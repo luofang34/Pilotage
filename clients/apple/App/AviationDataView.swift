@@ -106,6 +106,16 @@ private struct AviationReleaseView: View {
                         Task { await model.selectChart(installed, allowOutsideValidity: release.validityLabel() != "Current") }
                     }.disabled(model.busy || model.snapshot.active(release.product)?.id == installed.id)
                 }
+                if release.product == .procedures {
+                    NavigationLink("View procedure charts") {
+                        AviationProceduresView(model: model, installed: installed)
+                    }.disabled(model.busy)
+                }
+                if release.product == .navdata, installed.artifactURL(format: "acnav") != nil {
+                    Button(release.validityLabel() == "Current" ? "Use this edition" : "Inspect this edition") {
+                        Task { await model.selectNavigation(installed, allowOutsideValidity: release.validityLabel() != "Current") }
+                    }.disabled(model.busy || model.snapshot.active(.navdata)?.id == installed.id)
+                }
                 Button("Verify files") { Task { await model.verify(installed) } }.disabled(model.busy)
                 if let reason = model.retainedReason(installed) {
                     Text(reason).foregroundStyle(.secondary)

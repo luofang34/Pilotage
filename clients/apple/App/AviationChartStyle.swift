@@ -60,7 +60,7 @@ struct AviationChartStyle: Equatable, Sendable {
         return Self(installed: installed, json: json)
     }
 
-    private static func artifactURL(
+    static func artifactURL(
         _ artifact: AviationArtifact, installed: InstalledAviationRelease
     ) throws -> URL {
         let parts = artifact.path.split(separator: "/", omittingEmptySubsequences: false)

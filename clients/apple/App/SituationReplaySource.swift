@@ -34,12 +34,15 @@ final class SituationReplayRun {
     private let session: PresentationSession
     private let lines: [String]
 
-    init?(flight: Flight, terrainArchivePath: String?) {
+    init?(flight: Flight, terrainArchivePath: String?, navigationCycle: Data?) {
         guard let text = try? String(contentsOf: flight.receptionURL, encoding: .utf8),
               let domain = try? RadioDomainSession() else { return nil }
         let session = PresentationSession()
         if let terrainArchivePath {
             try? session.loadTerrainArchiveBlocking(archivePath: terrainArchivePath)
+        }
+        if let navigationCycle {
+            guard (try? session.loadWeatherStationsFromCycle(cycleBytes: navigationCycle)) != nil else { return nil }
         }
         self.flight = flight
         self.domain = domain

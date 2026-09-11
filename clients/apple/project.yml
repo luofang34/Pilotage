@@ -78,6 +78,7 @@ targets:
     platform: iOS
     sources:
       - path: Tests/GlobeSituationOverlayTests.swift
+      - path: Tests/SituationDataConsumerTests.swift
     dependencies:
       - target: Pilotage
       - package: PilotageCore

@@ -6,8 +6,10 @@ mkdir -p "$test_root/Sources/AviationDataRecords" "$test_root/Tests/AviationData
 cp "$client_root/App/AviationDataRecords.swift" "$test_root/Sources/AviationDataRecords/"
 cp "$client_root/App/AviationChartStyle.swift" "$test_root/Sources/AviationDataRecords/"
 cp "$client_root/App/AviationMapStyle.swift" "$test_root/Sources/AviationDataRecords/"
+cp "$client_root/App/AviationProcedureCatalog.swift" "$test_root/Sources/AviationDataRecords/"
 cp "$client_root/Tests/AviationDataTests.swift" "$test_root/Tests/AviationDataRecordsTests/"
 cp "$client_root/Tests/AviationChartStyleTests.swift" "$test_root/Tests/AviationDataRecordsTests/"
+cp "$client_root/Tests/AviationProcedureCatalogTests.swift" "$test_root/Tests/AviationDataRecordsTests/"
 cat > "$test_root/Package.swift" <<'SWIFT'
 // swift-tools-version: 6.2
 import PackageDescription

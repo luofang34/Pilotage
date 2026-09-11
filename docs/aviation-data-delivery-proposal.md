@@ -306,7 +306,9 @@ Report what can no longer be verified as current.
 
 Separate chart content from map projection.
 Offer Terrain, IFR Low, and IFR High as content choices.
-Globe and Mercator are projection choices where the profile supports them.
+Use globe projection for all content choices.
+Keep one renderer and one camera when the content choice changes.
+Keep north at the top of a zoomed-out overview.
 Do not hide the data cycle inside a renderer setting.
 
 The Data screen shows each installed product and region.
@@ -343,7 +345,7 @@ Record the required permission before publishing those resources in a product pa
 4. Add the file-backed tile source to the globe renderer.
    Test cold launch with all network access disabled, including fonts and sprites.
 5. Integrate the required IFR renderer features and package resources.
-   Verify LOW/HIGH display, globe/Mercator behavior, dense areas, and region boundaries.
+   Verify LOW/HIGH display, globe behavior, dense areas, and region boundaries.
 6. Add the Data screen, update preparation, and session selection rules.
    Test cycle changes, expired data, unavailable previews, and replay retention.
 7. Complete the navigation model for required CIFP families.

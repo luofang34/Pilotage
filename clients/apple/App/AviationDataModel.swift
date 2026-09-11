@@ -14,12 +14,14 @@ final class AviationDataModel: ObservableObject {
     private var worker: AviationDataWorker?
     private var publisherJSON: String?
     private var started = false
+    private weak var situation: SituationClientModel?
 
     var updatesConfigured: Bool { publisherJSON != nil }
 
-    func start() async {
+    func start(situation: SituationClientModel) async {
         guard !started else { return }
         started = true
+        self.situation = situation
         await perform("Checking installed data…") {
             let worker = try await AviationDataWorker.open()
             self.worker = worker
@@ -36,6 +38,12 @@ final class AviationDataModel: ObservableObject {
             }
             try await self.reload()
             try await self.restoreCharts()
+            if let navigation = self.snapshot.active(.navdata) ?? self.snapshot.installed.first(where: {
+                $0.release.product == .navdata && $0.release.validityLabel() == "Current"
+            }) {
+                try await worker.selectNavigation(navigation, allowOutsideValidity: self.snapshot.active(.navdata) != nil)
+                try await self.reload()
+            }
             try await self.prepareMap()
             if let publisher = self.publisherJSON {
                 do {
@@ -94,6 +102,36 @@ final class AviationDataModel: ObservableObject {
 
     func cancel() { worker?.cancel() }
 
+    func openProcedures(_ installed: InstalledAviationRelease) async -> AviationProcedureCatalog? {
+        guard let worker else { return nil }
+        var catalog: AviationProcedureCatalog?
+        await perform("Opening procedure charts…") {
+            catalog = try await worker.run { session in
+                _ = try session.verifyBlocking(releaseId: installed.id)
+                let result = try AviationProcedureCatalog.loadBlocking(installed)
+                try session.selectBlocking(request: DataSelectionRequest(
+                    name: AviationProduct.procedures.selectionName, releaseId: installed.id, pinned: false,
+                    now: Int64(Date().timeIntervalSince1970), development: installed.release.channel == "development",
+                    allowOutsideValidity: installed.release.validityLabel() != "Current",
+                    rendererCapabilities: ["procedure-pdf-v1"]
+                ))
+                return result
+            }
+            try await self.reload()
+        }
+        return catalog
+    }
+
+    func selectNavigation(_ installed: InstalledAviationRelease, allowOutsideValidity: Bool) async {
+        guard let worker else { return }
+        await perform("Opening navigation data…") {
+            try await worker.selectNavigation(installed, allowOutsideValidity: allowOutsideValidity)
+            try await self.reload()
+            let data = try await worker.situationData(snapshot: self.snapshot)
+            try await self.situation?.useInstalledData(data)
+        }
+    }
+
     func selectChart(_ installed: InstalledAviationRelease, allowOutsideValidity: Bool = false) async {
         guard let worker else { return }
         await perform("Opening \(installed.release.product.title)…") {
@@ -129,6 +167,8 @@ final class AviationDataModel: ObservableObject {
         guard let worker else { return }
         mapStyle = try await worker.prepareMap(snapshot: snapshot, charts: Array(charts.values))
         try await reload()
+        let data = try await worker.situationData(snapshot: snapshot)
+        try await situation?.useInstalledData(data)
     }
 
     func retainedReason(_ installed: InstalledAviationRelease) -> String? {

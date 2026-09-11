@@ -54,7 +54,7 @@ struct SituationContentView: View {
                 .toolbar(.hidden, for: .navigationBar)
         }
         .navigationSplitViewStyle(.balanced)
-        .task { await aviationData.start() }
+        .task { await aviationData.start(situation: model) }
         .background(.black)
         .onGeometryChange(for: CGSize.self) { proxy in
             proxy.size

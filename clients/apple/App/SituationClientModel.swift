@@ -44,10 +44,11 @@ final class SituationClientModel: ObservableObject {
         errorMessage != nil || (adsbEnabled && !radioSource.bandFailures.isEmpty)
     }
 
-    private let session: PresentationSession
+    private let dataConsumer: SituationDataConsumer
+    private var session: PresentationSession { dataConsumer.session }
     private let domain: RadioDomainSession?
-    private let terrainArchivePath: String?
-    private let terrainAvailable: Bool
+    private var terrainArchivePath: String? { dataConsumer.terrainArchivePath }
+    private var terrainAvailable: Bool { terrainArchivePath != nil }
     private let discovery = AeroLinkDiscoveryGate()
     private let evidenceWriter = SituationEvidenceWriter()
     private let recorder = FlightRecorder()
@@ -86,31 +87,18 @@ final class SituationClientModel: ObservableObject {
             receivers: [],
             bandFailures: []
         )
-        let session = PresentationSession()
-        self.session = session
+        let consumer = SituationDataConsumer()
+        dataConsumer = consumer
+        let session = consumer.session
         radioSource = source
-        let terrainArchivePath = Bundle.main.url(
-            forResource: "SituationTerrain",
-            withExtension: "mbtiles"
-        )?.path
-        self.terrainArchivePath = terrainArchivePath
-        var loadedTerrain = false
         var initialError: String?
-        if let terrainArchivePath {
-            do {
-                try session.loadTerrainArchiveBlocking(archivePath: terrainArchivePath)
-                loadedTerrain = true
-            } catch {
-                initialError = Self.join(initialError, error.localizedDescription)
-            }
-        }
         var createdDomain: RadioDomainSession?
         var initialDisplay: DisplayBatch?
         do {
             initialDisplay = try session.observeSources(
                 observation: PresentationSourceObservation(
                     source: source,
-                    terrainAvailable: loadedTerrain
+                    terrainAvailable: false
                 ),
                 nowMicros: Self.monotonicMicros
             )
@@ -118,11 +106,18 @@ final class SituationClientModel: ObservableObject {
         } catch {
             initialError = Self.join(initialError, error.localizedDescription)
         }
-        terrainAvailable = loadedTerrain
         domain = createdDomain
         startupError = initialError
         display = initialDisplay
         errorMessage = initialError
+    }
+
+    func useInstalledData(_ data: AviationSituationData) async throws {
+        applyDisplay(try await dataConsumer.load(data))
+        applyDisplay(try session.observeSources(
+            observation: PresentationSourceObservation(source: radioSource, terrainAvailable: terrainAvailable),
+            nowMicros: Self.monotonicMicros
+        ))
     }
 
     func activate() async {
@@ -392,7 +387,8 @@ final class SituationClientModel: ObservableObject {
         stopReplay()
         guard let run = SituationReplayRun(
             flight: flight,
-            terrainArchivePath: terrainArchivePath
+            terrainArchivePath: terrainArchivePath,
+            navigationCycle: dataConsumer.installed?.navigationCycle
         ) else {
             errorMessage = Self.join(startupError, "\(flight.receptionFileName) cannot be read.")
             return

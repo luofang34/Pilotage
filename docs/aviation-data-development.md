@@ -31,7 +31,8 @@ Copy installed development releases into the Apple bundle:
 
 ```sh
 python3 clients/apple/scripts/prepare-aviation-data-examples.py \
-  /path/to/store navdata-existing-2026-06-11 terrain-existing ifr-existing-2026-09-03
+  /path/to/store navdata-existing-2026-06-11 terrain-existing \
+  basemap-natural-earth-r1 ifr-low-2609-r2 ifr-high-2609-r2 procedures-2609-kttn-r1
 ```
 
 List dependency releases before the releases that use them.
@@ -39,6 +40,45 @@ The script checks each file size and SHA-256 digest.
 The app verifies each package before it records the installation.
 The app imports each bundled example once.
 Removal does not cause another import at the next start.
+
+## Use installed data
+
+The map and the presentation session use the selected terrain package.
+The presentation session uses terrain to place traffic and weather above the surface.
+Select a navigation edition in Data to load its weather station positions.
+The app restores this selection at the next start.
+Use `Inspect this edition` to select an expired development example.
+The Data screen continues to show its expired state.
+
+Terrain, IFR Low, and IFR High use one globe renderer.
+A content change retains the camera and loaded resources.
+The overview keeps north at the top.
+
+The procedure viewer reads PDF files from the installed package.
+It shows the package edition and validity state with each chart.
+The PDF index must name artifacts in that release.
+The viewer rejects a different edition, repeated chart IDs, and paths outside the release.
+The package contains reference charts, not executable procedure legs.
+The navigation snapshot still requires model and parser work for full CIFP procedure semantics.
+
+Prepare a local procedure example from FAA source files:
+
+```sh
+python3 clients/apple/scripts/prepare-procedure-release.py \
+  /path/to/d-tpp_Metafile.xml /path/to/pdfs /path/to/output \
+  --id procedures-2609-kttn-r1 --airport KTTN --pdf 00982IL6.PDF
+```
+
+Use PDF files from the cycle in the FAA metadata.
+The script retains the source metadata and exact PDF bytes.
+It derives the UTC interval from the metadata.
+It marks the example as partial coverage on the development channel.
+Import this release with `install_local` before you add it to the app bundle.
+
+The replay session uses the installed terrain and navigation data selected when it opens.
+It retains its own navigation positions while it runs.
+Historical package identities are not yet stored with reception recordings.
+The package store supplies pinned selections for that integration.
 
 ## Configure updates
 
@@ -66,6 +106,7 @@ Installed data remains available without a catalog request.
 ```sh
 cargo test -p pilotage-data-packages -p pilotage-data-delivery -p pilotage-map-archives
 sh clients/apple/scripts/test-aviation-data.sh
+python3 clients/apple/scripts/test-prepare-procedure-release.py
 ```
 
 The download tests use temporary loopback ports.
