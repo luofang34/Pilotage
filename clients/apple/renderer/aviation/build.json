@@ -1,0 +1,618 @@
+{
+  "schema_version": 1,
+  "renderer_revision": "ecb03cdc566689c9b18b1682f5be2708b9125ab0",
+  "producer_renderer_revision": "73ee3c8832f08ea0a9636f5af59d7e1e96820589",
+  "patch": {
+    "path": "chart-renderer.patch",
+    "sha256": "88dea7d036717d4f59d507f06e924178a4f4179994da3479c5f80f5b228dfd71"
+  },
+  "files": [
+    {
+      "path": "apple/visionos/Cargo.toml",
+      "before_sha256": "3a13f89e076200eac67f973891b5a6ce08a05b4daffb1e25e6161190e6d63386",
+      "after_sha256": "d74f26133ce82b99ccd38ab28a874b8f8de4d520092cd8ac8ebcd875849b373b"
+    },
+    {
+      "path": "apple/visionos/examples/chart_snapshot.rs",
+      "before_sha256": null,
+      "after_sha256": "6f159a68e255b1c8e998a74c7f3cc026630f627d9589580045baff3d0634143d"
+    },
+    {
+      "path": "apple/visionos/src/api/settings/tests.rs",
+      "before_sha256": null,
+      "after_sha256": "51b514aca5a009f4a608400ee735fdb93c90b51df73d4f4a66901128c26eeca8"
+    },
+    {
+      "path": "apple/visionos/src/api/settings.rs",
+      "before_sha256": null,
+      "after_sha256": "7249a9857b84055469408aa97419e16c6adff5201363f3b84721a6ec3a9a891f"
+    },
+    {
+      "path": "apple/visionos/src/api.rs",
+      "before_sha256": "cf475e458a6308e045dff40062f723e78f0bc7804c30b0a30b3dea46f7ee792f",
+      "after_sha256": "38f6927390a9772e33328ab99260aa0f5c7450bfd4979aeb6f3e79dbec2fe8ed"
+    },
+    {
+      "path": "apple/visionos/src/aviation.rs",
+      "before_sha256": null,
+      "after_sha256": "bf1e520bb67958ed5e95a4fbf1a112a4692b2c70d48be8b497b3b816f9ffc696"
+    },
+    {
+      "path": "apple/visionos/src/lib.rs",
+      "before_sha256": "8adc5f10514f5319a150e84b0558d2e1c702352110c1d72e8d452ecd5526053a",
+      "after_sha256": "bb88b77c814d097834fb4255fee7e3fba49042006a78f2d03ebd9fa0f2acb9a4"
+    },
+    {
+      "path": "maplibre/Cargo.toml",
+      "before_sha256": "ff4273812b627616a67e6de5edec61f5dcd1a1220ef6c98f1834512fd6ad1e50",
+      "after_sha256": "42706ebd1e22f3c23e36c18724ae3ccc47af4e4137e2f538efe84676cef974fb"
+    },
+    {
+      "path": "maplibre/src/environment.rs",
+      "before_sha256": "8498f9daeb8136178fb8d44f611808aa6b1efc02e1ae3c0a1595fdce4996be7e",
+      "after_sha256": "5c41968ce52baff02a46757980956789dd7fafbf16bc4200f9a1cfae0b4b838a"
+    },
+    {
+      "path": "maplibre/src/headless/mod.rs",
+      "before_sha256": "445cc07bde7628f0e75759942c326cf89afb0983b1bd9346f252e64dc329c0b3",
+      "after_sha256": "1bf896822bca3b2eb97f2a0ee04fb70ae4c43e08a05e1562e4c8d2db327eb96d"
+    },
+    {
+      "path": "maplibre/src/io/apc/tests.rs",
+      "before_sha256": "6c6cd0233648f3fc1a4a48344b7f4d250be08aff86157e0120fff49a5372bc87",
+      "after_sha256": "8721ae258075b2ff5f473b3b999917340f9e489e15da7c285e1af6fd4a7168b8"
+    },
+    {
+      "path": "maplibre/src/io/source_client.rs",
+      "before_sha256": "a4744d20a453ab39ad24542112999faa89d605ee1d3520454385bdae9ac3ff54",
+      "after_sha256": "f24d9fa025b9a05bc410443d4106fbd65d33e7a93396c8897712a86ab821f15a"
+    },
+    {
+      "path": "maplibre/src/legacy/layout/symbol_feature.rs",
+      "before_sha256": "7309d0c8673eeac95c07ad588debbe91820658f9384250e72f443102f12e3bcf",
+      "after_sha256": "4bba4b1dcceb5bf2f7c2ea75b26fc24d207db8c8d038ed8802b8f299576de56f"
+    },
+    {
+      "path": "maplibre/src/legacy/quads.rs",
+      "before_sha256": "df5e69ad49060f9983e4ee3f21e3eefcb252dca922d45244a8d3dc9c101212cd",
+      "after_sha256": "baf26d23648c5ba9077a2d6a791294247270a6c36449844c2c3e093be04509b9"
+    },
+    {
+      "path": "maplibre/src/legacy/style_types.rs",
+      "before_sha256": "0fbaba3a10f33bb19ac1da274010b8bcc5a1bb250a871d67da52beaf411234d0",
+      "after_sha256": "9efd5387fbbc7e8e8d34617efcaa7b1304a99d1635b6b3f2fbe1a368fea62a4a"
+    },
+    {
+      "path": "maplibre/src/map.rs",
+      "before_sha256": "d3ac06009b14615662dbbfe3b2d1866ff5a11d806e4c5adf1e59f7f5ae2adb86",
+      "after_sha256": "27d85f8b2e7f2a5f7c6c61ea630a28a9cc74e229456a42db611aa39452bc84dd"
+    },
+    {
+      "path": "maplibre/src/platform/noweb/http_client/tests.rs",
+      "before_sha256": null,
+      "after_sha256": "8e4e7e48aea48ccd40328e58fbef5c09550f0f510fdc4edce4d30de593b71bd1"
+    },
+    {
+      "path": "maplibre/src/platform/noweb/http_client.rs",
+      "before_sha256": "975e83526ce04f3e03487a509361cdadb52d18dd2f690b98bba3dd03ce9ed101",
+      "after_sha256": "30ed5222ba13c0435f218f0cb22df6cd60fb291afcaaf913cfd3b454f516e79b"
+    },
+    {
+      "path": "maplibre/src/platform/noweb/mod.rs",
+      "before_sha256": "1933e80845056bb87594d247d478e7b4b98ff4efed85c2c28edcd3ddefb663e6",
+      "after_sha256": "a5a5ac363cee84355bf12664092175a4845c11376587f56b146e1d5cd26c1c15"
+    },
+    {
+      "path": "maplibre/src/raster/render_commands.rs",
+      "before_sha256": "ee7c2f20310148b856c12031924c4d5d8d4a24bec4c449f6fb8be85593b2ca30",
+      "after_sha256": "87975495cb2fab8f7ed65e748c1b0b9991958aad7e1ebc1efb9ad43055af7f39"
+    },
+    {
+      "path": "maplibre/src/raster/resource/raster/paint.rs",
+      "before_sha256": null,
+      "after_sha256": "1aeb6dd6489f87a0dc3f56f02f7f57fb3661c1bf97320507e92573fd7221b18d"
+    },
+    {
+      "path": "maplibre/src/raster/resource/raster.rs",
+      "before_sha256": "fbc3b0f8479526b630134e46ff15eed55462cecbef8ca2d89e67b08a3b09dd6e",
+      "after_sha256": "522283c994bd7bee42e504dec5e30c8a5af82b4ff704c3d5023369873758faf6"
+    },
+    {
+      "path": "maplibre/src/raster/resource_system.rs",
+      "before_sha256": "d20a57a086e0874f2bb99a678c4936f0af1d298f6f5676e3e54eb47af7cd68b8",
+      "after_sha256": "d9474303e9d817f8933cfb6257c4ab23f8386c26119551020ab8dfdaddd6e55e"
+    },
+    {
+      "path": "maplibre/src/render/main_pass.rs",
+      "before_sha256": "0ee900ca3658dd9f9b1d771d5ca3b51da89a707e255a9df0a93bc810e3e94047",
+      "after_sha256": "53bb094aedf6dbee115473f8d72f52554a2d2a460a7b44865b6252bf9c7738e2"
+    },
+    {
+      "path": "maplibre/src/render/projection/covering.rs",
+      "before_sha256": "f8b98cfff4ec67583b51d904fad71746c2a173ffab2b4df94c6c2a42f4932124",
+      "after_sha256": "f8ff2d2cac525400f6d587d9f60f3528a0508e79b185be70a4f0c8bf4b75ed52"
+    },
+    {
+      "path": "maplibre/src/render/projection/tests.rs",
+      "before_sha256": "3378fa6b4c54704fcbd0228e58b59f0a51db4a0c0b3ae6fa05a2a5427c56444c",
+      "after_sha256": "b6725e02c8406acd4ea794dcfbd9429b1e64f5c0757dff33bd3229f1e92f7579"
+    },
+    {
+      "path": "maplibre/src/render/settings.rs",
+      "before_sha256": "5769d835bedb644fbca2043150358a076c36c0dd9643b5e19a905f89e9cdd951",
+      "after_sha256": "a15c12f86133b8d977501569e95911a750d21ebbf21cfc49c3a6d028d6d5aaf9"
+    },
+    {
+      "path": "maplibre/src/render/shaders/chart_line.fragment.wgsl",
+      "before_sha256": null,
+      "after_sha256": "42cf9ab6cdc22f1c1b0181661ececfa0b453ade47cb374de639a09ef9592d82d"
+    },
+    {
+      "path": "maplibre/src/render/shaders/chart_line.rs",
+      "before_sha256": null,
+      "after_sha256": "b40ed8c47619a0677ba2996ee11353073ab3e457148f2665f38ed8a0ac405385"
+    },
+    {
+      "path": "maplibre/src/render/shaders/chart_line.vertex.wgsl",
+      "before_sha256": null,
+      "after_sha256": "d40feaee97affcf5cca53b4b39d1f222e0ef8edfb4134d798562b532c4e185e3"
+    },
+    {
+      "path": "maplibre/src/render/shaders/chart_sdf.fragment.wgsl",
+      "before_sha256": null,
+      "after_sha256": "b3fe7f2c6e41719132b70ddf330dc24cf84f78de8375e79719c0b28bff55ca62"
+    },
+    {
+      "path": "maplibre/src/render/shaders/chart_sdf.vertex.wgsl",
+      "before_sha256": null,
+      "after_sha256": "bd0c5b8da142d25b31ec0de1181017dfbd3ec4a460f0d1fef68b58771cbaa833"
+    },
+    {
+      "path": "maplibre/src/render/shaders/chart_symbol.rs",
+      "before_sha256": null,
+      "after_sha256": "1337d30440058632560cd7ded6f6a99b23ca42d2cd7f1f35eb2615a170cbea7a"
+    },
+    {
+      "path": "maplibre/src/render/shaders/raster.fragment.wgsl",
+      "before_sha256": "bb501aab1ce04a68d4e9a64ac15c4c9c3005a63e4f94302e91fbf0ca1c328e8c",
+      "after_sha256": "eab36a3e3ce7e3c45453fb5561d6a4158db870a3c7c5f15ef6fcc326afacb1e2"
+    },
+    {
+      "path": "maplibre/src/render/shaders/vertex.rs",
+      "before_sha256": "91567b4752e724cbf756d43581a92fc5ed735123b5a6bab670e2049a8a519c4e",
+      "after_sha256": "acef0b6f0df3b24bfaa8f97b77d9f0fdcf8bf935f73595e5451a6fb584d3f906"
+    },
+    {
+      "path": "maplibre/src/render/shaders.rs",
+      "before_sha256": "4824bc4e79a05e68f0e67dddfb7811fbad1953aa5f5809b58b8af6b331eb6d02",
+      "after_sha256": "32c559a41bf082c9e0f878a574cd96e60360c661e4257e6e37e097431bc7c9f9"
+    },
+    {
+      "path": "maplibre/src/sdf/assets/load.rs",
+      "before_sha256": "bb1ab9fae4fd76eb936ddb7c1ebdcc21cf664ba666baf56664f8ef32af8b24be",
+      "after_sha256": "975e9a4a3a3f34bcc307c585930b3765a0aa07b0f646c34c384e122345f24b43"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/collision_system/artwork/tests.rs",
+      "before_sha256": null,
+      "after_sha256": "1e4b0d0e5633c23e20609bb07b1cd1cb37a3e5f5b2a0a22187028894de6d4ecf"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/collision_system/artwork.rs",
+      "before_sha256": null,
+      "after_sha256": "8c42502771b91d6a058023e7781cc09273c5ab8c29728eaed79dbbfb91dcb64f"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/collision_system/components/tests.rs",
+      "before_sha256": null,
+      "after_sha256": "e94595eb7a63e444fa7d7961df7d14fa85255df9950f1641260cb3128d45dd02"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/collision_system/components.rs",
+      "before_sha256": null,
+      "after_sha256": "36f6b276446454695c848b2cbe1af2eea5fd379fe7ddcf6583d4d465a07b45b3"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/collision_system/groups/tests.rs",
+      "before_sha256": null,
+      "after_sha256": "6ee2df61929719922df6a920505d60e5d9d84bd4a2ebf758dcf45d03cbf32d14"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/collision_system/groups.rs",
+      "before_sha256": null,
+      "after_sha256": "5b37f042ed74a177ad5742f2c03fd9475dbd823e65dc36f01478aab417d3f39e"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/collision_system/line_clearance.rs",
+      "before_sha256": null,
+      "after_sha256": "57118fd41c7fa0d8e9bcbccb00d1027e2dd4259f9a4527d868e52e7f560f45da"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/collision_system/placement/shape.rs",
+      "before_sha256": null,
+      "after_sha256": "5ffa7f6ea59dc68c1558f4c5a61738ac494c4b5c9e333391390ab950527e877c"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/collision_system/placement.rs",
+      "before_sha256": null,
+      "after_sha256": "690cad91f941921d32d3678c4fe3838599e400dd308039ff2a2ac845e9f99b22"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/collision_system/projection.rs",
+      "before_sha256": null,
+      "after_sha256": "9e0ef39c63a3949c7f7ee86f9836d7a9ebb606e4f99a02b458aebb106e310faa"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/collision_system/tests.rs",
+      "before_sha256": null,
+      "after_sha256": "d1d02d15161e8116ad454d40f03e94bf3b967f51bbf36a490ec30fa4c5968577"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/collision_system/text_ink/tests.rs",
+      "before_sha256": null,
+      "after_sha256": "c4edb29ea62d2c0916f6f4a9bade81682ee683287421acd77abe9fc838443e08"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/collision_system/text_ink.rs",
+      "before_sha256": null,
+      "after_sha256": "4ff82ce794d3411da480e52df6b637d3a8046c3c2183edd6bc5a524e755cd694"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/collision_system.rs",
+      "before_sha256": null,
+      "after_sha256": "90338faa4b212edd369381bf41ee9ea66af712db32eac544b85dcf1a8c9e2088"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/font_atlas/tests.rs",
+      "before_sha256": null,
+      "after_sha256": "30a5e5a92f29b0c7719c616542baa593ef9c38ced50ac4fd3dd895433e1e2880"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/font_atlas.rs",
+      "before_sha256": null,
+      "after_sha256": "f34704a58e34a77dad34e33401c0528ff2cdc181e4faa222f85fa433accd2141"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/queue_system.rs",
+      "before_sha256": null,
+      "after_sha256": "e4a47499225d7a61913e04e04560f3928d023a06543965835e62f0eb1a6f4377"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/render_commands.rs",
+      "before_sha256": null,
+      "after_sha256": "846d91c3f3f901eab774433a6f104e28d6b3a6294a14ecd4245f55291b63a9ca"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/resource/glyph_texture.rs",
+      "before_sha256": null,
+      "after_sha256": "fc9addcdfa9353cf50e8ea8dc1a403da58441fab54076bc5913204a616a9d18b"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/resource/sprite_texture.rs",
+      "before_sha256": null,
+      "after_sha256": "a35612086da6a08fe959dac4eb7eae068a41b7343129c0d970a1305ec6bb7c9c"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/resource/symbol_terrain.rs",
+      "before_sha256": null,
+      "after_sha256": "528adcadc21be169f98e9e344169e3b8ece2e93aac8f40ce8f2afb47db960d2d"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/resource.rs",
+      "before_sha256": null,
+      "after_sha256": "c3c6c191ccb0773e1ab3ec50cbc8ce502c534a7fbd664e2874b824b3c59a8480"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/resource_system.rs",
+      "before_sha256": null,
+      "after_sha256": "099e2d34d3e49c61cb209f07ae075161d228f3349c6909d3f45acff6d807daa4"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/tessellation_new/icons/tests.rs",
+      "before_sha256": null,
+      "after_sha256": "abe999a838224ad5799e2f0dcc3d23c7b761a513d19375303961ae7196df27ec"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/tessellation_new/icons.rs",
+      "before_sha256": null,
+      "after_sha256": "f70a01becfd6ac5611f684735f5b34f6d5946d451d98bb968df5bc7d7b4fe5bc"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/tessellation_new/ownership/tests.rs",
+      "before_sha256": null,
+      "after_sha256": "163a5d9eb33353f82f153e9888e36d861f5fb9866b485ba1cc69df06a37e0faa"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/tessellation_new/ownership.rs",
+      "before_sha256": null,
+      "after_sha256": "44890139112eb23598bbdec6060b143723cee1f2c05b4e73935c82f7a58cb708"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/tessellation_new/paper_paths/encoding/tests.rs",
+      "before_sha256": null,
+      "after_sha256": "bec297fbfa006aa698f6115ac508d2c6806b33455c411f5d9b84a1e89eec9e7e"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/tessellation_new/paper_paths/encoding.rs",
+      "before_sha256": null,
+      "after_sha256": "5c4ed9af70a8dd82e16093514e17cf944d89b4194a74e0703929260778e876a4"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/tessellation_new/paper_paths/tests.rs",
+      "before_sha256": null,
+      "after_sha256": "d895c493f05c3db3a223a0af5264a98d7161d21f101cd58d86a8d6549fa3bc44"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/tessellation_new/paper_paths.rs",
+      "before_sha256": null,
+      "after_sha256": "76352ad00a244c6f815836b136a0384f200ffba5a735c61465c2966f7b956df0"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/tessellation_new/tests.rs",
+      "before_sha256": null,
+      "after_sha256": "f6ed1b54801f973c70f8d691786bd355db73dea580c802f5911156262734dd12"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/tessellation_new/text_shaping.rs",
+      "before_sha256": null,
+      "after_sha256": "5c9352fa70a2f4ad7b298d01c584fbd008a2cc0ae84180c7414f226552b558f0"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/tessellation_new.rs",
+      "before_sha256": null,
+      "after_sha256": "aecae75a2a5ee8badb5c24f33a3a74efb198a7dd90b60055521a705ca6d72196"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/tests/frame.rs",
+      "before_sha256": null,
+      "after_sha256": "8a7864b82940d3ae0ee4826bacc6a61b27fd5b5be9d23022091069c56c56f50f"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/tests.rs",
+      "before_sha256": null,
+      "after_sha256": "4ea70575d847501a37cdfe0c67de727594c35d272df9c97ca604d9a9eca1030d"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/upload_system/paint.rs",
+      "before_sha256": null,
+      "after_sha256": "0d592208495e9124572fe93ac0e99886ce3e0733214b8caa34a8f43aca9a6b6f"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/upload_system/tests.rs",
+      "before_sha256": null,
+      "after_sha256": "793ff28a1e71a7824309f6b1e35d1594ebe27251fcbbd5f20da944e2b9d6e452"
+    },
+    {
+      "path": "maplibre/src/sdf/chart/upload_system.rs",
+      "before_sha256": null,
+      "after_sha256": "939e10511b0a8ef913bcf43ec8ebe5926d0454a8b5634695cbd480b52c7ef221"
+    },
+    {
+      "path": "maplibre/src/sdf/chart.rs",
+      "before_sha256": null,
+      "after_sha256": "185327bcd8d473272662c95c6fcf431e61e8a7f18900fe5fc78cad1022a0dfb5"
+    },
+    {
+      "path": "maplibre/src/sdf/text/tests.rs",
+      "before_sha256": null,
+      "after_sha256": "56e873676e48c9cdbb056fc2cdfaedc472be6021b5e023c6c90998f592482207"
+    },
+    {
+      "path": "maplibre/src/sdf/text.rs",
+      "before_sha256": "de9307218d6642a171d3ae3124388912f17839ead31ffafe39a4e7ed4ace4d69",
+      "after_sha256": "4e2ee0f02b625d736954867a486e3953d8c7eb4803269a59affb9003e7a5f8f6"
+    },
+    {
+      "path": "maplibre/src/sdf.rs",
+      "before_sha256": "ce81ab705b6615f1ffe9c3467da33e9f163d1adfa6bfba41b81a5f36534cc410",
+      "after_sha256": "fcba802a825ad444cc86b7747402acdee9a1adba86bb73b0e24d96707543bc4b"
+    },
+    {
+      "path": "maplibre/src/style/collision.rs",
+      "before_sha256": null,
+      "after_sha256": "441ba98df3d404f4bec9b87f9f659f2d44975aee847c5bcdb9e5d194bfff7160"
+    },
+    {
+      "path": "maplibre/src/style/layer/paint.rs",
+      "before_sha256": "e324ab9d4643a643f8b25caadd2c7a118764580d4ea19a8d6c830020e778493a",
+      "after_sha256": "9de014fe2d48cf084baf5f68b1a2e8c3571db09864fb29c62b3cd991db9e5e43"
+    },
+    {
+      "path": "maplibre/src/style/layer.rs",
+      "before_sha256": "11a2b693b1cc3f45f44f05ea295c538a1627c08c1889a57e1b1d473ce48bf248",
+      "after_sha256": "d92d1562ea9415a976658856351675c0f6a302eb40cefad48979008dd5bde00a"
+    },
+    {
+      "path": "maplibre/src/style/paper/tests.rs",
+      "before_sha256": null,
+      "after_sha256": "e381165b885d416207d96c922c8fd2142f2642bff9f22e003b966f90ec0fd32d"
+    },
+    {
+      "path": "maplibre/src/style/paper.rs",
+      "before_sha256": null,
+      "after_sha256": "bb5fe3e77592bb2dc02f813e1b82632334be2991435f76d7f597f4b2839b90af"
+    },
+    {
+      "path": "maplibre/src/style/sprite/footprint/tests.rs",
+      "before_sha256": null,
+      "after_sha256": "705bd1593388d749c49218ede7edc133ca19b2fff9e2945efcadb3c543aaedf8"
+    },
+    {
+      "path": "maplibre/src/style/sprite/footprint.rs",
+      "before_sha256": null,
+      "after_sha256": "4ba9ac1ebc1440474bb74d697889b9fdbb1d594c96c7ce7036698466c59ad1fe"
+    },
+    {
+      "path": "maplibre/src/style/sprite/layout/paper_path.rs",
+      "before_sha256": null,
+      "after_sha256": "57047370d02903f058fe8fe8b49ba376a782955adc2f4af0f171094105e3a5aa"
+    },
+    {
+      "path": "maplibre/src/style/sprite/layout/placement/tests.rs",
+      "before_sha256": null,
+      "after_sha256": "4c9349a738b6f79c5c5368166e5975613587960bfd554cbeeb5403033d464779"
+    },
+    {
+      "path": "maplibre/src/style/sprite/layout/placement.rs",
+      "before_sha256": null,
+      "after_sha256": "f55011867ca19944de3d055acde340fb425a81ba15cdf896da7d71b11e9df43a"
+    },
+    {
+      "path": "maplibre/src/style/sprite/layout.rs",
+      "before_sha256": null,
+      "after_sha256": "aaae2fd0435f353b4b5b9e10f4e895f43b27743412e95003a9cbafb8a8df4ab3"
+    },
+    {
+      "path": "maplibre/src/style/sprite.rs",
+      "before_sha256": null,
+      "after_sha256": "759a4993253ae52db3268073027c5f0269298b385f76448bb0e9d5c1f3a2ef2e"
+    },
+    {
+      "path": "maplibre/src/style/text/placement.rs",
+      "before_sha256": null,
+      "after_sha256": "e3dd19dc9df77c6dc3461f14565bff1fc8d016862c6a1db3571074af003986d7"
+    },
+    {
+      "path": "maplibre/src/style/text.rs",
+      "before_sha256": null,
+      "after_sha256": "5cd4848bec63217bb431888a2e4cf798b1e5939a1c683db78db0a101d0215dad"
+    },
+    {
+      "path": "maplibre/src/style/zigzag.rs",
+      "before_sha256": null,
+      "after_sha256": "57b105d87b63f185a13397fb71c632773448e7bd8e79bbd9fecddf480387ee97"
+    },
+    {
+      "path": "maplibre/src/style.rs",
+      "before_sha256": "b38e8941206458346440dca33c544e43c79c2c7339f307a244fc839f87175bbc",
+      "after_sha256": "908786196734e75f38f8c1950f7162d79ab186336d0b22d0263eeb1a4077887d"
+    },
+    {
+      "path": "maplibre/src/tcs/resources.rs",
+      "before_sha256": "57c46e68821154e663dbd99a70fc15a47c292bea6d72e876fa36ef368613ac51",
+      "after_sha256": "0b9181477ab2c281ebb1e1ca7ca6d6751443422d1cd220074377b1106af03600"
+    },
+    {
+      "path": "maplibre/src/tcs/system/mod.rs",
+      "before_sha256": "745556c07aed188a74e57acea27965b3bf47b7bf3674b8ec72425b585603df71",
+      "after_sha256": "9f1326b74e8a0f42193a8b52f5a95f2058e425877b8cea7cf085a03c9aed962f"
+    },
+    {
+      "path": "maplibre/src/vector/annotation_mask/raster/tests.rs",
+      "before_sha256": null,
+      "after_sha256": "8fb4cc3d0c788845c7b5dae3e8ccb9ef07a90b8d7527ff8b06f22e9484fcb94a"
+    },
+    {
+      "path": "maplibre/src/vector/annotation_mask/raster.rs",
+      "before_sha256": null,
+      "after_sha256": "486dfe3ca9d780b3a2c536b63d55ab1af464cff792b0cc8b360b5df4fc0c7ed9"
+    },
+    {
+      "path": "maplibre/src/vector/annotation_mask.rs",
+      "before_sha256": null,
+      "after_sha256": "339bf2c70693e077b50ae9fa622c82f7dd7ab36f07ebe0ab40962a1755d1b8d8"
+    },
+    {
+      "path": "maplibre/src/vector/process_vector.rs",
+      "before_sha256": "4fd412250d198d39ffd4695af695dbea316d4a50f19762b6cc5ab68b8a0ef6c2",
+      "after_sha256": "bfec97b52825fd80aada1553b5520b8ffdfd15e13d8171e613d00d7bb9304585"
+    },
+    {
+      "path": "maplibre/src/vector/render_commands.rs",
+      "before_sha256": "b9d7ee655c6fd7907cd065fdc745a42cf2ddf5d5bf9899540060da50f7b73241",
+      "after_sha256": "fed90431001d1b5d82454e304956dd3ee214527d5e02b0efabbf5ad023d34cac"
+    },
+    {
+      "path": "maplibre/src/vector/resource_system.rs",
+      "before_sha256": "b60242f11516390a765a80572ee355ed06d8fa40710348c60f07eaffe8d7cc42",
+      "after_sha256": "6350577b4f8b898dd71c57b63f0f0f2c1d4c3d6d16b1dc796d6c8ba613c66a91"
+    },
+    {
+      "path": "maplibre/src/vector/structures.rs",
+      "before_sha256": "de624f4d2809e5f46260ccbd1e11dab933350f14b58c7a949c2708bdbe269e0d",
+      "after_sha256": "44f13b7c8544e39c76aeb978b4e17653e8ccf925a3d4972dc121407e0c8ffe51"
+    },
+    {
+      "path": "maplibre/src/vector/tessellation/endpoint_disks/packed.rs",
+      "before_sha256": null,
+      "after_sha256": "30504a78c68db7568a26e9e90596a775b4167d30a095e13730e300bd1740feb7"
+    },
+    {
+      "path": "maplibre/src/vector/tessellation/endpoint_disks/tests.rs",
+      "before_sha256": null,
+      "after_sha256": "bef7876f5df3815a5dc2e3aa71103fd4f565255672aee1d2a23d79fc33d52b53"
+    },
+    {
+      "path": "maplibre/src/vector/tessellation/endpoint_disks.rs",
+      "before_sha256": null,
+      "after_sha256": "58bf68ff993f44546c817d5d1d6b84ea615a121165f962c09c915ee291e92766"
+    },
+    {
+      "path": "maplibre/src/vector/tessellation/zigzag/tests.rs",
+      "before_sha256": null,
+      "after_sha256": "894fba17c027de3a995a5420e98b077911824718ec541afe2ee579c704b2665f"
+    },
+    {
+      "path": "maplibre/src/vector/tessellation/zigzag.rs",
+      "before_sha256": null,
+      "after_sha256": "d89163774a4fcb47479999b107077429e67affe90b610288b7c8742ca3cf3ce4"
+    },
+    {
+      "path": "maplibre/src/vector/tessellation.rs",
+      "before_sha256": "cd8488dfb8e31f7085f647ad3d0a2ca52553948f6198f3aafc684d1667163e27",
+      "after_sha256": "65a386cab82e73911bda761031db7aaaabf6c0441e3aa8603eed252618ca6cc9"
+    },
+    {
+      "path": "maplibre/src/vector/upload_system.rs",
+      "before_sha256": "fa125c4c4d0711cf6e42b5aa1afa4bc5038e2985725e9a9fff2160cd384313e2",
+      "after_sha256": "ee596fdc529828164366f61e07935161a7d7835959fc8a0bae23458db1d03042"
+    },
+    {
+      "path": "maplibre/src/vector.rs",
+      "before_sha256": "b05f62cde31350a4df7889234696841b22ca49929080227b81666aafc2da879c",
+      "after_sha256": "63ffc422a530740c2c95e66e5c439e504f60738eafacb61918b4c8999c3ab25a"
+    },
+    {
+      "path": "maplibre-winit/src/noweb.rs",
+      "before_sha256": "a2bdc197dd062de622afd070ccd99a7652c8e1dafa16f7b1bf1e68d5370f52ba",
+      "after_sha256": "99d9881d2179ab6f22882020fd06a6b95dbe7ca7944ff349f8307a2d64c6efbc"
+    },
+    {
+      "path": "web/src/lib.rs",
+      "before_sha256": "83a8293afd39ab664fd39d48d732e7303fcf3f43c3937ef83f436654ac67ea79",
+      "after_sha256": "69258f762b0a4c4923df5a249d52bc65a20412d3fc1897bac858d4f040d9ae4f"
+    }
+  ],
+  "resources": [
+    {
+      "path": "glyphs/direction-arrows.pbf",
+      "target": "data/chart-glyphs.pbf",
+      "base": "data/0-255.pbf",
+      "sha256": "7aea8826426bdd97201ca6717660a4605f62bb3d74171518a68cce061555fe8f",
+      "base_sha256": "2b5324d3fcaa58f93c71d4e6ee70eba532f15585401d764daf99efc427a62693",
+      "output_sha256": "00f5cf7669a12ebd6c5d8823c46c39a56f62d391372d017f86b4473b571fa1dc"
+    },
+    {
+      "path": "glyphs/futura-medium.pbf",
+      "target": "data/futura-medium.pbf",
+      "sha256": "5e55c004c638655cc81b41b97b1e6acc9e2ac3cfbe63e2d56ae1a016b38d1b7a",
+      "output_sha256": "5e55c004c638655cc81b41b97b1e6acc9e2ac3cfbe63e2d56ae1a016b38d1b7a"
+    },
+    {
+      "path": "glyphs/futura-mediumitalic.pbf",
+      "target": "data/futura-mediumitalic.pbf",
+      "sha256": "fc822ad60b1288ac6b775887677362e472b1eea1dac6a6375a42a051a2952b80",
+      "output_sha256": "fc822ad60b1288ac6b775887677362e472b1eea1dac6a6375a42a051a2952b80"
+    },
+    {
+      "path": "glyphs/chart-fonts.json",
+      "target": "data/chart-fonts.json",
+      "sha256": "e50c51b6e190623860465f9cbc6ecb79eb46df8ad3ed1f48e80e0ec8242b35d6",
+      "output_sha256": "e50c51b6e190623860465f9cbc6ecb79eb46df8ad3ed1f48e80e0ec8242b35d6"
+    }
+  ],
+  "lock": {
+    "path": "Cargo.lock",
+    "sha256": "21b0d5ef8eb72dbe86544351f93f1914fb512ed08ee29c150f0236c5905ef9d0"
+  }
+}
