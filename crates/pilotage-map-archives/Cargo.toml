@@ -12,8 +12,9 @@ workspace = true
 bytes = "1"
 pmtiles = { version = "0.24", default-features = false, features = ["http-async"] }
 rusqlite = { workspace = true }
+serde = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["rt", "fs", "io-util"] }
+tokio = { workspace = true, features = ["rt", "fs", "io-util", "sync"] }
 
 [dev-dependencies]
 pmtiles = { version = "0.24", default-features = false, features = ["write"] }

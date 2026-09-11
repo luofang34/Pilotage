@@ -2389,6 +2389,7 @@ dependencies = [
  "bytes",
  "pmtiles",
  "rusqlite",
+ "serde",
  "tempfile",
  "thiserror",
  "tokio",
