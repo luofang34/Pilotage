@@ -1,8 +1,9 @@
 {
   "plan_sha256": "1ea2b7719ae2fce191ce3160d5c6424c5aef0abcf65777275481406dabd5a095",
-  "archive_sha256": "d54e07e7be017d822470ddf0f2587361047b77d2ced1ed54e6c4e520a5fda89e",
-  "tiles_written": 17171,
-  "archive_bytes": 7995392,
+  "builder_sha256": "cbe50eaca980ccf7d496ffddad5fe447bbdf544b4f00e9cb300afeb84f53f956",
+  "archive_sha256": "dafa8ee4b34d6f3ce4fa47d035fd10709c2906e73cf9f429f8c253c58ac5f7f4",
+  "tiles_written": 22507,
+  "archive_bytes": 8863744,
   "source_name": "Natural Earth",
   "dataset_scale": "1:10m",
   "attribution": "Made with Natural Earth. Free vector and raster map data at naturalearthdata.com.",
@@ -38,25 +39,43 @@
       "min_lat_deg": -85.0511287798066,
       "max_lat_deg": 85.0511287798066,
       "min_lon_deg": -180.0,
-      "max_lon_deg": 180.0
+      "max_lon_deg": 180.0,
+      "tile_rectangle": [
+        0,
+        0,
+        1,
+        1
+      ]
     },
     {
       "name": "region",
       "min_zoom": 6,
       "max_zoom": 10,
-      "min_lat_deg": 37.5,
-      "max_lat_deg": 43.5,
-      "min_lon_deg": -81.0,
-      "max_lon_deg": -72.0
+      "min_lat_deg": 36.59788913307021,
+      "max_lat_deg": 45.089035564831015,
+      "min_lon_deg": -84.375,
+      "max_lon_deg": -67.5,
+      "tile_rectangle": [
+        17,
+        23,
+        20,
+        25
+      ]
     },
     {
       "name": "local",
       "min_zoom": 11,
       "max_zoom": 15,
-      "min_lat_deg": 40.1,
-      "max_lat_deg": 41.1,
-      "min_lon_deg": -75.25,
-      "max_lon_deg": -74.25
+      "min_lat_deg": 40.044437584608566,
+      "max_lat_deg": 41.11246878918086,
+      "min_lon_deg": -75.41015625,
+      "max_lon_deg": -74.1796875,
+      "tile_rectangle": [
+        595,
+        767,
+        602,
+        775
+      ]
     }
   ]
 }

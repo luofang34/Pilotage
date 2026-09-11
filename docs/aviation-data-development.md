@@ -32,7 +32,7 @@ Copy installed development releases into the Apple bundle:
 ```sh
 python3 clients/apple/scripts/prepare-aviation-data-examples.py \
   /path/to/store navdata-existing-2026-06-11 terrain-existing \
-  basemap-natural-earth-r1 ifr-low-2609-r2 ifr-high-2609-r2 procedures-2609-kttn-r1
+  basemap-natural-earth-r2 ifr-low-2609-r2 ifr-high-2609-r2 procedures-2609-kttn-r1
 ```
 
 List dependency releases before the releases that use them.
@@ -41,9 +41,15 @@ The app verifies each package before it records the installation.
 The app imports each bundled example once.
 Removal does not cause another import at the next start.
 
+The coastline builder extends each detail region to complete tile boundaries.
+It removes adjacent tiles that contain only polygon buffer fragments.
+The source manifest records the resulting tile coverage.
+Use a new release ID and revision when archive bytes change.
+
 ## Use installed data
 
 The map and the presentation session use the selected terrain package.
+Use `Use this edition` in Data to select a terrain or base map release.
 The presentation session uses terrain to place traffic and weather above the surface.
 Select a navigation edition in Data to load its weather station positions.
 The app restores this selection at the next start.

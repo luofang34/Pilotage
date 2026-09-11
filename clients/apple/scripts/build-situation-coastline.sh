@@ -8,7 +8,7 @@ archive="$client_root/Resources/SituationCoastline.mbtiles"
 manifest="$client_root/Resources/SituationCoastline.manifest.json"
 force=${1:-}
 
-for tool in curl jq shasum unzip ogr2ogr sqlite3 awk; do
+for tool in curl jq shasum unzip ogr2ogr sqlite3 awk python3; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "$tool is required to build the coastline archive" >&2
         exit 2
@@ -16,8 +16,10 @@ for tool in curl jq shasum unzip ogr2ogr sqlite3 awk; do
 done
 
 plan_digest=$(shasum -a 256 "$plan" | awk '{print $1}')
+builder_digest=$(cat "$0" "$client_root/scripts/coastline_tile_bounds.py" | shasum -a 256 | awk '{print $1}')
 if [ "$force" != "--force" ] && [ -f "$archive" ] && [ -f "$manifest" ] &&
     [ "$(jq -r '.plan_sha256 // ""' "$manifest")" = "$plan_digest" ] &&
+    [ "$(jq -r '.builder_sha256 // ""' "$manifest")" = "$builder_digest" ] &&
     [ "$(shasum -a 256 "$archive" | awk '{print $1}')" = "$(jq -r '.archive_sha256 // ""' "$manifest")" ]; then
     echo "coastline archive is ready for the current plan"
     exit 0
@@ -25,6 +27,8 @@ fi
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/situation-coastline.XXXXXX")
 trap 'rm -rf "$work"' EXIT
+python3 "$client_root/scripts/coastline_tile_bounds.py" "$plan" > "$work/complete-tiles.json"
+plan="$work/complete-tiles.json"
 source_cache="$client_root/.build/coastline-sources"
 mkdir -p "$source_cache"
 
@@ -104,6 +108,8 @@ GDAL_NUM_THREADS=1 ogr2ogr -f MBTiles \
     -dsco "CONF=$work/layers.json" \
     "$work/archive.mbtiles" "$geopackage"
 
+python3 "$client_root/scripts/coastline_tile_bounds.py" "$plan" --archive "$work/archive.mbtiles"
+
 tiles_written=$(sqlite3 "$work/archive.mbtiles" 'SELECT COUNT(*) FROM tiles;')
 if [ "$tiles_written" -eq 0 ]; then
     echo "the coastline archive has no tiles" >&2
@@ -114,12 +120,14 @@ mv "$work/archive.mbtiles" "$archive"
 archive_digest=$(shasum -a 256 "$archive" | awk '{print $1}')
 jq -n \
     --arg plan_sha256 "$plan_digest" \
+    --arg builder_sha256 "$builder_digest" \
     --arg archive_sha256 "$archive_digest" \
     --argjson tiles_written "$tiles_written" \
     --argjson bytes "$(wc -c < "$archive" | tr -d ' ')" \
     --slurpfile plan "$plan" '
     {
         plan_sha256: $plan_sha256,
+        builder_sha256: $builder_sha256,
         archive_sha256: $archive_sha256,
         tiles_written: $tiles_written,
         archive_bytes: $bytes,

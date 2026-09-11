@@ -23,7 +23,10 @@ def main():
     parser.add_argument("--product", choices=["terrain", "basemap"], required=True)
     parser.add_argument("--authority", required=True)
     parser.add_argument("--edition", required=True)
+    parser.add_argument("--revision", type=int, default=1)
     args = parser.parse_args()
+    if args.revision < 1:
+        raise ValueError("Use a positive release revision")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", args.id) or args.output.exists():
         raise ValueError("Use a valid release ID and a new output directory")
     source = json.loads(args.manifest.read_text())
@@ -42,7 +45,7 @@ def main():
                               "bytes": path.stat().st_size, "sha256": digest(path)})
         release = {
             "schema_version": 1, "id": args.id, "product": args.product, "authority": args.authority,
-            "revision": 1, "edition": args.edition, "source_set": digest(args.manifest),
+            "revision": args.revision, "edition": args.edition, "source_set": digest(args.manifest),
             "channel": "development", "distribution": "unspecified", "validity": None,
             "coverage": {"name": "World overview and regional detail", "bounds": [-180, -85.051129, 180, 85.051129],
                          "min_zoom": min(band["min_zoom"] for band in source["bands"]),

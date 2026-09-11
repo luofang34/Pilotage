@@ -142,6 +142,22 @@ final class AviationDataModel: ObservableObject {
         }
     }
 
+    func selectGeographic(_ installed: InstalledAviationRelease) async {
+        guard let worker else { return }
+        await perform("Opening \(installed.release.product.title)…") {
+            try await worker.run { session in
+                _ = try session.verifyBlocking(releaseId: installed.id)
+                try session.selectBlocking(request: DataSelectionRequest(
+                    name: installed.release.product.selectionName, releaseId: installed.id, pinned: false,
+                    now: Int64(Date().timeIntervalSince1970), development: installed.release.channel == "development",
+                    allowOutsideValidity: false, rendererCapabilities: AviationChartStyle.rendererCapabilities
+                ))
+            }
+            try await self.reload()
+            try await self.prepareMap()
+        }
+    }
+
     private func restoreCharts() async throws {
         guard let worker else { return }
         for product in [AviationProduct.ifrLow, .ifrHigh] {

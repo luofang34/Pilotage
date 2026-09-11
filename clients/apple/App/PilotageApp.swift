@@ -24,6 +24,24 @@ struct PilotageApp: App {
 /// shipped application has no reason to offer one. It exists so a window at an awkward
 /// size can be photographed and measured without somebody holding the tablet.
 enum LaunchRequest {
+    static var aviationGeographicRelease: String? { argument("-AviationGeographicRelease") }
+
+    static var globeDistance: Double? {
+        guard let value = argument("-GlobeDistance"), let distance = Double(value), distance.isFinite,
+              (150...80_000_000).contains(distance) else { return nil }
+        return distance
+    }
+
+    private static func argument(_ name: String) -> String? {
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: name), index + 1 < arguments.count else { return nil }
+        return arguments[index + 1]
+        #else
+        nil
+        #endif
+    }
+
     static var aviationChartRelease: String? {
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments

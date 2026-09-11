@@ -15,6 +15,7 @@ struct GlobeMap: UIViewRepresentable {
 
     func makeUIView(context: Context) -> GlobeMapView {
         let view = GlobeMapView()
+        if let distance = LaunchRequest.globeDistance { view.changeCamera { $0.distance = distance } }
         view.configure(style: style, mode: mode, requestedAt: requestedAt)
         view.batch = batch
         view.onFeatureTapped = onFeatureTapped

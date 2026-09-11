@@ -28,10 +28,10 @@ class GeographicReleaseTests(unittest.TestCase):
         }))
         self.output = self.root / "release"
 
-    def run_preparation(self, identifier="base-example"):
+    def run_preparation(self, identifier="base-example", revision=1):
         return subprocess.run([
             sys.executable, str(SCRIPT), str(self.archive), str(self.manifest), str(self.output),
-            "--id", identifier, "--product", "basemap", "--authority", "Example", "--edition", "1",
+            "--id", identifier, "--product", "basemap", "--authority", "Example", "--edition", "1", "--revision", str(revision),
         ], capture_output=True, text=True, check=False)
 
     def test_release_records_exact_bytes_and_partial_coverage(self):
@@ -47,6 +47,15 @@ class GeographicReleaseTests(unittest.TestCase):
             data = (self.output / artifact["path"]).read_bytes()
             self.assertEqual(len(data), artifact["bytes"])
             self.assertEqual(hashlib.sha256(data).hexdigest(), artifact["sha256"])
+
+    def test_release_revision_is_recorded(self):
+        result = self.run_preparation(revision=2)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads((self.output / "release.json").read_text())["revision"], 2)
+
+    def test_release_revision_must_be_positive(self):
+        self.assertNotEqual(self.run_preparation(revision=0).returncode, 0)
+        self.assertFalse(self.output.exists())
 
     def test_changed_source_cannot_create_a_release(self):
         self.archive.write_bytes(b"altered bytes")

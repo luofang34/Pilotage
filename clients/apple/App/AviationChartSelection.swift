@@ -6,7 +6,10 @@ extension AviationDataWorker {
         try await run { session in
             var geographic: [AviationProduct: InstalledAviationRelease] = [:]
             for product in [AviationProduct.terrain, .basemap] {
-                guard let installed = snapshot.active(product) ?? snapshot.installed.first(where: {
+                let requested = snapshot.installed.first {
+                    $0.id == LaunchRequest.aviationGeographicRelease && $0.release.product == product
+                }
+                guard let installed = requested ?? snapshot.active(product) ?? snapshot.installed.first(where: {
                     $0.release.product == product && $0.artifactURL(format: "mbtiles") != nil
                 }) else { throw AviationChartError.invalid("Install the \(product.title) package.") }
                 try session.selectBlocking(request: DataSelectionRequest(
