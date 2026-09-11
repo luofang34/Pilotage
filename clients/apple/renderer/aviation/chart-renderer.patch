@@ -674,6 +674,19 @@
  mod processed;
  mod xr;
  
+@@ -231,7 +232,11 @@
+             tiles
+                 .spawn_mut(coords)
+                 .ok_or(HeadlessMapOperationError::InvalidTile { coords })?
+-                .insert(VectorLayerBucketComponent { done: true, layers });
++                .insert(VectorLayerBucketComponent {
++                    done: true,
++                    layers,
++                    loaded_sources: None,
++                });
+         }
+ 
+         let mut symbols_by_tile = BTreeMap::new();
 --- a/maplibre/src/headless/mod.rs
 +++ b/maplibre/src/headless/mod.rs
 @@ -78,9 +78,21 @@
@@ -1465,7 +1478,7 @@
  }
 --- /dev/null
 +++ b/maplibre/src/render/main_pass/tests.rs
-@@ -0,0 +1,197 @@
+@@ -0,0 +1,274 @@
 +#![allow(clippy::expect_used, clippy::panic)]
 +
 +use crate::{
@@ -1492,15 +1505,22 @@
 +use geozero::mvt::{tile, Message, Tile};
 +use std::rc::Rc;
 +
-+struct ForcedCovering;
++struct ForcedCovering(bool);
++
++struct CoveringOptions {
++    only_fine: bool,
++}
 +impl Plugin<crate::headless::environment::HeadlessEnvironment> for ForcedCovering {
 +    fn build(
 +        &self,
 +        schedule: &mut Schedule,
 +        _kernel: Rc<Kernel<crate::headless::environment::HeadlessEnvironment>>,
-+        _world: &mut World,
++        world: &mut World,
 +        _graph: &mut crate::render::graph::RenderGraph,
 +    ) {
++        world
++            .resources
++            .insert(CoveringOptions { only_fine: self.0 });
 +        schedule.add_system_to_stage(RenderStageLabel::Queue, overlapping_covering);
 +        schedule.add_system_to_stage(
 +            RenderStageLabel::Queue,
@@ -1526,6 +1546,14 @@
 +    if reverse.0 {
 +        tiles.reverse();
 +    }
++    if context
++        .world
++        .resources
++        .get::<CoveringOptions>()
++        .is_some_and(|options| options.only_fine)
++    {
++        tiles.retain(|tile| u8::from(tile.z) == 2);
++    }
 +    let region = ViewRegion::from_tiles(tiles, 2.into(), 2);
 +    let Eventually::Initialized(pattern) = context
 +        .world
@@ -1535,10 +1563,11 @@
 +    else {
 +        return Ok(());
 +    };
-+    let shapes = pattern.generate_pattern(
++    let shapes = pattern.generate_pattern_for_sources(
 +        &region,
 +        &ViewTileSources::default(),
 +        &[],
++        &crate::vector::source_coverage::VectorSourceCoverage::from_style(&context.style),
 +        context.view_state.zoom(),
 +        &context.world,
 +    );
@@ -1614,7 +1643,7 @@
 +        kernel,
 +        vec![
 +            Box::new(RenderPlugin),
-+            Box::new(ForcedCovering),
++            Box::new(ForcedCovering(false)),
 +            Box::new(VectorPlugin::<DefaultVectorTransferables>::default()),
 +            Box::new(HeadlessPlugin::new(false)),
 +        ],
@@ -1628,6 +1657,67 @@
 +        assert!(
 +            pixel[1] > 240 && pixel[0] < 10,
 +            "the fine green tile must remain visible: {pixel:?}"
++        );
++    }
++}
++
++#[tokio::test]
++async fn detailed_source_keeps_a_lower_zoom_background_visible() {
++    let style: Style = serde_json::from_value(serde_json::json!({
++        "version":8, "center":[-76.5,40.5], "zoom":2.66, "projection":{"type":"globe"},
++        "sources":{
++            "base":{"type":"vector","maxzoom":0,"tiles":["base/{z}/{x}/{y}"]},
++            "detail":{"type":"vector","maxzoom":2,"tiles":["detail/{z}/{x}/{y}"]}
++        },
++        "layers":[
++            {"id":"base","type":"fill","source":"base","source-layer":"land","paint":{"fill-color":"#ffffff"}},
++            {"id":"detail","type":"fill","source":"detail","source-layer":"land","paint":{"fill-color":"#00ff00","fill-opacity":0.5}}
++        ]
++    })).expect("style");
++    let mut layers = process_tile_layers(
++        &tile_bytes("#ffffff"),
++        &style.layers[0],
++        WorldTileCoords::default(),
++        crate::projection::ProjectionType::Globe,
++    )
++    .expect("base");
++    layers.vector.extend(
++        process_tile_layers(
++            &tile_bytes("#00ff00"),
++            &style.layers[1],
++            WorldTileCoords {
++                x: 1,
++                y: 1,
++                z: 2.into(),
++            },
++            crate::projection::ProjectionType::Globe,
++        )
++        .expect("detail")
++        .vector,
++    );
++    let (kernel, renderer) = create_headless_renderer(256, 256, None)
++        .await
++        .expect("renderer");
++    let mut map = HeadlessMap::new(
++        style,
++        renderer,
++        kernel,
++        vec![
++            Box::new(RenderPlugin),
++            Box::new(ForcedCovering(true)),
++            Box::new(VectorPlugin::<DefaultVectorTransferables>::default()),
++            Box::new(HeadlessPlugin::new(false)),
++        ],
++    )
++    .expect("map");
++    map.render_source_frames(layers, Vec::new(), 2)
++        .expect("load");
++    for _ in 0..4 {
++        map.run_frame().expect("frame");
++        let pixel = center_pixel_blocking(&map);
++        assert!(
++            pixel[0] > 100 && pixel[1] > 240 && pixel[2] > 100,
++            "translucent detail must retain the white source below it: {pixel:?}"
 +        );
 +    }
 +}
@@ -2535,6 +2625,137 @@
 +
 +mod chart_symbol;
 +pub use chart_symbol::ChartSymbolShader;
+--- a/maplibre/src/render/systems/retention_system/tests.rs
++++ b/maplibre/src/render/systems/retention_system/tests.rs
+@@ -24,9 +24,56 @@
+         .spawn_mut(coords)
+         .expect("valid coordinates")
+         .insert(VectorLayerBucketComponent {
++            loaded_sources: None,
+             done,
+             layers: Vec::new(),
+         });
++}
++
++#[test]
++fn each_vector_source_keeps_its_requested_ancestors() {
++    use crate::{
++        render::{projection::view_region_for_projection, view_state::ViewStatePadding},
++        vector::source_coverage::{request_coords, VectorSourceCoverage},
++    };
++    let style = serde_json::from_value(serde_json::json!({
++        "version": 8,
++        "sources": {
++            "base": {"type": "vector", "tiles": [], "maxzoom": 0},
++            "detail": {"type": "vector", "tiles": [], "maxzoom": 3}
++        },
++        "layers": [
++            {"id": "base", "type": "fill", "source": "base", "source-layer": "land"},
++            {"id": "detail", "type": "fill", "source": "detail", "source-layer": "land"}
++        ]
++    }))
++    .expect("style");
++    let view = wide_eye_view();
++    let mut world = World::default();
++    let region = view_region_for_projection(
++        &style,
++        &view,
++        &world,
++        view.zoom().zoom_level(crate::coords::TILE_SIZE),
++        ViewStatePadding::Loose,
++    )
++    .expect("covering")
++    .expect("visible tiles");
++    let sources = VectorSourceCoverage::from_style(&style);
++    let expected: HashSet<_> = region
++        .iter()
++        .flat_map(|coords| request_coords(coords, &sources, &world))
++        .collect();
++    assert!(expected.iter().any(|coords| u8::from(coords.z) == 3));
++    for coords in &expected {
++        spawn_vector(&mut world, *coords, true);
++    }
++    let in_use = super::tiles_in_use(&world, &style, &view);
++    let evicted = evict_beyond(&mut world, &in_use, CacheBudget { tiles: 0, bytes: 0 });
++    assert!(
++        expected.iter().all(|coords| !evicted.contains(coords)),
++        "source ancestors must stay resident even before they draw"
++    );
+ }
+ 
+ #[test]
+@@ -180,6 +227,7 @@
+             .spawn_mut(coords)
+             .expect("valid coordinates")
+             .insert(VectorLayerBucketComponent {
++                loaded_sources: None,
+                 done: true,
+                 layers: vec![VectorLayerBucket::AvailableLayer(
+                     AvailableVectorLayerBucket {
+--- a/maplibre/src/render/systems/retention_system.rs
++++ b/maplibre/src/render/systems/retention_system.rs
+@@ -15,10 +15,7 @@
+ use crate::{
+     context::MapContext,
+     coords::WorldTileCoords,
+-    io::{
+-        tile_backpressure::is_settled,
+-        tile_sources::{clamp_to_max_zoom, source_max_zoom, TileKind},
+-    },
++    io::tile_backpressure::is_settled,
+     raster::resource::RasterResources,
+     render::{
+         eventually::{Eventually, Eventually::Initialized},
+@@ -232,6 +229,7 @@
+     view_state: &ViewState,
+ ) -> HashSet<WorldTileCoords> {
+     let mut in_use = drawn_tiles(world);
++    let sources = crate::vector::source_coverage::VectorSourceCoverage::from_style(style);
+     match view_region_for_projection(
+         style,
+         view_state,
+@@ -240,12 +238,11 @@
+         ViewStatePadding::Loose,
+     ) {
+         Ok(Some(requested)) => {
+-            // The request systems fetch the ancestor at the source's maximum zoom in place of
+-            // a finer tile, so that is the tile to keep.
+-            let max_zoom = source_max_zoom(style, TileKind::Vector);
+             for coords in requested.iter() {
+                 in_use.insert(coords);
+-                in_use.insert(clamp_to_max_zoom(coords, max_zoom));
++                in_use.extend(crate::vector::source_coverage::request_coords(
++                    coords, &sources, world,
++                ));
+             }
+         }
+         Ok(None) => {}
+@@ -255,13 +252,23 @@
+         .resources
+         .get::<crate::terrain::request_system::DrapeRequests>()
+     {
+-        in_use.extend(requests.0.iter().copied());
++        for coords in &requests.0 {
++            in_use.insert(*coords);
++            in_use.extend(crate::vector::source_coverage::request_coords(
++                *coords, &sources, world,
++            ));
++        }
+     }
+     if let Some(prefetch) = world
+         .resources
+         .get::<crate::terrain::request_system::DrapePrefetchRequests>()
+     {
+-        in_use.extend(prefetch.0.iter().copied());
++        for coords in &prefetch.0 {
++            in_use.insert(*coords);
++            in_use.extend(crate::vector::source_coverage::request_coords(
++                *coords, &sources, world,
++            ));
++        }
+     }
+     if let Some(dem) = dem_source(style) {
+         let view: Vec<WorldTileCoords> = in_use.iter().copied().collect();
 --- a/maplibre/src/render/systems/sort_phase_system.rs
 +++ b/maplibre/src/render/systems/sort_phase_system.rs
 @@ -1,17 +1,21 @@
@@ -2561,6 +2782,151 @@
 +
      Ok(())
  }
+--- a/maplibre/src/render/systems/tile_view_pattern_system.rs
++++ b/maplibre/src/render/systems/tile_view_pattern_system.rs
+@@ -39,10 +39,11 @@
+     if let Some(view_region) = &view_region {
+         let zoom = view_state.zoom();
+ 
+-        let view_tiles = tile_view_pattern.generate_pattern(
++        let view_tiles = tile_view_pattern.generate_pattern_for_sources(
+             view_region,
+             view_tile_sources,
+             &raster_coverings,
++            &crate::vector::source_coverage::VectorSourceCoverage::from_style(style),
+             zoom,
+             world,
+         );
+--- a/maplibre/src/render/tile_view_pattern/mod.rs
++++ b/maplibre/src/render/tile_view_pattern/mod.rs
+@@ -39,6 +39,8 @@
+     /// Source and target are equal, so no need to differentiate. We render the `source` shape
+     /// exactly at the `target`.
+     SourceEqTarget(TileShape),
++    /// Shapes selected independently for different vector sources.
++    Independent(Vec<TileShape>),
+     /// No data available so nothing to render
+     None,
+ }
+@@ -49,7 +51,7 @@
+             Self::Parent(source_shape) | Self::SourceEqTarget(source_shape) => {
+                 callback(source_shape)
+             }
+-            Self::Children(source_shapes) => {
++            Self::Children(source_shapes) | Self::Independent(source_shapes) => {
+                 for shape in source_shapes {
+                     callback(shape)
+                 }
+@@ -63,7 +65,7 @@
+             Self::Parent(source_shape) | Self::SourceEqTarget(source_shape) => {
+                 callback(source_shape)
+             }
+-            Self::Children(source_shapes) => {
++            Self::Children(source_shapes) | Self::Independent(source_shapes) => {
+                 for shape in source_shapes {
+                     callback(shape)
+                 }
+@@ -125,6 +127,7 @@
+     transform: Matrix4<f64>,
+ 
+     buffer_range: Option<Range<wgpu::BufferAddress>>,
++    vector_source: Option<String>,
+ }
+ 
+ impl TileShape {
+@@ -134,6 +137,7 @@
+             zoom_factor: zoom.scale_to_tile(&coords),
+             transform: coords.transform_for_zoom(zoom),
+             buffer_range: None,
++            vector_source: None,
+         }
+     }
+ 
+@@ -163,6 +167,11 @@
+ 
+     pub fn coords(&self) -> WorldTileCoords {
+         self.coords
++    }
++
++    /// The vector source selected for this shape, when source selection is explicit.
++    pub fn vector_source(&self) -> Option<&str> {
++        self.vector_source.as_deref()
+     }
+ }
+ 
+--- a/maplibre/src/render/tile_view_pattern/pattern.rs
++++ b/maplibre/src/render/tile_view_pattern/pattern.rs
+@@ -1,4 +1,7 @@
+-use std::{collections::HashSet, marker::PhantomData};
++use std::{
++    collections::{HashMap, HashSet},
++    marker::PhantomData,
++};
+ 
+ use crate::{
+     coords::{ViewRegion, WorldTileCoords, Zoom, ZoomLevel},
+@@ -123,8 +126,20 @@
+         zoom: Zoom,
+         world: &World,
+     ) -> Vec<ViewTile> {
++        self.generate_pattern_for_sources(view_region, sources, raster_coverings, &[], zoom, world)
++    }
++
++    pub(crate) fn generate_pattern_for_sources(
++        &self,
++        view_region: &ViewRegion,
++        sources: &ViewTileSources,
++        raster_coverings: &RasterCoverings,
++        vector_sources: &[crate::vector::source_coverage::VectorSourceCoverage],
++        zoom: Zoom,
++        world: &World,
++    ) -> Vec<ViewTile> {
+         let mut view_tiles = Vec::with_capacity(self.view_tiles.len());
+-        let mut vector_parents = HashSet::new();
++        let mut vector_parents = HashMap::new();
+         let mut raster_parents = HashSet::new();
+         let raster_sources = sources.of_kind(TileKind::Raster);
+         let covering: Vec<WorldTileCoords> = raster_coverings
+@@ -136,13 +151,32 @@
+             if coords.build_quad_key().is_none() {
+                 continue;
+             }
+-            let vector = source_shapes(
+-                &sources.of_kind(TileKind::Vector),
+-                coords,
+-                zoom,
+-                world,
+-                &mut vector_parents,
+-            );
++            let vector = if vector_sources.is_empty() {
++                source_shapes(
++                    &sources.of_kind(TileKind::Vector),
++                    coords,
++                    zoom,
++                    world,
++                    vector_parents.entry(String::new()).or_default(),
++                )
++            } else {
++                let mut shapes = Vec::new();
++                for source in vector_sources {
++                    let selected = source_shapes(
++                        source,
++                        coords,
++                        zoom,
++                        world,
++                        vector_parents.entry(source.name.clone()).or_default(),
++                    );
++                    selected.for_each(&mut |shape| {
++                        let mut shape = shape.clone();
++                        shape.vector_source = Some(source.name.clone());
++                        shapes.push(shape);
++                    });
++                }
++                SourceShapes::Independent(shapes)
++            };
+             let covered: Vec<WorldTileCoords> = covering_shapes_for(coords, &covering)
+                 .into_iter()
+                 .filter(|source| raster_sources.has_tile(*source, world))
 --- a/maplibre/src/sdf/assets/load.rs
 +++ b/maplibre/src/sdf/assets/load.rs
 @@ -20,6 +20,9 @@
@@ -4009,7 +4375,7 @@
 +mod tests;
 --- /dev/null
 +++ b/maplibre/src/sdf/chart/collision_system.rs
-@@ -0,0 +1,160 @@
+@@ -0,0 +1,168 @@
 +//! Resolve visible source-tile symbols using the same geometry as the GPU.
 +
 +use crate::{
@@ -4028,7 +4394,7 @@
 +};
 +use std::{
 +    borrow::Cow,
-+    collections::{BTreeSet, HashMap},
++    collections::{BTreeMap, BTreeSet, HashMap},
 +};
 +
 +mod artwork;
@@ -4071,10 +4437,13 @@
 +        else {
 +            return Err(SystemError::Dependencies);
 +        };
-+        let mut source_tiles = BTreeSet::new();
++        let mut source_tiles: BTreeMap<_, BTreeSet<Option<String>>> = BTreeMap::new();
 +        for view_tile in pattern.iter() {
 +            view_tile.render_kind(TileKind::Vector, |shape| {
-+                source_tiles.insert(shape.coords());
++                source_tiles
++                    .entry(shape.coords())
++                    .or_default()
++                    .insert(shape.vector_source().map(str::to_owned));
 +            });
 +        }
 +        let styles: HashMap<_, _> = style
@@ -4084,7 +4453,7 @@
 +            .map(|layer| (layer.id.as_str(), layer))
 +            .collect();
 +        let mut layers = Vec::new();
-+        for coords in source_tiles {
++        for (coords, sources) in source_tiles {
 +            let Some(component) = world.tiles.query::<&SymbolLayersDataComponent>(coords) else {
 +                continue;
 +            };
@@ -4092,6 +4461,11 @@
 +                let Some(style_layer) = styles.get(layer.style_layer_id.as_str()) else {
 +                    continue;
 +                };
++                if !sources.contains(&None)
++                    && !sources.contains(&Some(style_layer.source.clone().unwrap_or_default()))
++                {
++                    continue;
++                }
 +                layers.push(CollisionLayer::new(layer, style_layer));
 +            }
 +        }
@@ -4376,7 +4750,7 @@
 +mod tests;
 --- /dev/null
 +++ b/maplibre/src/sdf/chart/queue_system.rs
-@@ -0,0 +1,63 @@
+@@ -0,0 +1,68 @@
 +//! Queues [PhaseItems](crate::render::render_phase::PhaseItem) for rendering.
 +
 +use crate::{
@@ -4420,6 +4794,11 @@
 +                symbol_buffer_pool.index().get_layers(source_shape.coords())
 +            {
 +                for layer_entry in layer_entries {
++                    if source_shape.vector_source().is_some_and(|source| {
++                        layer_entry.style_layer.source.as_deref().unwrap_or("") != source
++                    }) {
++                        continue;
++                    }
 +                    if !layer_entry.style_layer.is_visible_at(zoom) {
 +                        continue;
 +                    }
@@ -9018,12 +9397,308 @@
 +    });
 +    (texture, group)
 +}
---- a/maplibre/src/vector/process_vector.rs
-+++ b/maplibre/src/vector/process_vector.rs
-@@ -31,6 +31,24 @@
- 
- #[derive(Error, Debug)]
- pub enum ProcessVectorError {
+--- /dev/null
++++ b/maplibre/src/vector/mvt_polygon/tests.rs
+@@ -0,0 +1,102 @@
++#![allow(clippy::expect_used, clippy::panic)]
++
++use super::*;
++
++#[derive(Default)]
++struct Geometry {
++    points: Vec<[f64; 2]>,
++    polygons: Vec<usize>,
++}
++
++impl GeomProcessor for Geometry {
++    fn xy(&mut self, x: f64, y: f64, _: usize) -> Result<()> {
++        self.points.push([x, y]);
++        Ok(())
++    }
++    fn polygon_begin(&mut self, _: bool, size: usize, _: usize) -> Result<()> {
++        self.polygons.push(size);
++        Ok(())
++    }
++}
++
++fn encode(rings: &[Ring]) -> Vec<u32> {
++    let mut commands = Vec::new();
++    let mut cursor = [0, 0];
++    for ring in rings {
++        commands.push(9);
++        for (index, point) in ring.iter().enumerate() {
++            if index == 1 {
++                commands.push(((ring.len() - 1) as u32) << 3 | 2);
++            }
++            for axis in 0..2 {
++                let delta = point[axis] - cursor[axis];
++                commands.push(((delta << 1) ^ (delta >> 31)) as u32);
++            }
++            cursor = *point;
++        }
++        commands.push(15);
++    }
++    commands
++}
++
++#[test]
++fn ring_winding_is_independent_of_position() {
++    for shift in [[0, 0], [3900, 4000], [-100, 3900], [4000, -80]] {
++        let ring: Ring = [[0, 0], [100, 0], [100, 100], [0, 100]]
++            .iter()
++            .map(|[x, y]| [x + shift[0], y + shift[1]])
++            .collect();
++        let mut result = Geometry::default();
++        polygons(&encode(&[ring.clone()]), &mut result).expect("valid exterior");
++        assert_eq!(result.polygons, [1]);
++        let expected: Vec<_> = ring
++            .iter()
++            .chain(ring.first())
++            .map(|[x, y]| [f64::from(*x), f64::from(*y)])
++            .collect();
++        assert_eq!(result.points, expected);
++    }
++}
++
++#[test]
++fn holes_and_exteriors_share_the_mvt_cursor() {
++    let exterior = vec![[3000, 3000], [4000, 3000], [4000, 4000], [3000, 4000]];
++    let hole = vec![[3100, 3100], [3100, 3200], [3200, 3200], [3200, 3100]];
++    let second = vec![[0, 0], [100, 0], [100, 100], [0, 100]];
++    let input = vec![exterior, hole, second];
++    let mut result = Geometry::default();
++    polygons(&encode(&input), &mut result).expect("valid multipolygon");
++    assert_eq!(result.polygons, [2, 1]);
++    let expected: Vec<_> = input
++        .iter()
++        .flat_map(|ring| ring.iter().chain(ring.first()))
++        .map(|[x, y]| [f64::from(*x), f64::from(*y)])
++        .collect();
++    assert_eq!(result.points, expected);
++}
++
++#[test]
++fn incomplete_commands_and_orphan_holes_return_errors() {
++    let valid = encode(&[vec![[3000, 3000], [4000, 3000], [4000, 4000]]]);
++    for end in 1..valid.len() {
++        assert!(polygons(&valid[..end], &mut Geometry::default()).is_err());
++    }
++    let hole = encode(&[vec![[0, 0], [0, 100], [100, 100]]]);
++    assert!(polygons(&hole, &mut Geometry::default()).is_err());
++}
++
++#[test]
++fn collapsed_ring_does_not_remove_valid_polygons() {
++    let collapsed = vec![[2683, 3496], [2685, 3494], [2686, 3493]];
++    let valid = vec![[3000, 3000], [4000, 3000], [4000, 4000], [3000, 4000]];
++    let input = encode(&[collapsed, valid.clone()]);
++    let mut result = Geometry::default();
++    polygons(&input, &mut result).expect("nonzero rings still render");
++    assert_eq!(result.polygons, [1]);
++    let expected: Vec<_> = valid
++        .iter()
++        .chain(valid.first())
++        .map(|[x, y]| [f64::from(*x), f64::from(*y)])
++        .collect();
++    assert_eq!(result.points, expected);
++}
+--- /dev/null
++++ b/maplibre/src/vector/mvt_polygon.rs
+@@ -0,0 +1,160 @@
++//! Reads vector polygon rings and ignores rings with zero area.
++
++use geozero::{
++    error::{GeozeroError, Result},
++    mvt::{self, tile},
++    ColumnValue, FeatureProcessor, GeomProcessor,
++};
++
++type Ring = Vec<[i32; 2]>;
++
++pub(super) fn process_layer(
++    layer: &tile::Layer,
++    processor: &mut impl FeatureProcessor,
++) -> Result<()> {
++    processor.dataset_begin(Some(&layer.name))?;
++    for (index, feature) in layer.features.iter().enumerate() {
++        processor.feature_begin(index as u64)?;
++        properties(layer, feature, processor)?;
++        processor.geometry_begin()?;
++        if feature.r#type == Some(tile::GeomType::Polygon as i32) {
++            polygons(&feature.geometry, processor)?;
++        } else {
++            mvt::process_geom(feature, processor)?;
++        }
++        processor.geometry_end()?;
++        processor.feature_end(index as u64)?;
++    }
++    processor.dataset_end()
++}
++
++fn properties(
++    layer: &tile::Layer,
++    feature: &tile::Feature,
++    processor: &mut impl FeatureProcessor,
++) -> Result<()> {
++    processor.properties_begin()?;
++    for (index, pair) in feature.tags.chunks(2).enumerate() {
++        let [key, value] = pair else {
++            return Err(mvt::MvtError::InvalidFeatureTagsLength(feature.tags.len()).into());
++        };
++        let key = layer
++            .keys
++            .get(*key as usize)
++            .ok_or(mvt::MvtError::InvalidKeyIndex(*key))?;
++        let value = layer
++            .values
++            .get(*value as usize)
++            .ok_or(mvt::MvtError::InvalidValueIndex(*value))?;
++        let value = if let Some(value) = &value.string_value {
++            ColumnValue::String(value)
++        } else if let Some(value) = value.float_value {
++            ColumnValue::Float(value)
++        } else if let Some(value) = value.double_value {
++            ColumnValue::Double(value)
++        } else if let Some(value) = value.int_value {
++            ColumnValue::Long(value)
++        } else if let Some(value) = value.uint_value {
++            ColumnValue::ULong(value)
++        } else if let Some(value) = value.sint_value {
++            ColumnValue::Long(value)
++        } else if let Some(value) = value.bool_value {
++            ColumnValue::Bool(value)
++        } else {
++            return Err(mvt::MvtError::UnsupportedKeyValueType(key.clone()).into());
++        };
++        processor.property(index, key, &value)?;
++    }
++    processor.properties_end()
++}
++
++fn invalid_geometry() -> GeozeroError {
++    mvt::MvtError::GeometryFormat.into()
++}
++
++fn coordinate(commands: &mut &[u32], cursor: &mut [i32; 2]) -> Result<[i32; 2]> {
++    let [x, y, rest @ ..] = *commands else {
++        return Err(invalid_geometry());
++    };
++    for (axis, value) in [x, y].into_iter().enumerate() {
++        let delta = ((value >> 1) as i32) ^ -((value & 1) as i32);
++        cursor[axis] = cursor[axis]
++            .checked_add(delta)
++            .ok_or_else(invalid_geometry)?;
++    }
++    *commands = rest;
++    Ok(*cursor)
++}
++
++fn rings(mut commands: &[u32]) -> Result<Vec<Ring>> {
++    let mut result = Vec::new();
++    let mut cursor = [0, 0];
++    while !commands.is_empty() {
++        let [9, rest @ ..] = commands else {
++            return Err(invalid_geometry());
++        };
++        commands = rest;
++        let start = coordinate(&mut commands, &mut cursor)?;
++        let [line, rest @ ..] = commands else {
++            return Err(invalid_geometry());
++        };
++        let count = (line >> 3) as usize;
++        if line & 7 != 2 || count < 2 || count > rest.len() / 2 {
++            return Err(invalid_geometry());
++        }
++        commands = rest;
++        let mut ring = Vec::with_capacity(count + 1);
++        ring.push(start);
++        for _ in 0..count {
++            ring.push(coordinate(&mut commands, &mut cursor)?);
++        }
++        let [15, rest @ ..] = commands else {
++            return Err(invalid_geometry());
++        };
++        commands = rest;
++        result.push(ring);
++    }
++    Ok(result)
++}
++
++fn area(ring: &Ring) -> i128 {
++    ring.iter()
++        .zip(ring.iter().cycle().skip(1))
++        .map(|(a, b)| i128::from(a[0]) * i128::from(b[1]) - i128::from(a[1]) * i128::from(b[0]))
++        .sum()
++}
++
++fn polygons(commands: &[u32], processor: &mut impl GeomProcessor) -> Result<()> {
++    let mut polygons: Vec<Vec<Ring>> = Vec::new();
++    for ring in rings(commands)? {
++        match area(&ring).cmp(&0) {
++            std::cmp::Ordering::Greater => polygons.push(vec![ring]),
++            std::cmp::Ordering::Less => {
++                polygons.last_mut().ok_or_else(invalid_geometry)?.push(ring)
++            }
++            std::cmp::Ordering::Equal => continue,
++        }
++    }
++    let multiple = polygons.len() > 1;
++    if multiple {
++        processor.multipolygon_begin(polygons.len(), 0)?;
++    }
++    for (index, polygon) in polygons.iter().enumerate() {
++        processor.polygon_begin(!multiple, polygon.len(), index)?;
++        for (index, ring) in polygon.iter().enumerate() {
++            processor.linestring_begin(false, ring.len() + 1, index)?;
++            for (point_index, [x, y]) in ring.iter().chain(ring.first()).enumerate() {
++                processor.xy(f64::from(*x), f64::from(*y), point_index)?;
++            }
++            processor.linestring_end(false, index)?;
++        }
++        processor.polygon_end(!multiple, index)?;
++    }
++    if multiple {
++        processor.multipolygon_end(0)?;
++    }
++    Ok(())
++}
++
++#[cfg(test)]
++mod tests;
+--- a/maplibre/src/vector/populate_world_system.rs
++++ b/maplibre/src/vector/populate_world_system.rs
+@@ -86,6 +86,9 @@
+         .query_mut::<&mut VectorLayerBucketComponent>(message.coords())
+     {
+         component.done = true;
++        if let Some(sources) = message.loaded_sources() {
++            component.loaded_sources = Some(sources.iter().cloned().collect());
++        }
+     }
+     if let Some(component) = world
+         .tiles
+--- /dev/null
++++ b/maplibre/src/vector/process_vector/error.rs
+@@ -0,0 +1,44 @@
++//! Errors from vector tile processing.
++
++use crate::{coords::WorldTileCoords, io::apc::SendError};
++use std::borrow::Cow;
++use thiserror::Error;
++
++#[derive(Error, Debug)]
++pub enum ProcessVectorError {
++    /// Vector geometry cannot be decoded for the named layer and tile.
++    #[error("cannot tessellate layer {layer} at {coords}")]
++    Tessellation {
++        /// Tile coordinates.
++        coords: WorldTileCoords,
++        /// Style layer identifier.
++        layer: String,
++        /// Geometry decoder error.
++        #[source]
++        source: geozero::error::GeozeroError,
++    },
 +    /// A line exclusion descriptor cannot be decoded without losing its meaning.
 +    #[error("invalid endpoint exclusion metadata for layer {layer}")]
 +    EndpointDisks {
@@ -9042,10 +9717,119 @@
 +        #[source]
 +        source: crate::sdf::chart::tessellation_new::IconError,
 +    },
-     /// Sending of results failed
-     #[error("sending data back through context failed")]
-     SendError(#[source] SendError),
-@@ -215,6 +233,11 @@
++    /// Sending of results failed
++    #[error("sending data back through context failed")]
++    SendError(#[source] SendError),
++    /// Error when decoding e.g. the protobuf file
++    #[error("decoding failed")]
++    Decoding(Cow<'static, str>),
++}
+--- a/maplibre/src/vector/process_vector/tests.rs
++++ b/maplibre/src/vector/process_vector/tests.rs
+@@ -387,3 +387,62 @@
+         );
+     }
+ }
++
++fn polygon_tile(geometry: Vec<u32>) -> Vec<u8> {
++    Tile {
++        layers: vec![tile::Layer {
++            version: 2,
++            name: "land".into(),
++            extent: Some(4096),
++            features: vec![tile::Feature {
++                id: Some(1),
++                tags: vec![],
++                r#type: Some(tile::GeomType::Polygon as i32),
++                geometry,
++            }],
++            keys: vec![],
++            values: vec![],
++        }],
++    }
++    .encode_to_vec()
++}
++
++fn fill_layer() -> StyleLayer {
++    serde_json::from_value(serde_json::json!({
++        "id":"paper-land", "type":"fill", "source":"base", "source-layer":"land",
++        "paint":{"fill-color":"#ffffff"}
++    }))
++    .expect("fill style")
++}
++
++#[test]
++fn collapsed_polygon_preserves_the_rest_of_the_fill_layer() {
++    // The first ring has no area after tile quantization.
++    let bytes = polygon_tile(vec![
++        9, 0, 0, 18, 2, 0, 2, 0, 15, 9, 0, 0, 26, 200, 0, 0, 200, 199, 0, 15,
++    ]);
++    let layers = tessellated(process(&bytes, fill_layer()));
++    assert_eq!(layers.len(), 1);
++    assert!(!layers[0].buffer.buffer.vertices.is_empty());
++    assert!(!layers[0].buffer.buffer.indices.is_empty());
++}
++
++#[test]
++fn malformed_polygon_reports_a_source_failure() {
++    let mut processor = ProcessVectorContext::<DefaultVectorTransferables, CollectingContext>::new(
++        CollectingContext::default(),
++    );
++    let error = process_vector_tile(
++        &polygon_tile(vec![9, 0, 0, 18, 2]),
++        VectorTileRequest {
++            coords: WorldTileCoords::default(),
++            layers: [fill_layer()].into_iter().collect(),
++            projection: ProjectionType::Globe,
++        },
++        &mut processor,
++    )
++    .expect_err("truncated geometry cannot mark a source tile ready");
++    assert!(
++        matches!(error, super::ProcessVectorError::Tessellation { layer, .. } if layer == "paper-land")
++    );
++}
+--- a/maplibre/src/vector/process_vector.rs
++++ b/maplibre/src/vector/process_vector.rs
+@@ -1,15 +1,11 @@
+-use std::{borrow::Cow, collections::HashSet, marker::PhantomData};
+-
+-use geozero::{
+-    mvt::{tile, Message},
+-    GeozeroDatasource,
+-};
+-use thiserror::Error;
++use std::{collections::HashSet, marker::PhantomData};
++
++use geozero::mvt::{tile, Message};
+ 
+ use crate::{
+     coords::{WorldTileCoords, EXTENT},
+     io::{
+-        apc::{Context, SendError},
++        apc::Context,
+         geometry_index::{IndexProcessor, IndexedGeometry, TileIndex},
+     },
+     projection::{globe::subdivision::granularity_for_zoom, ProjectionType},
+@@ -29,15 +25,8 @@
+     },
+ };
+ 
+-#[derive(Error, Debug)]
+-pub enum ProcessVectorError {
+-    /// Sending of results failed
+-    #[error("sending data back through context failed")]
+-    SendError(#[source] SendError),
+-    /// Error when decoding e.g. the protobuf file
+-    #[error("decoding failed")]
+-    Decoding(Cow<'static, str>),
+-}
++mod error;
++pub use error::ProcessVectorError;
+ 
+ /// Scale from a layer's declared coordinate extent to the 4096 grid the shaders expect, so a
+ /// producer emitting 8192 keeps its precision instead of landing twice as far from the origin.
+@@ -215,6 +204,11 @@
                              f64::from(u8::from(tile_request.coords.z)),
                          );
                          tessellator.coordinate_scale = coordinate_scale;
@@ -9057,7 +9841,7 @@
                          match paint {
                              LayerPaint::Fill(p) => {
                                  tessellator.style_property = p.fill_color.clone()
-@@ -225,6 +248,22 @@
+@@ -225,6 +219,22 @@
                              LayerPaint::Line(p) => {
                                  tessellator.style_property = p.line_color.clone();
                                  tessellator.is_line_layer = true;
@@ -9080,7 +9864,39 @@
                              }
                              LayerPaint::Background(p) => {
                                  tessellator.style_property = p.background_color.clone()
-@@ -249,33 +288,55 @@
+@@ -232,50 +242,73 @@
+                             _ => {}
+                         }
+ 
+-                        if let Err(e) = layer.process(&mut tessellator) {
+-                            context.layer_missing(coords, source_layer)?;
+-
+-                            tracing::error!("tessellation for layer source {source_layer} at {coords} failed {e:?}");
+-                        } else {
+-                            context.layer_tessellation_finished(
+-                                coords,
+-                                tessellator.buffer.into(),
+-                                tessellator.feature_indices,
+-                                tessellator.feature_colors,
+-                                original_layer,
+-                                id.clone(),
+-                            )?;
+-                        }
++                        super::mvt_polygon::process_layer(layer, &mut tessellator).map_err(
++                            |source| ProcessVectorError::Tessellation {
++                                coords: *coords,
++                                layer: id.clone(),
++                                source,
++                            },
++                        )?;
++                        context.layer_tessellation_finished(
++                            coords,
++                            tessellator.buffer.into(),
++                            tessellator.feature_indices,
++                            tessellator.feature_colors,
++                            original_layer,
++                            id.clone(),
++                        )?;
                      }
                      LayerPaint::Symbol(symbol_paint) => {
                          let zoom = f64::from(u8::from(tile_request.coords.z));
@@ -9110,9 +9926,9 @@
 +                            tessellator.icon = symbol_paint.icon.clone();
 +                            tessellator.text_style = symbol_paint.text_style.clone();
 +                            tessellator.coordinate_scale = coordinate_scale;
-+                            layer.process(&mut tessellator).map_err(|error| {
-+                                ProcessVectorError::Decoding(error.to_string().into())
-+                            })?;
++                            super::mvt_polygon::process_layer(layer, &mut tessellator).map_err(
++                                |error| ProcessVectorError::Decoding(error.to_string().into()),
++                            )?;
 +                            tessellator
 +                                .finish()
 +                                .map_err(|source| ProcessVectorError::Symbol {
@@ -9132,8 +9948,6 @@
 -                                    layer_data: original_layer,
 -                                    style_layer_id: id.clone(),
 -                                },
--                            )?;
--                        }
 +                            let mut tessellator = TextTessellatorNew::with_assets(
 +                                symbol_paint.clone(),
 +                                zoom,
@@ -9142,9 +9956,10 @@
 +                            tessellator.coordinate_scale = coordinate_scale;
 +                            tessellator.source_ids =
 +                                layer.features.iter().map(|feature| feature.id).collect();
-+                            layer.process(&mut tessellator).map_err(|error| {
-+                                ProcessVectorError::Decoding(error.to_string().into())
-+                            })?;
++                            super::mvt_polygon::process_layer(layer, &mut tessellator).map_err(
++                                |error| ProcessVectorError::Decoding(error.to_string().into()),
+                             )?;
+-                        }
 +                            tessellator.finish();
 +                            (tessellator.quad_buffer, tessellator.features)
 +                        };
@@ -9162,6 +9977,29 @@
                      }
                      _ => {
                          log::warn!("unhandled style layer type in {id}");
+@@ -316,7 +349,7 @@
+         index.set_coordinate_scale(extent_scale(layer));
+         // A layer that the index cannot decode still rendered above; losing its query index is
+         // better than losing the worker.
+-        if let Err(error) = layer.process(&mut index) {
++        if let Err(error) = super::mvt_polygon::process_layer(layer, &mut index) {
+             tracing::warn!(%coords, layer = %layer.name, ?error, "skipping query index for layer");
+         }
+     }
+--- a/maplibre/src/vector/queue_system.rs
++++ b/maplibre/src/vector/queue_system.rs
+@@ -71,6 +71,11 @@
+ 
+             if let Some(layer_entries) = buffer_pool_index.get_layers(source_shape.coords()) {
+                 for layer_entry in layer_entries {
++                    if source_shape.vector_source().is_some_and(|source| {
++                        layer_entry.style_layer.source.as_deref().unwrap_or("") != source
++                    }) {
++                        continue;
++                    }
+                     if !layer_entry
+                         .style_layer
+                         .is_visible_at(view_state.style_zoom().value())
 --- a/maplibre/src/vector/render_commands.rs
 +++ b/maplibre/src/vector/render_commands.rs
 @@ -158,7 +158,17 @@
@@ -9183,6 +10021,109 @@
          RenderCommandResult::Success
      }
  }
+--- a/maplibre/src/vector/request_system.rs
++++ b/maplibre/src/vector/request_system.rs
+@@ -8,9 +8,7 @@
+     io::{
+         apc::{AsyncProcedureCall, AsyncProcedureFuture, Context, Input, ProcedureError},
+         tile_backpressure::vector_request_budget,
+-        tile_sources::{
+-            clamp_to_max_zoom, source_layer_groups, source_max_zoom, source_min_zoom, TileKind,
+-        },
++        tile_sources::{source_layer_groups, TileKind},
+     },
+     kernel::Kernel,
+     render::{
+@@ -71,8 +69,7 @@
+ 
+         // Tile arrivals, eviction and a settling eye can change the covering without motion.
+         if let Some(view_region) = &view_region {
+-            let max_zoom = source_max_zoom(style, TileKind::Vector);
+-            let min_zoom = source_min_zoom(style, TileKind::Vector);
++            let coverages = super::source_coverage::VectorSourceCoverage::from_style(style);
+             let mut requested = HashSet::new();
+             let mut budget = vector_request_budget(world, style.terrain.is_some());
+ 
+@@ -95,18 +92,16 @@
+                     z: crate::coords::ZoomLevel::new(0),
+                 });
+             let draped = style.terrain.is_some();
+-            for coords in overview
++            let candidates: Vec<_> = overview
+                 .into_iter()
+                 .chain(drapes)
+                 .chain(view_region.iter().filter(|_| !draped))
+                 .chain(prefetch)
+-            {
+-                // Above the source maximum zoom the ancestor tile is fetched once and the
+-                // view pattern scales it into every descendant in view.
+-                if min_zoom.is_some_and(|min_zoom| u8::from(coords.z) < min_zoom) {
+-                    continue;
+-                }
+-                let coords = clamp_to_max_zoom(coords, max_zoom);
++                .flat_map(|coords| {
++                    super::source_coverage::request_coords(coords, &coverages, world)
++                })
++                .collect();
++            for coords in candidates {
+                 if coords.build_quad_key().is_none() || !requested.insert(coords) {
+                     continue;
+                 }
+@@ -150,7 +145,17 @@
+                 specification.projection_type.clone()
+             });
+ 
++        let coverages = super::source_coverage::VectorSourceCoverage::from_style(&style);
++        let mut loaded_sources = Vec::new();
+         for group in source_layer_groups(&style, TileKind::Vector) {
++            let name = group.source_name.as_deref().unwrap_or("");
++            if coverages
++                .iter()
++                .find(|coverage| coverage.name == name)
++                .is_some_and(|coverage| !coverage.accepts_zoom(coords))
++            {
++                continue;
++            }
+             let requested_layers: HashSet<StyleLayer> = group.layers.iter().cloned().collect();
+             if requested_layers.is_empty() {
+                 continue;
+@@ -170,7 +175,7 @@
+             let (symbols, base): (HashSet<_>, HashSet<_>) = requested_layers
+                 .into_iter()
+                 .partition(|layer| layer.type_ == "symbol");
+-            process_base::<T, C>(
++            if let Err(error) = process_base::<T, C>(
+                 &data,
+                 VectorTileRequest {
+                     coords,
+@@ -178,7 +183,17 @@
+                     projection: projection.clone(),
+                 },
+                 context.clone(),
+-            )?;
++            ) {
++                tracing::error!(%coords, source = name, %error, "vector tile processing failed");
++                continue;
++            }
++            loaded_sources.push(name.to_owned());
++            context
++                .send_back(
++                    T::TileTessellated::build_partial(coords)
++                        .with_loaded_sources(loaded_sources.clone()),
++                )
++                .map_err(ProcedureError::Send)?;
+             if symbols.is_empty() {
+                 continue;
+             }
+@@ -205,7 +220,7 @@
+         }
+ 
+         context
+-            .send_back(T::TileTessellated::build_from(coords))
++            .send_back(T::TileTessellated::build_from(coords).with_loaded_sources(loaded_sources))
+             .map_err(ProcedureError::Send)?;
+         Ok(())
+     })
 --- a/maplibre/src/vector/resource_system.rs
 +++ b/maplibre/src/vector/resource_system.rs
 @@ -53,6 +53,7 @@
@@ -9277,6 +10218,203 @@
              )
          });
          circle.initialize(|| {
+--- /dev/null
++++ b/maplibre/src/vector/source_coverage/tests.rs
+@@ -0,0 +1,84 @@
++#![allow(clippy::expect_used, clippy::panic)]
++
++use super::*;
++
++fn coverages() -> Vec<VectorSourceCoverage> {
++    VectorSourceCoverage::from_style(
++        &serde_json::from_value(serde_json::json!({
++            "version":8,"sources":{
++                "base":{"type":"vector","maxzoom":1,"tiles":["base/{z}/{x}/{y}"]},
++                "detail":{"type":"vector","minzoom":1,"maxzoom":4,"tiles":["detail/{z}/{x}/{y}"]}
++            },"layers":[
++                {"id":"base-land","type":"fill","source":"base","source-layer":"land"},
++                {"id":"detail-line","type":"line","source":"detail","source-layer":"line"}
++            ]
++        }))
++        .expect("style"),
++    )
++}
++
++fn loaded(world: &mut World, coords: WorldTileCoords, sources: &[&str]) {
++    world
++        .tiles
++        .spawn_mut(coords)
++        .expect("tile")
++        .insert(VectorLayerBucketComponent {
++            done: true,
++            layers: Vec::new(),
++            loaded_sources: Some(sources.iter().map(|source| (*source).to_owned()).collect()),
++        });
++}
++
++#[test]
++fn a_successful_empty_tile_is_available_only_for_its_source() {
++    let mut world = World::default();
++    let tile = WorldTileCoords {
++        x: 0,
++        y: 0,
++        z: 1.into(),
++    };
++    loaded(&mut world, tile, &["detail"]);
++    let sources = coverages();
++    assert!(!sources[0].has_tile(tile, &world));
++    assert!(sources[1].has_tile(tile, &world));
++}
++
++#[test]
++fn requests_keep_each_sources_zoom_range() {
++    let tile = WorldTileCoords {
++        x: 4,
++        y: 4,
++        z: 4.into(),
++    };
++    let requests = request_coords(tile, &coverages(), &World::default());
++    assert!(requests.contains(&tile));
++    assert!(requests.contains(&clamp_to_max_zoom(tile, Some(1))));
++    assert_eq!(requests.len(), 2);
++}
++
++#[test]
++fn missing_regional_coverage_requests_an_available_parent() {
++    let mut world = World::default();
++    let tile = WorldTileCoords {
++        x: 0,
++        y: 0,
++        z: 1.into(),
++    };
++    loaded(&mut world, tile, &["detail"]);
++    loaded(&mut world, WorldTileCoords::default(), &["base"]);
++    let requests = request_coords(tile, &coverages(), &world);
++    assert_eq!(requests.len(), 2);
++    assert!(requests.contains(&WorldTileCoords::default()));
++}
++
++#[test]
++fn an_empty_successful_tile_does_not_request_parent_features() {
++    let mut world = World::default();
++    let tile = WorldTileCoords {
++        x: 0,
++        y: 0,
++        z: 1.into(),
++    };
++    loaded(&mut world, tile, &["base", "detail"]);
++    assert_eq!(request_coords(tile, &coverages(), &world), vec![tile]);
++}
+--- /dev/null
++++ b/maplibre/src/vector/source_coverage.rs
+@@ -0,0 +1,107 @@
++//! Selects loaded vector tiles independently for each style source.
++
++use std::collections::{BTreeMap, BTreeSet};
++
++use crate::{
++    coords::WorldTileCoords,
++    io::tile_sources::{clamp_to_max_zoom, RASTER_LAYER_TYPES},
++    render::tile_view_pattern::HasTile,
++    style::{source::Source, Style},
++    tcs::world::World,
++    vector::{VectorLayerBucket, VectorLayerBucketComponent},
++};
++
++pub(crate) struct VectorSourceCoverage {
++    pub name: String,
++    min_zoom: Option<u8>,
++    max_zoom: Option<u8>,
++    layers: BTreeSet<String>,
++}
++
++impl VectorSourceCoverage {
++    pub fn from_style(style: &Style) -> Vec<Self> {
++        let mut groups = BTreeMap::new();
++        for layer in &style.layers {
++            if layer.type_ == "background" || RASTER_LAYER_TYPES.contains(&layer.type_.as_str()) {
++                continue;
++            }
++            let name = layer.source.as_deref().unwrap_or("");
++            let (min_zoom, max_zoom) = match style.sources.get(name) {
++                Some(Source::Vector(source)) => (source.minzoom, source.maxzoom),
++                Some(Source::GeoJson(source)) => (source.minzoom, source.maxzoom),
++                Some(_) => continue,
++                None => (None, None),
++            };
++            groups
++                .entry(name.to_owned())
++                .or_insert_with(|| Self {
++                    name: name.to_owned(),
++                    min_zoom,
++                    max_zoom,
++                    layers: BTreeSet::new(),
++                })
++                .layers
++                .insert(layer.id.clone());
++        }
++        groups.into_values().collect()
++    }
++
++    pub fn accepts_zoom(&self, coords: WorldTileCoords) -> bool {
++        let zoom = u8::from(coords.z);
++        self.min_zoom.is_none_or(|minimum| zoom >= minimum)
++            && self.max_zoom.is_none_or(|maximum| zoom <= maximum)
++    }
++}
++
++impl HasTile for VectorSourceCoverage {
++    fn has_tile(&self, coords: WorldTileCoords, world: &World) -> bool {
++        if !self.accepts_zoom(coords) {
++            return false;
++        }
++        let Some(buckets) = world.tiles.query::<&VectorLayerBucketComponent>(coords) else {
++            return false;
++        };
++        if !buckets.done {
++            return false;
++        }
++        if let Some(sources) = &buckets.loaded_sources {
++            return sources.contains(&self.name);
++        }
++        buckets.layers.iter().any(|layer| match layer {
++            VectorLayerBucket::AvailableLayer(layer) => self.layers.contains(&layer.style_layer_id),
++            VectorLayerBucket::Missing(_) => false,
++        })
++    }
++}
++
++/// Request an ancestor when a source has no tile at the requested detail level.
++pub(crate) fn request_coords(
++    coords: WorldTileCoords,
++    sources: &[VectorSourceCoverage],
++    world: &World,
++) -> Vec<WorldTileCoords> {
++    if sources.is_empty() {
++        return vec![coords];
++    }
++    let mut requests = BTreeSet::new();
++    for source in sources {
++        let mut candidate = clamp_to_max_zoom(coords, source.max_zoom);
++        while source.accepts_zoom(candidate) {
++            requests.insert(candidate);
++            let Some(buckets) = world.tiles.query::<&VectorLayerBucketComponent>(candidate) else {
++                break;
++            };
++            if !buckets.done || source.has_tile(candidate, world) {
++                break;
++            }
++            let Some(parent) = candidate.get_parent() else {
++                break;
++            };
++            candidate = parent;
++        }
++    }
++    requests.into_iter().collect()
++}
++
++#[cfg(test)]
++mod tests;
 --- a/maplibre/src/vector/structures.rs
 +++ b/maplibre/src/vector/structures.rs
 @@ -41,7 +41,7 @@
@@ -10061,6 +11199,68 @@
          Ok(())
      }
  }
+--- a/maplibre/src/vector/transferables.rs
++++ b/maplibre/src/vector/transferables.rs
+@@ -44,6 +44,16 @@
+     fn build_partial(coords: WorldTileCoords) -> Self
+     where
+         Self: Sized;
++    /// Source fetches completed successfully, including valid empty tiles.
++    fn loaded_sources(&self) -> Option<&[String]> {
++        None
++    }
++    fn with_loaded_sources(self, _sources: Vec<String>) -> Self
++    where
++        Self: Sized,
++    {
++        self
++    }
+     fn pending_symbols(&self) -> bool;
+     fn coords(&self) -> WorldTileCoords;
+ }
+@@ -124,6 +134,7 @@
+ pub struct DefaultTileTessellated {
+     coords: WorldTileCoords,
+     pending_symbols: bool,
++    loaded_sources: Option<Vec<String>>,
+ }
+ 
+ impl Debug for DefaultTileTessellated {
+@@ -147,6 +158,7 @@
+         Self {
+             coords,
+             pending_symbols: false,
++            loaded_sources: None,
+         }
+     }
+ 
+@@ -154,7 +166,15 @@
+         Self {
+             coords,
+             pending_symbols: true,
+-        }
++            loaded_sources: None,
++        }
++    }
++    fn loaded_sources(&self) -> Option<&[String]> {
++        self.loaded_sources.as_deref()
++    }
++    fn with_loaded_sources(mut self, sources: Vec<String>) -> Self {
++        self.loaded_sources = Some(sources);
++        self
+     }
+     fn pending_symbols(&self) -> bool {
+         self.pending_symbols
+--- a/maplibre/src/vector/upload_system/tests.rs
++++ b/maplibre/src/vector/upload_system/tests.rs
+@@ -72,6 +72,7 @@
+             .spawn_mut(*coords)
+             .expect("tile")
+             .insert(VectorLayerBucketComponent {
++                loaded_sources: None,
+                 done: true,
+                 layers: vec![VectorLayerBucket::AvailableLayer(
+                     AvailableVectorLayerBucket {
 --- a/maplibre/src/vector/upload_system.rs
 +++ b/maplibre/src/vector/upload_system.rs
 @@ -106,7 +106,9 @@
@@ -10097,15 +11297,16 @@
          layer_metadata.stroke_color = paint.stroke_color_rgba();
 --- a/maplibre/src/vector.rs
 +++ b/maplibre/src/vector.rs
-@@ -32,6 +32,7 @@
+@@ -32,6 +32,8 @@
      },
  };
  
 +pub(crate) mod annotation_mask;
++mod mvt_polygon;
  mod populate_world_system;
  mod process_vector;
  pub(crate) use process_vector::feature_properties;
-@@ -56,7 +57,7 @@
+@@ -56,7 +58,7 @@
      }
  }
  
@@ -10114,7 +11315,7 @@
  impl Deref for LinePipeline {
      type Target = wgpu::RenderPipeline;
  
-@@ -146,6 +147,7 @@
+@@ -146,6 +148,7 @@
          _graph: &mut RenderGraph,
      ) {
          let resources = &mut world.resources;
@@ -10122,13 +11323,27 @@
  
          resources.insert(Eventually::<VectorBufferPool>::Uninitialized);
          resources.insert(Eventually::<VectorPipeline>::Uninitialized);
+@@ -194,9 +197,13 @@
+ #[derive(Default)]
+ pub struct VectorLayerBucketComponent {
+     pub done: bool,
++    /// Successful source fetches. None permits directly supplied geometry.
++    pub loaded_sources: Option<std::collections::BTreeSet<String>>,
+     pub layers: Vec<VectorLayerBucket>,
+ }
+ 
+ impl TileComponent for VectorLayerBucketComponent {}
+ 
+ pub(crate) mod line_dash;
++
++pub(crate) mod source_coverage;
 --- a/maplibre-winit/src/noweb.rs
 +++ b/maplibre-winit/src/noweb.rs
 @@ -151,6 +151,7 @@
                  TokioScheduler::new(),
                  OffscreenKernelConfig {
                      cache_directory: cache_path.map(|path| path.to_str().unwrap().to_string()),
-+                ..Default::default()
++                    ..Default::default()
                  },
              ))
              .with_scheduler(TokioScheduler::new())
@@ -10138,7 +11353,7 @@
  
      let offscreen_kernel_config = OffscreenKernelConfig {
          cache_directory: None,
-+                ..Default::default()
++        ..Default::default()
      };
  
      #[cfg(target_feature = "atomics")]

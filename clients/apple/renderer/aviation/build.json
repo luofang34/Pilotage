@@ -4,7 +4,7 @@
   "producer_renderer_revision": "73ee3c8832f08ea0a9636f5af59d7e1e96820589",
   "patch": {
     "path": "chart-renderer.patch",
-    "sha256": "dc97388c3fbee5c880c8c6d8d693fb230d448d1a202fc7ef43460d68865ec27f"
+    "sha256": "dd311f23a11ec3231bc948edf0f9f48e7a905768b70bbee4056d02848da85b15"
   },
   "files": [
     {
@@ -85,7 +85,7 @@
     {
       "path": "maplibre/src/headless/map.rs",
       "before_sha256": "854f7f2be01a1304f8fbaa70b419766a0fe16f8a90e87365274f19eed6ac0f20",
-      "after_sha256": "4584799bb9aca0b2732203e796568984364f946d697f0151f5f8f4bcb2079051"
+      "after_sha256": "34354e628caf8493721b8e72481dca8808e2d9e7ed59cef74a8965883527ad4c"
     },
     {
       "path": "maplibre/src/headless/mod.rs",
@@ -185,7 +185,7 @@
     {
       "path": "maplibre/src/render/main_pass/tests.rs",
       "before_sha256": null,
-      "after_sha256": "d9f1cf12e6d816507b65c1a73e27e357c552c78ce4b49c3e260b936b44c01b42"
+      "after_sha256": "ffb3dacae8e4c9d942f7433122b956aeb5f933816ef0dc69bd991222483f0d60"
     },
     {
       "path": "maplibre/src/render/main_pass.rs",
@@ -258,9 +258,34 @@
       "after_sha256": "32c559a41bf082c9e0f878a574cd96e60360c661e4257e6e37e097431bc7c9f9"
     },
     {
+      "path": "maplibre/src/render/systems/retention_system/tests.rs",
+      "before_sha256": "bbe42daae6c419609504c8498273a71bcbee03f0db696b49cbd4a5d28cbd2527",
+      "after_sha256": "ee02fb833a10cf09e030bdfeb803b1d113f23ce4a8a0f8860b93b1b31f404d55"
+    },
+    {
+      "path": "maplibre/src/render/systems/retention_system.rs",
+      "before_sha256": "fc219535807d214d94120d5aef147d4cf2898a56d2e0c54505b88b3485df7022",
+      "after_sha256": "25dfb4b19af2754368f094c7ecaace277e07de3496e7f665c47111248f9e0e7a"
+    },
+    {
       "path": "maplibre/src/render/systems/sort_phase_system.rs",
       "before_sha256": "45def4e7d57c804cff4e6620fc1ceab8ecbe38d249aec1db826f50ef32115883",
       "after_sha256": "13fe8f9dc4e1f1249a77fdc9055f12b0b9758261b31a3150ada20ff1a9a7a9d7"
+    },
+    {
+      "path": "maplibre/src/render/systems/tile_view_pattern_system.rs",
+      "before_sha256": "10e14ce6ad2e3612f3bb76ab4abeab3d04f3111699ef87c0897c35367ec2dbcc",
+      "after_sha256": "edc91669df8bb3dfba2bece77d8896cb0a867fbf26618c0ea9e1c7fb5ff3b95a"
+    },
+    {
+      "path": "maplibre/src/render/tile_view_pattern/mod.rs",
+      "before_sha256": "f732e82660f51d5dfb4fb86e944f45d69875fd553f619af837cc6d000eb318e3",
+      "after_sha256": "15e7e5f5606d4c686dbef45682da45b3d5af0b930b35685b7a010f7859f1d053"
+    },
+    {
+      "path": "maplibre/src/render/tile_view_pattern/pattern.rs",
+      "before_sha256": "1e32358de35aeb048c9f1cd8d9e0ebc54d9d17f7bc3c2371e7f2794ecb03faff",
+      "after_sha256": "69f6f84c82f2a65962aef87ec2dd86da47b5eddb36527d93ea301186730cac5c"
     },
     {
       "path": "maplibre/src/sdf/assets/load.rs",
@@ -335,7 +360,7 @@
     {
       "path": "maplibre/src/sdf/chart/collision_system.rs",
       "before_sha256": null,
-      "after_sha256": "9b7240dff5b6c8e21cbec262378bc6d8a096872c46c4106e7815bbe74c8b552e"
+      "after_sha256": "aa06171afffe14b9313840ac7fa1a5c8e60b350537e92b4d9a31c868e51fc638"
     },
     {
       "path": "maplibre/src/sdf/chart/font_atlas/tests.rs",
@@ -350,7 +375,7 @@
     {
       "path": "maplibre/src/sdf/chart/queue_system.rs",
       "before_sha256": null,
-      "after_sha256": "e4a47499225d7a61913e04e04560f3928d023a06543965835e62f0eb1a6f4377"
+      "after_sha256": "5bd0793f38743a2834754b1b9ee1a5f082582c751a26adea4eb6712078f1b5e8"
     },
     {
       "path": "maplibre/src/sdf/chart/render_commands.rs",
@@ -598,9 +623,39 @@
       "after_sha256": "339bf2c70693e077b50ae9fa622c82f7dd7ab36f07ebe0ab40962a1755d1b8d8"
     },
     {
+      "path": "maplibre/src/vector/mvt_polygon/tests.rs",
+      "before_sha256": null,
+      "after_sha256": "5b9ec6841f6248f73271c0e9a34e062f893d6d98f97bb6d845ac37f4aa74a383"
+    },
+    {
+      "path": "maplibre/src/vector/mvt_polygon.rs",
+      "before_sha256": null,
+      "after_sha256": "dd998547b86ddc96a0f994ed2ea2798f5560b1a1bfed5e8739077bd14b4401ca"
+    },
+    {
+      "path": "maplibre/src/vector/populate_world_system.rs",
+      "before_sha256": "78223f3a79711b52d2f3b9fddee897de3afd4b149e41f5d0e7fc2b7806addcc2",
+      "after_sha256": "eb7990d17bc926a0dfdb7da853e1cee56965fc9bfd63a70e230cf8b1edef605c"
+    },
+    {
+      "path": "maplibre/src/vector/process_vector/error.rs",
+      "before_sha256": null,
+      "after_sha256": "1e3bd43b9145e9115768a8dd210cb9bc01989931fa091c3762b3e786ee570b7a"
+    },
+    {
+      "path": "maplibre/src/vector/process_vector/tests.rs",
+      "before_sha256": "5c283917652a4397318e220ee4513eb90a7fd2e48663c898bf3c265e32afd14d",
+      "after_sha256": "0b841ace26a7bd138ca275d1bc65bcb13a0b3a033ac10cc208cffde358ac5f4e"
+    },
+    {
       "path": "maplibre/src/vector/process_vector.rs",
       "before_sha256": "4fd412250d198d39ffd4695af695dbea316d4a50f19762b6cc5ab68b8a0ef6c2",
-      "after_sha256": "bfec97b52825fd80aada1553b5520b8ffdfd15e13d8171e613d00d7bb9304585"
+      "after_sha256": "d673417e1feecb240d821ead6208b99404784f0a6cfde3155877cc0c37a3b2e3"
+    },
+    {
+      "path": "maplibre/src/vector/queue_system.rs",
+      "before_sha256": "6684be18bdc49c1e3a476a45b74542ffb078202a04a04b6dc08a77db7557f66e",
+      "after_sha256": "edebcb6cb745848c49219653acca33adb95581ef174b1fcd8b350dca796c751d"
     },
     {
       "path": "maplibre/src/vector/render_commands.rs",
@@ -608,9 +663,24 @@
       "after_sha256": "fed90431001d1b5d82454e304956dd3ee214527d5e02b0efabbf5ad023d34cac"
     },
     {
+      "path": "maplibre/src/vector/request_system.rs",
+      "before_sha256": "cd7fff8ae14c219223df3c05637b06a3a7ac358849440f63dfc61d26baf2308a",
+      "after_sha256": "b2e42caa9da74098cc65ce1e8a4cf3bd01481a4d336c828a0c7956e2627bcd88"
+    },
+    {
       "path": "maplibre/src/vector/resource_system.rs",
       "before_sha256": "b60242f11516390a765a80572ee355ed06d8fa40710348c60f07eaffe8d7cc42",
       "after_sha256": "6350577b4f8b898dd71c57b63f0f0f2c1d4c3d6d16b1dc796d6c8ba613c66a91"
+    },
+    {
+      "path": "maplibre/src/vector/source_coverage/tests.rs",
+      "before_sha256": null,
+      "after_sha256": "562b06edd8e5ae2b0bd1e03201ade3cfec511b3f9ae174dd6ac8ef4648d9dede"
+    },
+    {
+      "path": "maplibre/src/vector/source_coverage.rs",
+      "before_sha256": null,
+      "after_sha256": "2d3918dd58b1c5162f4730494e97d1ac7bcda43e2fbe77193d6e44930919defe"
     },
     {
       "path": "maplibre/src/vector/structures.rs",
@@ -648,6 +718,16 @@
       "after_sha256": "65a386cab82e73911bda761031db7aaaabf6c0441e3aa8603eed252618ca6cc9"
     },
     {
+      "path": "maplibre/src/vector/transferables.rs",
+      "before_sha256": "3e8820f251ceef63966ae4790f4e47dde8b596e5bd82a92780fbdd5b7ef26896",
+      "after_sha256": "0dcf55f2a872869926297d4faed5713781291cb0e2d0a0cf55ef9f69c493a7ed"
+    },
+    {
+      "path": "maplibre/src/vector/upload_system/tests.rs",
+      "before_sha256": "9f15296120f0ca31de20555b235892c059b0c86805b000b54f7f335584c859c9",
+      "after_sha256": "d0a6d546371377ab8b424ab1a8d07f31551cf914df9c2babf06e286dbc304b70"
+    },
+    {
       "path": "maplibre/src/vector/upload_system.rs",
       "before_sha256": "fa125c4c4d0711cf6e42b5aa1afa4bc5038e2985725e9a9fff2160cd384313e2",
       "after_sha256": "ee596fdc529828164366f61e07935161a7d7835959fc8a0bae23458db1d03042"
@@ -655,17 +735,17 @@
     {
       "path": "maplibre/src/vector.rs",
       "before_sha256": "b05f62cde31350a4df7889234696841b22ca49929080227b81666aafc2da879c",
-      "after_sha256": "63ffc422a530740c2c95e66e5c439e504f60738eafacb61918b4c8999c3ab25a"
+      "after_sha256": "d5625a430a4cd387db1c09799fbdf856befce1f4daa1d4f0195d3ffc201d5a62"
     },
     {
       "path": "maplibre-winit/src/noweb.rs",
       "before_sha256": "a2bdc197dd062de622afd070ccd99a7652c8e1dafa16f7b1bf1e68d5370f52ba",
-      "after_sha256": "99d9881d2179ab6f22882020fd06a6b95dbe7ca7944ff349f8307a2d64c6efbc"
+      "after_sha256": "1280067cd3711595be495b67e23a945b6540c3ea0621ff63a9c290894279ffc8"
     },
     {
       "path": "web/src/lib.rs",
       "before_sha256": "83a8293afd39ab664fd39d48d732e7303fcf3f43c3937ef83f436654ac67ea79",
-      "after_sha256": "69258f762b0a4c4923df5a249d52bc65a20412d3fc1897bac858d4f040d9ae4f"
+      "after_sha256": "3cf5c7115659d83a55193b8d12a3a08be90a7eaf6047f9ddb805b91fb829fa03"
     }
   ],
   "resources": [

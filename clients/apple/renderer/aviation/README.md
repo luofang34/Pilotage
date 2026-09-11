@@ -17,6 +17,15 @@ Common layers and live display values remain available in each profile.
 The native host projects live display positions with the same map camera.
 The camera uses north-up orientation at world scale.
 
+Each vector source selects its own available tiles.
+Missing regional detail can use a coarser tile from the same source.
+A successful empty tile does not use features from a coarser tile.
+Tile masks and chart collision regions use the selected source geometry.
+The GPU tests check overlapping masks and sources with different detail levels.
+The cache retains requested ancestors for each vector source.
+The polygon reader ignores rings with zero area.
+A failed source tile uses an available ancestor.
+
 The native host reads `pilotage:resources` from the style metadata.
 This field contains `ResourceBinding` records from `pilotage-map-archives`.
 Each record binds a `pilotage://` URI to one installed file.

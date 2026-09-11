@@ -6,8 +6,11 @@ import importlib.util
 import json
 from pathlib import Path
 import tempfile
+import sys
 import unittest
 
+
+sys.dont_write_bytecode = True
 
 SCRIPT = Path(__file__).with_name("prepare-maplibre-aviation.py")
 SPEC = importlib.util.spec_from_file_location("aviation_renderer", SCRIPT)
