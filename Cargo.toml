@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/pilotage-data-packages",
     "crates/pilotage-navdata-cycle",
     "crates/pilotage-protocol",
     "crates/pilotage-authority",
@@ -51,6 +52,7 @@ members = [
 edition = "2024"
 
 [workspace.dependencies]
+pilotage-data-packages = { path = "crates/pilotage-data-packages" }
 # The Aviate XIL contract crates are consumed only at one exact upstream
 # revision: both crates must always pin the identical rev so the layout
 # types, the transport, and the canonical object name cannot drift apart.

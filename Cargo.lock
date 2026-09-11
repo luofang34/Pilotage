@@ -1952,6 +1952,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-data-packages"
+version = "0.1.0"
+dependencies = [
+ "aerocontext-core",
+ "aerocontext-navdata",
+ "chrono",
+ "ed25519-dalek",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "pilotage-durable-storage"
 version = "0.1.0"
 dependencies = [
