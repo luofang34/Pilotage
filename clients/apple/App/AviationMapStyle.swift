@@ -30,6 +30,13 @@ struct AviationMapStyle: Equatable, Sendable {
         for index in layers.indices where ["hillshade", "color-relief"].contains(layers[index]["type"] as? String ?? "") {
             layers[index]["metadata"] = ["maplibre:display-group": "terrain"]
         }
+        // The ocean remains continuous where overview tiles have no water polygon.
+        if let ocean = layers.first(where: { $0["source-layer"] as? String == "ocean" }),
+           let paint = ocean["paint"] as? [String: Any], let color = paint["fill-color"] {
+            for index in layers.indices where layers[index]["type"] as? String == "background" {
+                layers[index]["paint"] = ["background-color": color]
+            }
+        }
         style.removeValue(forKey: "glyphs")
         style["projection"] = ["type": "globe"]
         var spriteDigests: [String: String] = [:]

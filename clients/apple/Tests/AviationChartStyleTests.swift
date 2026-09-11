@@ -78,7 +78,8 @@ final class AviationChartStyleTests: XCTestCase {
         let coastline = geographic(.basemap)
         let base = Data("""
         {"version":8,"sources":{"pilotage-coastline":{"type":"vector"},"pilotage-terrain":{"type":"raster-dem"}},
-         "layers":[{"id":"background","type":"background"}]}
+         "layers":[{"id":"background","type":"background","paint":{"background-color":"#000000"}},
+                   {"id":"ocean","type":"fill","source":"pilotage-coastline","source-layer":"ocean","paint":{"fill-color":"#061927"}}]}
         """.utf8)
         let map = try AviationMapStyle.assemble(terrain: terrain, coastline: coastline, charts: [low, high], template: base)
         let output = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(map.json.utf8)) as? [String: Any])
@@ -88,6 +89,8 @@ final class AviationChartStyleTests: XCTestCase {
         XCTAssertEqual(resources.filter { $0["format"] == "pmtiles" }.count, 1)
         XCTAssertEqual(Set(metadata["maplibre:display-groups"] as? [String] ?? []), ["terrain", "ifr_low", "ifr_high"])
         let layers = try XCTUnwrap(output["layers"] as? [[String: Any]])
+        let background = try XCTUnwrap(layers.first { $0["type"] as? String == "background" })
+        XCTAssertEqual((background["paint"] as? [String: String])?["background-color"], "#061927")
         let groups = layers.compactMap { ($0["metadata"] as? [String: String])?["maplibre:display-group"] }
         XCTAssertTrue(groups.contains("ifr_low"))
         XCTAssertTrue(groups.contains("ifr_high"))
