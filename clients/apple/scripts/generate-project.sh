@@ -12,6 +12,9 @@ if [ ! -f "$example_root/index.json" ]; then
     printf '[]\n' > "$example_root/index.json"
 fi
 
+sh "$client_root/scripts/test-globe-camera.sh"
+sh "$client_root/scripts/build-maplibre-globe.sh"
+
 # The base map is built from artifacts rather than repository files, so a fresh checkout
 # has no map until these run. The style requires both archives and refuses to resolve
 # without either, so a missing one is a blank screen and not a degraded map. Each exits at

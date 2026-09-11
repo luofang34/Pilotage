@@ -2,13 +2,30 @@
 
 This client shows traffic and weather on iPadOS.
 
+All map profiles use globe projection in the maplibre-rs renderer.
+The renderer revision is in `MAPLIBRE_GLOBE_REVISION`.
+The build uses the local fork at
+`/private/tmp/maplibre-rs-globe-fork`. Set `MAPLIBRE_GLOBE_SOURCE` to use a
+different fork directory. The build reads the specified commit from Git.
+It does not change the fork worktree.
+
+Open Map Modes to select Terrain, IFR Low, or IFR High.
+The installed data determines which chart profiles are available.
+The map reads verified files from the aviation package store.
+A graphics processing unit (GPU) draws the map.
+A profile change keeps the renderer, camera, decoded tiles, and GPU storage.
+Drag with one finger to move the map. Pinch to change the camera distance.
+Drag with two fingers to tilt the camera.
+At world scale, the camera returns to north-up and looks straight down.
+Traffic and weather remain available in each profile.
+
 The Rust facade links the Surveillance and Airmass domain crates. It builds
 three Apple library slices. The build script puts these slices in one
 XCFramework. UniFFI generates the Swift binding from the same library.
 
-The portable Rust adapter supplies all overlay values and styles. The Swift
-binding maps these values to MapLibre Native 6.28.0. The binding does not read
-domain snapshots.
+The portable Rust adapter supplies all overlay values and styles.
+The Swift display binding projects these values with the map camera.
+The binding does not read domain snapshots.
 
 The portable adapter consumes typed feature changes from
 `surveillance-geojson` and `airmass-geojson`. Airmass supplies each flight
@@ -35,10 +52,9 @@ sh clients/apple/scripts/ci-ios.sh
 The command checks the Rust facade. It builds the XCFramework. It tests the
 GeoJSON edge. It then builds the MapLibre binding for the iOS Simulator.
 
-The default build uses the reviewed MapLibre Native 6.28.0 distribution. The
-optional terrain build uses a pinned, unreleased MapLibre Native source. The
-6.28.0 renderer has no 3D terrain support. The optional build keeps the
-unreleased source out of the default product build.
+The reusable MapLibre binding package also supports MapLibre Native.
+Its optional terrain build uses a pinned source revision.
+The following command checks this optional package build.
 
 Prepare a clean `WifiDB/maplibre-native` worktree at the commit in
 `MAPLIBRE_TERRAIN_REVISION`. Initialize all its submodules. Install Bazel.

@@ -101,6 +101,11 @@ private struct AviationReleaseView: View {
                 ForEach(release.coverage.exclusions, id: \.self) { Text($0).font(.footnote) }
             }
             Section {
+                if release.product.isChart, installed.artifactURL(format: "map_style") != nil {
+                    Button(release.validityLabel() == "Current" ? "Use this edition" : "Inspect this edition") {
+                        Task { await model.selectChart(installed, allowOutsideValidity: release.validityLabel() != "Current") }
+                    }.disabled(model.busy || model.snapshot.active(release.product)?.id == installed.id)
+                }
                 Button("Verify files") { Task { await model.verify(installed) } }.disabled(model.busy)
                 if let reason = model.retainedReason(installed) {
                     Text(reason).foregroundStyle(.secondary)

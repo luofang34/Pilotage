@@ -24,6 +24,26 @@ struct PilotageApp: App {
 /// shipped application has no reason to offer one. It exists so a window at an awkward
 /// size can be photographed and measured without somebody holding the tablet.
 enum LaunchRequest {
+    static var aviationChartRelease: String? {
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-AviationChartRelease"), index + 1 < arguments.count else {
+            return nil
+        }
+        return arguments[index + 1]
+        #else
+        nil
+        #endif
+    }
+
+    static var openMap: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-OpenMap")
+        #else
+        false
+        #endif
+    }
+
     static var openData: Bool {
         #if DEBUG
         ProcessInfo.processInfo.arguments.contains("-OpenData")

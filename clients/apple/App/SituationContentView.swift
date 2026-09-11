@@ -1,6 +1,7 @@
 import CoreLocation
 import PilotageMapLibreBinding
 import PilotageCore
+import QuartzCore
 import SwiftUI
 
 struct SituationContentView: View {
@@ -13,7 +14,7 @@ struct SituationContentView: View {
     @State private var dataPresented = LaunchRequest.openData
     /// Which regions show is the platform's own affordance: the split
     /// view's column state, never a custom toggle (ADR-0038).
-    @State private var columnVisibility: NavigationSplitViewVisibility = .doubleColumn
+    @State private var columnVisibility: NavigationSplitViewVisibility = LaunchRequest.openMap ? .detailOnly : .doubleColumn
     /// Which section the first sidebar level selects; the second level
     /// shows that section's content, in the two-level idiom of Mail.
     @AppStorage("pilotageSection") private var sectionRaw = OperatorSection.instruments.rawValue
@@ -29,7 +30,8 @@ struct SituationContentView: View {
     @State private var modesHeight: CGFloat = 360
     /// How tall the window is, so a sheet cannot ask to be taller than one.
     @State private var windowHeight: CGFloat = 800
-    @State private var selectedMapModeID = MapMode.available.first?.id ?? "terrain"
+    @AppStorage("pilotageMapMode") private var selectedMapModeID = "terrain"
+    @State private var mapModeRequestedAt: Double?
     @Namespace private var mapControlNamespace
     @StateObject private var ownship = OwnshipModel()
     @StateObject private var missionPlan = MissionPlanModel()
@@ -60,6 +62,8 @@ struct SituationContentView: View {
             windowHeight = size.height
         }
         .onAppear {
+            if LaunchRequest.openMap { columnVisibility = .detailOnly }
+            if selectedMapModeID == "globe" { selectedMapModeID = "terrain" }
             if LaunchRequest.openInstruments {
                 columnVisibility = .doubleColumn
                 sectionRaw = OperatorSection.instruments.rawValue
@@ -152,20 +156,29 @@ struct SituationContentView: View {
             // The map is the document, so it runs to the glass. A safe-area inset here
             // leaves a black band above and below that reads as a broken screen rather
             // than as a margin. The controls above it keep the inset.
-            SituationMap(
-                batch: model.mapDisplay,
-                onFeatureTapped: model.selectTraffic,
-                onCameraChanged: { camera = $0 },
-                onReady: { mapCommands = $0 },
-                onAttributions: model.observeMapAttributions,
-                onMovedByReader: {
-                    // A hand on the map ends both the following and the panel: the reader
-                    // has said what they want to look at.
-                    ownship.follow = .idle
-                    modesPresented = false
+            if let style = aviationData.mapStyle {
+                GlobeMap(
+                    style: style, mode: selectedMapModeID,
+                    requestedAt: mapModeRequestedAt,
+                    batch: model.mapDisplay,
+                    onFeatureTapped: model.selectTraffic,
+                    onCameraChanged: { camera = $0 },
+                    onReady: { mapCommands = $0 },
+                    onMovedByReader: {
+                        ownship.follow = .idle
+                        modesPresented = false
+                    }
+                )
+                .ignoresSafeArea()
+            } else {
+                ContentUnavailableView {
+                    Label("Map data", systemImage: "map")
+                } description: {
+                    Text(aviationData.busy ? "Opening installed map data…" : "Select installed map data in Data.")
+                } actions: {
+                    Button("Open Data") { dataPresented = true }
                 }
-            )
-            .ignoresSafeArea()
+            }
             // Each floating control is placed against the safe area by the same rule, so
             // none of them sits at a different distance from an edge than the others.
             ZStack {
@@ -183,11 +196,16 @@ struct SituationContentView: View {
                     modesContent: { mapModes(fixedWidth: true) }
                 )
                 .mapControlPlacement(.topTrailing)
-                PositionlessTrafficView(
-                    items: model.mapDisplay?.positionlessTraffic ?? [],
-                    select: model.selectTraffic
-                )
-                .mapControlPlacement(.bottomLeading)
+                    PositionlessTrafficView(
+                        items: model.mapDisplay?.positionlessTraffic ?? [],
+                        select: model.selectTraffic
+                    )
+                    .mapControlPlacement(.bottomLeading)
+                if let product = chartProduct, let chart = aviationData.charts[product] {
+                    AviationChartNotice(release: chart.installed.release) { dataPresented = true }
+                        .padding(.top, Metrics.control + 12)
+                        .mapControlPlacement(.topLeading)
+                }
                 menuButton
                     .mapControlPlacement(.bottomTrailing)
                 // One top row holds every top-center control, so nothing
@@ -321,15 +339,28 @@ private extension SituationContentView {
     /// have to learn it again wide.
     @ViewBuilder func mapModes(fixedWidth: Bool, drawsSurface: Bool = true) -> some View {
         MapModesView(
-            modes: MapMode.available,
-            selectedModeID: $selectedMapModeID,
+            modes: MapMode.available(charts: aviationData.charts),
+            selectedModeID: Binding(get: { selectedMapModeID }, set: { value in
+                guard value != selectedMapModeID else { return }
+                mapModeRequestedAt = CACurrentMediaTime()
+                selectedMapModeID = value
+            }),
             layers: model.mapDisplay?.layers ?? [],
             setLayerEnabled: model.setLayerEnabled,
-            attributions: model.mapAttributions,
+            attributions: mapAttributions,
             close: { modesPresented = false },
             fixedWidth: fixedWidth,
             drawsSurface: drawsSurface
         )
+    }
+
+    var chartProduct: AviationProduct? {
+        guard let product = AviationProduct(rawValue: selectedMapModeID), product.isChart else { return nil }
+        return product
+    }
+
+    var mapAttributions: [String] {
+        aviationData.mapStyle?.releases.flatMap { $0.release.attributions } ?? []
     }
 
     /// Step through not following, following, and turning with the aircraft.

@@ -9,6 +9,8 @@ final class AviationDataModel: ObservableObject {
     @Published private(set) var status = "Opening installed data…"
     @Published private(set) var errorMessage: String?
     @Published private(set) var progress: DataTransferProgress?
+    @Published private(set) var charts: [AviationProduct: AviationChartStyle] = [:]
+    @Published private(set) var mapStyle: AviationMapStyle?
     private var worker: AviationDataWorker?
     private var publisherJSON: String?
     private var started = false
@@ -33,6 +35,8 @@ final class AviationDataModel: ObservableObject {
                 }
             }
             try await self.reload()
+            try await self.restoreCharts()
+            try await self.prepareMap()
             if let publisher = self.publisherJSON {
                 do {
                     let json = try await worker.run {
@@ -89,6 +93,43 @@ final class AviationDataModel: ObservableObject {
     }
 
     func cancel() { worker?.cancel() }
+
+    func selectChart(_ installed: InstalledAviationRelease, allowOutsideValidity: Bool = false) async {
+        guard let worker else { return }
+        await perform("Opening \(installed.release.product.title)…") {
+            let chart = try await worker.selectChart(installed, allowOutsideValidity: allowOutsideValidity)
+            self.charts[installed.release.product] = chart
+            try await self.reload()
+            try await self.prepareMap()
+        }
+    }
+
+    private func restoreCharts() async throws {
+        guard let worker else { return }
+        for product in [AviationProduct.ifrLow, .ifrHigh] {
+            let active = snapshot.active(product)
+            let requested = snapshot.installed.first {
+                $0.id == LaunchRequest.aviationChartRelease && $0.release.product == product
+            }
+            let candidate = requested ?? active ?? snapshot.installed.filter {
+                $0.release.product == product && $0.artifactURL(format: "map_style") != nil
+                    && $0.release.validityLabel() == "Current"
+            }.sorted { lhs, rhs in
+                let left = lhs.release.validity?.effectiveAt ?? .distantPast
+                let right = rhs.release.validity?.effectiveAt ?? .distantPast
+                return left == right ? lhs.release.revision > rhs.release.revision : left > right
+            }.first
+            guard let candidate else { continue }
+            charts[product] = try await worker.selectChart(candidate, allowOutsideValidity: candidate.id == active?.id)
+        }
+        try await reload()
+    }
+
+    private func prepareMap() async throws {
+        guard let worker else { return }
+        mapStyle = try await worker.prepareMap(snapshot: snapshot, charts: Array(charts.values))
+        try await reload()
+    }
 
     func retainedReason(_ installed: InstalledAviationRelease) -> String? {
         if let selection = snapshot.selections.first(where: { $0.root == installed.id }) {

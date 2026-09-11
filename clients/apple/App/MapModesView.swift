@@ -14,11 +14,7 @@ private struct PanelSurface: ViewModifier {
     }
 }
 
-/// One way of drawing the ground.
-///
-/// A mode is a base map, not a layer: exactly one is drawn, and the layers below the tiles
-/// are what sits on top of it. Terrain is the only one this build carries. Satellite, VFR
-/// and IFR are the same shape of thing and arrive as data rather than as new screens.
+/// One way to draw the base map.
 struct MapMode: Identifiable, Equatable {
     let id: String
     let title: String
@@ -31,6 +27,12 @@ struct MapMode: Identifiable, Equatable {
     static let available: [MapMode] = [
         MapMode(id: "terrain", title: "Terrain", symbol: "mountain.2.fill"),
     ]
+
+    static func available(charts: [AviationProduct: AviationChartStyle]) -> [MapMode] {
+        available + [AviationProduct.ifrLow, .ifrHigh].compactMap { product in
+            charts[product].map { _ in MapMode(id: product.rawValue, title: product.title, symbol: "map.fill") }
+        }
+    }
 }
 
 /// Choose how the ground is drawn and what sits on it.
@@ -113,7 +115,7 @@ struct MapModesView: View {
     }
 
     private var modeTiles: some View {
-        HStack(alignment: .top, spacing: 16) {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
             ForEach(modes) { mode in
                 Button {
                     selectedModeID = mode.id
@@ -138,7 +140,6 @@ struct MapModesView: View {
                 .accessibilityLabel(mode.title)
                 .accessibilityAddTraits(selectedModeID == mode.id ? [.isSelected] : [])
             }
-            Spacer(minLength: 0)
         }
     }
 
@@ -199,5 +200,3 @@ struct MapModesView: View {
             : "© \(first)"
     }
 }
-
-

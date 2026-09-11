@@ -34,6 +34,7 @@ targets:
       - path: Resources
         excludes:
           - Fonts
+      - path: .build/GlobeResources
       - path: .build/AviationDataExamples
         type: folder
       # A folder reference, so the fontstack directory survives into the bundle. Flattened
@@ -50,6 +51,8 @@ targets:
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: false
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) ${PILOTAGE_MAPLIBRE_SWIFT_CONDITIONS}"
         TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_OBJC_BRIDGING_HEADER: App/GlobeBridge.h
+        HEADER_SEARCH_PATHS: "$(inherited) $(PROJECT_DIR)/.build/maplibre-globe/include"
     dependencies:
       - package: PilotageAppleInstrumentConsumer
         product: PilotageAppleInstrumentConsumer
@@ -64,6 +67,26 @@ targets:
       - target: AeroLink/AeroLinkDriver
         embed: true
       - sdk: SystemExtensions.framework
+      - framework: .build/MapLibreGlobe.xcframework
+        embed: false
+      - sdk: Metal.framework
+      - sdk: MetalKit.framework
+      - sdk: QuartzCore.framework
+      - sdk: libc++.tbd
+  PilotageMapTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests/GlobeSituationOverlayTests.swift
+    dependencies:
+      - target: Pilotage
+      - package: PilotageCore
+        product: PilotageCore
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Pilotage.app/Pilotage"
+        BUNDLE_LOADER: "$(TEST_HOST)"
 schemes:
   Pilotage:
     build:
@@ -71,5 +94,8 @@ schemes:
         Pilotage: all
     run:
       config: Debug
+    test:
+      targets:
+        - PilotageMapTests
     archive:
       config: Release
