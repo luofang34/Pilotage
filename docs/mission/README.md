@@ -36,3 +36,8 @@ part of the failure-detection scope tracked in issue #245.
 Run records in this directory are structured captures of acceptance
 flights: the pack-for-flight line, state transitions, terminal counters,
 and the gate context they flew under.
+
+## Coordinated mission planning
+
+See the [coordinated mission proposal](../coordinated-missions-proposal.md).
+It defines shared plans, vehicle assignments, owner acceptance, and live coordination.
