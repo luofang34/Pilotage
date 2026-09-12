@@ -23,6 +23,7 @@ struct SituationContentView: View {
     /// Whether the flight control unit strip stands over the map.
     @AppStorage("pilotageFcuShown") private var fcuShown = false
     @AppStorage("pilotageInstrumentProfile") private var rackProfileId = "px4-flight"
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var camera = SituationCamera(headingDegrees: 0, pitchDegrees: 0)
     @State private var mapCommands: SituationMapCommands?
     @State private var modesPresented = LaunchRequest.openMapModes
@@ -81,19 +82,16 @@ struct SituationContentView: View {
     /// when it would take the whole window, inward when it would give
     /// the columns back. The tile focus control speaks the same way.
     private var columnsToggle: some View {
-        Button {
-            withAnimation {
+        MapControlButton {
+            withAnimation(reduceMotion ? nil : .default) {
                 columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly
             }
-        } label: {
+        } content: {
             Image(systemName: columnVisibility == .detailOnly
                 ? "arrow.down.right.and.arrow.up.left"
                 : "arrow.up.left.and.arrow.down.right")
-                .font(Metrics.controlGlyph)
-                .frame(width: Metrics.control, height: Metrics.control)
-                .glassEffect(.regular, in: Circle())
         }
-        .buttonStyle(.plain)
+        .accessibilityLabel(columnVisibility == .detailOnly ? "Show panels" : "Hide panels")
     }
 
     private var sectionSelection: Binding<OperatorSection?> {
@@ -138,7 +136,7 @@ struct SituationContentView: View {
         let profile = InstrumentProfile.selected(storedId: rackProfileId)
         if let tile = profile.tiles.first(where: { $0.id == primaryTileId }) {
             PromotedSurfaceView(model: hostLink, tile: tile) {
-                withAnimation { primaryTileId = "" }
+                withAnimation(reduceMotion ? nil : .default) { primaryTileId = "" }
             }
         } else {
             mapSurface
@@ -189,7 +187,7 @@ struct SituationContentView: View {
                     follow: ownship.follow,
                     namespace: mapControlNamespace,
                     resetHeading: { mapCommands?.resetHeading() },
-                    resetPitch: { mapCommands?.resetPitch() },
+                    togglePitch: { mapCommands?.setPitch(camera.isTilted ? 0 : 60, true) },
                     cycleFollow: cycleFollow,
                     modesPresented: $modesPresented,
                     modesGrowFromControls: modesFitBesideTheMap,
@@ -222,7 +220,7 @@ struct SituationContentView: View {
                     }
                     Spacer(minLength: 12)
                     if fcuShown, hostLink.catalog?.offersFlightControl == true {
-                        FlightControlUnit { withAnimation { fcuShown = false } }
+                        FlightControlUnit { withAnimation(reduceMotion ? nil : .default) { fcuShown = false } }
                     }
                     Spacer(minLength: 12)
                     Color.clear.frame(width: Metrics.control, height: 1)
@@ -405,17 +403,12 @@ private extension SituationContentView {
     }
 
     var menuButton: some View {
-        Button {
+        MapControlButton {
             model.reloadFlights()
             menuPresented = true
-        } label: {
+        } content: {
             Image(systemName: "line.3.horizontal")
-                .font(Metrics.controlGlyph)
-                .frame(width: Metrics.control, height: Metrics.control)
-                .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .glassEffect(.clear.interactive(), in: .circle)
         // A reader must not have to open the drawer to learn that a receiver died. An
         // empty map with no mark reads as clear air.
         .overlay(alignment: .topTrailing) {

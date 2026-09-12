@@ -1,5 +1,6 @@
 import PilotageCore
 import UIKit
+import SwiftUI
 import XCTest
 @testable import Pilotage
 
@@ -42,6 +43,39 @@ final class GlobeSituationOverlayTests: XCTestCase {
         view.batch = batch()
         render(view)
         XCTAssertNil(view.feature(at: CGPoint(x: 100, y: 100)))
+    }
+
+    func testNativeMapControlsKeepTheirRenderedSize() {
+        let labels = [AnyView(Text("2D")), AnyView(Text("3D")), AnyView(Text("N")),
+                      AnyView(Image(systemName: "globe.americas.fill")),
+                      AnyView(Image(systemName: "location")),
+                      AnyView(Image(systemName: "line.3.horizontal")),
+                      AnyView(Image(systemName: "arrow.down.right.and.arrow.up.left")),
+                      AnyView(CompassRose(headingDegrees: 45))]
+        for colorScheme in [ColorScheme.light, .dark] {
+            for label in labels {
+                let host = UIHostingController(rootView: MapControlButton(action: {}) {
+                    label
+                }.environment(\.colorScheme, colorScheme))
+                let size = host.sizeThatFits(in: CGSize(width: 200, height: 200))
+                XCTAssertEqual(size.width, 48, accuracy: 0.5)
+                XCTAssertEqual(size.height, 48, accuracy: 0.5)
+            }
+        }
+    }
+
+    func testNativeNavigationPillKeepsItsSize() {
+        let host = UIHostingController(rootView: MapControlPill {
+            MapPillButton(label: "Map modes", action: {}) { Image(systemName: "globe.americas.fill") }
+            MapPillButton(label: "Location", action: {}) { Image(systemName: "location") }
+        })
+        let size = host.sizeThatFits(in: CGSize(width: 200, height: 200))
+        XCTAssertEqual(size.width, 48, accuracy: 0.5)
+        XCTAssertEqual(size.height, 104, accuracy: 0.5)
+        let compass = UIHostingController(rootView: CompassRose(headingDegrees: 30))
+        let dial = compass.sizeThatFits(in: CGSize(width: 200, height: 200))
+        XCTAssertEqual(dial.width, 48, accuracy: 0.5)
+        XCTAssertEqual(dial.height, 48, accuracy: 0.5)
     }
 
     private func overlay() -> GlobeSituationOverlay {

@@ -54,14 +54,15 @@ final class GlobeRenderer {
     }
 
     func selectMode(_ mode: String, requestedAt: Double?) throws {
-        guard maplibre_visionos_set_map_mode(map, mode) else { throw GlobeRenderError.startup }
         guard mode != mapMode else { return }
+        guard maplibre_visionos_set_map_mode(map, mode) else { throw GlobeRenderError.startup }
         mapMode = mode
         modeRequestedAt = requestedAt ?? CACurrentMediaTime()
     }
 
     func setTerrainVisible(_ visible: Bool) {
         maplibre_visionos_set_layer_visible(map, "pilotage-terrain-hillshade", visible)
+        maplibre_visionos_set_layer_visible(map, "pilotage-terrain-relief", visible)
     }
 
     func project(_ coordinates: [Double], into size: CGSize) -> [CGPoint?] {

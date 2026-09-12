@@ -12,10 +12,14 @@ public struct SituationCamera: Equatable, Sendable {
     /// Angle away from straight down, in degrees.
     public let pitchDegrees: Double
 
+    /// Whether the map scale permits a tilted view.
+    public let canTilt: Bool
+
     /// Create a camera reading.
-    public init(headingDegrees: Double, pitchDegrees: Double) {
+    public init(headingDegrees: Double, pitchDegrees: Double, canTilt: Bool = true) {
         self.headingDegrees = headingDegrees
         self.pitchDegrees = pitchDegrees
+        self.canTilt = canTilt
     }
 
     /// Whether the map is turned far enough off north for a reader to notice.

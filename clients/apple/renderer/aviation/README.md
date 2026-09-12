@@ -17,6 +17,27 @@ Common layers and live display values remain available in each profile.
 The native host projects live display positions with the same map camera.
 The camera uses north-up orientation at world scale.
 
+The terrain profile uses an elevation mesh with an exaggeration value of 1.
+`maplibre:terrain-by-display-group` defines the elevation source for a profile.
+The initial style enables the terrain plugin before a profile is selected.
+A profile without an elevation source draws directly on the globe.
+Terrain textures contain only layers from the active profile and common layers.
+Each source keeps its own tile coverage and masks in these textures.
+The upload queue includes the current view and the selected terrain sources.
+The current view uploads before the terrain queue draws a newly exposed area.
+A GPU test checks every frame during zoom and pan changes.
+Only active and common vector layers use the upload budget.
+Inactive layers keep their decoded data for a later profile selection.
+Texture readiness requires only the active and common geometry.
+The terrain pass prepares source meshes before it records a completed texture.
+These meshes can differ from the meshes in the screen pass.
+The GPU tests check source coverage and inactive layers on the elevation mesh.
+The tests also check the world overview and a tilted regional view.
+A partial raster tile group retains its parent for missing tiles.
+The coverage test checks that a shared parent occurs only once.
+Tile masks prevent duplicate shading where elevation levels overlap.
+A GPU test measures the opacity across these boundaries.
+
 Each vector source selects its own available tiles.
 Missing regional detail can use a coarser tile from the same source.
 A successful empty tile does not use features from a coarser tile.

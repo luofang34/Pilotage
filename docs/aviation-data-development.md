@@ -59,6 +59,28 @@ The Data screen continues to show its expired state.
 Terrain, IFR Low, and IFR High use one globe renderer.
 A content change retains the camera and loaded resources.
 The overview keeps north at the top.
+Terrain mode uses the installed elevation data to draw the ground surface in 3D.
+Drag with two fingers to tilt the map.
+Select `3D` to tilt the local view.
+Select `2D` to look straight down.
+The globe overview hides the tilt control.
+Select the compass to turn back to north.
+The source package controls the available ground detail.
+
+Map controls use native SwiftUI Liquid Glass buttons and system label colors.
+Each round control uses the shared `MapControlButton` view.
+Its rendered size is 48 by 48 points.
+The compass dial fills the control.
+The map and location controls share a native glass pill.
+The pill measures 48 by 104 points when both controls are available.
+The iOS tests measure the control labels, compass dial, and pill.
+The round control tests use light and dark appearance.
+Glass identities use the system transition for each control.
+The mode panel uses the regular Liquid Glass material.
+The app does not add a tint to these controls.
+The operating system controls the glass appearance and accessibility effects.
+Use the system Reduce Motion setting to remove camera and control movement.
+See [Apple materials guidance](https://developer.apple.com/design/human-interface-guidelines/materials).
 
 The procedure viewer reads PDF files from the installed package.
 It shows the package edition and validity state with each chart.
@@ -118,3 +140,27 @@ python3 clients/apple/scripts/test-prepare-procedure-release.py
 The download tests use temporary loopback ports.
 They check resumed, restarted, truncated, and invalid responses.
 The Swift tests check UTC validity boundaries and retained expired selections.
+
+## Base map selection
+
+Use the Natural Earth package for the permanent world overview.
+Keep this package installed when the user removes a detail region.
+The terrain archive supplies separate elevation data.
+It includes world overview tiles and more detailed regional tiles.
+
+Protomaps is the preferred candidate for a more detailed base map.
+Its OpenStreetMap data includes roads, water, buildings, and place names.
+It supports regional PMTiles files and local storage.
+See [Protomaps downloads](https://docs.protomaps.com/basemaps/downloads).
+This candidate is not part of the installed examples.
+
+Publish each base map edition through the existing package catalog.
+Record its source date, data license, attribution, bounds, and zoom range.
+Include its style, symbols, and fonts in the release dependencies.
+Validate the complete tile coverage before publication.
+Install each region before the map selects it.
+Keep the current edition until the new edition passes all checks.
+
+The renderer must retain coarse coverage while detail tiles load.
+A partial set of detail tiles must not remove the remaining coarse coverage.
+A change to the base map supplier must pass the globe and terrain image tests.

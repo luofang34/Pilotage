@@ -13,10 +13,11 @@ struct AviationChartNotice: View {
                     if release.channel == "development" { Text("Development sample").font(.caption2) }
                     if !release.coverage.complete { Text("Partial coverage").font(.caption2) }
                 }
-                .padding(10)
-                .glassEffect(.regular, in: .rect(cornerRadius: 12))
+                .padding(4)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.glass)
+            .buttonBorderShape(.roundedRectangle(radius: 12))
+            .foregroundStyle(.primary)
             .accessibilityHint("Shows chart validity, coverage, and source details")
         }
     }

@@ -124,6 +124,7 @@ struct MissionPlannerBar: View {
     @ObservedObject var model: HostLinkModel
     @ObservedObject var plan: MissionPlanModel
     @State private var planPresented = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Button {
@@ -131,7 +132,7 @@ struct MissionPlannerBar: View {
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: "point.topleft.down.to.point.bottomright.curvepath")
-                    .foregroundStyle(.cyan)
+                    .foregroundStyle(.primary)
                 // Collapsed, the bar answers the glance questions only:
                 // where from, where to, how far, how long.
                 Text(plan.summary.endpoints)
@@ -139,30 +140,31 @@ struct MissionPlannerBar: View {
                     .lineLimit(1)
                 Text(plan.summary.detail)
                     .font(.footnote.monospaced())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.primary)
                     .lineLimit(1)
                 Spacer(minLength: 0)
                 Text("Preview")
                     .font(.caption2.weight(.semibold))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(Capsule().fill(.orange.opacity(0.25)))
-                    .foregroundStyle(.orange)
+                    .background(.quaternary, in: .capsule)
+                    .foregroundStyle(.primary)
                 Image(systemName: "chevron.up")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.primary)
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 12)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
             .frame(maxWidth: 440)
-            .glassEffect(.regular, in: Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.glass)
+        .buttonBorderShape(.capsule)
+        .foregroundStyle(.primary)
         // The pill is the planner's collapsed face; while the planner
         // itself is up there is no second face to show.
         .opacity(planPresented ? 0 : 1)
         .allowsHitTesting(!planPresented)
-        .animation(.easeInOut(duration: 0.15), value: planPresented)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.15), value: planPresented)
         .sheet(isPresented: $planPresented) {
             NavigationStack {
                 MissionPlannerView(

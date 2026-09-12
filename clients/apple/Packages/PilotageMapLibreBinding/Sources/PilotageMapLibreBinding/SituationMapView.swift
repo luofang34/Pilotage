@@ -186,8 +186,13 @@ public final class SituationMapView: UIView, @preconcurrency MLNMapViewDelegate 
 
     /// Look straight down, keeping heading and position.
     public func resetPitch(animated: Bool = true) {
+        setPitch(0, animated: animated)
+    }
+
+    /// Set the tilt. Keep the heading and position.
+    public func setPitch(_ degrees: Double, animated: Bool = true) {
         let camera = mapView.camera
-        camera.pitch = 0
+        camera.pitch = min(max(degrees, 0), 80)
         move(to: camera, animated: animated)
     }
 

@@ -39,6 +39,8 @@ struct AviationMapStyle: Equatable, Sendable {
         }
         style.removeValue(forKey: "glyphs")
         style["projection"] = ["type": "globe"]
+        let elevation: [String: Any] = ["source": "pilotage-terrain", "exaggeration": 1.0]
+        style["terrain"] = elevation
         var spriteDigests: [String: String] = [:]
         for chart in charts.sorted(by: { $0.id < $1.id }) {
             try append(chart, sources: &sources, layers: &layers, bindings: &bindings, spriteDigests: &spriteDigests)
@@ -50,6 +52,7 @@ struct AviationMapStyle: Equatable, Sendable {
             "pilotage:resources": bindings,
             "maplibre:display-groups": ["terrain"] + charts.map { $0.installed.release.product.rawValue },
             "maplibre:active-display-group": "terrain",
+            "maplibre:terrain-by-display-group": ["terrain": elevation],
         ]
         let releases = [terrain, coastline] + charts.map(\.installed)
         let bytes = try JSONSerialization.data(withJSONObject: style, options: [.sortedKeys])

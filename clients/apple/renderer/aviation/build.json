@@ -4,7 +4,7 @@
   "producer_renderer_revision": "73ee3c8832f08ea0a9636f5af59d7e1e96820589",
   "patch": {
     "path": "chart-renderer.patch",
-    "sha256": "dd311f23a11ec3231bc948edf0f9f48e7a905768b70bbee4056d02848da85b15"
+    "sha256": "27a8cf634e0c03bbb3bee8d50851c5f90c5a76dee91d5971b3546e9a8344fe48"
   },
   "files": [
     {
@@ -98,6 +98,11 @@
       "after_sha256": "a3a91ad261486a589844946dd3bce01e2e5667571ccbbc979edd430ea80148e8"
     },
     {
+      "path": "maplibre/src/hillshade/resource_system.rs",
+      "before_sha256": "91f1b17e353ff5018a1f142dec4538c4d9fb1aa6f246757cf7e480e801597ca1",
+      "after_sha256": "ca3853eb25c1e078e66ad2a097bfee43de4f8f250d36de5a1e91c7181ac01ecd"
+    },
+    {
       "path": "maplibre/src/hillshade/tests.rs",
       "before_sha256": null,
       "after_sha256": "20e19948479a1631b12feaaa5129e4e84d81d84005f8b81e49614c89d33f4421"
@@ -183,9 +188,19 @@
       "after_sha256": "d9474303e9d817f8933cfb6257c4ab23f8386c26119551020ab8dfdaddd6e55e"
     },
     {
+      "path": "maplibre/src/render/main_pass/tests/terrain.rs",
+      "before_sha256": null,
+      "after_sha256": "a406ce4c46f2b6f924903a2da3f432518546dbfd29975a7970c685e19a8c0d1a"
+    },
+    {
+      "path": "maplibre/src/render/main_pass/tests/terrain_continuity.rs",
+      "before_sha256": null,
+      "after_sha256": "7b1629f2e5c8d7c46b4a28038511533fec85f26bc7f697346989ee9ea3ccf213"
+    },
+    {
       "path": "maplibre/src/render/main_pass/tests.rs",
       "before_sha256": null,
-      "after_sha256": "ffb3dacae8e4c9d942f7433122b956aeb5f933816ef0dc69bd991222483f0d60"
+      "after_sha256": "16cfba5b315c917991164f593430bad12feef57aac63588f6b15d4fb07dd03eb"
     },
     {
       "path": "maplibre/src/render/main_pass.rs",
@@ -515,7 +530,7 @@
     {
       "path": "maplibre/src/style/display_groups.rs",
       "before_sha256": null,
-      "after_sha256": "76e189d4aed1f720f36b1f29a57638b81a97052cc3b0befe6f8f8c1f3007f6cd"
+      "after_sha256": "fe08efe207fbf5984bfff784e307a39900eea1fe7be77684df5af30114e5532e"
     },
     {
       "path": "maplibre/src/style/layer/paint.rs",
@@ -605,7 +620,47 @@
     {
       "path": "maplibre/src/tcs/system/mod.rs",
       "before_sha256": "745556c07aed188a74e57acea27965b3bf47b7bf3674b8ec72425b585603df71",
-      "after_sha256": "9f1326b74e8a0f42193a8b52f5a95f2058e425877b8cea7cf085a03c9aed962f"
+      "after_sha256": "060f1fa1e3ae16a30a10ee851cb3a15df4534672ead75c95dcf5267e2b957a4f"
+    },
+    {
+      "path": "maplibre/src/terrain/drape_pass.rs",
+      "before_sha256": "5dedd31045a6af08b09132bae29e43617952735001a9da792743d9b385260159",
+      "after_sha256": "36ebe3e6acd4ca8c921b0a18efa57ecbc186379c9791d9c6c16f6a2e7dfc307e"
+    },
+    {
+      "path": "maplibre/src/terrain/drape_targets/tests.rs",
+      "before_sha256": null,
+      "after_sha256": "77229128cf5a844b2e0edf1cb6dae80dab03a73bccb070f53210d2721f5a27fa"
+    },
+    {
+      "path": "maplibre/src/terrain/drape_targets.rs",
+      "before_sha256": "117d91d7097909ae8fbe3db1ebe55df2213bbf22b046100cb53a28bca52be9dd",
+      "after_sha256": "13c17be36b65a6ce6e6bb16de7d6f77d906e2b86bd0e1ddf88bf62de6f10f846"
+    },
+    {
+      "path": "maplibre/src/terrain/queue_system/drape_phase.rs",
+      "before_sha256": "60e770831fe222e9fb1cf01734e1754c951558cb380075235c78cd4287ab6843",
+      "after_sha256": "9c2603e90950a9408b7c83d1f1bdbf6c0b89fe555d19c68696769e4bfd226cd4"
+    },
+    {
+      "path": "maplibre/src/terrain/queue_system/meshes.rs",
+      "before_sha256": null,
+      "after_sha256": "b4293b7f0f382523f8ba7b44bfd98f42dbf3835dd0656d5c678ef4ca191513c8"
+    },
+    {
+      "path": "maplibre/src/terrain/queue_system/targets.rs",
+      "before_sha256": "5d91d1e0d1ef1bb9c089b935008e804b7d636d13593f39ec23178cc65fe5bac9",
+      "after_sha256": "a3aa168a3b2c97a39c6f91fc290ff75c1986168a7dd852afe1e4986ee4244a05"
+    },
+    {
+      "path": "maplibre/src/terrain/queue_system.rs",
+      "before_sha256": "7696fff5dec56f8064fdb220f0e54806bbea28d879375fbd399a76c816074d43",
+      "after_sha256": "6c95297109c47f68e135b0e92bfe01c7257ac4c64758eb1f82ea11c2813cf388"
+    },
+    {
+      "path": "maplibre/src/terrain.rs",
+      "before_sha256": "7fb72013c9a887d6e4fd53fa82fdc55e7d3889a0f12e64f5e89596648f031078",
+      "after_sha256": "234602ab40ecc9085e4d65d2eccfc0431d7974ea917893ee07a5fa84ac8b6422"
     },
     {
       "path": "maplibre/src/vector/annotation_mask/raster/tests.rs",
@@ -730,12 +785,12 @@
     {
       "path": "maplibre/src/vector/upload_system.rs",
       "before_sha256": "fa125c4c4d0711cf6e42b5aa1afa4bc5038e2985725e9a9fff2160cd384313e2",
-      "after_sha256": "ee596fdc529828164366f61e07935161a7d7835959fc8a0bae23458db1d03042"
+      "after_sha256": "027083bb205067035c215960f3414e92b93bdae2ae8909f7b282d1e7e530daea"
     },
     {
       "path": "maplibre/src/vector.rs",
       "before_sha256": "b05f62cde31350a4df7889234696841b22ca49929080227b81666aafc2da879c",
-      "after_sha256": "d5625a430a4cd387db1c09799fbdf856befce1f4daa1d4f0195d3ffc201d5a62"
+      "after_sha256": "ec017d49983dd0e9584e41aa3b623611b5cd107465c64930d0c229626d748881"
     },
     {
       "path": "maplibre-winit/src/noweb.rs",

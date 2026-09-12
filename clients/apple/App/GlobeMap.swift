@@ -16,6 +16,7 @@ struct GlobeMap: UIViewRepresentable {
     func makeUIView(context: Context) -> GlobeMapView {
         let view = GlobeMapView()
         if let distance = LaunchRequest.globeDistance { view.changeCamera { $0.distance = distance } }
+        if let pitch = LaunchRequest.globePitch { view.changeCamera { $0.pitch = pitch } }
         view.configure(style: style, mode: mode, requestedAt: requestedAt)
         view.batch = batch
         view.onFeatureTapped = onFeatureTapped
@@ -25,11 +26,11 @@ struct GlobeMap: UIViewRepresentable {
             guard let view else { return }
             view.changeCamera { _ in }
             onReady(SituationMapCommands(
-                resetHeading: { view.changeCamera { $0.heading = 0 } },
-                resetPitch: { view.changeCamera { $0.pitch = 0 } },
-                centre: { coordinate, _ in view.centre(on: coordinate, frame: false) },
-                centreAndFrame: { coordinate, _ in view.centre(on: coordinate, frame: true) },
-                setHeading: { heading, _ in view.changeCamera { $0.heading = heading } }
+                resetHeading: { view.changeCamera(animated: true) { $0.heading = 0 } },
+                setPitch: { pitch, animated in view.changeCamera(animated: animated) { $0.pitch = pitch } },
+                centre: { coordinate, animated in view.centre(on: coordinate, frame: false, animated: animated) },
+                centreAndFrame: { coordinate, animated in view.centre(on: coordinate, frame: true, animated: animated) },
+                setHeading: { heading, animated in view.changeCamera(animated: animated) { $0.heading = heading } }
             ))
         }
         return view

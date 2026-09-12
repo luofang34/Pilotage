@@ -13,6 +13,7 @@ final class GlobeMapView: MTKView, MTKViewDelegate, UIGestureRecognizerDelegate 
     var batch: DisplayBatch? { didSet { overlay.batch = batch } }
     private let overlay = GlobeSituationOverlay()
     private var camera = GlobeCamera()
+    private var cameraMotion: GlobeCameraMotion?
     private var renderer: GlobeRenderer?
     private var style: AviationMapStyle?
     private var mode = "terrain"
@@ -90,6 +91,7 @@ final class GlobeMapView: MTKView, MTKViewDelegate, UIGestureRecognizerDelegate 
 
     func draw(in view: MTKView) {
         guard !failed, window != nil, drawableSize.width > 1, drawableSize.height > 1 else { return }
+        updateCameraMotion()
         do {
             if renderer == nil {
                 guard let style else { return }
@@ -142,13 +144,35 @@ final class GlobeMapView: MTKView, MTKViewDelegate, UIGestureRecognizerDelegate 
         renderer = nil
     }
 
-    func changeCamera(_ change: (inout GlobeCamera) -> Void) {
-        change(&camera)
-        onCameraChanged?(SituationCamera(headingDegrees: camera.displayHeading, pitchDegrees: camera.displayPitch))
+    func changeCamera(animated: Bool = false, _ change: (inout GlobeCamera) -> Void) {
+        var target = camera
+        change(&target)
+        if animated && !UIAccessibility.isReduceMotionEnabled {
+            cameraMotion = GlobeCameraMotion(start: camera, target: target, startedAt: CACurrentMediaTime())
+        } else {
+            cameraMotion = nil
+            camera = target
+            publishCamera()
+        }
     }
 
-    func centre(on coordinate: CLLocationCoordinate2D, frame: Bool) {
-        changeCamera {
+    private func updateCameraMotion() {
+        guard let motion = cameraMotion else { return }
+        let now = CACurrentMediaTime()
+        camera = motion.value(at: now)
+        if now >= motion.startedAt + GlobeCameraMotion.duration { cameraMotion = nil }
+        publishCamera()
+    }
+
+    private func publishCamera() {
+        onCameraChanged?(SituationCamera(
+            headingDegrees: camera.displayHeading, pitchDegrees: camera.displayPitch,
+            canTilt: camera.overviewWeight == 0
+        ))
+    }
+
+    func centre(on coordinate: CLLocationCoordinate2D, frame: Bool, animated: Bool) {
+        changeCamera(animated: animated) {
             $0.latitude = coordinate.latitude
             $0.longitude = coordinate.longitude
             if frame { $0.distance = 134_000 }

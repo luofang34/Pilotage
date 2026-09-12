@@ -18,3 +18,9 @@ English.
 
 Do not copy noncompliant legacy text into a new document. Record a broad legacy
 rewrite as separate work.
+
+## Rust module files
+
+Do not create `mod.rs` files. Use `name.rs` and a `name/` directory.
+This rule also applies to files added by renderer patches.
+Run `bash scripts/check-structure.sh --forbidden-filenames-only` to check this rule.

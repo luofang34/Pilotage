@@ -763,6 +763,17 @@
      SetDemLayerBindGroup,
      DrawRasterTile,
  );
+--- a/maplibre/src/hillshade/resource_system.rs
++++ b/maplibre/src/hillshade/resource_system.rs
+@@ -62,7 +62,7 @@
+                 shader.describe_fragment(),
+                 true,
+                 false,
+-                true,
++                false,
+                 false,
+                 surface.is_multisampling_supported(settings.msaa),
+                 true,
 --- /dev/null
 +++ b/maplibre/src/hillshade/tests.rs
 @@ -0,0 +1,85 @@
@@ -1477,8 +1488,428 @@
      Ok(())
  }
 --- /dev/null
++++ b/maplibre/src/render/main_pass/tests/terrain.rs
+@@ -0,0 +1,293 @@
++use super::*;
++use crate::terrain::{DefaultDemTransferables, TerrainFrame, TerrainPlugin};
++
++#[tokio::test]
++async fn terrain_drapes_keep_each_source_and_exclude_inactive_chart_layers() {
++    let style: Style = serde_json::from_value(serde_json::json!({
++        "version":8, "center":[-76.5,40.5], "zoom":2.66, "projection":{"type":"globe"},
++        "terrain":{"source":"dem"},
++        "metadata":{"maplibre:active-display-group":"terrain","maplibre:display-groups":["terrain","ifr"]},
++        "sources":{
++            "dem":{"type":"raster-dem","encoding":"terrarium","tiles":["dem/{z}/{x}/{y}"]},
++            "base":{"type":"vector","maxzoom":0,"tiles":["base/{z}/{x}/{y}"]},
++            "detail":{"type":"vector","maxzoom":2,"tiles":["detail/{z}/{x}/{y}"]}
++        },
++        "layers":[
++            {"id":"base","type":"fill","source":"base","source-layer":"land","paint":{"fill-color":"#ffffff"}},
++            {"id":"detail","type":"fill","source":"detail","source-layer":"land","paint":{"fill-color":"#00ff00","fill-opacity":0.5}},
++            {"id":"chart","type":"fill","source":"detail","source-layer":"land","paint":{"fill-color":"#ff0000"},"metadata":{"maplibre:display-group":"ifr"}}
++        ]
++    })).expect("style");
++    let mut layers = process_tile_layers(
++        &tile_bytes("#ffffff"),
++        &style.layers[0],
++        WorldTileCoords::default(),
++        crate::projection::ProjectionType::Globe,
++    )
++    .expect("base");
++    for layer in &style.layers[1..] {
++        layers.vector.extend(
++            process_tile_layers(
++                &tile_bytes("#00ff00"),
++                layer,
++                WorldTileCoords {
++                    x: 1,
++                    y: 1,
++                    z: 2.into(),
++                },
++                crate::projection::ProjectionType::Globe,
++            )
++            .expect("detail")
++            .vector,
++        );
++    }
++    let (kernel, renderer) = create_headless_renderer(256, 256, None)
++        .await
++        .expect("renderer");
++    let mut map = HeadlessMap::new(
++        style,
++        renderer,
++        kernel,
++        vec![
++            Box::new(RenderPlugin),
++            Box::new(VectorPlugin::<DefaultVectorTransferables>::default()),
++            Box::new(DiscardScreenMeshes),
++            Box::new(TerrainPlugin::<DefaultDemTransferables>::default()),
++            Box::new(HeadlessPlugin::new(false).preserve_tile_sources()),
++        ],
++    )
++    .expect("map");
++    let dem = image::RgbaImage::from_pixel(256, 256, image::Rgba([131, 232, 0, 255]));
++    map.render_frames_with_terrain(
++        layers,
++        Vec::new(),
++        vec![(WorldTileCoords::default(), dem)],
++        16,
++    )
++    .expect("terrain");
++    assert_only_active_geometry_uploaded(&map);
++    assert_terrain_detail(&mut map);
++    assert_group_switch_uses_decoded_geometry(&mut map);
++}
++
++fn assert_terrain_detail(map: &mut HeadlessMap) {
++    for _ in 0..4 {
++        map.run_frame().expect("frame");
++        let pixel = center_pixel_blocking(map);
++        assert!(
++            (100..230).contains(&pixel[0]) && pixel[1] > 240 && (100..230).contains(&pixel[2]),
++            "terrain must retain the white base and translucent green detail: {pixel:?}"
++        );
++    }
++}
++
++fn assert_group_switch_uses_decoded_geometry(map: &mut HeadlessMap) {
++    for (group, color) in [("ifr", [255, 0, 0]), ("terrain", [127, 255, 127])] {
++        assert!(map.select_display_group(group));
++        for _ in 0..4 {
++            map.run_frame().expect("selected group frame");
++        }
++        let pixel = center_pixel_blocking(map);
++        for channel in 0..3 {
++            assert!(
++                pixel[channel].abs_diff(color[channel]) <= 2,
++                "the selected group must draw from retained data: {group}, {pixel:?}"
++            );
++        }
++    }
++}
++
++fn assert_only_active_geometry_uploaded(map: &HeadlessMap) {
++    use crate::vector::{VectorBufferPool, VectorLayerBucket, VectorLayerBucketComponent};
++    let world = map.world();
++    assert!(
++        world
++            .resources
++            .get::<TerrainFrame>()
++            .expect("terrain frame")
++            .active
++    );
++    let coords = WorldTileCoords {
++        x: 1,
++        y: 1,
++        z: 2.into(),
++    };
++    let Some(Eventually::Initialized(pool)) = world.resources.get::<Eventually<VectorBufferPool>>()
++    else {
++        panic!("vector pool");
++    };
++    let loaded = pool
++        .get_loaded_style_layers_at(coords)
++        .expect("detail geometry");
++    assert!(loaded.contains("detail"));
++    assert!(
++        !loaded.contains("chart"),
++        "inactive chart geometry must not consume the upload budget"
++    );
++    assert!(world.tiles.query::<&VectorLayerBucketComponent>(coords).expect("decoded layers")
++        .layers.iter().any(|layer| matches!(layer, VectorLayerBucket::AvailableLayer(bucket) if bucket.style_layer_id == "chart")));
++}
++
++#[tokio::test]
++async fn tilted_globe_uploads_the_available_regional_ancestor() {
++    assert_terrain_surface(
++        12.627358722628763,
++        65.0,
++        WorldTileCoords {
++            x: 294,
++            y: 385,
++            z: 10.into(),
++        },
++    )
++    .await;
++}
++
++#[tokio::test]
++async fn distant_globe_keeps_the_world_basemap() {
++    assert_terrain_surface(0.0, 0.0, WorldTileCoords::default()).await;
++}
++
++async fn assert_terrain_surface(zoom: f64, pitch: f64, base: WorldTileCoords) {
++    let style: Style = serde_json::from_value(serde_json::json!({
++        "version":8, "center":[-76.5,40.5], "zoom":zoom, "pitch":pitch,
++        "projection":{"type":"globe"}, "terrain":{"source":"dem"},
++        "sources":{
++            "dem":{"type":"raster-dem","encoding":"terrarium","tiles":["dem/{z}/{x}/{y}"]},
++            "base":{"type":"vector","maxzoom":u8::from(base.z),"tiles":["base/{z}/{x}/{y}"]}
++        },
++        "layers":[
++            {"id":"background","type":"background","paint":{"background-color":"#061927"}},
++            {"id":"base","type":"fill","source":"base","source-layer":"land","paint":{"fill-color":"#ffffff"}}
++        ]
++    })).expect("style");
++    let layers = process_tile_layers(
++        &tile_bytes("#ffffff"),
++        &style.layers[1],
++        base,
++        crate::projection::ProjectionType::Globe,
++    )
++    .expect("base");
++    let (kernel, renderer) = create_headless_renderer(1536, 1058, None)
++        .await
++        .expect("renderer");
++    let mut map = HeadlessMap::new(
++        style,
++        renderer,
++        kernel,
++        vec![
++            Box::new(RenderPlugin),
++            Box::new(crate::background::BackgroundPlugin),
++            Box::new(VectorPlugin::<DefaultVectorTransferables>::default()),
++            Box::new(TerrainPlugin::<DefaultDemTransferables>::default()),
++            Box::new(HeadlessPlugin::new(false).preserve_tile_sources()),
++        ],
++    )
++    .expect("map");
++    map.set_max_pitch(cgmath::Deg(80.0));
++    let dem = image::RgbaImage::from_pixel(256, 256, image::Rgba([131, 232, 0, 255]));
++    map.render_frames_with_terrain(
++        layers,
++        Vec::new(),
++        vec![(WorldTileCoords::default(), dem)],
++        32,
++    )
++    .expect("terrain");
++    let pixel = center_pixel_blocking(&map);
++    assert!(
++        pixel[0] > 240 && pixel[1] > 240 && pixel[2] > 240,
++        "the globe must have a terrain texture at zoom {zoom}, pitch {pitch}: {pixel:?}"
++    );
++}
++
++struct DiscardScreenMeshes;
++
++impl Plugin<crate::headless::environment::HeadlessEnvironment> for DiscardScreenMeshes {
++    fn build(
++        &self,
++        schedule: &mut Schedule,
++        _kernel: Rc<Kernel<crate::headless::environment::HeadlessEnvironment>>,
++        _world: &mut World,
++        _graph: &mut crate::render::graph::RenderGraph,
++    ) {
++        schedule.add_system_to_stage(RenderStageLabel::Queue, discard_screen_meshes);
++    }
++}
++
++fn discard_screen_meshes(context: &mut MapContext) -> SystemResult {
++    context
++        .world
++        .resources
++        .insert(crate::render::tile_mesh::GlobeTileMeshCache::default());
++    Ok(())
++}
++
++#[tokio::test]
++async fn coarse_and_fine_elevation_shading_have_the_same_opacity() {
++    use crate::raster::{AvailableRasterLayerData, DefaultRasterTransferables, RasterPlugin};
++    let style: Style = serde_json::from_value(serde_json::json!({
++        "version":8, "center":[-76.5,40.5], "zoom":4.5421364883027495,
++        "projection":{"type":"globe"}, "terrain":{"source":"dem"},
++        "sources":{
++            "dem":{"type":"raster-dem","encoding":"terrarium","tileSize":256,"tiles":["dem/{z}/{x}/{y}"]},
++            "base":{"type":"vector","maxzoom":0,"tiles":["base/{z}/{x}/{y}"]}
++        },
++        "layers":[
++            {"id":"base","type":"fill","source":"base","source-layer":"land","paint":{"fill-color":"#ffffff"}},
++            {"id":"relief","type":"color-relief","source":"dem","paint":{"color-relief-opacity":0.5,"color-relief-color":["interpolate",["linear"],["elevation"],0,"#00ff00",2000,"#00ff00"]}}
++        ]
++    })).expect("style");
++    let layers = process_tile_layers(
++        &tile_bytes("#ffffff"),
++        &style.layers[0],
++        WorldTileCoords::default(),
++        crate::projection::ProjectionType::Globe,
++    )
++    .expect("base");
++    let (kernel, renderer) = create_headless_renderer(1536, 1058, None)
++        .await
++        .expect("renderer");
++    let mut map = HeadlessMap::new(
++        style,
++        renderer,
++        kernel,
++        vec![
++            Box::new(RenderPlugin),
++            Box::new(VectorPlugin::<DefaultVectorTransferables>::default()),
++            Box::new(RasterPlugin::<DefaultRasterTransferables>::default()),
++            Box::new(crate::hillshade::HillshadePlugin),
++            Box::new(TerrainPlugin::<DefaultDemTransferables>::default()),
++            Box::new(HeadlessPlugin::new(false).preserve_tile_sources()),
++        ],
++    )
++    .expect("map");
++    let tiles = [
++        WorldTileCoords::default(),
++        WorldTileCoords {
++            x: 18,
++            y: 24,
++            z: 6.into(),
++        },
++    ];
++    let image = image::RgbaImage::from_pixel(256, 256, image::Rgba([131, 232, 0, 255]));
++    let rasters = tiles
++        .iter()
++        .map(|coords| AvailableRasterLayerData {
++            coords: *coords,
++            source_layer: "dem".into(),
++            image: image.clone(),
++        })
++        .collect();
++    let elevation = tiles
++        .iter()
++        .map(|coords| (*coords, image.clone()))
++        .collect();
++    map.render_frames_with_terrain(layers, rasters, elevation, 32)
++        .expect("terrain");
++    for (x, y) in [(768, 529), (468, 529), (1068, 529), (768, 229), (768, 829)] {
++        let pixel = pixel_blocking(&map, x, y);
++        assert!(
++            (125..=130).contains(&pixel[0]) && pixel[1] > 250 && (125..=130).contains(&pixel[2]),
++            "terrain shading must have one opacity across detail levels at {x},{y}: {pixel:?}"
++        );
++    }
++}
+--- /dev/null
++++ b/maplibre/src/render/main_pass/tests/terrain_continuity.rs
+@@ -0,0 +1,121 @@
++use super::*;
++use crate::{
++    coords::{LatLon, Zoom},
++    terrain::{DefaultDemTransferables, TerrainPlugin},
++};
++
++#[tokio::test]
++async fn zoom_keeps_terrain_visible_before_new_source_uploads() {
++    for pitch in [3.7, 65.0] {
++        let mut map = prepared_map(pitch).await;
++        for (frame, zoom) in [10.061845395, 10.035, 9.9, 9.5, 9.2, 9.5, 10.0, 10.5]
++            .into_iter()
++            .enumerate()
++        {
++            set_view(&mut map, zoom, pitch, 0.0);
++            map.run_frame().expect("zoom frame");
++            assert_terrain_frame(&map, frame, zoom, pitch);
++        }
++        for (frame, longitude) in [0.01, 0.02, -0.01, 0.0].into_iter().enumerate() {
++            set_view(&mut map, 10.061845395, pitch, longitude);
++            map.run_frame().expect("pan frame");
++            assert_terrain_frame(&map, frame, 10.061845395, pitch);
++        }
++    }
++}
++
++fn assert_terrain_frame(map: &HeadlessMap, frame: usize, zoom: f64, pitch: f64) {
++    for (x, y) in [(768, 529), (128, 529), (1408, 529), (768, 128), (768, 930)] {
++        let pixel = pixel_blocking(map, x, y);
++        assert!(pixel[0] > 240 && pixel[1] > 240 && pixel[2] > 240,
++            "terrain disappears at frame {frame}, zoom {zoom}, pitch {pitch}, at {x},{y}: {pixel:?}");
++    }
++}
++
++async fn prepared_map(pitch: f64) -> HeadlessMap {
++    let style: Style = serde_json::from_value(serde_json::json!({
++        "version":8, "center":[-74.20719026636004,40.590289612148496], "zoom":10.061845395,
++        "bearing":2.595221571, "pitch":pitch, "projection":{"type":"globe"},
++        "terrain":{"source":"dem"},
++        "sources": {
++            "dem":{"type":"raster-dem","encoding":"terrarium","tiles":["dem/{z}/{x}/{y}"]},
++            "base":{"type":"vector","maxzoom":12,"tiles":["base/{z}/{x}/{y}"]}
++        },
++        "layers":[
++            {"id":"background","type":"background","paint":{"background-color":"#061927"}},
++            {"id":"base","type":"fill","source":"base","source-layer":"land","paint":{"fill-color":"#ffffff"}}
++        ]
++    })).expect("style");
++    let layer = style.layers[1].clone();
++    let (kernel, renderer) = create_headless_renderer(1536, 1058, None)
++        .await
++        .expect("renderer");
++    let mut map = HeadlessMap::new(
++        style,
++        renderer,
++        kernel,
++        vec![
++            Box::new(RenderPlugin),
++            Box::new(crate::background::BackgroundPlugin),
++            Box::new(VectorPlugin::<DefaultVectorTransferables>::default()),
++            Box::new(TerrainPlugin::<DefaultDemTransferables>::default()),
++            Box::new(HeadlessPlugin::new(false).preserve_tile_sources()),
++        ],
++    )
++    .expect("map");
++    map.set_max_pitch(cgmath::Deg(80.0));
++    let layers = decoded_tiles(&mut map, &layer, pitch);
++    set_view(&mut map, 10.061845395, pitch, 0.0);
++    let dem = image::RgbaImage::from_pixel(256, 256, image::Rgba([131, 232, 0, 255]));
++    map.render_frames_with_terrain(
++        layers,
++        Vec::new(),
++        vec![(WorldTileCoords::default(), dem)],
++        32,
++    )
++    .expect("initial terrain");
++    map
++}
++
++fn decoded_tiles(
++    map: &mut HeadlessMap,
++    layer: &crate::style::layer::StyleLayer,
++    pitch: f64,
++) -> crate::headless::map::ProcessedLayers {
++    let mut coordinates = std::collections::HashSet::new();
++    for zoom in [9.2, 9.5, 10.0, 10.035, 10.061845395, 10.5, 11.0] {
++        set_view(map, zoom, pitch, 0.0);
++        for mut tile in map.required_tile_coords().expect("tiles") {
++            loop {
++                coordinates.insert(tile);
++                let Some(parent) = tile.get_parent() else {
++                    break;
++                };
++                tile = parent;
++            }
++        }
++    }
++    let mut layers = crate::headless::map::ProcessedLayers::default();
++    for tile in coordinates {
++        layers.vector.extend(
++            process_tile_layers(
++                &tile_bytes("#ffffff"),
++                layer,
++                tile,
++                crate::projection::ProjectionType::Globe,
++            )
++            .expect("tile")
++            .vector,
++        );
++    }
++    layers
++}
++
++fn set_view(map: &mut HeadlessMap, zoom: f64, pitch: f64, longitude_offset: f64) {
++    map.set_view(
++        LatLon::new(40.590289612148496, -74.20719026636004 + longitude_offset),
++        Zoom::new(zoom),
++        cgmath::Deg(2.595221571),
++        cgmath::Deg(pitch),
++    );
++}
+--- /dev/null
 +++ b/maplibre/src/render/main_pass/tests.rs
-@@ -0,0 +1,274 @@
+@@ -0,0 +1,284 @@
 +#![allow(clippy::expect_used, clippy::panic)]
 +
 +use crate::{
@@ -1716,7 +2147,7 @@
 +        map.run_frame().expect("frame");
 +        let pixel = center_pixel_blocking(&map);
 +        assert!(
-+            pixel[0] > 100 && pixel[1] > 240 && pixel[2] > 100,
++            (100..230).contains(&pixel[0]) && pixel[1] > 240 && (100..230).contains(&pixel[2]),
 +            "translucent detail must retain the white source below it: {pixel:?}"
 +        );
 +    }
@@ -1724,9 +2155,15 @@
 +
 +fn center_pixel_blocking(map: &HeadlessMap) -> Vec<u8> {
 +    let texture = map.head_texture().expect("texture");
++    pixel_blocking(map, texture.width() / 2, texture.height() / 2)
++}
++
++fn pixel_blocking(map: &HeadlessMap, x: u32, y: u32) -> Vec<u8> {
++    let texture = map.head_texture().expect("texture");
++    let row_bytes = (texture.width() * 4).div_ceil(256) * 256;
 +    let buffer = map.device().create_buffer(&wgpu::BufferDescriptor {
 +        label: Some("stationary map pixel"),
-+        size: 256 * 256 * 4,
++        size: u64::from(row_bytes) * u64::from(texture.height()),
 +        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
 +        mapped_at_creation: false,
 +    });
@@ -1737,7 +2174,7 @@
 +            buffer: &buffer,
 +            layout: wgpu::ImageDataLayout {
 +                offset: 0,
-+                bytes_per_row: Some(1024),
++                bytes_per_row: Some(row_bytes),
 +                rows_per_image: None,
 +            },
 +        },
@@ -1748,11 +2185,15 @@
 +        .slice(..)
 +        .map_async(wgpu::MapMode::Read, |result| result.expect("mapped"));
 +    map.device().poll(wgpu::Maintain::Wait);
-+    let offset = (128 * 256 + 128) * 4;
++    let offset = (y * row_bytes + x * 4) as usize;
 +    let pixel = buffer.slice(..).get_mapped_range()[offset..offset + 4].to_vec();
 +    buffer.unmap();
 +    pixel
 +}
++
++mod terrain;
++
++mod terrain_continuity;
 --- a/maplibre/src/render/main_pass.rs
 +++ b/maplibre/src/render/main_pass.rs
 @@ -107,13 +107,6 @@
@@ -7608,7 +8049,7 @@
 +}
 --- /dev/null
 +++ b/maplibre/src/style/display_groups.rs
-@@ -0,0 +1,88 @@
+@@ -0,0 +1,124 @@
 +//! Select a display group without discarding decoded tiles or GPU allocations.
 +use super::{layer::StyleLayer, Style};
 +
@@ -7641,6 +8082,18 @@
 +            .and_then(serde_json::Value::as_array)
 +            .is_some_and(|groups| groups.iter().any(|value| value.as_str() == Some(group)));
 +        if valid {
++            if let Some(specifications) = self.metadata.get("maplibre:terrain-by-display-group") {
++                self.terrain = match specifications.get(group) {
++                    Some(value) => match serde_json::from_value(value.clone()) {
++                        Ok(terrain) => Some(terrain),
++                        Err(error) => {
++                            tracing::error!(%group, %error, "invalid display group terrain");
++                            return false;
++                        }
++                    },
++                    None => None,
++                };
++            }
 +            self.metadata
 +                .insert("maplibre:active-display-group".into(), group.into());
 +        }
@@ -7673,6 +8126,7 @@
 +
 +#[cfg(test)]
 +mod tests {
++    #![allow(clippy::expect_used, clippy::panic)]
 +    use super::*;
 +
 +    #[test]
@@ -7695,6 +8149,29 @@
 +        assert!(style.layer_in_active_group(&style.layers[2]));
 +        assert!(!style.select_display_group("absent"));
 +        assert!(style.layer_in_active_group(&style.layers[2]));
++    }
++    #[test]
++    fn terrain_selection_preserves_elevation_and_rejects_invalid_groups() {
++        let mut style: Style = serde_json::from_value(serde_json::json!({
++            "version":8, "sources":{}, "layers":[],
++            "terrain":{"source":"dem","exaggeration":1.0},
++            "metadata":{
++                "maplibre:display-groups":["terrain","ifr","broken"],
++                "maplibre:active-display-group":"terrain",
++                "maplibre:terrain-by-display-group":{
++                    "terrain":{"source":"dem","exaggeration":1.0}, "broken":false
++                }
++            }
++        }))
++        .expect("style");
++        let terrain = style.terrain.clone();
++        assert!(!style.select_display_group("broken"));
++        assert_eq!(style.terrain, terrain);
++        assert_eq!(style.metadata["maplibre:active-display-group"], "terrain");
++        assert!(style.select_display_group("ifr"));
++        assert!(style.terrain.is_none());
++        assert!(style.select_display_group("terrain"));
++        assert_eq!(style.terrain, terrain);
 +    }
 +}
 --- a/maplibre/src/style/layer/paint.rs
@@ -9128,15 +9605,467 @@
  mod tests;
 --- a/maplibre/src/tcs/system/mod.rs
 +++ b/maplibre/src/tcs/system/mod.rs
-@@ -11,6 +11,8 @@
+@@ -11,6 +11,14 @@
  
  #[derive(Error, Debug)]
  pub enum SystemError {
++    #[error("cannot prepare terrain source mesh at {coords}: {source}")]
++    TerrainMesh {
++        coords: crate::coords::WorldTileCoords,
++        #[source]
++        source: crate::render::tile_mesh::GpuTileMeshError,
++    },
 +    #[error(transparent)]
 +    Font(#[from] crate::sdf::chart::font_atlas::FontError),
      #[error("renderer was setup wrong")]
      Setup,
      #[error("dependencies were not resolvable")]
+--- a/maplibre/src/terrain/drape_pass.rs
++++ b/maplibre/src/terrain/drape_pass.rs
+@@ -10,7 +10,7 @@
+         RenderResources,
+     },
+     tcs::world::World,
+-    terrain::{resources::TerrainResources, DrapePhase},
++    terrain::{resources::TerrainResources, DrapePhase, DrapeTarget},
+ };
+ 
+ /// Name of the drape node inside the draw sub-graph.
+@@ -86,15 +86,7 @@
+                         timestamp_writes: None,
+                         occlusion_query_set: None,
+                     });
+-            {
+-                let mut tracked_pass = TrackedRenderPass::new(pass);
+-                for mask in &target.masks {
+-                    mask.draw_function.draw(&mut tracked_pass, world, mask);
+-                }
+-                for layer in &target.layers {
+-                    layer.draw_function.draw(&mut tracked_pass, world, layer);
+-                }
+-            }
++            draw_layers(pass, world, target);
+             terrain.generate_drape_mipmaps(
+                 render_context.device,
+                 &mut render_context.command_encoder,
+@@ -104,3 +96,27 @@
+         Ok(())
+     }
+ }
++
++fn draw_layers<'a>(pass: wgpu::RenderPass<'a>, world: &'a World, target: &'a DrapeTarget) {
++    let mut tracked_pass = TrackedRenderPass::new(pass);
++    let mut masked_layer = None;
++    for layer in &target.layers {
++        if masked_layer != Some(layer.index) {
++            let coords: std::collections::BTreeSet<_> = target
++                .layers
++                .iter()
++                .filter(|item| item.index == layer.index)
++                .map(|item| item.source_shape.coords())
++                .collect();
++            for mask in target
++                .masks
++                .iter()
++                .filter(|mask| coords.contains(&mask.source_shape.coords()))
++            {
++                mask.draw_function.draw(&mut tracked_pass, world, mask);
++            }
++            masked_layer = Some(layer.index);
++        }
++        layer.draw_function.draw(&mut tracked_pass, world, layer);
++    }
++}
+--- /dev/null
++++ b/maplibre/src/terrain/drape_targets/tests.rs
+@@ -0,0 +1,65 @@
++#![allow(clippy::expect_used, clippy::panic)]
++
++use super::*;
++use crate::raster::{AvailableRasterLayerData, RasterLayerData, RasterLayersDataComponent};
++
++#[derive(Default)]
++struct LoadedRaster;
++
++impl HasTile for LoadedRaster {
++    fn has_tile(&self, coords: WorldTileCoords, world: &World) -> bool {
++        world
++            .tiles
++            .query::<&RasterLayersDataComponent>(coords)
++            .is_some_and(RasterLayersDataComponent::has_image)
++    }
++}
++
++#[test]
++fn partial_raster_children_keep_the_loaded_parent_for_missing_siblings() {
++    let mut world = World::default();
++    let target = WorldTileCoords {
++        x: 1,
++        y: 1,
++        z: 2.into(),
++    };
++    let children = target.get_children();
++    for coords in [target, children[0]] {
++        world
++            .tiles
++            .spawn_mut(coords)
++            .expect("tile")
++            .insert(RasterLayersDataComponent {
++                layers: vec![RasterLayerData::Available(AvailableRasterLayerData {
++                    coords,
++                    source_layer: "dem".into(),
++                    image: image::RgbaImage::new(1, 1),
++                })],
++            });
++    }
++    world
++        .resources
++        .get_or_init_mut::<ViewTileSources>()
++        .add::<LoadedRaster>(TileKind::Raster);
++    let style: Style = serde_json::from_value(serde_json::json!({
++        "version":8, "sources":{"dem":{"type":"raster-dem","tiles":["dem/{z}/{x}/{y}"]}},
++        "layers":[{"id":"shade","type":"hillshade","source":"dem"}]
++    }))
++    .expect("style");
++    let selected = select_targets(
++        [target].into_iter(),
++        &world,
++        &[("dem".into(), children.to_vec())],
++        &style,
++    );
++    let sources: Vec<_> = selected[0].1.iter().map(|shape| shape.coords).collect();
++    assert!(
++        sources.contains(&children[0]),
++        "the loaded detail must remain visible"
++    );
++    assert!(
++        sources.contains(&target),
++        "the parent must cover the three missing siblings: {sources:?}"
++    );
++    assert_eq!(sources.len(), 2, "a shared ancestor must be drawn once");
++}
+--- a/maplibre/src/terrain/drape_targets.rs
++++ b/maplibre/src/terrain/drape_targets.rs
+@@ -9,7 +9,7 @@
+     render::{
+         eventually::{Eventually, Eventually::Initialized},
+         tile_view_pattern::{
+-            covering_shapes_for, HasTile, KindSources, RasterCoverings, ViewTileSources,
++            covering_shapes_for, HasTile, RasterCoverings, ViewTileSources,
+             COMPLETE_CHILDREN_SEARCH_DEPTH,
+         },
+     },
+@@ -18,6 +18,9 @@
+     vector::VectorBufferPool,
+ };
+ 
++#[derive(Default)]
++pub(crate) struct DrapeSourceTiles(pub(crate) Vec<WorldTileCoords>);
++
+ const DRAPEABLE_LAYER_TYPES: [&str; 5] = ["fill", "line", "raster", "hillshade", "color-relief"];
+ 
+ /// Whether a style layer renders into drape textures rather than straight to the screen.
+@@ -56,6 +59,7 @@
+ pub(crate) struct ShapeSource {
+     pub(crate) coords: WorldTileCoords,
+     pub(crate) raster_source: Option<String>,
++    pub(crate) vector_source: Option<String>,
+ }
+ 
+ /// Pairs every view tile with the source tiles that hold its data, without the screen path's
+@@ -66,33 +70,59 @@
+     coords: impl Iterator<Item = WorldTileCoords>,
+     world: &World,
+     raster_coverings: &RasterCoverings,
++    style: &Style,
+ ) -> Vec<(WorldTileCoords, Vec<ShapeSource>)> {
+     let Some(sources) = world.resources.get::<ViewTileSources>() else {
+         return Vec::new();
+     };
+-    let vector_sources = sources.of_kind(TileKind::Vector);
++    let active_sources: std::collections::HashSet<_> = style
++        .layers
++        .iter()
++        .filter(|layer| style.layer_in_active_group(layer))
++        .filter_map(|layer| layer.source.as_deref())
++        .collect();
++    let vector_sources: Vec<_> =
++        crate::vector::source_coverage::VectorSourceCoverage::from_style(style)
++            .into_iter()
++            .filter(|source| active_sources.contains(source.name.as_str()))
++            .collect();
+     let raster_sources = sources.of_kind(TileKind::Raster);
+     coords
+         .filter(|coords| coords.build_quad_key().is_some())
+         .map(|coords| {
+-            let mut shapes: Vec<ShapeSource> = loaded_shapes(&vector_sources, coords, world)
+-                .into_iter()
+-                .map(|source| ShapeSource {
+-                    coords: source,
+-                    raster_source: None,
++            let mut shapes: Vec<ShapeSource> = vector_sources
++                .iter()
++                .flat_map(|source| {
++                    loaded_shapes(source, coords, world)
++                        .into_iter()
++                        .map(|coords| ShapeSource {
++                            coords,
++                            raster_source: None,
++                            vector_source: Some(source.name.clone()),
++                        })
+                 })
+                 .collect();
++            if vector_sources.is_empty() && raster_coverings.is_empty() {
++                shapes.push(ShapeSource {
++                    coords,
++                    raster_source: None,
++                    vector_source: None,
++                });
++            }
+             for (name, covering) in raster_coverings {
+                 let mut covered: Vec<WorldTileCoords> = covering_shapes_for(coords, covering)
+                     .into_iter()
+-                    .filter(|source| raster_sources.has_tile(*source, world))
++                    .flat_map(|source| loaded_shapes(&raster_sources, source, world))
+                     .collect();
+                 if covered.is_empty() {
+                     covered = loaded_shapes(&raster_sources, coords, world);
+                 }
++                covered.sort();
++                covered.dedup();
+                 shapes.extend(covered.into_iter().map(|source| ShapeSource {
+                     coords: source,
+                     raster_source: Some(name.clone()),
++                    vector_source: None,
+                 }));
+             }
+             (coords, shapes)
+@@ -103,7 +133,7 @@
+ /// The loaded tiles nearest to `coords` in the pyramid: itself, complete children, the parent,
+ /// or no shape until complete coverage is available.
+ fn loaded_shapes(
+-    sources: &KindSources<'_>,
++    sources: &impl HasTile,
+     coords: WorldTileCoords,
+     world: &World,
+ ) -> Vec<WorldTileCoords> {
+@@ -129,21 +159,7 @@
+ ) -> Vec<TargetSpec> {
+     let vector = world.resources.get::<Eventually<VectorBufferPool>>();
+     let raster = world.resources.get::<Eventually<RasterResources>>();
+-    let raster_layers: Vec<(String, u32, Option<String>, bool)> = style
+-        .layers
+-        .iter()
+-        .filter(|layer| {
+-            RASTER_LAYER_TYPES.contains(&layer.type_.as_str()) && layer.is_visible_at(zoom)
+-        })
+-        .map(|layer| {
+-            (
+-                layer.id.clone(),
+-                layer.index,
+-                layer.source.clone(),
+-                dem_layer_kind(&layer.type_).is_some(),
+-            )
+-        })
+-        .collect();
++    let raster_layers = active_raster_layers(style, zoom);
+     let covered_sources: Vec<String> = targets
+         .iter()
+         .flat_map(|(_, shapes)| {
+@@ -161,8 +177,7 @@
+                 .map(|shape| {
+                     let has_raster = matches!(raster, Some(Initialized(resources))
+                         if resources.get_bound_texture(&shape.coords).is_some());
+-                    // Raster layers of a source without a covering of its own ride along with
+-                    // the vector shapes, as every raster layer did before per-source coverings.
++                    // A raster source with its own covering must not draw again on vector shapes.
+                     let raster_layers = if !has_raster {
+                         Vec::new()
+                     } else {
+@@ -180,9 +195,13 @@
+                     ShapeSpec {
+                         source: shape.coords,
+                         vector_layers: match (&shape.raster_source, vector) {
+-                            (None, Some(Initialized(pool))) => {
+-                                vector_layer_specs(pool, shape.coords, zoom)
+-                            }
++                            (None, Some(Initialized(pool))) => vector_layer_specs(
++                                pool,
++                                shape.coords,
++                                zoom,
++                                style,
++                                shape.vector_source.as_deref(),
++                            ),
+                             _ => Vec::new(),
+                         },
+                         raster_layers,
+@@ -197,6 +216,8 @@
+     pool: &VectorBufferPool,
+     source: WorldTileCoords,
+     zoom: f64,
++    style: &Style,
++    source_name: Option<&str>,
+ ) -> Vec<VectorLayerSpec> {
+     pool.index()
+         .get_layers(source)
+@@ -204,6 +225,8 @@
+         .flatten()
+         .filter(|entry| {
+             entry.style_layer.is_visible_at(zoom)
++                && style.layer_in_active_group(&entry.style_layer)
++                && source_name.is_none_or(|name| entry.style_layer.source.as_deref() == Some(name))
+                 && is_drapeable(&entry.style_layer.type_)
+                 && crate::vector::structures::kind(&entry.style_layer).is_none()
+         })
+@@ -215,3 +238,26 @@
+         })
+         .collect()
+ }
++
++fn active_raster_layers(style: &Style, zoom: f64) -> Vec<(String, u32, Option<String>, bool)> {
++    style
++        .layers
++        .iter()
++        .filter(|layer| {
++            RASTER_LAYER_TYPES.contains(&layer.type_.as_str())
++                && layer.is_visible_at(zoom)
++                && style.layer_in_active_group(layer)
++        })
++        .map(|layer| {
++            (
++                layer.id.clone(),
++                layer.index,
++                layer.source.clone(),
++                dem_layer_kind(&layer.type_).is_some(),
++            )
++        })
++        .collect()
++}
++
++#[cfg(test)]
++mod tests;
+--- a/maplibre/src/terrain/queue_system/drape_phase.rs
++++ b/maplibre/src/terrain/queue_system/drape_phase.rs
+@@ -148,6 +148,9 @@
+             }
+         }
+         target.layers.sort_by_key(|item| item.index);
++        target
++            .masks
++            .sort_by_key(|item| item.source_shape.coords().z);
+         phase.targets.push(target);
+     }
+     phase
+--- /dev/null
++++ b/maplibre/src/terrain/queue_system/meshes.rs
+@@ -0,0 +1,32 @@
++//! Prepare the source meshes used by terrain textures.
++use crate::{
++    render::tile_mesh::{GlobeTileMeshCache, TileMeshUsage},
++    tcs::{
++        system::{SystemError, SystemResult},
++        world::World,
++    },
++    terrain::drape_targets::TargetSpec,
++};
++
++pub(super) fn prepare(
++    specs: &[TargetSpec],
++    world: &mut World,
++    device: &wgpu::Device,
++) -> SystemResult {
++    let sources: std::collections::BTreeSet<_> = specs
++        .iter()
++        .flat_map(|spec| spec.shapes.iter().map(|shape| shape.source))
++        .collect();
++    let Some(meshes) = world.resources.get_mut::<GlobeTileMeshCache>() else {
++        return Err(SystemError::Dependencies);
++    };
++    // A texture can use an ancestor that the screen pass does not draw.
++    for coords in sources {
++        for usage in [TileMeshUsage::Stencil, TileMeshUsage::Raster] {
++            meshes
++                .prepare(device, coords, usage, false)
++                .map_err(|source| SystemError::TerrainMesh { coords, source })?;
++        }
++    }
++    Ok(())
++}
+--- a/maplibre/src/terrain/queue_system/targets.rs
++++ b/maplibre/src/terrain/queue_system/targets.rs
+@@ -50,7 +50,18 @@
+     world
+         .resources
+         .insert(crate::terrain::request_system::DrapeRequests(tiles.clone()));
+-    let targets = select_targets(tiles.into_iter(), world, &raster_coverings);
++    let targets = select_targets(tiles.into_iter(), world, &raster_coverings, style);
++    let vector_sources = targets
++        .iter()
++        .flat_map(|(_, shapes)| shapes.iter())
++        .filter(|shape| shape.vector_source.is_some())
++        .map(|shape| shape.coords)
++        .collect();
++    world
++        .resources
++        .insert(crate::terrain::drape_targets::DrapeSourceTiles(
++            vector_sources,
++        ));
+     Ok(collect_layer_specs(
+         targets,
+         style,
+--- a/maplibre/src/terrain/queue_system.rs
++++ b/maplibre/src/terrain/queue_system.rs
+@@ -27,7 +27,7 @@
+         source::{dem_source, DemSource},
+         DrapePhase, TerrainFrame,
+     },
+-    vector::{geometry_uploaded, VectorBufferPool},
++    vector::{active_geometry_uploaded, VectorBufferPool},
+ };
+ mod cohort;
+ mod covering;
+@@ -42,6 +42,7 @@
+     })
+ }
+ mod drape_phase;
++mod meshes;
+ mod surface_covering;
+ mod uniforms;
+ use drape_phase::{background_clear_color, build_drape_phase, drape_metadata};
+@@ -76,10 +77,14 @@
+         .insert(surface_covering::SurfaceTiles::default());
+     let Some(dem) = dem_source(style) else {
+         world.resources.insert(DrapePhase::default());
++        world
++            .resources
++            .insert(crate::terrain::drape_targets::DrapeSourceTiles::default());
+         world.resources.insert(TerrainFrame::default());
+         return Ok(());
+     };
+     let specs = target_specs(style, view_state, world)?;
++    meshes::prepare(&specs, world, device)?;
+     let PreparedDrapes {
+         redraw,
+         sources,
+@@ -372,7 +377,7 @@
+                 && spec.shapes.iter().all(|shape| {
+                     !shape.raster_layers.is_empty()
+                         || ((!strict || shape.source == spec.coords)
+-                            && geometry_uploaded(shape.source, world))
++                            && active_geometry_uploaded(shape.source, world, style))
+                 })
+         })
+         .collect();
+--- a/maplibre/src/terrain.rs
++++ b/maplibre/src/terrain.rs
+@@ -24,6 +24,7 @@
+ mod drape_cache;
+ mod drape_pass;
+ mod drape_targets;
++pub(crate) use drape_targets::DrapeSourceTiles;
+ mod draw;
+ pub mod elevation;
+ pub mod interaction;
 --- /dev/null
 +++ b/maplibre/src/vector/annotation_mask/raster/tests.rs
 @@ -0,0 +1,37 @@
@@ -11263,7 +12192,25 @@
                      AvailableVectorLayerBucket {
 --- a/maplibre/src/vector/upload_system.rs
 +++ b/maplibre/src/vector/upload_system.rs
-@@ -106,7 +106,9 @@
+@@ -57,11 +57,12 @@
+     else {
+         return Err(SystemError::Dependencies);
+     };
+-    let mut source_tiles = if style.terrain.is_some() {
+-        vec![crate::coords::WorldTileCoords::default()]
+-    } else {
+-        sources_for_upload(pattern)
+-    };
++    // A newly exposed edge needs this frame's geometry before its terrain texture is drawn.
++    let mut source_tiles = sources_for_upload(pattern);
++    if let Some(sources) = world.resources.get::<crate::terrain::DrapeSourceTiles>() {
++        let mut seen: HashSet<_> = source_tiles.iter().copied().collect();
++        source_tiles.extend(sources.0.iter().copied().filter(|tile| seen.insert(*tile)));
++    }
+     if let Some(requests) = world
+         .resources
+         .get::<crate::terrain::request_system::DrapeRequests>()
+@@ -106,7 +107,9 @@
      style: &Style,
      view_state: &crate::render::view_state::ViewState,
  ) -> (VectorPaintFrame, Option<VectorPaintFrame>) {
@@ -11274,7 +12221,39 @@
          paint::stabilize_zoom(world, view_state.style_zoom().value()) as f32
      } else {
          view_state.style_zoom().level()
-@@ -386,6 +388,20 @@
+@@ -201,6 +204,15 @@
+     }
+ }
+ 
++fn active_layer_ids(style: &Style) -> HashSet<&str> {
++    style
++        .layers
++        .iter()
++        .filter(|layer| style.layer_in_active_group(layer))
++        .map(|layer| layer.id.as_str())
++        .collect()
++}
++
+ fn upload_tessellated_layer(
+     buffer_pool: &mut VectorBufferPool,
+     queue: &wgpu::Queue,
+@@ -213,6 +225,7 @@
+ ) {
+     // Upload the tessellated layers in view, a few tiles a frame; the rest follow next
+     // frame rather than staging a whole burst of arrivals at once.
++    let active_layers = active_layer_ids(style);
+     let mut uploaded_tiles = 0;
+     let mut bytes = crate::render::memory_budget::UploadBudget::new(16 << 20);
+     for coords in source_tiles {
+@@ -234,6 +247,7 @@
+                 VectorLayerBucket::AvailableLayer(data) => Some(data),
+                 VectorLayerBucket::Missing(_) => None,
+             })
++            .filter(|data| active_layers.contains(data.style_layer_id.as_str()))
+             .filter(|data| !loaded_layers.contains(data.style_layer_id.as_str()))
+             // Empty buckets never enter the pool and must not consume a slot every frame.
+             .filter(|data| !data.buffer.buffer.indices.is_empty())
+@@ -386,6 +400,20 @@
      let translate = layer_translate_tile_units(style_layer.paint.as_ref(), coords.z, zoom, bearing);
      let mut layer_metadata =
          ShaderLayerMetadata::new(style_layer.index as f32, line_width, translate);
@@ -11315,7 +12294,73 @@
  impl Deref for LinePipeline {
      type Target = wgpu::RenderPipeline;
  
-@@ -146,6 +148,7 @@
+@@ -109,32 +111,46 @@
+ /// one pass per tile, or the tile has nothing to upload: no vector data at all, or none with
+ /// geometry. A drape drawn from a finished tile before its upload would miss every layer.
+ pub fn geometry_uploaded(coords: WorldTileCoords, world: &World) -> bool {
++    geometry_uploaded_matching(coords, world, |_| true)
++}
++
++pub(crate) fn active_geometry_uploaded(
++    coords: WorldTileCoords,
++    world: &World,
++    style: &crate::style::Style,
++) -> bool {
++    geometry_uploaded_matching(coords, world, |id| {
++        style
++            .layers
++            .iter()
++            .any(|layer| layer.id == id && style.layer_in_active_group(layer))
++    })
++}
++
++fn geometry_uploaded_matching(
++    coords: WorldTileCoords,
++    world: &World,
++    included: impl Fn(&str) -> bool,
++) -> bool {
+     let Some(buckets) = world.tiles.query::<&VectorLayerBucketComponent>(coords) else {
+         return true;
+     };
+     if !buckets.done {
+         return false;
+     }
+-    let has_geometry = buckets.layers.iter().any(|layer| match layer {
+-        VectorLayerBucket::AvailableLayer(bucket) => !bucket.buffer.buffer.indices.is_empty(),
+-        VectorLayerBucket::Missing(_) => false,
+-    });
+-    if !has_geometry {
+-        return true;
+-    }
+-    match world.resources.get::<Eventually<VectorBufferPool>>() {
+-        Some(Eventually::Initialized(pool)) => {
+-            let loaded = pool.get_loaded_style_layers_at(coords).unwrap_or_default();
+-            buckets.layers.iter().all(|layer| match layer {
+-                VectorLayerBucket::AvailableLayer(bucket) => {
+-                    bucket.buffer.buffer.indices.is_empty()
+-                        || loaded.contains(bucket.style_layer_id.as_str())
+-                }
+-                VectorLayerBucket::Missing(_) => true,
+-            })
++    let loaded = match world.resources.get::<Eventually<VectorBufferPool>>() {
++        Some(Eventually::Initialized(pool)) => pool.get_loaded_style_layers_at(coords),
++        _ => None,
++    }
++    .unwrap_or_default();
++    buckets.layers.iter().all(|layer| match layer {
++        VectorLayerBucket::AvailableLayer(bucket) => {
++            !included(&bucket.style_layer_id)
++                || bucket.buffer.buffer.indices.is_empty()
++                || loaded.contains(bucket.style_layer_id.as_str())
+         }
+-        _ => false,
+-    }
++        VectorLayerBucket::Missing(_) => true,
++    })
+ }
+ 
+ impl<E: Environment, T: VectorTransferables> Plugin<E> for VectorPlugin<T> {
+@@ -146,6 +162,7 @@
          _graph: &mut RenderGraph,
      ) {
          let resources = &mut world.resources;
@@ -11323,7 +12368,7 @@
  
          resources.insert(Eventually::<VectorBufferPool>::Uninitialized);
          resources.insert(Eventually::<VectorPipeline>::Uninitialized);
-@@ -194,9 +197,13 @@
+@@ -194,9 +211,13 @@
  #[derive(Default)]
  pub struct VectorLayerBucketComponent {
      pub done: bool,

@@ -124,7 +124,7 @@ struct MapModesView: View {
                         Image(systemName: mode.symbol)
                             .font(.system(size: 26))
                             .frame(width: 74, height: 74)
-                            .glassEffect(.regular, in: .rect(cornerRadius: 14))
+                            .background(.quaternary, in: .rect(cornerRadius: 14))
                             .overlay {
                                 RoundedRectangle(cornerRadius: 14)
                                     .stroke(
@@ -166,7 +166,7 @@ struct MapModesView: View {
                 }
             }
         }
-        .glassEffect(.regular, in: .rect(cornerRadius: 16))
+        .background(.quaternary, in: .rect(cornerRadius: 16))
     }
 
     /// The credit for the data, at the foot of the panel that chose it.
@@ -175,10 +175,8 @@ struct MapModesView: View {
             attributionPresented = true
         } label: {
             Text(summary)
-                // Small and dim on purpose. The credit is owed and has to be there; a
-                // reader looking at the map is not the one it is owed to.
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
         }

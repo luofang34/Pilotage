@@ -65,3 +65,30 @@ struct GlobeCamera {
         return matrix
     }
 }
+
+/// A camera movement that follows the shortest path across north and the date line.
+struct GlobeCameraMotion {
+    let start: GlobeCamera
+    let target: GlobeCamera
+    let startedAt: Double
+    static let duration = 0.35
+
+    func value(at time: Double) -> GlobeCamera {
+        let fraction = min(1, max(0, (time - startedAt) / Self.duration))
+        guard fraction < 1 else { return target }
+        let weight = fraction * fraction * (3 - 2 * fraction)
+        var result = start
+        result.latitude += (target.latitude - start.latitude) * weight
+        result.longitude += Self.angularDelta(from: start.longitude, to: target.longitude) * weight
+        result.longitude = Self.angularDelta(from: 0, to: result.longitude)
+        result.heading += Self.angularDelta(from: start.heading, to: target.heading) * weight
+        result.pitch += (target.pitch - start.pitch) * weight
+        result.distance += (target.distance - start.distance) * weight
+        return result
+    }
+
+    private static func angularDelta(from start: Double, to target: Double) -> Double {
+        ((target - start + 180).truncatingRemainder(dividingBy: 360) + 360)
+            .truncatingRemainder(dividingBy: 360) - 180
+    }
+}

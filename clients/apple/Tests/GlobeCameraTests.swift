@@ -87,6 +87,35 @@ final class GlobeCameraTests: XCTestCase {
         XCTAssertEqual(rotated.longitude, northUp.longitude)
     }
 
+    func testCameraMotionReturnsAcrossNorthWithoutMovingTheCenter() {
+        let start = GlobeCamera(distance: 134_000, heading: 350, pitch: 60)
+        var target = start
+        target.heading = 0
+        target.pitch = 0
+        let motion = GlobeCameraMotion(start: start, target: target, startedAt: 10)
+        let middle = motion.value(at: 10 + GlobeCameraMotion.duration / 2)
+        XCTAssertEqual(middle.heading, 355, accuracy: 0.001)
+        XCTAssertEqual(middle.pitch, 30, accuracy: 0.001)
+        XCTAssertEqual(middle.latitude, start.latitude)
+        XCTAssertEqual(middle.longitude, start.longitude)
+        XCTAssertEqual(middle.distance, start.distance)
+        let end = motion.value(at: 11)
+        XCTAssertEqual(end.heading, 0)
+        XCTAssertEqual(end.pitch, 0)
+    }
+
+    func testCameraMotionCrossesTheDateLineWithinTheRendererBounds() {
+        let start = GlobeCamera(latitude: 20, longitude: 179, distance: 134_000)
+        var target = start
+        target.longitude = -179
+        let motion = GlobeCameraMotion(start: start, target: target, startedAt: 0)
+        let position = motion.value(at: GlobeCameraMotion.duration * 0.75)
+        XCTAssertLessThan(position.longitude, -179)
+        XCTAssertGreaterThanOrEqual(position.longitude, -180)
+        XCTAssertEqual(position.latitude, start.latitude)
+        XCTAssertEqual(position.distance, start.distance)
+    }
+
     func testChartZoomTracksDistanceAndAvailableWindowWidth() {
         var camera = GlobeCamera(distance: 134_000)
         let zoom = camera.chartZoom(width: 1200, height: 900)

@@ -31,4 +31,28 @@ if ! grep -qF './scratch/mod.rs' "$output"; then
     exit 1
 fi
 
+rm "$fixture/scratch/mod.rs"
+cat > "$fixture/renderer.patch" <<'PATCH'
+--- /dev/null
++++ b/maplibre/src/shading/mod.rs
+@@ -0,0 +1 @@
++pub fn shade() {}
+PATCH
+if bash "$fixture/scripts/check-structure.sh" --forbidden-filenames-only \
+    >"$output" 2>&1; then
+    echo "the structure guard accepted mod.rs in a renderer patch" >&2
+    exit 1
+fi
+if ! grep -qF 'maplibre/src/shading/mod.rs' "$output"; then
+    echo "the structure guard did not name the patched mod.rs file" >&2
+    exit 1
+fi
+cat > "$fixture/renderer.patch" <<'PATCH'
+--- /dev/null
++++ b/maplibre/src/shading.rs
+@@ -0,0 +1 @@
++pub fn shade() {}
+PATCH
+bash "$fixture/scripts/check-structure.sh" --forbidden-filenames-only >/dev/null
+
 echo "check-structure self-test: OK"

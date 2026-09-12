@@ -1,30 +1,11 @@
 import SwiftUI
 
-/// The measurements every floating map control shares.
-///
-/// One place, because the alternative is what it replaced: a control that was wider than
-/// the one under it because each carried its own numbers. A reader reads a column of
-/// controls as one thing only when they are one width.
+/// Shared dimensions keep the floating map controls aligned.
 enum Metrics {
-    /// Side of a single round or capsule control.
-    ///
-    /// Forty-four points is the platform's smallest comfortable target, and a map is used
-    /// with a thumb while the aircraft moves.
-    static let control: CGFloat = 52
-
-    /// Size of the glyph inside a control.
-    static let controlGlyph: Font = .system(size: 19, weight: .semibold)
-
-    /// Box the compass dial is drawn in, inside a control.
-    static let controlGlyphBox: CGFloat = 30
-
-    /// Gap between controls in a stack.
-    ///
-    /// Also the blend distance of the glass container that holds them, and the two are
-    /// the same number on purpose. A container blends only the shapes that sit within its
-    /// spacing, so a distance below this gap leaves each control its own island: it stops
-    /// growing out of the group and starts arriving from nowhere.
-    static let controlSpacing: CGFloat = 10
+    static let control: CGFloat = 48
+    static let controlGlyph: Font = .system(size: 17, weight: .semibold)
+    static let controlLabelBox: CGFloat = 34
+    static let controlSpacing: CGFloat = 8
 
     /// Distance from a control to the edge of the safe area.
     ///

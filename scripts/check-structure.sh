@@ -88,6 +88,20 @@ check_forbidden_filenames() {
     done < <(collect_rs_files)
 }
 
+check_patch_module_names() {
+    local file
+    while IFS= read -r file; do
+        awk '
+            /^--- / { added = ($0 == "--- /dev/null") }
+            /^\+\+\+ / && added && $0 ~ /\/mod[.]rs([[:space:]]|$)/ {
+                print "FORBIDDEN: " FILENAME " adds " substr($0, 5) " (use name.rs + name/)" > "/dev/stderr"
+                bad = 1
+            }
+            END { exit bad }
+        ' "$file" || status=1
+    done < <(git ls-files --cached --others --exclude-standard -- '*.patch')
+}
+
 check_file_length() {
     local file base lines limit
     while IFS= read -r file; do
@@ -255,6 +269,7 @@ check_indicate_pin_coherence() {
 case "${1:-}" in
     "")
         check_forbidden_filenames
+        check_patch_module_names
         check_file_length
         check_swift_file_lengths
         check_function_length
@@ -264,6 +279,7 @@ case "${1:-}" in
         ;;
     --forbidden-filenames-only)
         check_forbidden_filenames
+        check_patch_module_names
         ;;
     *)
         echo "usage: $0 [--forbidden-filenames-only]" >&2

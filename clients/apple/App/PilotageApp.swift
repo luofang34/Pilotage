@@ -26,6 +26,12 @@ struct PilotageApp: App {
 enum LaunchRequest {
     static var aviationGeographicRelease: String? { argument("-AviationGeographicRelease") }
 
+    static var globePitch: Double? {
+        guard let value = argument("-GlobePitch"), let pitch = Double(value), pitch.isFinite,
+              (0...80).contains(pitch) else { return nil }
+        return pitch
+    }
+
     static var globeDistance: Double? {
         guard let value = argument("-GlobeDistance"), let distance = Double(value), distance.isFinite,
               (150...80_000_000).contains(distance) else { return nil }
@@ -143,7 +149,7 @@ enum LaunchRequest {
 @MainActor
 struct SituationMapCommands {
     let resetHeading: () -> Void
-    let resetPitch: () -> Void
+    let setPitch: (Double, Bool) -> Void
     let centre: (CLLocationCoordinate2D, Bool) -> Void
     /// Centre and set how much ground is on screen, for a reader who asked to be found.
     let centreAndFrame: (CLLocationCoordinate2D, Bool) -> Void
@@ -181,7 +187,7 @@ struct SituationMap: UIViewRepresentable {
             onReady(
                 SituationMapCommands(
                     resetHeading: { view.resetHeading() },
-                    resetPitch: { view.resetPitch() },
+                    setPitch: { view.setPitch($0, animated: $1) },
                     centre: { view.centre(on: $0, animated: $1) },
                     centreAndFrame: {
                         view.centre(
