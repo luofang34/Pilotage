@@ -12,6 +12,7 @@ if [ ! -f "$example_root/index.json" ]; then
     printf '[]\n' > "$example_root/index.json"
 fi
 
+sh "$client_root/scripts/build-hwd-review.sh"
 sh "$client_root/scripts/test-globe-camera.sh"
 sh "$client_root/scripts/build-maplibre-globe.sh"
 

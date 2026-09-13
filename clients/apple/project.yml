@@ -35,6 +35,8 @@ targets:
         excludes:
           - Fonts
       - path: .build/GlobeResources
+      - path: .build/HwdReview
+        type: folder
       - path: .build/AviationDataExamples
         type: folder
       # A folder reference, so the fontstack directory survives into the bundle. Flattened
