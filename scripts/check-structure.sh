@@ -29,14 +29,22 @@ is_excluded_path() {
     esac
 }
 
+collect_existing_files() {
+    local file
+    git ls-files --cached --others --exclude-standard -- "$@" |
+        while IFS= read -r file; do
+            if [ -f "$file" ]; then
+                printf './%s\n' "$file"
+            fi
+        done
+}
+
 collect_rs_files() {
-    git ls-files --cached --others --exclude-standard -- '*.rs' \
-        | sed 's#^#./#'
+    collect_existing_files '*.rs'
 }
 
 collect_swift_files() {
-    git ls-files --cached --others --exclude-standard -- '*.swift' \
-        | sed 's#^#./#'
+    collect_existing_files '*.swift'
 }
 
 # Swift sources obey the same file-length ceiling as Rust. Function
@@ -99,7 +107,7 @@ check_patch_module_names() {
             }
             END { exit bad }
         ' "$file" || status=1
-    done < <(git ls-files --cached --others --exclude-standard -- '*.patch')
+    done < <(collect_existing_files '*.patch')
 }
 
 check_file_length() {

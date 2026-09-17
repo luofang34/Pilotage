@@ -15,6 +15,10 @@ printf '%s\n' 'pub fn ignored_dependency() {}' \
     > "$fixture/.build/vendor/src/mod.rs"
 git -C "$fixture" add .gitignore scripts/check-structure.sh src/lib.rs
 
+printf '%s\n' 'pub fn deleted_module() {}' > "$fixture/src/mod.rs"
+git -C "$fixture" add src/mod.rs
+rm "$fixture/src/mod.rs"
+
 bash "$fixture/scripts/check-structure.sh" --forbidden-filenames-only \
     >/dev/null
 
