@@ -57,6 +57,7 @@ export function createControlLoop({
   lengthDelimit,
   maybeAnnounceProfileActivation,
   requestReconnect,
+  agentSource = null,
 }) {
   function motionGroup(scope) {
     return scope === directScope ? motionScope : scope;
@@ -553,9 +554,15 @@ export function createControlLoop({
       connected: state.connected, inputLost: controlGate.isLatched(),
       nowMs: performance.now(),
     };
-    const plan = pad
-      ? state.controlShell.tickFromPad(pad, sessionState)
-      : state.controlShell.tickFromKeys(sessionState);
+    // An engaged agent is the input source. The pad still goes in: the
+    // runtime releases the agent on the first operator input.
+    const agentInput = state.controlShell.agentEngaged ? agentSource?.tick(sessionState.nowMs) : null;
+    const plan = agentInput
+      ? state.controlShell.tickFromAgent(pad, agentInput, sessionState)
+      : pad
+        ? state.controlShell.tickFromPad(pad, sessionState)
+        : state.controlShell.tickFromKeys(sessionState);
+    if (plan.agentOverridden) agentSource?.overridden();
     return { pad, plan };
   }
 
@@ -767,6 +774,9 @@ export function createControlLoop({
         state.lastFrameRejectionLogged = null;
         surface.armAccepted();
       }
+    }
+    if (entry.action === CONTROL_ACTION.arm || entry.action === CONTROL_ACTION.disarm) {
+      agentSource?.onActionResult(entry.action === CONTROL_ACTION.arm, message.accepted);
     }
     if (entry.scope === lifecycleScope) {
       const action = state.controlShell?.planAuthority("lifecycle", false);

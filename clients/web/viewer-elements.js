@@ -12,5 +12,12 @@ export function resolveViewerElements(document) {
     gamepad: document.getElementById("gamepad"),
     flightMode: document.getElementById("flightMode"),
     feelMode: document.getElementById("feelMode"),
+    agentStatus: document.getElementById("agentStatus"),
+    agentEngage: document.getElementById("agentEngage"),
+    agentModel: document.getElementById("agentModel"),
+    agentMessage: document.getElementById("agentMessage"),
+    agentSend: document.getElementById("agentSend"),
+    agentLog: document.getElementById("agentLog"),
+    agentPresets: [...document.querySelectorAll("#agentPresets button")],
   };
 }

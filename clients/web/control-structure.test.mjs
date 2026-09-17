@@ -10,22 +10,26 @@
 import { readFileSync, readdirSync } from "node:fs";
 
 // Generated wasm bindings are build artifacts, not first-party shell code.
-const GENERATED = new Set(["control-runtime.js", "instrument-runtime.js"]);
+const GENERATED = new Set(["agent-runtime.js", "control-runtime.js", "instrument-runtime.js"]);
 
 const SIZE_CAPS = {
   "action-tracker.js": 100,
+  "agent-inputs.js": 45,
+  "agent-model-port.js": 61,
+  "agent-module.js": 170,
+  "agent-panel.js": 25,
   "authority-stream.js": 17,
   "authority-transition.js": 22,
   "bootstrap.js": 88,
   "calibration.js": 285,
-  "cockpit-readout.js": 763,
+  "cockpit-readout.js": 764,
   "composition.js": 123,
   "connect-authority.js": 63,
   "control-edges.js": 31,
   "control-gate.js": 39,
-  "control-loop.js": 952,
+  "control-loop.js": 962,
   "feel-mode-control.js": 76,
-  "control-shell.js": 341,
+  "control-shell.js": 372,
   "datagram-control.js": 87,
   "envelope-fields.js": 24,
   "envelope-framing.js": 19,
@@ -39,7 +43,7 @@ const SIZE_CAPS = {
   "layout.js": 75,
   "lease-executor.js": 14,
   "lease-release.js": 67,
-  "main.js": 239,
+  "main.js": 279,
   "media-recovery.js": 50,
   "nav-display.js": 63,
   "reconnect.js": 150,
@@ -68,7 +72,7 @@ const SIZE_CAPS = {
   "video-stall.js": 39,
   "video-identity.js": 298,
   "video-routing.js": 37,
-  "viewer-elements.js": 16,
+  "viewer-elements.js": 23,
   "wire-bounds.js": 120,
   "transfer-handover.js": 84,
   "wire.js": 1389,
