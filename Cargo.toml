@@ -41,6 +41,7 @@ members = [
     "tools/flight-tune-campaign",
     "tools/flight-tune-xplane",
     "tools/flight-tune-aviate",
+    "tools/intent-pilot",
     "tools/loopback-probe",
     "tools/xtask",
     "hosts/session-host",

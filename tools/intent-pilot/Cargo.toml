@@ -1,0 +1,24 @@
+[package]
+name = "intent-pilot"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[[bin]]
+name = "intent-pilot"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+pilotage-client-session = { workspace = true }
+pilotage-input = { workspace = true }
+pilotage-protocol = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync", "fs", "process", "io-util"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+wtransport = { workspace = true }
