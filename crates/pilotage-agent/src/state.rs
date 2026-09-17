@@ -37,3 +37,27 @@ pub struct TruthState {
     /// Heading in radians from north toward east, when truth has attitude.
     pub yaw_rad: Option<f64>,
 }
+
+/// Yaw of a body-to-NED quaternion, in radians from north toward east.
+#[must_use]
+pub fn yaw_of_quaternion(w: f64, x: f64, y: f64, z: f64) -> f64 {
+    (2.0 * (w * z + x * y)).atan2(1.0 - 2.0 * (y * y + z * z))
+}
+
+#[cfg(test)]
+mod tests {
+    use core::f64::consts::{FRAC_PI_2, FRAC_PI_4};
+
+    use super::yaw_of_quaternion;
+
+    #[test]
+    fn a_quarter_turn_about_down_reads_as_east() {
+        let yaw = yaw_of_quaternion(FRAC_PI_4.cos(), 0.0, 0.0, FRAC_PI_4.sin());
+        assert!((yaw - FRAC_PI_2).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_identity_quaternion_reads_as_north() {
+        assert!(yaw_of_quaternion(1.0, 0.0, 0.0, 0.0).abs() < 1e-12);
+    }
+}

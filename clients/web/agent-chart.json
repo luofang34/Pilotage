@@ -1,0 +1,52 @@
+{
+  "id": "web-live",
+  "fixes": {
+    "ALPHA": {
+      "north_m": 15,
+      "east_m": 0
+    },
+    "BRAVO": {
+      "north_m": 0,
+      "east_m": 15
+    },
+    "CHARLIE": {
+      "north_m": -15,
+      "east_m": 0
+    },
+    "DELTA": {
+      "north_m": 15,
+      "east_m": 15
+    }
+  },
+  "procedures": {
+    "RNAV27": {
+      "fixes": [
+        "DELTA",
+        "BRAVO",
+        "HOME"
+      ],
+      "then": "land"
+    },
+    "ILS09": {
+      "fixes": [
+        "CHARLIE",
+        "HOME"
+      ],
+      "then": "land"
+    }
+  },
+  "cruise_height_m": 5,
+  "arrival_radius_m": 1.5,
+  "max_range_m": 35,
+  "height_m": {
+    "min": 2,
+    "max": 30
+  },
+  "messages": [],
+  "expect": {
+    "end": {
+      "state": "checkpoints_only"
+    },
+    "timeout_s": 3600
+  }
+}

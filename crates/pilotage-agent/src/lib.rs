@@ -40,5 +40,5 @@ pub use model_port::{
 pub use scenario::{
     Checkpoint, EndState, Expectation, Fix, HOME, OperatorMessage, Procedure, Scenario, Trigger,
 };
-pub use state::{TruthState, VehicleState};
+pub use state::{TruthState, VehicleState, yaw_of_quaternion};
 pub use verdict::{Report, Verdict, Verifier};
