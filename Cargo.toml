@@ -5,6 +5,7 @@ members = [
     "crates/pilotage-map-archives",
     "crates/pilotage-data-packages",
     "crates/pilotage-navdata-cycle",
+    "crates/pilotage-planning",
     "crates/pilotage-protocol",
     "crates/pilotage-authority",
     "crates/pilotage-session",
