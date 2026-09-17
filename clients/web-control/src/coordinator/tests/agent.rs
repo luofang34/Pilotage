@@ -225,6 +225,84 @@ fn a_pad_change_keeps_the_agent_as_the_source() {
     assert!(coordinator.agent_engaged(), "a disconnect is not a release");
 }
 
+/// A pad that takes control back is the source that the announcement names.
+/// Naming the keyboard there would attribute pad input to the keyboard profile.
+#[test]
+fn a_pad_that_takes_control_is_the_announced_source() {
+    let mut coordinator = with_scheme();
+    let state = session(true, true);
+    coordinator.select_device(DUALSENSE_ID);
+    operator_tick(
+        &mut coordinator,
+        &[0.0; 4],
+        &[],
+        flying(DirectDemand::default()),
+        &state,
+    );
+    assert_eq!(coordinator.device_label(), "Sony DualSense");
+    assert!(coordinator.engage_agent(AGENT_ID));
+    for _ in 0..3 {
+        agent_tick(&mut coordinator, flying(DEMAND), &state);
+    }
+    assert_eq!(coordinator.device_label(), AGENT_ID);
+
+    let (tick, _) = operator_tick(
+        &mut coordinator,
+        &[0.0, -1.0, 0.0, 0.0],
+        &[],
+        flying(DEMAND),
+        &state,
+    );
+    assert_eq!(tick, AgentTick::OperatorOverride);
+    for _ in 0..3 {
+        operator_tick(&mut coordinator, &[0.0; 4], &[], flying(DEMAND), &state);
+    }
+    assert_eq!(coordinator.device_label(), "Sony DualSense");
+}
+
+/// A pad that disconnects under the agent leaves the keyboard to return to.
+#[test]
+fn a_release_after_a_pad_disconnect_returns_to_the_keyboard() {
+    let mut coordinator = with_scheme();
+    let state = session(true, true);
+    coordinator.select_device(DUALSENSE_ID);
+    operator_tick(
+        &mut coordinator,
+        &[0.0; 4],
+        &[],
+        flying(DirectDemand::default()),
+        &state,
+    );
+    assert!(coordinator.engage_agent(AGENT_ID));
+    for _ in 0..3 {
+        agent_tick(&mut coordinator, flying(DEMAND), &state);
+    }
+    coordinator.deselect_device();
+    for _ in 0..3 {
+        agent_tick(&mut coordinator, flying(DEMAND), &state);
+    }
+    coordinator.disengage_agent();
+    for _ in 0..3 {
+        agent_tick(&mut coordinator, flying(DEMAND), &state);
+    }
+    assert_eq!(coordinator.device_label(), "Keyboard");
+}
+
+/// An engaged agent keeps the identity that it announced. A second identity
+/// with no handover would change the announcement under the same revision.
+#[test]
+fn a_second_identity_cannot_replace_an_engaged_agent() {
+    let mut coordinator = engaged();
+    let revision = coordinator.activation_revision();
+    assert!(!coordinator.engage_agent("automation.other/v1"));
+    assert_eq!(coordinator.device_label(), AGENT_ID);
+    assert_eq!(coordinator.activation_revision(), revision);
+    assert!(
+        coordinator.engage_agent(AGENT_ID),
+        "the same identity is accepted"
+    );
+}
+
 #[test]
 fn an_engage_needs_an_identity_and_an_active_scheme() {
     let mut coordinator = with_scheme();
