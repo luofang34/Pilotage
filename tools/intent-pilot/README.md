@@ -244,9 +244,11 @@ vehicle pose from Gazebo (`gz model -p`). It does not read the agent or the page
 | 1 | 10 of 11 checks | The failed check was the first probe of the test rig. It read the wrong page element for the lease. Each flight check passed. |
 | 2 | lost | The test rig stopped on a failed truth sample. The browser closed, and the link-loss policy of the host landed the vehicle. |
 | 3 | 11 of 11 checks | 5.25 m after takeoff, heading 264 and 10.3 m west after 7 s, 0.9 m from `BRAVO`, 5.1 m under the operator, landed 0.19 m from `HOME`. |
+| 4 | 11 of 11 checks | Heading 271 and 13.9 m west after 7 s, 0.7 m from `BRAVO`, landed 0.45 m from `HOME`. |
+| 5 | 11 of 11 checks | Heading 267 and 13.5 m west after 7 s, 0.4 m from `BRAVO`, landed 0.30 m from `HOME`. This run is the recorded demonstration. |
 
-In each run the model gave `ALPHA` for `ZULU`, and the grounding check refused the
-reply. The host accepted four profile activations in run 1: the keyboard, the agent,
+In each of the five runs the model gave `ALPHA` for `ZULU`, and the grounding check
+refused the reply. The host accepted four profile activations in run 1: the keyboard, the agent,
 the keyboard after the operator input, and the agent again. The host rejected no
 control frame.
 
