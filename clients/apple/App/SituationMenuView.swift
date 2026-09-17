@@ -22,6 +22,7 @@ struct SituationMenuView: View {
     @ObservedObject var hostLink: HostLinkModel
     @ObservedObject var aviationData: AviationDataModel
     @Environment(\.dismiss) private var dismiss
+    @State private var hwdReviewPresented = false
 
     var body: some View {
         NavigationStack {
@@ -34,6 +35,15 @@ struct SituationMenuView: View {
                         Label("Data", systemImage: "externaldrive")
                     }
                 }
+                Section {
+                    Button {
+                        hwdReviewPresented = true
+                    } label: {
+                        Label("HWD instrument review", systemImage: "airplane.circle")
+                    }
+                } footer: {
+                    Text("Indicate test cases use synthetic data. They do not show live flight guidance.")
+                }
                 flightsSection
                 if let message = model.errorMessage {
                     Section("Problems") {
@@ -41,6 +51,7 @@ struct SituationMenuView: View {
                     }
                 }
             }
+            .fullScreenCover(isPresented: $hwdReviewPresented) { HwdReviewView() }
             .navigationTitle("More")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
