@@ -55,6 +55,10 @@ pub struct ControlCoordinator {
     /// The identity of the agent that engaged last. It names the source in
     /// the announcement while [`InputSource::Agent`] is active.
     agent: Option<agent::AgentIdentity>,
+    /// The operator source that a release of the agent returns to. It follows
+    /// pad connects and disconnects while the agent is engaged, so the
+    /// announcement after a release names the device that then drives.
+    agent_resume: InputSource,
     /// The activation revision last observed by [`Self::evaluate`], so a
     /// revision advance (the handover completing) is detectable.
     seen_revision: u32,
@@ -73,6 +77,7 @@ impl ControlCoordinator {
             pending: None,
             active_source: InputSource::Keyboard,
             agent: None,
+            agent_resume: InputSource::Keyboard,
             seen_revision: 0,
             last_pad_id: String::new(),
         }
@@ -144,7 +149,12 @@ impl ControlCoordinator {
         let (candidate, outcome) = self.stage.resolve_pad(gamepad_id);
         // An engaged agent stays the source. The pad map still follows the
         // connected pad, because the operator-override check reads through it.
-        let source = (!self.agent_engaged()).then_some(InputSource::Pad);
+        let source = if self.agent_engaged() {
+            self.agent_resume = InputSource::Pad;
+            None
+        } else {
+            Some(InputSource::Pad)
+        };
         let changed = candidate.as_ref().map(CompiledDevice::digest) != self.stage.pad_digest()
             || (source.is_some() && self.active_source != InputSource::Pad);
         if !changed {
@@ -170,10 +180,16 @@ impl ControlCoordinator {
         if self.active_source != InputSource::Pad && self.stage.pad_digest().is_none() {
             return;
         }
+        let source = if self.agent_engaged() {
+            self.agent_resume = InputSource::Keyboard;
+            None
+        } else {
+            Some(InputSource::Keyboard)
+        };
         self.swap(PendingSwap {
             pad: Some((None, SelectOutcome::Refused)),
             keyboard: None,
-            source: (!self.agent_engaged()).then_some(InputSource::Keyboard),
+            source,
         });
     }
 

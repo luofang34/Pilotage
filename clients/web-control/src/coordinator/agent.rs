@@ -54,26 +54,39 @@ pub enum AgentTick {
 impl ControlCoordinator {
     /// Engages an agent as the input source, under the identity that it
     /// announces. Returns `false` for an empty identity or before a scheme is
-    /// active: there is then nothing to hand control over from.
+    /// active: there is then nothing to hand control over from. An engaged
+    /// agent keeps its identity: a different identity is refused, because it
+    /// would change the announcement with no handover and no new revision.
     pub fn engage_agent(&mut self, profile_id: &str) -> bool {
         if profile_id.trim().is_empty() || self.runtime.active_flight_buttons().is_none() {
             return false;
         }
+        if self.agent_engaged() {
+            return self
+                .agent
+                .as_ref()
+                .is_some_and(|agent| agent.profile_id == profile_id);
+        }
+        self.agent_resume = self
+            .pending
+            .as_ref()
+            .and_then(|pending| pending.source)
+            .unwrap_or(self.active_source);
         self.agent = Some(AgentIdentity {
             profile_id: profile_id.to_owned(),
             digest: content_digest(profile_id.as_bytes()),
         });
-        if !self.agent_engaged() {
-            self.swap(PendingSwap {
-                pad: None,
-                keyboard: None,
-                source: Some(InputSource::Agent),
-            });
-        }
+        self.swap(PendingSwap {
+            pad: None,
+            keyboard: None,
+            source: Some(InputSource::Agent),
+        });
         true
     }
 
-    /// Returns control to the operator's devices through the same handover.
+    /// Returns control to the operator's device through the same handover:
+    /// the pad when one is selected, the keyboard when none is. The
+    /// announcement then names the device that drives.
     pub fn disengage_agent(&mut self) {
         if !self.agent_engaged() {
             return;
@@ -81,7 +94,7 @@ impl ControlCoordinator {
         self.swap(PendingSwap {
             pad: None,
             keyboard: None,
-            source: Some(InputSource::Keyboard),
+            source: Some(self.agent_resume),
         });
     }
 

@@ -126,13 +126,20 @@ async function harness({ answers = {}, mode = "quad-pilot", offer = null } = {})
   check("a gateway fault is a fault and not a directive", module.status().history.at(-1).kind === "fault");
 }
 
-// The first operator input wins.
+// The first operator input wins, and the announcement then names the device
+// that took control.
 {
   const { shell, module, tick } = await harness();
+  const PAD_ID = "DualSense Wireless Controller (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)";
+  shell.selectDevice(PAD_ID);
+  const centred = { axes: [0, 0, 0, 0], buttons: [] };
+  for (let i = 0; i < 3; i += 1) shell.tickFromPad(centred, SESSION);
   await module.engage();
   for (let i = 0; i < 3; i += 1) tick();
   const pad = { axes: [0, -1, 0, 0], buttons: [] };
   const taken = tick(pad);
+  for (let i = 0; i < 3; i += 1) shell.tickFromPad(centred, SESSION);
+  check("the pad that took control is the announced source", shell.deviceLabel() === "Sony DualSense", shell.deviceLabel());
   check("an operator stick releases the agent", taken.agentOverridden === true);
   check("the module follows the override", module.status().engaged === false);
   check("the control runtime has no agent source", shell.agentEngaged === false);

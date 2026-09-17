@@ -117,4 +117,7 @@ edge of the runtime, so the gates of a live lease apply to it. The first
 operator input releases the agent: a deflected control or a safety press, on
 the keyboard or on the pad. The press that takes control does not also fire
 its action, and the handover holds neutral until the controls of the operator
-are neutral.
+are neutral. A release returns to the operator source that is present: the
+pad when one is selected, and the keyboard when none is. The announcement
+thus names the device that drives after the release. An engaged agent keeps
+the identity that it announced, and a different identity is refused.
