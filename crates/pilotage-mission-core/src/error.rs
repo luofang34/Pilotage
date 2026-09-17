@@ -95,6 +95,14 @@ pub enum ValidationError {
         /// The field path.
         field: String,
     },
+    /// A number that must be greater than zero is zero or negative.
+    #[error("{field} value {actual} must be greater than zero")]
+    NotPositive {
+        /// The field path.
+        field: String,
+        /// The supplied value.
+        actual: f64,
+    },
     /// A number is outside its permitted range.
     #[error("{field} value {actual} is outside {minimum} through {maximum}")]
     OutOfRange {
