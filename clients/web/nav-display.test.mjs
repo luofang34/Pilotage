@@ -39,6 +39,7 @@ function testEveryQuantityMapsIntoTheInstrumentVocabulary() {
   assert.equal(nav.fromto, 1, "flying toward the active waypoint");
   assert.equal(nav.courseRad, 1.25, "course passes through in radians");
   assert.equal(nav.courseReference, 1, "true north, the reference the wire declares");
+  assert.equal(nav.scale, 1, "the terminal scale, which the feeder declares");
   // Full-scale lateral is two dots at 25 m each: 50 m is exactly full scale.
   assert.equal(nav.cdiDots, -2);
   assert.equal(LATERAL_M_PER_DOT * 2, 50, "full-scale lateral deflection is ±50 m");

@@ -63,7 +63,7 @@ impl InstrumentRuntime {
             .map_or(0, |runtime| runtime.state().as_ptr() as u32)
     }
 
-    /// Capacity of the state-frame buffer in bytes. The v7 frame is
+    /// Capacity of the state-frame buffer in bytes. The state frame is
     /// self-delimiting, so the writer needs a bound, not an exact size;
     /// growing the capacity is not a wire break.
     pub fn state_capacity(&self) -> u32 {

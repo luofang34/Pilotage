@@ -234,6 +234,9 @@ writes packed state and interprets abstract scene commands onto Canvas2D.</div>
         nav: document.getElementById("navOn").checked
           ? {
               source: 1,
+              // The bench declares the terminal scale. A nav group with
+              // no declared scale fails closed.
+              scale: 1,
               courseRad: v("crs") * DEG,
               cdiDots: v("cdi"),
               fromto: 1,

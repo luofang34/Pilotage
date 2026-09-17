@@ -4,7 +4,7 @@
 
 #![allow(clippy::expect_used, clippy::panic)]
 
-use indicate_instrument_state::abi::v7::encode_state;
+use indicate_instrument_state::abi::v8::{VERSION, encode_state};
 use indicate_instrument_state::{AircraftState, Attitude, Quat, Stamped};
 use pilotage_instrument_runtime::RenderStatus;
 
@@ -15,11 +15,11 @@ use crate::{
 };
 
 const PINNED_SCENE_DIGEST: &str =
-    "f82d905643b48822de25665761ad3e29daa334d937f18b1e98a3e215353cb704";
+    "f6fb603bf2e1f7889ddc9b5d534f329a0379d34a8f00d954f366e9b270ddc273";
 const PINNED_COMPOSITION_DIGEST: &str =
-    "6761e8e1ed137e682530274c8f02353d2ab40e7142a36cd4321a6835323b463c";
+    "2912562c50aa7f6dd4bfd3b3be2c83fe69ab0ef225b6081496b5a0a5dd8f18f4";
 const PINNED_CORPUS_DIGEST: &str =
-    "1fb8e6de2734ff7506843b05869f39d501f0926599636c6110a7e3b0c6e1625e";
+    "0b0c7ccb135bfc4107bc110e4b24dceffd84adf1b767fcd14d2c5ace7391f962";
 
 fn attitude_state() -> AircraftState {
     AircraftState {
@@ -44,7 +44,7 @@ fn attitude_state() -> AircraftState {
 }
 
 fn encode(state: &AircraftState) -> Vec<u8> {
-    let mut block = vec![0u8; indicate_instrument_state::abi::v7::CAPACITY];
+    let mut block = vec![0u8; indicate_instrument_state::abi::v8::CAPACITY];
     let len = encode_state(state, &mut block).expect("encodes");
     block.truncate(len);
     block
@@ -88,7 +88,7 @@ fn digest_identity_equals_the_pinned_tuple_values() {
         scene_format_version(),
         pilotage_instrument_runtime::scene_format_version()
     );
-    assert_eq!(corpus_version(), 4);
+    assert_eq!(corpus_version(), 8);
     assert_eq!(corpus_digest_hex(), PINNED_CORPUS_DIGEST);
     assert_eq!(scene_digest_hex(), PINNED_SCENE_DIGEST);
     assert_eq!(composition_digest_hex(), PINNED_COMPOSITION_DIGEST);
@@ -163,12 +163,13 @@ fn quiet_input_crosses_both_freshness_thresholds() {
 
 #[test]
 fn a_truncated_state_fails_with_unchanged_generation() {
-    // The state buffer is fixed-capacity and the v7 frame is
+    // The state buffer is fixed-capacity and the state frame is
     // self-delimiting, so a short write is not a truncation. An
     // over-declared group length is: tag 0x05 claims 65535 payload
     // bytes against the 1024-byte buffer.
     let bridge = InstrumentBridge::new();
-    assert_eq!(bridge.write_state(&[7, 1, 0x05, 0xff, 0xff], 0).status, 0);
+    let frame = [VERSION, 1, 0x05, 0xff, 0xff];
+    assert_eq!(bridge.write_state(&frame, 0).status, 0);
 
     let outcome = bridge.composition_frame(0, true);
     assert_eq!(outcome.status, RenderStatus::StateTruncated as u32);
@@ -179,7 +180,7 @@ fn a_truncated_state_fails_with_unchanged_generation() {
 #[test]
 fn state_write_accepts_exact_capacity_and_refuses_capacity_plus_one() {
     let bridge = InstrumentBridge::new();
-    let capacity = indicate_instrument_state::abi::v7::CAPACITY;
+    let capacity = indicate_instrument_state::abi::v8::CAPACITY;
     assert_eq!(bridge.write_state(&vec![0; capacity], 0).status, 0);
 
     let error = bridge.write_state(&vec![0; capacity + 1], 0);
@@ -197,7 +198,7 @@ fn oversized_valid_prefix_is_not_truncated_into_an_accepted_frame() {
     assert_eq!(first.status, RenderStatus::Ok as u32);
 
     let mut oversized = encoded;
-    oversized.resize(indicate_instrument_state::abi::v7::CAPACITY + 1, 0);
+    oversized.resize(indicate_instrument_state::abi::v8::CAPACITY + 1, 0);
     assert_eq!(bridge.write_state(&oversized, 1).status, 1);
     let refused = bridge.composition_frame(1, true);
     assert_ne!(refused.status, RenderStatus::Ok as u32);
