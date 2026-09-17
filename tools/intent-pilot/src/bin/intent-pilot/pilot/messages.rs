@@ -3,7 +3,7 @@
 
 use std::time::Instant;
 
-use pilotage_agent::{Directive, ModelRequest, check_grounding, check_reply};
+use pilotage_agent::Directive;
 
 use super::{Answer, Ask, Pilot, input};
 use crate::error::PilotError;
@@ -13,12 +13,7 @@ impl Pilot {
     pub(super) async fn ask(&mut self, text: String, source: Source) {
         self.clock.get_or_insert_with(Instant::now);
         tracing::info!(%text, ?source, "operator message");
-        let request = ModelRequest {
-            message: text.clone(),
-            envelope: self.envelope.clone(),
-            legend: self.legend.clone(),
-            frames: Vec::new(),
-        };
+        let request = self.flight.request(&text, Vec::new());
         // A closed queue means the model task ended. The run record then has
         // no answer for this message, and the vehicle keeps its directive.
         self.asks.send((Ask { text, source }, request)).await.ok();
@@ -32,11 +27,7 @@ impl Pilot {
                 self.quitting = true;
                 let now_s = self.elapsed_s();
                 let home = Directive::ReturnToBase {};
-                if self
-                    .executor
-                    .accept(&home, self.state.as_ref(), now_s)
-                    .is_err()
-                {
+                if self.flight.fly(&home, now_s).is_err() {
                     tracing::error!("the executor refused the return to base");
                 }
             }
@@ -61,15 +52,7 @@ impl Pilot {
                     .await;
             }
         };
-        // Three checks stand between a reply and the vehicle: the envelope,
-        // the words of the message, and the executor's chart.
-        let taken = check_reply(&self.envelope, &reply).and_then(|directive| {
-            check_grounding(text, &directive)?;
-            self.executor
-                .accept(&directive, self.state.as_ref(), at_s)
-                .map(|()| directive)
-        });
-        match taken {
+        match self.flight.take_reply(text, &reply, at_s) {
             Ok(directive) => {
                 tracing::info!(?directive, model_ms = reply.model_ms, "directive");
                 let read_correctly = means.as_ref().map(|means| same(means, &directive));
