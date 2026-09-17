@@ -17,6 +17,9 @@ mod reception;
 #[allow(clippy::disallowed_types)]
 mod records;
 mod session;
+// UniFFI derive output uses a dynamic error.
+#[allow(clippy::disallowed_types)]
+mod planning;
 
 pub use data::{
     AviationDataSession, DataDownloadObserver, DataError, DataSelectionRequest,
@@ -36,11 +39,13 @@ pub use records::{
     DisplayBatch, DisplayColor, DisplayCoordinate, DisplayCoordinateRing, DisplayLayerControl,
     DisplayLayerSourceState, DisplayPoint, DisplayPointChange, DisplayPointChangeKind,
     DisplayPointStyle, DisplayShape, DisplayShapeStyle, DisplayTrafficDetail,
-    DisplayTrafficDetailField, DisplayTrafficListItem, PresentationRadioBand,
-    PresentationRadioState, PresentationReceiverObservation, PresentationSourceObservation,
-    ProducerSchemaVersions, RadioRecordBatch, WeatherStationPosition,
+    DisplayTrafficDetailField, DisplayTrafficListItem, Gdl90HeadingReferenceValue,
+    Gdl90IngestBatch, Gdl90NavigationSnapshot, PresentationRadioBand, PresentationRadioState,
+    PresentationReceiverObservation, PresentationSourceObservation, ProducerSchemaVersions,
+    RadioRecordBatch, WeatherStationPosition,
 };
 pub use session::PresentationSession;
+pub use planning::{NavigationIndexRequest, NavigationSearchSession, PlanningFfiError};
 
 /// Get the facade version.
 #[uniffi::export]

@@ -4,6 +4,7 @@ use aero_link::ReceptionEvent;
 use surveillance_aero_link::replay::{ReceptionOutcome, ingest_event, refusal_ends_the_stream};
 use surveillance_core::{
     EngineConfig, ProducerInstanceId, SurveillanceEngine, TrackDelta, TrackRecord,
+    TrafficObservation,
 };
 
 use super::ReceptionError;
@@ -75,6 +76,21 @@ impl TrafficPipeline {
             .advance_time(monotonic_micros, |delta| deltas.push(delta.clone()))
             .map_err(|source| ReceptionError::TrafficAdvance {
                 monotonic_micros,
+                source,
+            })?;
+        encode_deltas(deltas, monotonic_micros)
+    }
+
+    pub(super) fn accept_observation(
+        &mut self,
+        observation: TrafficObservation,
+        monotonic_micros: u64,
+    ) -> Result<Vec<String>, ReceptionError> {
+        let mut deltas = Vec::new();
+        self.engine
+            .ingest(observation, |delta| deltas.push(delta.clone()))
+            .map_err(|source| ReceptionError::TrafficIngest {
+                received_at_micros: monotonic_micros,
                 source,
             })?;
         encode_deltas(deltas, monotonic_micros)
