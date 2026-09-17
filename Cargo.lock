@@ -1406,13 +1406,15 @@ source = "git+https://github.com/luofang34/Indicate.git?rev=985eb3390d3e09abf83d
 
 [[package]]
 name = "intent-pilot"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
+ "pilotage-agent",
  "pilotage-client-session",
  "pilotage-input",
  "pilotage-protocol",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "thiserror",
  "tokio",
  "tracing",
@@ -1914,6 +1916,15 @@ dependencies = [
  "pilotage-timing",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "pilotage-agent"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

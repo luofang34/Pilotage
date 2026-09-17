@@ -1,5 +1,5 @@
 {
- "id": "retarget-recall",
+ "id": "approach",
  "fixes": {
   "ALPHA": {
    "north_m": 15,
@@ -44,36 +44,23 @@
  },
  "messages": [
   {
-   "text": "Get airborne and go to ALPHA, hold overhead.",
+   "text": "Cleared for takeoff.",
    "trigger": {
     "when": "start"
    },
    "means": {
-    "kind": "direct_to",
-    "fix": "ALPHA",
-    "on_arrival": "hold"
+    "kind": "takeoff"
    }
   },
   {
-   "text": "Forget ALPHA. Head to BRAVO and hold there.",
+   "text": "Cleared RNAV 27 approach.",
    "trigger": {
     "when": "flying_for",
     "seconds": 3
    },
    "means": {
-    "kind": "direct_to",
-    "fix": "BRAVO",
-    "on_arrival": "hold"
-   }
-  },
-  {
-   "text": "That's enough, come back to base and land.",
-   "trigger": {
-    "when": "flying_for",
-    "seconds": 8
-   },
-   "means": {
-    "kind": "return_to_base"
+    "kind": "join_procedure",
+    "procedure": "RNAV27"
    }
   }
  ],
@@ -81,13 +68,13 @@
   "checkpoints": [
    {
     "check": "approach",
-    "fix": "ALPHA",
-    "within_m": 12
+    "fix": "DELTA",
+    "within_m": 2
    },
    {
     "check": "approach",
     "fix": "BRAVO",
-    "within_m": 12
+    "within_m": 2
    }
   ],
   "end": {
@@ -96,8 +83,8 @@
   },
   "must_not_reach": [
    "ALPHA",
-   "BRAVO"
+   "CHARLIE"
   ],
-  "timeout_s": 150
+  "timeout_s": 200
  }
 }

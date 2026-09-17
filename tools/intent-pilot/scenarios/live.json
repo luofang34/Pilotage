@@ -1,5 +1,5 @@
 {
- "id": "direct-land",
+ "id": "live",
  "fixes": {
   "ALPHA": {
    "north_m": 15,
@@ -42,24 +42,11 @@
   "min": 2,
   "max": 30
  },
- "messages": [
-  {
-   "text": "Lift off and make for ALPHA. Land once you are there.",
-   "trigger": {
-    "when": "start"
-   },
-   "means": {
-    "kind": "direct_to",
-    "fix": "ALPHA",
-    "on_arrival": "land"
-   }
-  }
- ],
+ "messages": [],
  "expect": {
   "end": {
-   "state": "landed_at",
-   "fix": "ALPHA"
+   "state": "checkpoints_only"
   },
-  "timeout_s": 90
+  "timeout_s": 3600
  }
 }

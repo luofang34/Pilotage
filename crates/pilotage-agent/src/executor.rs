@@ -1,0 +1,389 @@
+//! The deterministic directive executor.
+//!
+//! A model supplies a directive and nothing else. Every decision that depends
+//! on vehicle state is made here, in code that has no model in it: when to
+//! arm, when the climb is complete, when the vehicle is at a fix, when it is
+//! on the ground, when it is too far away. The executor has no I/O and no
+//! clock of its own, so each decision can be tested.
+
+use std::collections::BTreeMap;
+
+use serde::Serialize;
+
+use crate::directive::{Arrival, Directive, HoldPoint, TurnDirection};
+use crate::guidance::{Demand, Speeds};
+use crate::model_port::Refusal;
+use crate::scenario::{Fix, HOME, Procedure, Scenario};
+use crate::state::VehicleState;
+
+mod flight;
+
+/// Interval between repeats of an arm or disarm request, in seconds.
+const ACTION_RETRY_S: f64 = 2.0;
+
+/// Where the flight is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Phase {
+    /// On the ground with nothing to fly.
+    Idle,
+    /// An arm request is out.
+    Arming,
+    /// Climbing to the commanded height.
+    Climb,
+    /// Flying to a fix.
+    Enroute,
+    /// Flying a heading.
+    OnHeading,
+    /// At a point, at the commanded height.
+    Holding,
+    /// At the range limit, at the commanded height. A heading took the
+    /// vehicle there, and the executor stopped it.
+    RangeHold,
+    /// Descending to land.
+    Descending,
+    /// On the ground; a disarm request is out.
+    Disarming,
+    /// On the ground, and disarmed where the vehicle offers a disarm.
+    Landed,
+}
+
+/// A discrete request for the reliable action channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Discrete {
+    /// Arm the vehicle.
+    Arm,
+    /// Disarm the vehicle.
+    Disarm,
+}
+
+/// What the scenario and the vehicle advertisement fix for one flight.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FlightLimits {
+    /// Height above the launch point at the start, in metres.
+    pub cruise_height_m: f64,
+    /// Cruise speed at the start, in metres per second.
+    pub cruise_speed_mps: f64,
+    /// Horizontal distance that counts as arrival, in metres.
+    pub arrival_radius_m: f64,
+    /// The largest permitted distance from the launch point, in metres.
+    pub max_range_m: f64,
+    /// Advertised speed at full horizontal demand, in metres per second.
+    pub max_linear_mps: f64,
+    /// True when the motion scope advertises a disarm. A vehicle with no
+    /// disarm to offer is landed when it is down.
+    pub disarm_offered: bool,
+}
+
+/// The output of one executor step.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Step {
+    /// The motion demand for this frame.
+    pub demand: Demand,
+    /// A discrete request to send now, if one is due.
+    pub action: Option<Discrete>,
+    /// The phase after this step.
+    pub phase: Phase,
+}
+
+/// What the vehicle is doing in the air.
+#[derive(Debug, Clone, PartialEq)]
+enum Task {
+    /// Climb and then hold where the climb ends.
+    Takeoff,
+    /// Fly to a fix.
+    GoTo { fix: Fix, arrival: Arrival },
+    /// Fly fixes in sequence.
+    Route {
+        fixes: Vec<Fix>,
+        next: usize,
+        then: Arrival,
+    },
+    /// Fly a heading until the next directive or the range limit.
+    FlyHeading {
+        heading_rad: f64,
+        turn: TurnDirection,
+    },
+    /// Stay at a point.
+    HoldAt { fix: Fix },
+    /// Descend at a point.
+    LandAt { fix: Fix },
+}
+
+/// The directive state machine.
+#[derive(Debug)]
+pub struct Executor {
+    limits: FlightLimits,
+    fixes: BTreeMap<String, Fix>,
+    procedures: BTreeMap<String, Procedure>,
+    phase: Phase,
+    task: Option<Task>,
+    height_m: f64,
+    speed_mps: f64,
+    acknowledged_armed: bool,
+    /// True when a climb did not leave the ground. The armed report is then
+    /// not believed, and an arm request goes out until the host accepts one.
+    force_arm: bool,
+    climb_stalled_since_s: Option<f64>,
+    last_request_s: Option<f64>,
+    settled_since_s: Option<f64>,
+    flying_since_s: Option<f64>,
+}
+
+impl Executor {
+    /// An executor on the ground with nothing to fly.
+    #[must_use]
+    pub fn new(limits: FlightLimits, scenario: &Scenario) -> Self {
+        Self {
+            limits,
+            fixes: scenario.fixes.clone(),
+            procedures: scenario.procedures.clone(),
+            phase: Phase::Idle,
+            task: None,
+            height_m: limits.cruise_height_m,
+            speed_mps: limits.cruise_speed_mps,
+            acknowledged_armed: false,
+            force_arm: false,
+            climb_stalled_since_s: None,
+            last_request_s: None,
+            settled_since_s: None,
+            flying_since_s: None,
+        }
+    }
+
+    /// The current phase.
+    #[must_use]
+    pub const fn phase(&self) -> Phase {
+        self.phase
+    }
+
+    /// Seconds that the vehicle has flown the newest directive without a
+    /// break, or `None` when it is not flying one.
+    #[must_use]
+    pub fn flying_seconds(&self, now_s: f64) -> Option<f64> {
+        self.flying_since_s.map(|since| now_s - since)
+    }
+
+    /// Records the host's answer to a discrete request.
+    pub fn on_action_result(&mut self, request: Discrete, accepted: bool) {
+        if accepted {
+            self.acknowledged_armed = request == Discrete::Arm;
+            if request == Discrete::Arm {
+                self.force_arm = false;
+            }
+        }
+    }
+
+    /// Takes a directive that passed the reply check. `state` gives the
+    /// present position for the directives that need one.
+    pub fn accept(
+        &mut self,
+        directive: &Directive,
+        state: Option<&VehicleState>,
+        now_s: f64,
+    ) -> Result<(), Refusal> {
+        let here = state.map(|state| Fix {
+            north_m: state.north_m,
+            east_m: state.east_m,
+        });
+        let task = match directive {
+            Directive::Unable { .. } => None,
+            Directive::Takeoff {} => self.on_ground().then_some(Task::Takeoff),
+            Directive::DirectTo { fix, on_arrival } => Some(Task::GoTo {
+                fix: self.fix(fix)?,
+                arrival: *on_arrival,
+            }),
+            Directive::ReturnToBase {} => Some(Task::GoTo {
+                fix: self.fix(HOME)?,
+                arrival: Arrival::Land,
+            }),
+            Directive::Hold {
+                point: HoldPoint::Fix(fix),
+            } => Some(Task::GoTo {
+                fix: self.fix(fix)?,
+                arrival: Arrival::Hold,
+            }),
+            Directive::Hold {
+                point: HoldPoint::PresentPosition,
+            } => here
+                .filter(|_| self.airborne())
+                .map(|fix| Task::HoldAt { fix }),
+            Directive::Heading { degrees, turn } => Some(Task::FlyHeading {
+                heading_rad: f64::from(*degrees).to_radians(),
+                turn: *turn,
+            }),
+            Directive::JoinProcedure { procedure } => Some(self.route(procedure)?),
+            Directive::Land {} => here
+                .filter(|_| self.airborne())
+                .map(|fix| Task::LandAt { fix }),
+            // Only a descent can go around. In every other phase the vehicle
+            // already does what a go-around asks for.
+            Directive::GoAround {} => here
+                .filter(|_| self.phase == Phase::Descending)
+                .map(|fix| Task::HoldAt { fix }),
+            Directive::Altitude { height_m } => {
+                self.height_m = *height_m;
+                (self.on_ground() && self.task.is_none()).then_some(Task::Takeoff)
+            }
+            Directive::Speed { speed_mps } => {
+                self.speed_mps = *speed_mps;
+                None
+            }
+        };
+        if let Some(task) = task {
+            self.start(task, now_s);
+        }
+        Ok(())
+    }
+
+    /// Advances the machine by one frame.
+    pub fn step(&mut self, state: &VehicleState, now_s: f64) -> Step {
+        // The flight controller's word wins. The acknowledgement serves a
+        // vehicle that reports no armed state.
+        let armed = state.armed.unwrap_or(self.acknowledged_armed);
+        let (demand, action) = match self.phase {
+            Phase::Idle | Phase::Landed => {
+                if self.task.is_some() {
+                    self.enter(Phase::Arming, now_s);
+                }
+                (Demand::default(), None)
+            }
+            Phase::Arming => self.arming(state, armed, now_s),
+            Phase::Disarming => self.disarming(armed, now_s),
+            _ => (self.fly(state, now_s), None),
+        };
+        Step {
+            demand,
+            action,
+            phase: self.phase,
+        }
+    }
+
+    fn on_ground(&self) -> bool {
+        matches!(self.phase, Phase::Idle | Phase::Landed)
+    }
+
+    fn airborne(&self) -> bool {
+        matches!(
+            self.phase,
+            Phase::Enroute
+                | Phase::OnHeading
+                | Phase::Holding
+                | Phase::RangeHold
+                | Phase::Descending
+        )
+    }
+
+    fn fix(&self, name: &str) -> Result<Fix, Refusal> {
+        if name == HOME {
+            return Ok(Fix {
+                north_m: 0.0,
+                east_m: 0.0,
+            });
+        }
+        self.fixes
+            .get(name)
+            .copied()
+            .ok_or_else(|| Refusal::UnknownFix(name.to_owned()))
+    }
+
+    fn route(&self, name: &str) -> Result<Task, Refusal> {
+        let procedure = self
+            .procedures
+            .get(name)
+            .ok_or_else(|| Refusal::UnknownProcedure(name.to_owned()))?;
+        let fixes = procedure
+            .fixes
+            .iter()
+            .map(|fix| self.fix(fix))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Task::Route {
+            fixes,
+            next: 0,
+            then: procedure.then,
+        })
+    }
+
+    /// Makes `task` the thing to fly. A vehicle in the air turns to it at
+    /// once. A vehicle on the ground arms for it on the next step.
+    fn start(&mut self, task: Task, now_s: f64) {
+        let phase = phase_of(&task);
+        self.task = Some(task);
+        if self.airborne() {
+            self.enter(phase, now_s);
+        }
+    }
+
+    fn enter(&mut self, phase: Phase, now_s: f64) {
+        self.phase = phase;
+        self.last_request_s = None;
+        self.settled_since_s = None;
+        self.climb_stalled_since_s = None;
+        // The flying time measures the newest directive. A scripted message
+        // that waits on it must not count the time of the directive before.
+        self.flying_since_s = matches!(
+            phase,
+            Phase::Enroute
+                | Phase::OnHeading
+                | Phase::Holding
+                | Phase::RangeHold
+                | Phase::Descending
+        )
+        .then_some(now_s);
+    }
+
+    fn speeds(&self) -> Speeds {
+        Speeds {
+            max_linear_mps: self.limits.max_linear_mps,
+            cruise_mps: self.speed_mps.min(self.limits.max_linear_mps),
+        }
+    }
+
+    fn arming(
+        &mut self,
+        state: &VehicleState,
+        armed: bool,
+        now_s: f64,
+    ) -> (Demand, Option<Discrete>) {
+        if !armed || self.force_arm {
+            return (Demand::default(), self.request(Discrete::Arm, now_s));
+        }
+        if state.height_m.is_some() {
+            self.enter(Phase::Climb, now_s);
+        } else {
+            self.begin_task(state, now_s);
+        }
+        (Demand::default(), None)
+    }
+
+    fn disarming(&mut self, armed: bool, now_s: f64) -> (Demand, Option<Discrete>) {
+        if !armed {
+            self.enter(Phase::Landed, now_s);
+            return (Demand::default(), None);
+        }
+        (Demand::default(), self.request(Discrete::Disarm, now_s))
+    }
+
+    /// Issues `request` now if none is out or the last one is overdue.
+    fn request(&mut self, request: Discrete, now_s: f64) -> Option<Discrete> {
+        let due = self
+            .last_request_s
+            .is_none_or(|last| now_s - last >= ACTION_RETRY_S);
+        due.then(|| {
+            self.last_request_s = Some(now_s);
+            request
+        })
+    }
+}
+
+const fn phase_of(task: &Task) -> Phase {
+    match task {
+        Task::Takeoff | Task::HoldAt { .. } => Phase::Holding,
+        Task::GoTo { .. } | Task::Route { .. } => Phase::Enroute,
+        Task::FlyHeading { .. } => Phase::OnHeading,
+        Task::LandAt { .. } => Phase::Descending,
+    }
+}
+
+#[cfg(test)]
+mod tests;
