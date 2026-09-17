@@ -19,9 +19,10 @@ command (setpoint or discrete action) that executes under an authority
 epoch, input mapping, or channel it was not bound to: a delayed ARM
 re-arming after a DISARM, a frame produced by an unannounced mapping, a
 sibling scope escaping a link-loss brake, keyboard input attributed to a
-gamepad profile, a simulation reset fired from flight authority, or a
+gamepad profile, a simulation reset fired from flight authority, a
 duplicated or late datagram refreshing liveness it no longer holds and
-resurrecting an expired lease.
+resurrecting an expired lease, or the demand of an agent that is attributed
+to the operator's device or that continues after the operator takes a control.
 
 ## Requirements
 
@@ -103,3 +104,17 @@ already revoked and can never refresh the deadline it missed. Typed-only
 control is the production default; legacy numeric payloads are admitted
 at their single translation boundary only under the explicit SIMULATION
 compatibility mode.
+
+### INPUT-AGENT-007 {#input-agent-007}
+
+An engaged agent is an input source of the control runtime. An engage and a
+release go through the transactional neutral handover, and the announcement
+names the identity of the agent while the agent is the source. The demand of
+an agent does not go through a stick mapping. The runtime bounds each value,
+reads a value that is not finite as neutral, and flies neutral in a flight
+mode that has no velocity law. An arm request of an agent is the typed arm
+edge of the runtime, so the gates of a live lease apply to it. The first
+operator input releases the agent: a deflected control or a safety press, on
+the keyboard or on the pad. The press that takes control does not also fire
+its action, and the handover holds neutral until the controls of the operator
+are neutral.

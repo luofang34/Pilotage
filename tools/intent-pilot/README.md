@@ -7,6 +7,12 @@ shared core is `crates/pilotage-agent`. The core has no I/O.
 - `intent-pilot` flies operator messages. A model reads each message and gives a
   directive. Deterministic code checks the directive and flies it.
 - `agent-eval` gives each model the same cases and the same score.
+- `model-gateway` gives the model port over HTTP to a client that cannot start a
+  process. The browser viewer uses it.
+
+The agent module has a second port in the browser viewer (`clients/web`, with the
+wasm crate `clients/web-agent`). The two ports fly through `AgentFlight` of the
+shared core, so the checks and the executor are the same.
 
 ## Terms
 
@@ -125,6 +131,39 @@ Scenarios: `direct-land`, `retarget-recall`, `vectors` (heading and altitude),
 A live run has no verdict. A person in the viewer can request the motion scope at
 any time, and the pilot gives it up.
 
+## Fly from the browser viewer
+
+In the viewer the agent is an input source of the client, beside the keyboard and a
+pad. It uses the lease that the viewer holds. It does not open a connection.
+
+1. Start the session with `cargo xtask sim --fc aviate --no-open --viewer-port 8099`.
+2. Start the gateway:
+
+   ```
+   model-gateway --model-cmd "PYTHONPATH=tools/intent-pilot/adapters python3 tools/intent-pilot/adapters/ollama_json.py"
+   ```
+
+   The gateway listens on `127.0.0.1:8098`. It accepts a page from
+   `http://localhost:8099` or `http://127.0.0.1:8099`. Give `--listen` and
+   `--allow-origin` for a different address.
+3. Open the viewer address that the launcher prints. Select a Quad control mode.
+4. Push **Engage agent**. The status shows `AGENT HAS CONTROL` and the executor
+   phase. The host log shows a profile activation with the device profile
+   `automation.intent-pilot/v1`.
+5. Type an instruction, or push a preset. The panel shows each directive that is
+   flown and each reply that is refused.
+6. Move a stick or push a flight key to take control. The agent stops at once, and
+   the vehicle holds its position until you move a control again. Push **Engage
+   agent** to give control back.
+
+The viewer reads the gateway address from the `agent` parameter of its address,
+for example `&agent=http://localhost:8098`. The default is port 8098 on the host
+that serves the page.
+
+A browser on a second machine needs a secure context for WebTransport. Forward the
+viewer port and the gateway port to `localhost` on that machine, and give the host
+name of the session machine in the `host` parameter.
+
 ## Score a model
 
 ```
@@ -192,6 +231,25 @@ Two live runs took operator messages from the keyboard. In the two runs the mess
 "Proceed direct ZULU and land." got the reply `ALPHA`. The first run had no grounding
 check, and the vehicle flew toward `ALPHA` for 4 s. The second run refused the reply.
 
+### Flights from the browser viewer
+
+A headless Chrome on a second machine flew this sequence through the agent panel,
+with `gemma4:e4b` behind the gateway: takeoff, "Turn left heading 270.", "Proceed
+direct ZULU and land.", "Proceed direct BRAVO and hold.", a flight key from the
+operator, a second engage, and "Cleared RNAV 27 approach.". Each check reads the
+vehicle pose from Gazebo (`gz model -p`). It does not read the agent or the page.
+
+| Run | Result | Notes |
+| --- | --- | --- |
+| 1 | 10 of 11 checks | The failed check was the first probe of the test rig. It read the wrong page element for the lease. Each flight check passed. |
+| 2 | lost | The test rig stopped on a failed truth sample. The browser closed, and the link-loss policy of the host landed the vehicle. |
+| 3 | 11 of 11 checks | 5.25 m after takeoff, heading 264 and 10.3 m west after 7 s, 0.9 m from `BRAVO`, 5.1 m under the operator, landed 0.19 m from `HOME`. |
+
+In each run the model gave `ALPHA` for `ZULU`, and the grounding check refused the
+reply. The host accepted four profile activations in run 1: the keyboard, the agent,
+the keyboard after the operator input, and the agent again. The host rejected no
+control frame.
+
 ## Known limits
 
 - The executor is a copy of what the mission core of ADR-0041 will do. The mission
@@ -203,3 +261,7 @@ check, and the vehicle flew toward `ALPHA` for 4 s. The second run refused the r
 - The telemetry has no energy state. The agent has no hazard response.
 - The host grant path does not mark an agent as different from a person.
 - A heading is a heading and not a track. The executor does not hold a ground track.
+- The browser port flies only while its window has the focus, as a person's input
+  does. A window that loses the focus releases its lease.
+- The Apple client links the same control runtime, so it has the agent input source.
+  It has no agent panel and no connection to a model gateway.

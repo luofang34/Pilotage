@@ -54,8 +54,24 @@ typed control frames and discrete actions under that lease. It offers the lease 
 a different principal requests the scope. A client shows the agent as the holder of
 the scope.
 
-The headless tool is one platform port of this module. A web shell or a native
-shell can add a port of its own and use the same core.
+The module has two platform ports, and the two fly through one type of the shared
+core, `AgentFlight`. That type owns the model request, the checks of a model reply,
+the executor and the newest vehicle state, so the two ports cannot differ in what
+they fly.
+
+- The headless port is a client of its own. It holds a session and a lease.
+- The web port is a part of the operator client. The agent is an input source of
+  the control runtime that the web shell and the Apple shell share, beside the
+  keyboard and a pad. An engage and a release take the transactional neutral
+  handover that a device change takes. While the agent is the source, the
+  announcement names the identity of the agent as the device profile. The demand of
+  the agent goes through the control loop, the publish gate, the typed intent
+  builder and the action tracker of the client. The first operator input releases
+  the agent, and the press that takes control does not also fire its action.
+
+The web port reads the operational estimate that the instrument module already
+admitted, and the advertisement of the motion scope. It has no connection of its
+own.
 
 ### The model is not part of Pilotage
 
@@ -80,6 +96,12 @@ one model asks for them in its declaration. The measurements above are the reaso
 A reply has one directive, a probability for each slot when the model has one, and
 the model time. A model can reply `unable`. An adapter must reply `unable` when the
 model cannot fill a slot that the directive needs.
+
+A client that cannot start a process, such as a browser, reaches the adapter
+through a **model gateway**. The gateway holds the adapter process and gives the
+same request and the same reply over HTTP. It adds no second protocol, and it holds
+no authority: it sends nothing to a vehicle and reads nothing from one. A page can
+call it only when the origin of the page is in its permitted list.
 
 A **model adapter** is the small program that connects one model to the model port.
 It owns the prompt, the decoding method and the image encoding of that model. It
