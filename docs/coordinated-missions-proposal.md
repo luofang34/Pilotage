@@ -2,6 +2,9 @@
 
 Status: Proposed product and architecture design.
 
+The [local planner](mission/planner-implementation.md) implements route search and coordinated timing.
+Shared editing, owner acceptance, and live release remain proposed.
+
 ## Purpose
 
 A mission can use vehicles from several people and organizations.
@@ -22,6 +25,7 @@ It does not grant vehicle control through document access.
 | Vehicle owner | The authority that permits use of a vehicle. Ownership and operation can differ. |
 | Vehicle binding | A reference from a planned vehicle to its current host, session, and vehicle ID. |
 | Milestone | An identified result that another assignment can require. |
+| Time on target (ToT) | A required UTC arrival time at a specified route occurrence. |
 | Revision | An immutable, published version of a mission plan. |
 | Run | One execution of a specific revision. |
 | Coordinator host | A host that evaluates shared conditions and requests work from member hosts. |
@@ -85,6 +89,21 @@ Do not show sample distance or duration values as calculated results.
 8. Review conflicts and missing information.
 9. Publish a revision for owner acceptance.
 10. Review the acceptance and readiness of each assignment.
+
+### Time on target
+
+Each assignment can have its own ToT.
+A swarm can have a common ToT with a separate route occurrence for each member.
+Each condition has an early and late tolerance.
+A member can have an offset from the common time.
+Use this offset to define an arrival order.
+
+Bind each timing condition to exact assignment and route occurrence IDs.
+Do not infer the target from the last waypoint after a route change.
+Check the departure window for each member.
+Report a conflict when one member's target windows do not intersect.
+Report unknown timing when speed, departure, or route data is absent.
+An estimated arrival within tolerance does not prove execution readiness.
 
 Publishing a revision does not send a vehicle command.
 An invitation does not permit use of the invited participant's vehicles.

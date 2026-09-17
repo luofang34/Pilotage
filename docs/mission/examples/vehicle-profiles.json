@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "example-cruise-profile",
+      "revision": 1,
+      "name": "Example cruise profile",
+      "registration": null,
+      "kind": "aircraft",
+      "cruise_speed_knots": 120,
+      "speed_reference": "true_airspeed",
+      "source": "Format example. Replace this value with verified vehicle data."
+    }
+  ]
+}
