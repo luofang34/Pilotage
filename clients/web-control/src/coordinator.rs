@@ -12,8 +12,11 @@ use pilotage_input::ProfileLayer;
 use crate::authority::{AuthorityDisposition, AuthorityEvent, AuthorityScope, AuthorityState};
 use crate::device::{CompiledDevice, DeviceStage, SelectOutcome};
 
-/// Which physical source currently drives control — the identity the
-/// activation announcement names. Keyboard is the boot source; a pad
+mod agent;
+pub use agent::{AgentInput, AgentTick};
+
+/// Which source currently drives control — the identity the activation
+/// announcement names. Keyboard is the boot source; a pad or an agent
 /// becomes active only through a completed selection transaction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputSource {
@@ -21,6 +24,8 @@ pub enum InputSource {
     Keyboard,
     /// The selected pad profile.
     Pad,
+    /// An engaged automation source (ADR-0042).
+    Agent,
 }
 
 /// The parts a pending swap installs at its transaction boundary. `None`
@@ -47,6 +52,9 @@ pub struct ControlCoordinator {
     pending: Option<PendingSwap>,
     /// The source whose profile identity the announcement names.
     active_source: InputSource,
+    /// The identity of the agent that engaged last. It names the source in
+    /// the announcement while [`InputSource::Agent`] is active.
+    agent: Option<agent::AgentIdentity>,
     /// The activation revision last observed by [`Self::evaluate`], so a
     /// revision advance (the handover completing) is detectable.
     seen_revision: u32,
@@ -64,6 +72,7 @@ impl ControlCoordinator {
             stage: DeviceStage::new(),
             pending: None,
             active_source: InputSource::Keyboard,
+            agent: None,
             seen_revision: 0,
             last_pad_id: String::new(),
         }
@@ -133,8 +142,11 @@ impl ControlCoordinator {
     pub fn select_device(&mut self, gamepad_id: &str) -> SelectOutcome {
         self.last_pad_id = gamepad_id.to_owned();
         let (candidate, outcome) = self.stage.resolve_pad(gamepad_id);
+        // An engaged agent stays the source. The pad map still follows the
+        // connected pad, because the operator-override check reads through it.
+        let source = (!self.agent_engaged()).then_some(InputSource::Pad);
         let changed = candidate.as_ref().map(CompiledDevice::digest) != self.stage.pad_digest()
-            || self.active_source != InputSource::Pad;
+            || (source.is_some() && self.active_source != InputSource::Pad);
         if !changed {
             self.stage.install_pad(candidate, outcome);
             self.runtime.reseed_edge_baselines();
@@ -143,7 +155,7 @@ impl ControlCoordinator {
         self.swap(PendingSwap {
             pad: Some((candidate, outcome)),
             keyboard: None,
-            source: Some(InputSource::Pad),
+            source,
         });
         outcome
     }
@@ -155,13 +167,13 @@ impl ControlCoordinator {
     /// re-announcement a pad selection takes.
     pub fn deselect_device(&mut self) {
         self.last_pad_id = String::new();
-        if self.active_source == InputSource::Keyboard && self.stage.pad_digest().is_none() {
+        if self.active_source != InputSource::Pad && self.stage.pad_digest().is_none() {
             return;
         }
         self.swap(PendingSwap {
             pad: Some((None, SelectOutcome::Refused)),
             keyboard: None,
-            source: Some(InputSource::Keyboard),
+            source: (!self.agent_engaged()).then_some(InputSource::Keyboard),
         });
     }
 
@@ -274,6 +286,10 @@ impl ControlCoordinator {
         match self.active_source {
             InputSource::Keyboard => self.stage.keyboard_label(),
             InputSource::Pad => self.stage.pad_label(),
+            InputSource::Agent => self
+                .agent
+                .as_ref()
+                .map_or("", |agent| agent.profile_id.as_str()),
         }
     }
 
@@ -283,6 +299,7 @@ impl ControlCoordinator {
         match self.active_source {
             InputSource::Keyboard => self.stage.keyboard_revision(),
             InputSource::Pad => self.stage.pad_revision(),
+            InputSource::Agent => agent::AgentIdentity::revision(),
         }
     }
 
@@ -292,6 +309,7 @@ impl ControlCoordinator {
         match self.active_source {
             InputSource::Keyboard => self.stage.keyboard_digest(),
             InputSource::Pad => self.stage.pad_digest(),
+            InputSource::Agent => self.agent.as_ref().map(|agent| agent.digest),
         }
     }
 
@@ -330,6 +348,9 @@ impl ControlCoordinator {
                 .stage
                 .pad_button_label(slot)
                 .map_or_else(|| format!("button {slot}"), str::to_owned),
+            // An agent has no button to press. The operator's own safety
+            // press disengages it and then needs a second press.
+            InputSource::Agent => "agent engaged".to_owned(),
         }
     }
 

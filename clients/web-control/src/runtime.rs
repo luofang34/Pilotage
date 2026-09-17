@@ -11,11 +11,11 @@
 use crate::authority::{
     AuthorityDisposition, AuthorityEvent, AuthorityScope, AuthorityState, AuthorityTable,
 };
-use crate::flight::{Capture, flight_axes, shaped_stick};
+use crate::flight::{Capture, FlightAxes, flight_axes, shaped_stick};
 use crate::plan::{ControlPlan, Frame, LeaseAction};
 use crate::profile::CompiledProfile;
 use crate::quasimode::{frame_plan, gimbal_demand, modifier_held, reset_edge, reset_held};
-use crate::sample::{RawSample, SessionState};
+use crate::sample::{DirectDemand, Mode, RawSample, SessionState};
 
 mod activation;
 mod authority;
@@ -155,6 +155,18 @@ impl ControlRuntime {
         self.active
             .as_ref()
             .map(|active| (active.flight.arm_button, active.flight.disarm_button))
+    }
+
+    /// Whether `sample` shows no operator input under the active scheme: every
+    /// control reads neutral and neither safety button is pressed. An
+    /// automation source gives way when this is false.
+    #[must_use]
+    pub fn operator_input_neutral(&self, sample: &RawSample) -> bool {
+        self.active.as_ref().is_none_or(|active| {
+            controls_neutral(sample, active)
+                && !sample.pressed(usize::from(active.flight.arm_button))
+                && !sample.pressed(usize::from(active.flight.disarm_button))
+        })
     }
 
     /// The active profile's content digest, or all-zero before activation. The
@@ -334,7 +346,10 @@ impl ControlRuntime {
             yaw_axis: active.gimbal.yaw.source_index,
             modifier_button: usize::from(active.gimbal.modifier_button),
         };
-        let axes = flight_axes(sample, flight, &active.flight_stick, session.mode, capture);
+        let axes = match sample.direct {
+            Some(demand) => direct_axes(demand, session.mode),
+            None => flight_axes(sample, flight, &active.flight_stick, session.mode, capture),
+        };
         MotionOutcome {
             frame: Frame::motion(axes.roll, axes.pitch, axes.throttle, axes.yaw),
             label: axes.label,
@@ -354,6 +369,29 @@ impl ControlRuntime {
             self.prev_disarm = pressed;
         }
         pressed && !prev
+    }
+}
+
+/// The flight axes of an automation source. The demand is already in flight
+/// axes, so no stick assignment applies. A mode that reads the four demands
+/// differently gets neutral, never a reinterpreted demand.
+fn direct_axes(demand: DirectDemand, mode: Mode) -> FlightAxes {
+    if !mode.carries_direct_demand() {
+        return FlightAxes {
+            roll: 0.0,
+            pitch: 0.0,
+            throttle: 0.0,
+            yaw: 0.0,
+            label: "AGENT: this flight mode has no velocity law",
+        };
+    }
+    let demand = demand.bounded();
+    FlightAxes {
+        roll: demand.roll,
+        pitch: demand.pitch,
+        throttle: demand.throttle,
+        yaw: demand.yaw,
+        label: "AGENT: directive",
     }
 }
 
