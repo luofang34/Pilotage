@@ -112,7 +112,10 @@ Scenarios: `direct-land`, `retarget-recall`, `vectors` (heading and altitude),
 ## Run a live demonstration
 
 1. Start the session with `cargo xtask sim --fc aviate --lan --no-open`. The launcher
-   prints a viewer address for a browser on the same network.
+   prints a viewer address for a browser on the same network. The address uses the
+   name `pilotage.local`. If that name does not resolve, use the host name of the
+   machine. The viewer page, the connect manifest and the QUIC port were reached from
+   a second machine. The viewer was not operated in a browser in this work.
 2. Start the pilot with `--scenario tools/intent-pilot/scenarios/live.json --live`.
 3. Type one operator message on each line. Examples: `Cleared for takeoff.`,
    `Turn left heading 270.`, `Climb and maintain 12 metres.`, `Proceed direct BRAVO
@@ -162,6 +165,8 @@ numbers are not a blind test. The comparison between adapters is fair.
 | `rlcd_directive.py`, the same Qwen weights | 19 of 46 | 5 | 19 | 379 ms |
 
 The "flown" and "stopped" columns are from the second run, before the turn-side rule.
+That rule was written after the held-out run showed a reply with a lost turn side. It
+changes what the agent flies. It does not change the score of a model.
 The grounding check stopped no correct answer. The parallel engine is below the
 keyword baseline on this vocabulary: directive kind 21 of 30 and numbers 2 of 15 in
 the two suites. It is correct for kinds with one clear word, such as a procedure.
