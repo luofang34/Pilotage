@@ -18,6 +18,7 @@ mod executor;
 mod flight;
 mod grounding;
 mod guidance;
+mod lowering;
 mod model_port;
 mod scenario;
 mod state;
@@ -33,6 +34,7 @@ pub use executor::{Discrete, Executor, FlightLimits, Phase, Step};
 pub use flight::{AgentFlight, VehicleOffer};
 pub use grounding::check_grounding;
 pub use guidance::Demand;
+pub use lowering::{LoweringContext, LoweringError, flight_actions};
 pub use model_port::{
     AdapterDeclaration, Frame, FrameSupport, ModelReply, ModelRequest, Projection, Refusal,
     SlotProbabilities, check_reply,

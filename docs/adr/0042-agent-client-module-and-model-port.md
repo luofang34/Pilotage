@@ -126,16 +126,33 @@ the phrases of air traffic control, because an operator already knows them.
 | `return_to_base` | "return to base" | — |
 | `unable` | a message that is not an instruction | reason |
 
-The directive vocabulary is not a second mission vocabulary. The executor lowers a
-directive onto the flight actions of ADR-0041. `takeoff` is `arm` and `climb`.
-`altitude` is `climb`. `direct_to` and `join_procedure` are `follow_plan`. `hold` is
-`maintain_target`. `land` is `land`.
+The directive vocabulary is not a second mission vocabulary. Each directive lowers
+onto the flight actions of ADR-0041, and the function `flight_actions` of the agent
+core is the one place that states the lowering. Its match is exhaustive, so a new
+directive kind does not compile until it has a lowering. A test gives each lowered
+action to the mission core in a document.
 
-Three directives have no flight action today: `heading`, `speed` and `go_around`.
-A directive also changes the active target in flight, and the mission document of
-ADR-0041 does not change after a mission starts. These are the additions that the
-mission core needs before the agent can use it. Until then, the agent core has an
-executor of its own. That executor sends the same typed velocity frames.
+| Directive | Flight actions |
+| --- | --- |
+| `takeoff` | `arm`, `climb` |
+| `direct_to` | `follow_plan`, then `land` or `maintain_target` |
+| `heading` | `heading` |
+| `altitude` | `climb` |
+| `speed` | `speed` |
+| `hold` | `maintain_target`, after `follow_plan` for a hold at a fix |
+| `join_procedure` | `follow_plan` |
+| `land` | `land` |
+| `go_around` | `go_around` |
+| `return_to_base` | `follow_plan`, `land` |
+
+A flight plan comes from the flight-planning module. The lowering asks for the plan
+to a fix or along a procedure, and it has no answer when no plan is known.
+
+The executor of the agent core does not run these actions today. A directive changes
+the active target in flight, and the mission document of ADR-0041 does not change
+after a mission starts. This is the addition that the mission core needs before the
+agent can use it. Until then, the agent core has an executor of its own. That
+executor sends the same typed velocity frames.
 
 ### Checks before a directive is flown
 
@@ -209,7 +226,8 @@ the same scenarios for each model.
 - The agent cannot do more than a person's client can do. A person can take the
   scope from it in the normal way.
 - The agent core has an executor that the mission core will replace. The two must
-  not grow apart. The additions to the mission core are small and are named above.
+  not grow apart. The lowering function and its tests hold the two vocabularies
+  together. The addition to the mission core is named above.
 
 ## Alternatives considered
 
