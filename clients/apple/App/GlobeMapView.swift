@@ -11,9 +11,11 @@ final class GlobeMapView: MTKView, MTKViewDelegate, UIGestureRecognizerDelegate 
     var onMovedByReader: (() -> Void)?
     var onFeatureTapped: ((String) -> Void)?
     var batch: DisplayBatch? { didSet { overlay.batch = batch } }
+    var plannedRoutes: [PlannedMapRoute] = [] { didSet { overlay.plannedRoutes = plannedRoutes } }
     private let overlay = GlobeSituationOverlay()
     private var camera = GlobeCamera()
     private var cameraMotion: GlobeCameraMotion?
+    var requestedCamera: GlobeCamera { cameraMotion?.target ?? camera }
     private var renderer: GlobeRenderer?
     private var style: AviationMapStyle?
     private var mode = "terrain"
@@ -145,9 +147,11 @@ final class GlobeMapView: MTKView, MTKViewDelegate, UIGestureRecognizerDelegate 
     }
 
     func changeCamera(animated: Bool = false, _ change: (inout GlobeCamera) -> Void) {
-        var target = camera
+        let animate = animated && !UIAccessibility.isReduceMotionEnabled
+        // One control can set position, scale, and heading before the next frame.
+        var target = animate ? requestedCamera : camera
         change(&target)
-        if animated && !UIAccessibility.isReduceMotionEnabled {
+        if animate {
             cameraMotion = GlobeCameraMotion(start: camera, target: target, startedAt: CACurrentMediaTime())
         } else {
             cameraMotion = nil
@@ -176,6 +180,19 @@ final class GlobeMapView: MTKView, MTKViewDelegate, UIGestureRecognizerDelegate 
             $0.latitude = coordinate.latitude
             $0.longitude = coordinate.longitude
             if frame { $0.distance = 134_000 }
+        }
+    }
+
+    func fitRoute(_ coordinates: [CLLocationCoordinate2D], animated: Bool) {
+        guard let overview = RouteOverview(coordinates) else { return }
+        let covered = min(400, bounds.height * 0.45)
+        let fraction = max(0.25, (bounds.height - covered) / max(1, bounds.height))
+        let distance = min(80_000_000, overview.radiusMeters * 2.8 / fraction)
+        let offset = min(20, distance * 0.41421356 * covered / max(1, bounds.height) / GlobeCamera.earthRadius * 180 / .pi)
+        changeCamera(animated: animated) {
+            $0.latitude = max(-85, min(85, overview.center.latitude - offset))
+            $0.longitude = overview.center.longitude
+            $0.distance = distance; $0.heading = 0; $0.pitch = 0
         }
     }
 

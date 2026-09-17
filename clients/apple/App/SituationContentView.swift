@@ -55,7 +55,33 @@ struct SituationContentView: View {
                 .toolbar(.hidden, for: .navigationBar)
         }
         .navigationSplitViewStyle(.balanced)
-        .task { await aviationData.start(situation: model) }
+        .task {
+            await missionPlan.start()
+            await aviationData.start(situation: model, retainedSources: missionPlan.retainedSources)
+            await aviationData.retainMission(missionPlan.draft.id, sources: missionPlan.retainedSources)
+        }
+        .task(id: missionPlan.retainedSources) {
+            await aviationData.retainMission(missionPlan.draft.id, sources: missionPlan.retainedSources)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await aviationData.refreshInstalledNavigation() } }
+        }
+        .onChange(of: ownship.fix) { _, fix in missionPlan.receiveNavigationFix(fix) }
+        .onChange(of: missionPlan.navigationProgress != nil) { _, navigating in
+            if navigating && ownship.fix == nil { ownship.requestPositionIfNeeded() }
+        }
+        .onChange(of: missionPlan.routeOverviewRequest) { _, _ in
+            ownship.follow = .idle
+            mapCommands?.fitRoute(missionPlan.tokens.map {
+                CLLocationCoordinate2D(latitude: $0.point.latitudeDeg, longitude: $0.point.longitudeDeg)
+            }, true)
+        }
+        .onChange(of: missionPlan.mapSelection) { _, point in
+            guard let point else { return }
+            ownship.follow = .idle
+            mapCommands?.centreAndFrame(CLLocationCoordinate2D(latitude: point.point.latitudeDeg,
+                longitude: point.point.longitudeDeg), true)
+        }
         .background(.black)
         .onGeometryChange(for: CGSize.self) { proxy in
             proxy.size
@@ -120,8 +146,7 @@ struct SituationContentView: View {
             .toolbarBackground(.visible, for: .navigationBar)
         case .mission:
             MissionPlannerView(
-                controllable: hostLink.catalog?.offersFlightControl == true,
-                plan: missionPlan
+                plan: missionPlan, search: aviationData.navigationSearch, aviationData: aviationData
             )
                 .navigationTitle("Mission Planner")
                 .navigationBarTitleDisplayMode(.inline)
@@ -159,9 +184,15 @@ struct SituationContentView: View {
                     style: style, mode: selectedMapModeID,
                     requestedAt: mapModeRequestedAt,
                     batch: model.mapDisplay,
+                    plannedRoutes: missionPlan.draft.assignments.map {
+                        PlannedMapRoute(id: $0.id, name: $0.name, tokens: $0.route.waypoints,
+                            selected: $0.id == missionPlan.assignment?.id,
+                            currentLegIndex: missionPlan.navigationProgress?.assignmentID == $0.id
+                                ? missionPlan.navigationProgress?.destinationIndex : nil)
+                    },
                     onFeatureTapped: model.selectTraffic,
                     onCameraChanged: { camera = $0 },
-                    onReady: { mapCommands = $0 },
+                    onReady: { mapCommands = $0; applyFollow(animated: false) },
                     onMovedByReader: {
                         ownship.follow = .idle
                         modesPresented = false
@@ -226,7 +257,7 @@ struct SituationContentView: View {
                     Color.clear.frame(width: Metrics.control, height: 1)
                 }
                 .mapControlPlacement(.top)
-                MissionPlannerBar(model: hostLink, plan: missionPlan)
+                MissionPlannerBar(plan: missionPlan, search: aviationData.navigationSearch, aviationData: aviationData)
                     .mapControlPlacement(.bottom)
             }
         }
@@ -244,6 +275,24 @@ struct SituationContentView: View {
             }
             model.onOwnship = { [ownship] reported in
                 ownship.observeAircraft(reported.map(OwnshipFix.init))
+            }
+            model.onApplianceNavigation = { [ownship] navigation in
+                let fix = navigation.flatMap { value -> OwnshipFix? in
+                    guard let latitude = value.latitudeDegrees,
+                          let longitude = value.longitudeDegrees else { return nil }
+                    return OwnshipFix(
+                        latitudeDegrees: latitude,
+                        longitudeDegrees: longitude,
+                        courseDegrees: value.groundTrackDegreesTrue,
+                        source: .aircraft
+                    )
+                }
+                let heading = navigation.flatMap { value -> HeadingFix? in
+                    guard value.headingReference == .trueNorth,
+                          let degrees = value.headingDegrees else { return nil }
+                    return HeadingFix(trueDegrees: degrees, source: .aircraft)
+                }
+                ownship.observeAeroLink(fix: fix, heading: heading)
             }
             ownship.startIfPermitted()
             model.refreshEvidence()
@@ -368,24 +417,22 @@ private extension SituationContentView {
     func cycleFollow() {
         // Pressing this is also how a reader asks for permission the first time.
         ownship.requestPositionIfNeeded()
-        let wasIdle = ownship.follow == .idle
         ownship.follow = ownship.follow.next
-        // Only the press that starts following sets the width. A reader who has zoomed
-        // out to look ahead and then presses again to turn the map with the aircraft has
-        // not asked to be zoomed back in.
-        if wasIdle, let fix = ownship.fix {
-            mapCommands?.centreAndFrame(fix.coordinate, true)
-        }
         applyFollow(animated: true)
     }
 
     /// Put the camera where the current mode says it belongs.
     func applyFollow(animated: Bool) {
+        guard let mapCommands else { return }
         // Position and heading are separate answers. Coupling them meant a map that would
         // not turn with the aircraft until it also knew where the aircraft was, and indoors
         // that is most of the time.
         if ownship.follow.followsPosition, let fix = ownship.fix {
-            mapCommands?.centre(fix.coordinate, animated)
+            if ownship.takePositionFrameRequest() {
+                mapCommands.centreAndFrame(fix.coordinate, animated)
+            } else {
+                mapCommands.centre(fix.coordinate, animated)
+            }
         }
         switch ownship.follow {
         case .heading:
@@ -393,10 +440,10 @@ private extension SituationContentView {
             // only when neither does. They differ in wind, and the map should turn to
             // where the aircraft points rather than where it is drifting.
             if let heading = ownship.heading {
-                mapCommands?.setHeading(heading.trueDegrees, animated)
+                mapCommands.setHeading(heading.trueDegrees, animated)
             }
         case .centred:
-            mapCommands?.resetHeading()
+            mapCommands.resetHeading()
         case .idle:
             break
         }

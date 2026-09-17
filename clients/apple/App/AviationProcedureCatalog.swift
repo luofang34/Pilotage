@@ -12,6 +12,25 @@ struct AviationProcedureCatalog: Sendable {
     let installed: InstalledAviationRelease
     let charts: [AviationProcedureChart]
 
+    static func preferredReleases(_ snapshot: AviationDataSnapshot, at now: Date) -> [InstalledAviationRelease] {
+        let candidates = snapshot.installed.filter {
+            $0.release.product == .procedures && $0.release.validityLabel(at: now) != "Upcoming"
+        }.sorted {
+            let left = $0.release.validityLabel(at: now) == "Current"
+            let right = $1.release.validityLabel(at: now) == "Current"
+            if left != right { return left }
+            let leftDate = $0.release.validity?.effectiveAt ?? .distantPast
+            let rightDate = $1.release.validity?.effectiveAt ?? .distantPast
+            if leftDate != rightDate { return leftDate > rightDate }
+            if $0.release.revision != $1.release.revision { return $0.release.revision > $1.release.revision }
+            return $0.id < $1.id
+        }
+        var families = Set<String>()
+        return candidates.filter {
+            families.insert($0.release.authority + ":" + $0.release.coverage.bounds.map { String($0) }.joined(separator: ",")).inserted
+        }
+    }
+
     private struct Index: Decodable {
         let schemaVersion: Int
         let edition: String

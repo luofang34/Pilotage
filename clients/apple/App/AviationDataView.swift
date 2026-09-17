@@ -116,7 +116,7 @@ private struct AviationReleaseView: View {
                         AviationProceduresView(model: model, installed: installed)
                     }.disabled(model.busy)
                 }
-                if release.product == .navdata, installed.artifactURL(format: "acnav") != nil {
+                if release.product == .navdata {
                     Button(release.validityLabel() == "Current" ? "Use this edition" : "Inspect this edition") {
                         Task { await model.selectNavigation(installed, allowOutsideValidity: release.validityLabel() != "Current") }
                     }.disabled(model.busy || model.snapshot.active(.navdata)?.id == installed.id)

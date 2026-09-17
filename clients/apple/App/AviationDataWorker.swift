@@ -43,7 +43,7 @@ final class AviationDataWorker: @unchecked Sendable {
         return UInt64(max(0, (values.volumeAvailableCapacityForImportantUsage ?? 0) - reserve))
     }
 
-    func importExamples(from directory: URL) async throws {
+    func importExamples(from directory: URL, navigationOnly: Bool = false) async throws {
         try await run { [self] session in
             let index = try Data(contentsOf: directory.appendingPathComponent("index.json"))
             let manifests = try JSONDecoder().decode([String].self, from: index)
@@ -56,6 +56,7 @@ final class AviationDataWorker: @unchecked Sendable {
                 let url = directory.appendingPathComponent(name)
                 let manifest = try String(contentsOf: url, encoding: .utf8)
                 let release = try decodeAviationData(AviationRelease.self, from: manifest)
+                if navigationOnly && release.product != .navdata { continue }
                 guard !imported.contains(release.id) else { continue }
                 try session.importBundledBlocking(
                     manifestJson: manifest, sourceDirectory: url.deletingLastPathComponent().path,

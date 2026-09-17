@@ -42,7 +42,7 @@ struct AviationProceduresView: View {
     }
 }
 
-private struct AviationProcedurePDFView: View {
+struct AviationProcedurePDFView: View {
     let catalog: AviationProcedureCatalog
     let chart: AviationProcedureChart
     @State private var document: PDFDocument?

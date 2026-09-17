@@ -3,6 +3,7 @@ import PilotageCore
 
 @MainActor
 final class AviationDataModel: ObservableObject {
+    let navigationSearch = NavigationSearchModel()
     @Published private(set) var snapshot = AviationDataSnapshot.empty
     @Published private(set) var available: [AviationRelease] = []
     @Published private(set) var busy = false
@@ -15,13 +16,15 @@ final class AviationDataModel: ObservableObject {
     private var publisherJSON: String?
     private var started = false
     private weak var situation: SituationClientModel?
+    private var retainedNavigationIDs = Set<String>()
 
     var updatesConfigured: Bool { publisherJSON != nil }
 
-    func start(situation: SituationClientModel) async {
+    func start(situation: SituationClientModel, retainedSources: [NavigationSource] = []) async {
         guard !started else { return }
         started = true
         self.situation = situation
+        retainedNavigationIDs = Set(retainedSources.map(\.releaseId))
         await perform("Checking installed data…") {
             let worker = try await AviationDataWorker.open()
             self.worker = worker
@@ -30,6 +33,8 @@ final class AviationDataModel: ObservableObject {
             }
             if let examples = Bundle.main.url(forResource: "AviationDataExamples", withExtension: nil) {
                 do {
+                    try await worker.importExamples(from: examples, navigationOnly: true)
+                    try await self.reload()
                     try await worker.importExamples(from: examples)
                 } catch {
                     try await self.reload()
@@ -101,6 +106,15 @@ final class AviationDataModel: ObservableObject {
     }
 
     func cancel() { worker?.cancel() }
+
+    func retainMission(_ id: String, sources: [NavigationSource]) async {
+        retainedNavigationIDs = Set(sources.map(\.releaseId))
+        guard let worker else { return }
+        do {
+            try await worker.retainMission(id, sources: sources, snapshot: snapshot)
+            try await reload()
+        } catch { errorMessage = error.localizedDescription }
+    }
 
     func openProcedures(_ installed: InstalledAviationRelease) async -> AviationProcedureCatalog? {
         guard let worker else { return nil }
@@ -201,6 +215,22 @@ final class AviationDataModel: ObservableObject {
         guard let worker else { return }
         let json = try await worker.run { try $0.snapshotCachedBlocking() }
         snapshot = try decodeAviationData(AviationDataSnapshot.self, from: json)
+        do {
+            try await navigationSearch.configure(worker: worker, snapshot: snapshot)
+            let previousNavigationID = snapshot.active(.navdata)?.id
+            snapshot = try await worker.renewNavigation(snapshot: snapshot, opened: navigationSearch.sources,
+                retaining: retainedNavigationIDs, at: Date())
+            if previousNavigationID != snapshot.active(.navdata)?.id, snapshot.active(.terrain) != nil {
+                let data = try await worker.situationData(snapshot: snapshot)
+                try await situation?.useInstalledData(data)
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func refreshInstalledNavigation() async {
+        do { try await reload() } catch { errorMessage = error.localizedDescription }
     }
 
     private func perform(_ message: String, success: String = "Installed data is available offline.",
