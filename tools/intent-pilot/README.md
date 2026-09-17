@@ -175,13 +175,17 @@ from stamped simulator truth.
 
 | Scenario | Flights | Pass | Notes |
 | --- | --- | --- | --- |
-| `vectors` | 3 | 3 | heading 270 held, 12 m held, landed at `HOME` |
-| `approach` | 2 | 2 | `DELTA`, then `BRAVO`, then landed at `HOME` |
-| `go-around` | 2 | 2 | descent seen, then 5 m held, landed at `HOME` |
+| `vectors` | 5 | 5 | heading 270 held, 12 m held, landed at `HOME` |
+| `approach` | 3 | 3 | `DELTA`, then `BRAVO`, then landed at `HOME` |
+| `go-around` | 3 | 3 | descent seen, then 5 m held, landed at `HOME` |
 | `direct-land` | 2 | 2 | 0.60 m and 0.71 m from `ALPHA` |
 | `retarget-recall` | 3 | 0 | The model misread the first message. One of these flights passed an earlier, weaker expectation. That pass does not count. With `oracle.py` the scenario passes. |
 
 The host rejected no control frame in these flights.
+
+Two live runs took operator messages from the keyboard. In the two runs the message
+"Proceed direct ZULU and land." got the reply `ALPHA`. The first run had no grounding
+check, and the vehicle flew toward `ALPHA` for 4 s. The second run refused the reply.
 
 ## Known limits
 
