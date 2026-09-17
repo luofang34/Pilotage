@@ -5,6 +5,12 @@ import UIKit
 @MainActor
 final class GlobeSituationOverlay: UIView {
     var batch: DisplayBatch?
+    var plannedRoutes: [PlannedMapRoute] = [] {
+        didSet {
+            if plannedRoutes != oldValue { preparedRoutes = plannedRoutes.map(PreparedMapRoute.init) }
+        }
+    }
+    var preparedRoutes: [PreparedMapRoute] = []
     var project: (([Double]) -> [CGPoint?])?
     var heading = 0.0
     private var hits: [(String, UIBezierPath)] = []
@@ -28,7 +34,9 @@ final class GlobeSituationOverlay: UIView {
     override func draw(_ rect: CGRect) {
         hits.removeAll(keepingCapacity: true)
         labels.removeAll(keepingCapacity: true)
-        guard let batch, let context = UIGraphicsGetCurrentContext(), project != nil else { return }
+        guard let context = UIGraphicsGetCurrentContext(), project != nil else { return }
+        drawPlannedRoute(context: context)
+        guard let batch else { return }
         let hidden = Set(batch.layers.filter { !$0.enabled }.map(\.id))
         let entries = batch.pointStyles.map { Entry.point($0) } + batch.shapeStyles.map { Entry.shape($0) }
         for entry in entries.sorted(by: { ($0.order, $0.id) < ($1.order, $1.id) }) {

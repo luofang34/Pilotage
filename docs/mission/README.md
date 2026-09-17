@@ -41,3 +41,7 @@ and the gate context they flew under.
 
 See the [coordinated mission proposal](../coordinated-missions-proposal.md).
 It defines shared plans, vehicle assignments, owner acceptance, and live coordination.
+
+See [Mission planner and navigation search](planner-implementation.md) for the local implementation.
+
+See the [X-Plane planner check](xplane-planner-check-2026-09-13.md) for the simulator test record.

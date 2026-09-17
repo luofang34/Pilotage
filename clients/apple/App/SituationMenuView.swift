@@ -28,6 +28,7 @@ struct SituationMenuView: View {
         NavigationStack {
             List {
                 receptionSection
+                applianceSection
                 Section {
                     NavigationLink {
                         AviationDataView(model: aviationData)
@@ -59,6 +60,25 @@ struct SituationMenuView: View {
                     Button("Done") { dismiss() }
                 }
             }
+        }
+    }
+
+    private var applianceSection: some View {
+        Section {
+            AeroLinkApplianceView(
+                snapshot: model.appliance,
+                isRecentered: model.ahrsIsRecentered,
+                recenter: model.recenterAhrs,
+                clearRecenter: model.clearAhrsRecenter
+            )
+        } header: {
+            Text("AeroLink Appliance")
+        } footer: {
+            Text(
+                "Pilotage can receive the AeroLink appliance over Bluetooth while the "
+                    + "direct USB radio path stays available. Recenter changes pitch and bank "
+                    + "in Pilotage. It does not change heading calibration."
+            )
         }
     }
 

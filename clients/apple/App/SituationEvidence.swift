@@ -89,6 +89,69 @@ struct SituationEvidence: Codable, Equatable {
     var followMode: String?
     /// First error the client reported, if any.
     var errorMessage: String?
+    /// State observed from the dedicated AeroLink Bluetooth appliance.
+    var aeroLinkAppliance: AeroLinkApplianceEvidence
+}
+
+struct AeroLinkApplianceEvidence: Codable, Equatable {
+    var state: String
+    var name: String?
+    var identifier: String?
+    var bytesConsumed: UInt64
+    var validFrames: UInt64
+    var crcErrors: UInt64
+    var invalidFrames: UInt64
+    var trafficReports: UInt64
+    var deferredUplinkMessages: UInt64
+    var unsupportedMessages: UInt64
+    var rollDegrees: Double?
+    var pitchDegrees: Double?
+    var rawRollDegrees: Double?
+    var rawPitchDegrees: Double?
+    var ahrsRecentered: Bool
+    var headingDegrees: Double?
+    var headingReference: String?
+    var pressureAltitudeFeet: Double?
+    var verticalSpeedFeetPerMinute: Double?
+    var latitudeDegrees: Double?
+    var longitudeDegrees: Double?
+    var groundTrackDegreesTrue: Double?
+
+    init(snapshot: AeroLinkApplianceSnapshot, ahrsRecentered: Bool) {
+        state = Self.label(snapshot.state)
+        name = snapshot.name
+        identifier = snapshot.identifier
+        bytesConsumed = snapshot.bytesConsumed
+        validFrames = snapshot.validFrames
+        crcErrors = snapshot.crcErrors
+        invalidFrames = snapshot.invalidFrames
+        trafficReports = snapshot.trafficReports
+        deferredUplinkMessages = snapshot.deferredUplinkMessages
+        unsupportedMessages = snapshot.unsupportedMessages
+        rollDegrees = snapshot.navigation?.rollDegrees
+        pitchDegrees = snapshot.navigation?.pitchDegrees
+        rawRollDegrees = snapshot.navigation?.rawRollDegrees
+        rawPitchDegrees = snapshot.navigation?.rawPitchDegrees
+        self.ahrsRecentered = ahrsRecentered
+        headingDegrees = snapshot.navigation?.headingDegrees
+        headingReference = snapshot.navigation?.headingReference.map(String.init(describing:))
+        pressureAltitudeFeet = snapshot.navigation?.pressureAltitudeFeet
+        verticalSpeedFeetPerMinute = snapshot.navigation?.verticalSpeedFeetPerMinute
+        latitudeDegrees = snapshot.navigation?.latitudeDegrees
+        longitudeDegrees = snapshot.navigation?.longitudeDegrees
+        groundTrackDegreesTrue = snapshot.navigation?.groundTrackDegreesTrue
+    }
+
+    private static func label(_ state: AeroLinkApplianceConnectionState) -> String {
+        switch state {
+        case .off: "off"
+        case .checking: "checking"
+        case .connecting: "connecting"
+        case .ready: "ready"
+        case .streaming: "streaming"
+        case .unavailable(let detail): "unavailable: \(detail)"
+        }
+    }
 }
 
 @MainActor
@@ -105,7 +168,9 @@ extension SituationEvidence {
         replay: SituationReplayRun?,
         driverEnabled: Bool?,
         terrainArchiveAvailable: Bool,
-        errorMessage: String?
+        errorMessage: String?,
+        appliance: AeroLinkApplianceSnapshot,
+        ahrsRecentered: Bool
     ) {
         self.driverEnabled = driverEnabled
         self.terrainArchiveAvailable = terrainArchiveAvailable
@@ -156,6 +221,10 @@ extension SituationEvidence {
         deviceHeadingAvailable = DeviceHeadingProvider.available
         followMode = String(describing: follow)
         self.errorMessage = errorMessage
+        aeroLinkAppliance = AeroLinkApplianceEvidence(
+            snapshot: appliance,
+            ahrsRecentered: ahrsRecentered
+        )
     }
 
     /// Read one counter for each attached receiver.

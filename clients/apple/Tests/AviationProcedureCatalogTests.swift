@@ -3,15 +3,30 @@ import XCTest
 @testable import AviationDataRecords
 
 final class AviationProcedureCatalogTests: XCTestCase {
-    private func installed(path: String = "chart.PDF", directory: String = "/installed/procedures") -> InstalledAviationRelease {
+    private func installed(path: String = "chart.PDF", directory: String = "/installed/procedures",
+                           id: String = "procedures-2609", validity: AviationValidity? = nil) -> InstalledAviationRelease {
         InstalledAviationRelease(release: AviationRelease(
-            id: "procedures-2609", product: .procedures, authority: "FAA", edition: "2609", revision: 1,
-            channel: "development", validity: nil,
+            id: id, product: .procedures, authority: "FAA", edition: "2609", revision: 1,
+            channel: "development", validity: validity,
             coverage: AviationCoverage(name: "KTTN", bounds: [-180, -90, 180, 90], minZoom: 0, maxZoom: 0,
                                        complete: false, exclusions: []),
             artifacts: [AviationArtifact(path: path, format: "pdf", bytes: 1, sha256: "test")],
             dependencies: [], rendererCapabilities: ["procedure-pdf-v1"], attributions: []
         ), directory: directory)
+    }
+
+    func testChartsUseCurrentCoverageAndKeepExpiredFallbackUntilTheUpdateIsEffective() {
+        func release(_ id: String, _ start: TimeInterval, _ end: TimeInterval) -> InstalledAviationRelease {
+            installed(id: id, validity: AviationValidity(effectiveAt: Date(timeIntervalSince1970: start),
+                expiresAt: Date(timeIntervalSince1970: end)))
+        }
+        let old = release("old", 0, 100), current = release("current", 100, 200), future = release("future", 200, 300)
+        let now = Date(timeIntervalSince1970: 150)
+        let complete = AviationDataSnapshot(installed: [future, old, current], selections: [])
+        XCTAssertEqual(AviationProcedureCatalog.preferredReleases(complete, at: now).map(\.id), ["current"])
+        let partial = AviationDataSnapshot(installed: [old, future], selections: [])
+        XCTAssertEqual(AviationProcedureCatalog.preferredReleases(partial, at: now).map(\.id), ["old"])
+        XCTAssertEqual(AviationProcedureCatalog.preferredReleases(partial, at: Date(timeIntervalSince1970: 200)).map(\.id), ["future"])
     }
 
     private func index(edition: String = "2609", paths: [String] = ["chart.PDF"]) throws -> Data {

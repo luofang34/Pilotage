@@ -1,7 +1,9 @@
 //! Flat records that cross the Apple FFI boundary.
 
+mod gdl90;
 mod presentation;
 
+pub use gdl90::{Gdl90HeadingReferenceValue, Gdl90IngestBatch, Gdl90NavigationSnapshot};
 pub use presentation::{
     DisplayLayerControl, DisplayLayerSourceState, DisplayTrafficDetail, DisplayTrafficDetailField,
     DisplayTrafficListItem, PresentationRadioBand, PresentationRadioState,

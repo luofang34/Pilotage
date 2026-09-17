@@ -196,14 +196,28 @@ final class OwnshipModel: ObservableObject {
     /// Held here rather than in the view because a closure that reads it outlives the
     /// view value that created it, and a captured view value holds the mode as it was
     /// when the closure was made rather than as it is when the closure runs.
-    @Published var follow: FollowMode = .idle
+    @Published var follow: FollowMode = .idle {
+        didSet {
+            if follow == .idle { frameNextPosition = false }
+            else if oldValue == .idle { frameNextPosition = true }
+        }
+    }
+    private var frameNextPosition = false
+
+    func takePositionFrameRequest() -> Bool {
+        guard frameNextPosition, follow.followsPosition, fix != nil else { return false }
+        frameNextPosition = false
+        return true
+    }
 
     private let device = DeviceLocationProvider()
     private let compass = DeviceHeadingProvider()
     private var deviceFix: OwnshipFix?
     private var aircraftFix: OwnshipFix?
+    private var aeroLinkFix: OwnshipFix?
     private var deviceHeading: HeadingFix?
     private var aircraftHeading: HeadingFix?
+    private var aeroLinkHeading: HeadingFix?
 
     init() {
         device.onFix = { [weak self] fix in
@@ -237,7 +251,7 @@ final class OwnshipModel: ObservableObject {
         let course = fix?.courseDegrees.map {
             HeadingFix(trueDegrees: $0, source: .courseOverGround)
         }
-        let next = aircraftHeading ?? deviceHeading ?? course
+        let next = aeroLinkHeading ?? aircraftHeading ?? deviceHeading ?? course
         guard next != heading else { return }
         heading = next
     }
@@ -284,8 +298,16 @@ final class OwnshipModel: ObservableObject {
         resolve()
     }
 
+    /// Take position and true heading from an AeroLink appliance.
+    func observeAeroLink(fix: OwnshipFix?, heading: HeadingFix?) {
+        aeroLinkFix = fix
+        aeroLinkHeading = heading
+        resolve()
+        resolveHeading()
+    }
+
     private func resolve() {
-        let next = aircraftFix ?? deviceFix
+        let next = aeroLinkFix ?? aircraftFix ?? deviceFix
         guard next != fix else { return }
         fix = next
         resolveHeading()

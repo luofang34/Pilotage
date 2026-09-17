@@ -1,3 +1,4 @@
+import CoreLocation
 import PilotageCore
 import UIKit
 import SwiftUI
@@ -6,6 +7,57 @@ import XCTest
 
 @MainActor
 final class GlobeSituationOverlayTests: XCTestCase {
+    func testFollowFramesTheFirstPositionEvenWhenPermissionDelaysIt() {
+        let ownship = OwnshipModel()
+        ownship.follow = .centred
+        XCTAssertFalse(ownship.takePositionFrameRequest())
+        ownship.observeAircraft(OwnshipFix(latitudeDegrees: 40, longitudeDegrees: -74,
+            courseDegrees: nil, source: .aircraft))
+        XCTAssertTrue(ownship.takePositionFrameRequest())
+        XCTAssertFalse(ownship.takePositionFrameRequest())
+        ownship.follow = .heading
+        XCTAssertFalse(ownship.takePositionFrameRequest())
+        ownship.observeAircraft(nil)
+        ownship.observeAircraft(OwnshipFix(latitudeDegrees: 41, longitudeDegrees: -74,
+            courseDegrees: nil, source: .aircraft))
+        XCTAssertFalse(ownship.takePositionFrameRequest())
+    }
+
+    func testLeavingFollowCancelsFramingUntilTheNextFollowRequest() {
+        let ownship = OwnshipModel()
+        ownship.follow = .centred
+        ownship.follow = .idle
+        ownship.observeAircraft(OwnshipFix(latitudeDegrees: 40, longitudeDegrees: -74,
+            courseDegrees: nil, source: .aircraft))
+        XCTAssertFalse(ownship.takePositionFrameRequest())
+        ownship.follow = .centred
+        XCTAssertTrue(ownship.takePositionFrameRequest())
+    }
+
+    func testFollowCommandsKeepPositionScaleAndNorthUpInOneAnimation() {
+        let view = GlobeMapView()
+        view.changeCamera { $0.heading = 123 }
+        let position = CLLocationCoordinate2D(latitude: 40.27324, longitude: -74.81675)
+        view.centre(on: position, frame: true, animated: true)
+        view.centre(on: position, frame: false, animated: true)
+        view.changeCamera(animated: true) { $0.heading = 0 }
+        XCTAssertEqual(view.requestedCamera.latitude, position.latitude)
+        XCTAssertEqual(view.requestedCamera.longitude, position.longitude)
+        XCTAssertEqual(view.requestedCamera.distance, 134_000)
+        XCTAssertEqual(view.requestedCamera.heading, 0)
+    }
+
+    func testDirectCameraGestureCancelsThePendingAnimatedDestination() throws {
+        try XCTSkipIf(UIAccessibility.isReduceMotionEnabled)
+        let view = GlobeMapView()
+        view.centre(on: CLLocationCoordinate2D(latitude: 20, longitude: 30), frame: true, animated: true)
+        view.changeCamera { $0.heading = 45 }
+        XCTAssertEqual(view.requestedCamera.latitude, 40.5)
+        XCTAssertEqual(view.requestedCamera.longitude, -76.5)
+        XCTAssertEqual(view.requestedCamera.distance, 12_000_000)
+        XCTAssertEqual(view.requestedCamera.heading, 45)
+    }
+
     func testDisplayedTrafficCanBeSelectedAndRemovalClearsItsHitRegion() {
         let view = overlay()
         view.project = { positions in

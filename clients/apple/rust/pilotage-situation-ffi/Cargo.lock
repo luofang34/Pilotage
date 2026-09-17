@@ -411,8 +411,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
+ "js-sys",
  "num-traits",
  "serde",
+ "wasm-bindgen",
  "windows-link",
 ]
 
@@ -1683,6 +1685,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-planning"
+version = "0.1.0"
+dependencies = [
+ "aerocontext-core",
+ "aerocontext-navdata",
+ "chrono",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "pilotage-presentation"
 version = "0.1.0"
 dependencies = [
@@ -1707,9 +1724,12 @@ name = "pilotage-situation-ffi"
 version = "0.1.0"
 dependencies = [
  "aero-link",
+ "aerocontext-core",
+ "aerocontext-navdata",
  "airmass-aero-link",
  "airmass-core",
  "airmass-geojson",
+ "chrono",
  "objc2",
  "pilotage-client-session",
  "pilotage-control-web",
@@ -1718,6 +1738,7 @@ dependencies = [
  "pilotage-instrument-apple-bridge",
  "pilotage-instrument-feed",
  "pilotage-navdata-cycle",
+ "pilotage-planning",
  "pilotage-presentation",
  "pilotage-protocol",
  "pilotage-terrain-query",
@@ -1726,6 +1747,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "surveillance-aero-link",
  "surveillance-core",
  "surveillance-geojson",

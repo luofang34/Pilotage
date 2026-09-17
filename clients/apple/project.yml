@@ -81,6 +81,11 @@ targets:
     sources:
       - path: Tests/GlobeSituationOverlayTests.swift
       - path: Tests/SituationDataConsumerTests.swift
+      - path: Tests/MissionPlannerTests.swift
+      - path: Tests/NavigationReleaseTests.swift
+      - path: Tests/VehicleProfileTests.swift
+      - path: Tests/RouteLegTests.swift
+      - path: Tests/RouteEntryTests.swift
     dependencies:
       - target: Pilotage
       - package: PilotageCore
@@ -90,6 +95,17 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Pilotage.app/Pilotage"
         BUNDLE_LOADER: "$(TEST_HOST)"
+  PilotagePlannerUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+    dependencies:
+      - target: Pilotage
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Pilotage
 schemes:
   Pilotage:
     build:
@@ -100,5 +116,6 @@ schemes:
     test:
       targets:
         - PilotageMapTests
+        - PilotagePlannerUITests
     archive:
       config: Release

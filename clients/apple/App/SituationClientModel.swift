@@ -8,6 +8,7 @@ final class SituationClientModel: ObservableObject {
     @Published private(set) var display: DisplayBatch?
     @Published private(set) var errorMessage: String?
     @Published private(set) var radioSource: RadioSourceSnapshot
+    @Published private(set) var appliance: AeroLinkApplianceSnapshot = .off
     @Published private(set) var selectedTraffic: DisplayTrafficDetail?
     /// Display of the replay in progress, when a flight is open.
     @Published private(set) var replayDisplay: DisplayBatch?
@@ -41,7 +42,9 @@ final class SituationClientModel: ObservableObject {
     /// nothing on it and no reason given. A map that looks clear because a receiver died
     /// is the failure the layer states exist to prevent.
     var hasAttention: Bool {
-        errorMessage != nil || (adsbEnabled && !radioSource.bandFailures.isEmpty)
+        errorMessage != nil
+            || (adsbEnabled && !radioSource.bandFailures.isEmpty)
+            || (adsbEnabled && applianceNeedsAttention)
     }
 
     private let dataConsumer: SituationDataConsumer
@@ -58,6 +61,8 @@ final class SituationClientModel: ObservableObject {
     @Published private(set) var recordedEvents: UInt64 = 0
     /// Receives the aircraft's own position whenever a batch carries one.
     var onOwnship: ((DisplayOwnship?) -> Void)?
+    /// Receives ownship values from the AeroLink appliance.
+    var onApplianceNavigation: ((AeroLinkApplianceNavigation?) -> Void)?
     /// Reads the position the map may centre on, for the evidence file.
     var currentOwnship: (() -> (OwnshipFix?, HeadingFix?, FollowMode, DeviceLocationAuthorisation, Bool))?
     private var replayTask: Task<Void, Never>?
@@ -69,6 +74,10 @@ final class SituationClientModel: ObservableObject {
     private var lastReplayPublishMicros: UInt64 = 0
     private var replayRun: SituationReplayRun?
     private var runtime: AeroLinkRadioRuntime?
+    private var applianceCentral: AeroLinkBLECentral?
+    private var attitudeCage = AttitudeCage()
+    private var cageIdentifier: String?
+    private var rawApplianceNavigation: Gdl90NavigationSnapshot?
     private var maintenanceTask: Task<Void, Never>?
     private var drainTask: Task<Void, Never>?
     private var projectionTask: Task<Void, Never>?
@@ -152,6 +161,7 @@ final class SituationClientModel: ObservableObject {
             self.runtime = runtime
         }
         await runtime.activate()
+        activateAppliance()
         guard !Task.isCancelled, isActive else { return }
         maintenanceTask = Task.detached(priority: .utility) {
             await runtime.maintenanceLoop()
@@ -171,6 +181,7 @@ final class SituationClientModel: ObservableObject {
     private func suspendRadio() async {
         guard isActive, let runtime else { return }
         isActive = false
+        applianceCentral?.stop()
         let maintenance = maintenanceTask
         let drain = drainTask
         maintenance?.cancel()
@@ -219,6 +230,174 @@ final class SituationClientModel: ObservableObject {
         // A run that never produces a batch still has to say why: a receiver state and a
         // disabled driver extension are the answer, and both change without a batch.
         recordEvidence()
+    }
+
+    private func activateAppliance() {
+        let central: AeroLinkBLECentral
+        if let current = applianceCentral {
+            central = current
+        } else {
+            central = AeroLinkBLECentral { [weak self] event in
+                self?.apply(event)
+            }
+            applianceCentral = central
+        }
+        central.start()
+    }
+
+    private func apply(_ event: AeroLinkBLEEvent) {
+        switch event {
+        case .state(let state, let connection):
+            if let connection {
+                loadCage(for: connection.identifier)
+            }
+            appliance.state = state
+            appliance.name = connection?.name ?? appliance.name
+            appliance.identifier = connection?.identifier ?? appliance.identifier
+            if state == .off {
+                rawApplianceNavigation = nil
+                appliance.navigation = nil
+                onApplianceNavigation?(nil)
+            }
+        case .bytes(let data, let connection):
+            acceptApplianceBytes(data, connection: connection)
+        }
+        recordEvidence()
+    }
+
+    private func acceptApplianceBytes(
+        _ data: Data,
+        connection: AeroLinkBLEConnection
+    ) {
+        guard let domain else { return }
+        do {
+            let batch = try domain.acceptGdl90Chunk(
+                data: data,
+                sourceId: connection.sourceId,
+                reconnectGeneration: connection.reconnectGeneration,
+                monotonicMicros: Self.monotonicMicros
+            )
+            try acceptApplianceRecords(batch.records)
+            rawApplianceNavigation = batch.navigation
+            appliance.state = batch.validFrames > 0 ? .streaming : .ready
+            appliance.name = connection.name
+            appliance.identifier = connection.identifier
+            appliance.bytesConsumed = batch.bytesConsumed
+            appliance.validFrames = batch.validFrames
+            appliance.crcErrors = batch.crcErrors
+            appliance.invalidFrames = batch.invalidFrames
+            appliance.trafficReports = batch.trafficReports
+            appliance.deferredUplinkMessages = batch.deferredUplinkMessages
+            appliance.unsupportedMessages = batch.unsupportedMessages
+            refreshApplianceNavigation()
+        } catch {
+            appliance.state = .unavailable(error.localizedDescription)
+        }
+    }
+
+    private func acceptApplianceRecords(_ records: RadioRecordBatch) throws {
+        var latest: DisplayBatch?
+        var changes: [DisplayPointChange] = []
+        for record in records.trackRecords {
+            var next = try session.acceptTrackRecord(
+                recordJson: record,
+                nowMicros: Self.monotonicMicros
+            )
+            changes.append(contentsOf: next.pointChanges)
+            next.pointChanges = changes
+            latest = next
+        }
+        if let latest {
+            applyDisplay(latest)
+        }
+    }
+
+    private func refreshApplianceNavigation() {
+        guard let raw = rawApplianceNavigation else {
+            appliance.navigation = nil
+            onApplianceNavigation?(nil)
+            return
+        }
+        let attitude: AircraftAttitude? = if let roll = raw.rollDegrees,
+                                             let pitch = raw.pitchDegrees {
+            AircraftAttitude(rollDegrees: roll, pitchDegrees: pitch)
+        } else {
+            nil
+        }
+        let adjusted = attitude.map { attitudeCage.apply(to: $0) }
+        let navigation = AeroLinkApplianceNavigation(
+            rollDegrees: adjusted?.rollDegrees ?? raw.rollDegrees,
+            pitchDegrees: adjusted?.pitchDegrees ?? raw.pitchDegrees,
+            rawRollDegrees: raw.rollDegrees,
+            rawPitchDegrees: raw.pitchDegrees,
+            headingDegrees: raw.headingDegrees,
+            headingReference: raw.headingReference,
+            pressureAltitudeFeet: raw.pressureAltitudeFeet,
+            verticalSpeedFeetPerMinute: raw.verticalSpeedFeetPerMinute,
+            latitudeDegrees: raw.latitudeDegrees,
+            longitudeDegrees: raw.longitudeDegrees,
+            groundTrackDegreesTrue: raw.groundTrackDegreesTrue
+        )
+        appliance.navigation = navigation
+        onApplianceNavigation?(navigation)
+    }
+
+    private func loadCage(for identifier: String) {
+        guard cageIdentifier != identifier else { return }
+        cageIdentifier = identifier
+        let values = UserDefaults.standard.array(forKey: cageKey(identifier)) as? [Double]
+        attitudeCage = if let values, values.count == 2 {
+            AttitudeCage(
+                rollOffsetDegrees: values[0],
+                pitchOffsetDegrees: values[1]
+            )
+        } else {
+            AttitudeCage()
+        }
+    }
+
+    private func saveCage() {
+        guard let cageIdentifier else { return }
+        let key = cageKey(cageIdentifier)
+        if let roll = attitudeCage.rollOffsetDegrees,
+           let pitch = attitudeCage.pitchOffsetDegrees {
+            UserDefaults.standard.set([roll, pitch], forKey: key)
+        } else {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+    }
+
+    private func cageKey(_ identifier: String) -> String {
+        "pilotage.aerolink.ahrs-cage.\(identifier)"
+    }
+
+    private var applianceNeedsAttention: Bool {
+        if case .unavailable = appliance.state { return true }
+        return appliance.crcErrors > 0 || appliance.invalidFrames > 0
+    }
+
+    /// Set the current AeroLink pitch and bank to level in this application.
+    func recenterAhrs() {
+        guard let navigation = appliance.navigation,
+              let roll = navigation.rawRollDegrees,
+              let pitch = navigation.rawPitchDegrees,
+              attitudeCage.recenter(on: AircraftAttitude(
+                  rollDegrees: roll,
+                  pitchDegrees: pitch
+              )) else { return }
+        saveCage()
+        refreshApplianceNavigation()
+    }
+
+    /// Remove the local pitch and bank correction.
+    func clearAhrsRecenter() {
+        attitudeCage.clear()
+        saveCage()
+        refreshApplianceNavigation()
+    }
+
+    var ahrsIsRecentered: Bool {
+        attitudeCage.rollOffsetDegrees != nil && attitudeCage.pitchOffsetDegrees != nil
     }
 
     func setLayerEnabled(id: String, enabled: Bool) {
@@ -452,7 +631,9 @@ final class SituationClientModel: ObservableObject {
                 replay: replayRun,
                 driverEnabled: discovery.driverIsEnabled(),
                 terrainArchiveAvailable: terrainAvailable,
-                errorMessage: errorMessage
+                errorMessage: errorMessage,
+                appliance: appliance,
+                ahrsRecentered: ahrsIsRecentered
             )
         )
     }

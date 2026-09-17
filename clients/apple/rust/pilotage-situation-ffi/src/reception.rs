@@ -1,6 +1,7 @@
 //! Conversion of portable AeroLink receptions into typed domain records.
 
 mod error;
+mod gdl90;
 mod traffic;
 mod weather;
 
@@ -15,7 +16,9 @@ pub(crate) use error::ReceptionError;
 use traffic::TrafficPipeline;
 use weather::WeatherPipeline;
 
+use crate::Gdl90IngestBatch;
 use crate::{FfiError, RadioRecordBatch};
+use gdl90::Gdl90StreamState;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 struct ReceptionTally {
@@ -97,6 +100,7 @@ impl ReceptionPipeline {
 struct RadioState {
     producer_instance_id: u64,
     pipeline: ReceptionPipeline,
+    gdl90: Gdl90StreamState,
 }
 
 impl RadioState {
@@ -104,12 +108,14 @@ impl RadioState {
         Ok(Self {
             producer_instance_id,
             pipeline: ReceptionPipeline::new(producer_instance_id)?,
+            gdl90: Gdl90StreamState::default(),
         })
     }
 
     fn reset(&mut self) -> Result<(), ReceptionError> {
         self.producer_instance_id = self.producer_instance_id.wrapping_add(1);
         self.pipeline = ReceptionPipeline::new(self.producer_instance_id)?;
+        self.gdl90 = Gdl90StreamState::default();
         Ok(())
     }
 }
@@ -150,6 +156,39 @@ impl RadioDomainSession {
             )
             .map_err(radio_input_error)?;
         Ok(record_batch(tally, records))
+    }
+
+    /// Convert bytes from one GDL 90 appliance connection.
+    pub fn accept_gdl90_chunk(
+        &self,
+        data: Vec<u8>,
+        source_id: u32,
+        reconnect_generation: u64,
+        monotonic_micros: u64,
+    ) -> Result<Gdl90IngestBatch, FfiError> {
+        let source_epoch = u32::try_from(reconnect_generation).map_err(|_| {
+            radio_input_error(ReceptionError::ReconnectGenerationRange {
+                reconnect_generation,
+            })
+        })?;
+        let mut state = self.lock_state()?;
+        let RadioState {
+            pipeline, gdl90, ..
+        } = &mut *state;
+        let (tally, records) = gdl90
+            .accept_chunk(&data, source_id, source_epoch, monotonic_micros, pipeline)
+            .map_err(radio_input_error)?;
+        Ok(Gdl90IngestBatch {
+            records: record_batch(tally, records),
+            navigation: gdl90.navigation_snapshot(),
+            bytes_consumed: gdl90.bytes_consumed,
+            valid_frames: gdl90.valid_frames,
+            crc_errors: gdl90.crc_errors,
+            invalid_frames: gdl90.invalid_frames,
+            traffic_reports: gdl90.traffic_reports,
+            deferred_uplink_messages: gdl90.deferred_uplink_messages,
+            unsupported_messages: gdl90.unsupported_messages,
+        })
     }
 
     /// Advance traffic and weather lifecycle time.

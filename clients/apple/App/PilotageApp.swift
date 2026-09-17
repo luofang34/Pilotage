@@ -24,6 +24,10 @@ struct PilotageApp: App {
 /// shipped application has no reason to offer one. It exists so a window at an awkward
 /// size can be photographed and measured without somebody holding the tablet.
 enum LaunchRequest {
+    static var openMission: Bool { ProcessInfo.processInfo.arguments.contains("-OpenMission") }
+    static var missionTestDraft: String? {
+        argument("-MissionTestDraft").flatMap { UUID(uuidString: $0)?.uuidString }
+    }
     static var aviationGeographicRelease: String? { argument("-AviationGeographicRelease") }
 
     static var globePitch: Double? {
@@ -154,6 +158,7 @@ struct SituationMapCommands {
     /// Centre and set how much ground is on screen, for a reader who asked to be found.
     let centreAndFrame: (CLLocationCoordinate2D, Bool) -> Void
     let setHeading: (Double, Bool) -> Void
+    let fitRoute: ([CLLocationCoordinate2D], Bool) -> Void
 }
 
 struct SituationMap: UIViewRepresentable {
@@ -196,7 +201,11 @@ struct SituationMap: UIViewRepresentable {
                             animated: $1
                         )
                     },
-                    setHeading: { view.setHeading($0, animated: $1) }
+                    setHeading: { view.setHeading($0, animated: $1) },
+                    fitRoute: { coordinates, animated in
+                        guard let overview = RouteOverview(coordinates) else { return }
+                        view.centre(on: overview.center, widthNauticalMiles: overview.radiusMeters * 3 / 1852, animated: animated)
+                    }
                 )
             )
         }
