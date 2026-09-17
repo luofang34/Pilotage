@@ -4,7 +4,8 @@
 # SIM / NOT FOR FLIGHT. This is the maintained engineering trace record for
 # the typed control-authority behavior slice (INPUT-01 / CTRL-01): profile
 # binding, the reliable discrete-action channel, exclusive authority
-# groups, input-source identity, and the simulator lifecycle capability. It
+# groups, input-source identity, the automation input source, and the simulator
+# lifecycle capability. It
 # establishes NO DO-178C, ISO 26262, ECSS, ARP4754A/4761, TSO, or ASIL
 # claim and is not tool qualification (DO-330). It records that the
 # declared engineering trace is internally complete and resolvable in both
@@ -26,6 +27,7 @@ scope-requirement CTRL-GROUP-003
 scope-requirement INPUT-SRC-004
 scope-requirement CTRL-LIFE-005
 scope-requirement CTRL-INGRESS-006
+scope-requirement INPUT-AGENT-007
 
 # --- Intended function ---
 
@@ -64,6 +66,10 @@ locator docs/control/README.md#ctrl-life-005
 node CTRL-INGRESS-006 safety-requirement
 title Datagram ingress admits only what it can attribute and order: own-session binding, wrap-aware strictly-advancing sequences ahead of liveness and recovery, correlated staleness, deadlines judged before messages, typed-only by default
 locator docs/control/README.md#ctrl-ingress-006
+
+node INPUT-AGENT-007 safety-requirement
+title An engaged agent is an input source — transactional engage and release, its own announced identity, a bounded direct demand, and release on the first operator input
+locator docs/control/README.md#input-agent-007
 
 # --- Design ---
 
@@ -112,6 +118,16 @@ node IMPL-ON-PROFILE-ACTIVATION implementation
 title SessionEngine::on_profile_activation — session and monotonic-revision validation
 locator crates/pilotage-session/src/engine/handlers.rs
 attr symbol on_profile_activation
+
+node IMPL-ENGAGE-AGENT implementation
+title ControlCoordinator::engage_agent — the agent becomes the input source through the transactional swap
+locator clients/web-control/src/coordinator/agent.rs
+attr symbol engage_agent
+
+node IMPL-AGENT-SAMPLE implementation
+title ControlCoordinator::agent_sample — the operator override check, then the bounded direct demand
+locator clients/web-control/src/coordinator/agent.rs
+attr symbol agent_sample
 
 node IMPL-SELECT-DEVICE implementation
 title ControlCoordinator::select_device — transactional source and mapping swaps
@@ -204,6 +220,36 @@ node CASE-CTRL-WIRE-CHAIN verification-case
 title the reliable action chain holds over the real transport
 locator hosts/session-host/tests/reliable_actions_wire.rs
 attr test the_reliable_action_chain_holds_over_the_real_transport
+
+node CASE-CTRL-AGENT-HANDOVER verification-case
+title an agent takes control through the neutral handover
+locator clients/web-control/src/coordinator/tests/agent.rs
+attr test an_agent_takes_control_through_the_neutral_handover
+
+node CASE-CTRL-AGENT-ANNOUNCE verification-case
+title the announcement names the agent while it is the source
+locator clients/web-control/src/coordinator/tests/agent.rs
+attr test the_announcement_names_the_agent_while_it_is_the_source
+
+node CASE-CTRL-AGENT-STICK verification-case
+title an operator stick disengages the agent and never flies the deflection
+locator clients/web-control/src/coordinator/tests/agent.rs
+attr test an_operator_stick_disengages_the_agent_and_never_flies_the_deflection
+
+node CASE-CTRL-AGENT-PRESS verification-case
+title an operator safety press disengages the agent
+locator clients/web-control/src/coordinator/tests/agent.rs
+attr test an_operator_safety_press_disengages_the_agent
+
+node CASE-CTRL-AGENT-BOUND verification-case
+title a demand that is not finite reads neutral and a large one is bounded
+locator clients/web-control/src/coordinator/tests/agent.rs
+attr test a_demand_that_is_not_finite_reads_neutral_and_a_large_one_is_bounded
+
+node CASE-CTRL-AGENT-MODE verification-case
+title a mode with no velocity law flies the agent neutral
+locator clients/web-control/src/coordinator/tests/agent.rs
+attr test a_mode_with_no_velocity_law_flies_the_agent_neutral
 
 node CASE-CTRL-SOURCE-BOOT verification-case
 title the boot source is the keyboard and a disconnect returns to it
@@ -370,12 +416,22 @@ attr outcome pass
 node RESULT-CTRL-SOURCE verification-result
 title input-source coordinator suite — recorded pass
 attr command cargo test -p pilotage-control-web --lib coordinator
-attr config-digest 655630c24e6e6a1167cc7662a4ee878f00344935
-attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
-attr source-digest git-blob:d1d9b319c28be95ee84202948d2315dc9be31ed6
+attr config-digest 829a343b9fbd9a4982dd7c1dd240ba2d5133ca1d
+attr tool-version rustc 1.98.0 (88d9e12ae 2026-08-18)
+attr source-digest git-blob:45d56efb1d214d65d3e368ab5a406a59bbbf9990
 attr artifact docs/control/evidence-artifacts/ctrl01/source-coordinator.run.txt
-attr output-digest sha256:127818308dc7777bea5f81f9c69bcf5a859769159070494b1639038bc4bf5426
-attr run-id local:655630c24e6e6a1167cc7662a4ee878f00344935
+attr output-digest sha256:1991ce257a1f620576ccf1991c8c6817c6ab341263b674171ae92fe51cd731aa
+attr run-id local:829a343b9fbd9a4982dd7c1dd240ba2d5133ca1d
+attr outcome pass
+node RESULT-CTRL-AGENT verification-result
+title automation input source suite — recorded pass
+attr command cargo test -p pilotage-control-web --lib coordinator::tests::agent
+attr config-digest 829a343b9fbd9a4982dd7c1dd240ba2d5133ca1d
+attr tool-version rustc 1.98.0 (88d9e12ae 2026-08-18)
+attr source-digest git-blob:558d56bfa2b0c43ab9c1ed2d741b62d54b093c89
+attr artifact docs/control/evidence-artifacts/ctrl01/agent-source.run.txt
+attr output-digest sha256:f008694acb5e9c9c7dfe133d0b1623afc03df15e5d90bb39c8b4b89bab5c50fb
+attr run-id local:829a343b9fbd9a4982dd7c1dd240ba2d5133ca1d
 attr outcome pass
 node RESULT-CTRL-FIXTURE verification-result
 title browser-encoded wire fixture suite — recorded pass
@@ -450,8 +506,8 @@ attr tree b43ad29521d5ff461ccfb1ccd8abbb47630ce382
 node CFG-CTRL-SOURCE configuration-item
 title committed input-source coordinator verification baseline
 attr scm git
-attr commit 655630c24e6e6a1167cc7662a4ee878f00344935
-attr tree cc529ab568435856f6d389effc240a46350d1fa9
+attr commit 829a343b9fbd9a4982dd7c1dd240ba2d5133ca1d
+attr tree e3ed83bef36df4ddd2b39a10575f90733d696315
 
 node TOOL-CTRL-CARGO tool
 title cargo test on Rust stable — not DO-330 tool-qualified
@@ -473,6 +529,7 @@ edge CTRL-BIND-001 mitigates CTRL-HAZ-01
 edge CTRL-CHAN-002 mitigates CTRL-HAZ-01
 edge CTRL-GROUP-003 mitigates CTRL-HAZ-01
 edge INPUT-SRC-004 mitigates CTRL-HAZ-01
+edge INPUT-AGENT-007 mitigates CTRL-HAZ-01
 edge CTRL-LIFE-005 mitigates CTRL-HAZ-01
 edge CTRL-INGRESS-006 mitigates CTRL-HAZ-01
 
@@ -482,6 +539,7 @@ edge CTRL-BIND-001 allocated-to DESIGN-PROFILE-BINDING
 edge CTRL-CHAN-002 allocated-to DESIGN-ACTION-CHANNEL
 edge CTRL-GROUP-003 allocated-to DESIGN-AUTH-GROUP
 edge INPUT-SRC-004 allocated-to DESIGN-SOURCE-COORDINATOR
+edge INPUT-AGENT-007 allocated-to DESIGN-SOURCE-COORDINATOR
 edge CTRL-LIFE-005 allocated-to DESIGN-LIFECYCLE-SCOPE
 edge CTRL-INGRESS-006 allocated-to DESIGN-INGRESS-ORDER
 
@@ -490,6 +548,8 @@ edge DESIGN-ACTION-CHANNEL implemented-by IMPL-ON-ACTION-COMMAND
 edge DESIGN-ACTION-CHANNEL implemented-by IMPL-ACTION-DEDUP
 edge DESIGN-AUTH-GROUP implemented-by IMPL-AUTHORITY-PAIR
 edge DESIGN-SOURCE-COORDINATOR implemented-by IMPL-SELECT-DEVICE
+edge DESIGN-SOURCE-COORDINATOR implemented-by IMPL-ENGAGE-AGENT
+edge DESIGN-SOURCE-COORDINATOR implemented-by IMPL-AGENT-SAMPLE
 edge DESIGN-LIFECYCLE-SCOPE implemented-by IMPL-LIFECYCLE-DESCRIPTOR
 edge DESIGN-INGRESS-ORDER implemented-by IMPL-FRAME-ATTRIBUTION
 edge DESIGN-INGRESS-ORDER implemented-by IMPL-SEQUENCE-ADMITS
@@ -541,6 +601,18 @@ edge CASE-CTRL-GROUP-EXCL covers CTRL-GROUP-003
 edge CASE-CTRL-GROUP-GEN covers CTRL-GROUP-003
 edge CASE-CTRL-GROUP-LATCH covers CTRL-GROUP-003
 
+edge INPUT-AGENT-007 verified-by CASE-CTRL-AGENT-HANDOVER
+edge INPUT-AGENT-007 verified-by CASE-CTRL-AGENT-ANNOUNCE
+edge INPUT-AGENT-007 verified-by CASE-CTRL-AGENT-STICK
+edge INPUT-AGENT-007 verified-by CASE-CTRL-AGENT-PRESS
+edge INPUT-AGENT-007 verified-by CASE-CTRL-AGENT-BOUND
+edge INPUT-AGENT-007 verified-by CASE-CTRL-AGENT-MODE
+edge CASE-CTRL-AGENT-HANDOVER covers INPUT-AGENT-007
+edge CASE-CTRL-AGENT-ANNOUNCE covers INPUT-AGENT-007
+edge CASE-CTRL-AGENT-STICK covers INPUT-AGENT-007
+edge CASE-CTRL-AGENT-PRESS covers INPUT-AGENT-007
+edge CASE-CTRL-AGENT-BOUND covers INPUT-AGENT-007
+edge CASE-CTRL-AGENT-MODE covers INPUT-AGENT-007
 edge INPUT-SRC-004 verified-by CASE-CTRL-SOURCE-BOOT
 edge INPUT-SRC-004 verified-by CASE-CTRL-SWAP-GATED
 edge CASE-CTRL-SOURCE-BOOT covers INPUT-SRC-004
@@ -607,6 +679,15 @@ edge RESULT-CTRL-WIRE covers CTRL-CHAN-002
 edge RESULT-CTRL-WIRE justified-by CFG-CTRL-FEEL-MODE
 edge RESULT-CTRL-WIRE justified-by TOOL-CTRL-CARGO
 
+edge RESULT-CTRL-AGENT result-of CASE-CTRL-AGENT-HANDOVER
+edge RESULT-CTRL-AGENT result-of CASE-CTRL-AGENT-ANNOUNCE
+edge RESULT-CTRL-AGENT result-of CASE-CTRL-AGENT-STICK
+edge RESULT-CTRL-AGENT result-of CASE-CTRL-AGENT-PRESS
+edge RESULT-CTRL-AGENT result-of CASE-CTRL-AGENT-BOUND
+edge RESULT-CTRL-AGENT result-of CASE-CTRL-AGENT-MODE
+edge RESULT-CTRL-AGENT covers INPUT-AGENT-007
+edge RESULT-CTRL-AGENT justified-by CFG-CTRL-SOURCE
+edge RESULT-CTRL-AGENT justified-by TOOL-CTRL-CARGO
 edge RESULT-CTRL-SOURCE result-of CASE-CTRL-SOURCE-BOOT
 edge RESULT-CTRL-SOURCE result-of CASE-CTRL-SWAP-GATED
 edge RESULT-CTRL-SOURCE covers INPUT-SRC-004
@@ -657,5 +738,6 @@ edge REVIEW-CTRL01 reviews CTRL-BIND-001
 edge REVIEW-CTRL01 reviews CTRL-CHAN-002
 edge REVIEW-CTRL01 reviews CTRL-GROUP-003
 edge REVIEW-CTRL01 reviews INPUT-SRC-004
+edge REVIEW-CTRL01 reviews INPUT-AGENT-007
 edge REVIEW-CTRL01 reviews CTRL-LIFE-005
 edge REVIEW-CTRL01 reviews CTRL-INGRESS-006
