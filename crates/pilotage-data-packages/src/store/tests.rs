@@ -6,6 +6,57 @@ use crate::{
 };
 
 #[test]
+fn local_import_replaces_partial_bytes_and_survives_reopen() {
+    let directory = tempfile::tempdir().expect("store directory");
+    let source = tempfile::tempdir().expect("source directory");
+    let bytes: Vec<u8> = (0..262_147).map(|index| (index % 251) as u8).collect();
+    let chart = release("local-chart", &bytes);
+    let artifact = &chart.artifacts[0];
+    std::fs::create_dir_all(source.path().join("symbols")).expect("source parent");
+    std::fs::write(source.path().join(artifact.path.as_str()), &bytes).expect("source file");
+    let mut store = PackageStore::open_blocking(directory.path()).expect("open");
+    store
+        .append_blocking(artifact, 0, b"invalid partial")
+        .expect("interrupted transfer");
+    let installed = store
+        .import_directory_blocking(&chart, source.path(), artifact.bytes)
+        .expect("local import");
+    assert_eq!(
+        std::fs::read(installed.directory.join(artifact.path.as_str())).expect("installed bytes"),
+        bytes
+    );
+    drop(store);
+    let store = PackageStore::open_blocking(directory.path()).expect("reopen");
+    assert!(store.verify_installed_blocking(&chart.id).is_ok());
+}
+
+#[test]
+fn corrupt_local_source_is_not_installed_and_can_be_retried() {
+    let directory = tempfile::tempdir().expect("store directory");
+    let source = tempfile::tempdir().expect("source directory");
+    let chart = release("local-chart", b"valid");
+    let artifact = &chart.artifacts[0];
+    std::fs::create_dir_all(source.path().join("symbols")).expect("source parent");
+    std::fs::write(source.path().join(artifact.path.as_str()), b"wrong").expect("corrupt source");
+    let mut store = PackageStore::open_blocking(directory.path()).expect("open");
+    assert!(matches!(
+        store.import_directory_blocking(&chart, source.path(), 5),
+        Err(PackageError::Digest { .. })
+    ));
+    assert!(
+        store
+            .installed_cached_blocking(&chart.id)
+            .expect("catalog")
+            .is_none()
+    );
+    std::fs::write(source.path().join(artifact.path.as_str()), b"valid").expect("repair source");
+    store
+        .import_directory_blocking(&chart, source.path(), 5)
+        .expect("retry import");
+    assert!(store.verify_installed_blocking(&chart.id).is_ok());
+}
+
+#[test]
 fn interrupted_download_resumes_and_corruption_never_becomes_installed() {
     let directory = tempfile::tempdir().expect("store directory");
     let chart = release("chart", b"complete chart");

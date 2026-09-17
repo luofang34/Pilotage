@@ -1,6 +1,6 @@
 use std::{
     fs::{self, File},
-    io::Read,
+    io,
     path::Path,
 };
 
@@ -28,17 +28,13 @@ impl PackageStore {
             let path = directory.join(download.artifact.path.as_str());
             verify_file_blocking(&path, &download.artifact)?;
             self.discard_download_blocking(&download.artifact.sha256)?;
-            let mut file = File::open(&path).map_err(|s| file_error(&path, s))?;
-            let mut buffer = [0u8; 65536];
-            let mut offset = 0;
-            loop {
-                let read = file.read(&mut buffer).map_err(|s| file_error(&path, s))?;
-                if read == 0 {
-                    break;
-                }
-                self.append_blocking(&download.artifact, offset, &buffer[..read])?;
-                offset += read as u64;
-            }
+            let staged = self.partial_path(&download.artifact.sha256);
+            let mut source = File::open(&path).map_err(|s| file_error(&path, s))?;
+            let mut target = File::create(&staged).map_err(|s| file_error(&staged, s))?;
+            // Local files can restart from their source. Durability is required before
+            // promotion, without a disk flush for every transfer buffer.
+            io::copy(&mut source, &mut target).map_err(|s| file_error(&staged, s))?;
+            target.sync_all().map_err(|s| file_error(&staged, s))?;
         }
         self.finish_install_blocking(release)
     }
