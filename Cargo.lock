@@ -1138,6 +1138,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a9fcbcc408c5526c3ab80d534e5c86e7967c1fb7aa0a8c76abd1edc27deb877"
 
 [[package]]
+name = "httparse"
+version = "1.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87"
+
+[[package]]
 name = "hybrid-array"
 version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1408,6 +1414,7 @@ source = "git+https://github.com/luofang34/Indicate.git?rev=985eb3390d3e09abf83d
 name = "intent-pilot"
 version = "0.2.0"
 dependencies = [
+ "httparse",
  "pilotage-agent",
  "pilotage-client-session",
  "pilotage-input",
