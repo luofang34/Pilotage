@@ -1929,6 +1929,7 @@ dependencies = [
 name = "pilotage-agent"
 version = "0.1.0"
 dependencies = [
+ "pilotage-mission-core",
  "serde",
  "serde_json",
  "thiserror",

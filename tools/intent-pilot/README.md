@@ -266,9 +266,10 @@ control frame.
 
 ## Known limits
 
-- The executor is a copy of what the mission core of ADR-0041 will do. The mission
-  core has no `heading`, `speed` or `go_around` action, and its document does not
-  change after a mission starts.
+- The executor is a copy of what the mission core of ADR-0041 will do. Each directive
+  has a lowering onto the flight actions of the mission core (`flight_actions`), but
+  the mission document does not change after a mission starts, so the agent does not
+  fly through the mission core.
 - The protocol has no typed `Land` action. The executor descends and then sends
   `Disarm`. Aviate refuses `Disarm` while it reports the vehicle airborne, so the
   executor sends `Disarm` again each 2 s.
