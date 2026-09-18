@@ -49,8 +49,18 @@ fn a_scenario_that_names_an_unknown_fix_is_refused() {
 
 #[test]
 fn home_is_implicit_and_a_cruise_height_outside_the_range_is_refused() {
-    let listed = GOOD.replace(r#""ALPHA": {"north_m": 15"#, r#""HOME": {"north_m": 15"#);
-    assert!(Scenario::parse(&listed).is_err());
+    // DELTA is in no procedure, message or expectation, so the rename leaves
+    // every other name valid and the HOME rule is the only thing refused.
+    let listed = GOOD
+        .replace(r#""DELTA": {"north_m": -10"#, r#""HOME": {"north_m": -10"#)
+        .replace(r#""fixes": ["DELTA", "ALPHA"]"#, r#""fixes": ["ALPHA"]"#);
+    let error = Scenario::parse(&listed).map(|_| ());
+    assert!(
+        error
+            .as_ref()
+            .is_err_and(|error| error.to_string().contains("HOME is implicit")),
+        "{error:?}"
+    );
     let low = GOOD.replace(r#""cruise_height_m": 5"#, r#""cruise_height_m": 1"#);
     assert!(Scenario::parse(&low).is_err());
 }
