@@ -157,8 +157,9 @@ impl Executor {
         self.phase
     }
 
-    /// Seconds that the vehicle has flown the newest directive without a
-    /// break, or `None` when it is not flying one.
+    /// Seconds in the newest phase in the air, or `None` on the ground. An
+    /// arrival, a hold and a new directive each start a new phase, so the
+    /// count restarts at each of them.
     #[must_use]
     pub fn flying_seconds(&self, now_s: f64) -> Option<f64> {
         self.flying_since_s.map(|since| now_s - since)
@@ -416,8 +417,9 @@ impl Executor {
         self.last_request_s = None;
         self.settled_since_s = None;
         self.climb_stalled_since_s = None;
-        // The flying time measures the newest directive. A scripted message
-        // that waits on it must not count the time of the directive before.
+        // The flying time measures the newest phase in the air. A scripted
+        // message that waits on it must not count the time of the phase
+        // before: an arrival, a hold or a new directive each restart it.
         self.flying_since_s = matches!(
             phase,
             Phase::Enroute

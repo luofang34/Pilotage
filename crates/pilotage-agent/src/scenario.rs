@@ -45,8 +45,9 @@ pub enum Trigger {
     /// Released as soon as control is held. The braces make the decoder
     /// refuse an unknown field, which a unit variant would accept.
     Start {},
-    /// Released after the vehicle flies the newest directive for this many
-    /// seconds without a break.
+    /// Released after the vehicle has spent this many seconds in its newest
+    /// phase in the air. An arrival, a hold and a new directive each start a
+    /// phase, so the count restarts at each of them.
     FlyingFor {
         /// Continuous flying time in seconds.
         seconds: f64,
