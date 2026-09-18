@@ -162,8 +162,11 @@ impl Executor {
             return self.station(state);
         };
         // A heading has no end. The range limit is the end that protects the
-        // vehicle when no directive follows.
-        if state.north_m.hypot(state.east_m) > self.limits.max_range_m {
+        // vehicle when no directive follows. A heading that points back
+        // toward the launch point is the way out of the limit, so only a
+        // heading that points away from it holds.
+        let outward = state.north_m * heading_rad.cos() + state.east_m * heading_rad.sin() > 0.0;
+        if outward && state.north_m.hypot(state.east_m) > self.limits.max_range_m {
             self.task = Some(Task::HoldAt {
                 fix: Fix {
                     north_m: state.north_m,

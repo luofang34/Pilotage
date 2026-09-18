@@ -40,10 +40,11 @@ pub struct Procedure {
 
 /// The condition that releases a scripted operator message.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "when", rename_all = "snake_case")]
+#[serde(tag = "when", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Trigger {
-    /// Released as soon as control is held.
-    Start,
+    /// Released as soon as control is held. The braces make the decoder
+    /// refuse an unknown field, which a unit variant would accept.
+    Start {},
     /// Released after the vehicle flies the newest directive for this many
     /// seconds without a break.
     FlyingFor {
@@ -97,7 +98,7 @@ pub enum Checkpoint {
 
 /// How the flight must end.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "state", rename_all = "snake_case")]
+#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
 pub enum EndState {
     /// On the ground at a fix, at rest and not armed.
     LandedAt {
@@ -110,7 +111,7 @@ pub enum EndState {
         fix: String,
     },
     /// The checkpoints are the whole result.
-    CheckpointsOnly,
+    CheckpointsOnly {},
 }
 
 /// The result that the verifier holds the flight to.
@@ -270,7 +271,7 @@ impl Scenario {
         }
         match &self.expect.end {
             EndState::LandedAt { fix } | EndState::HoldingAt { fix } => names.push(fix),
-            EndState::CheckpointsOnly => {}
+            EndState::CheckpointsOnly {} => {}
         }
         names
     }

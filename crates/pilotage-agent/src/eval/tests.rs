@@ -152,7 +152,8 @@ fn a_wrong_answer_that_the_message_does_not_support_is_stopped_and_not_flown() {
         },
         &[],
     );
-    // "proceed direct BRAVO and land": the wrong arrival is in the message.
+    // "proceed direct BRAVO and land": a hold in place of the landing that
+    // the message asks for is a lost instruction, and is stopped too.
     let wrong_arrival = reply(
         Directive::DirectTo {
             fix: "BRAVO".into(),
@@ -167,8 +168,8 @@ fn a_wrong_answer_that_the_message_does_not_support_is_stopped_and_not_flown() {
     ];
     assert_eq!(
         results.iter().map(|r| r.would_fly).collect::<Vec<_>>(),
-        [false, false, true]
+        [false, false, false]
     );
     let report = summarize(&results);
-    assert_eq!((report.wrong_and_stopped, report.wrong_and_flown), (2, 1));
+    assert_eq!((report.wrong_and_stopped, report.wrong_and_flown), (3, 0));
 }

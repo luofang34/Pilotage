@@ -30,7 +30,7 @@ impl Script {
         }
         let message = self.messages.get(self.next)?;
         let due = match message.trigger {
-            Trigger::Start => true,
+            Trigger::Start {} => true,
             Trigger::FlyingFor { seconds } => flying_s.is_some_and(|flying| flying >= seconds),
         };
         if !due {
@@ -71,7 +71,7 @@ mod tests {
     #[test]
     fn the_second_message_waits_for_the_answer_and_then_for_its_trigger() {
         let mut script = Script::new(vec![
-            message("first", Trigger::Start),
+            message("first", Trigger::Start {}),
             message("second", Trigger::FlyingFor { seconds: 4.0 }),
         ]);
         assert_eq!(script.release(None).map(|m| m.text.as_str()), Some("first"));
