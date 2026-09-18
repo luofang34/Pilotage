@@ -24,6 +24,9 @@ pub(crate) const PROFILE_ID: &str = "automation.intent-pilot/v1";
 pub(crate) const MOTION_SCOPE: &str = "vehicle.motion";
 /// Deadline for admission and for the lease, in seconds.
 const HANDSHAKE_TIMEOUT_S: u64 = 10;
+/// Time to wait for the host's next word after the release, in seconds. A
+/// close right after the write can drop the release with the connection.
+const RELEASE_WORD_TIMEOUT_S: u64 = 2;
 
 /// An admitted session that holds the motion lease.
 pub(crate) struct Session {
@@ -136,13 +139,42 @@ impl Session {
         self.execute(actions).await
     }
 
-    /// Releases the lease and closes the link.
+    /// Releases the lease and closes the link. The close waits for the next
+    /// word of the host on authority: it comes on the same stream after the
+    /// release, so the release was read. Without the wait, a close can drop
+    /// the release with the connection, and the host sees a link loss.
     pub(crate) async fn close(mut self) {
         let actions = self.engine.release_lease(self.vehicle_id, MOTION_SCOPE);
         if let Err(error) = self.execute(actions).await {
             tracing::warn!(%error, "the lease release did not reach the host");
         }
+        let wait = Duration::from_secs(RELEASE_WORD_TIMEOUT_S);
+        match tokio::time::timeout(wait, self.next_authority_word()).await {
+            Ok(Ok(word)) => tracing::info!(word, "the host answered after the release"),
+            Ok(Err(error)) => tracing::debug!(%error, "the link ended before a word"),
+            Err(_) => tracing::warn!(
+                "no word from the host after the release; the link-loss policy covers the vehicle"
+            ),
+        }
         self.link.shutdown().await;
+    }
+
+    /// The next authority event or lease response from the host.
+    async fn next_authority_word(&mut self) -> Result<&'static str, PilotError> {
+        loop {
+            let Some(event) = self.events.recv().await else {
+                return Err(PilotError::TransportLost {
+                    detail: "the event queue closed before the host answered".to_owned(),
+                });
+            };
+            for event in self.ingest(event).await? {
+                match event {
+                    ModuleEvent::Authority(_) => return Ok("authority event"),
+                    ModuleEvent::Lease(_) => return Ok("lease response"),
+                    _ => {}
+                }
+            }
+        }
     }
 
     async fn admit(&mut self) -> Result<(), PilotError> {

@@ -17,9 +17,10 @@ const PAGE: &str = "http://localhost:8099";
 /// request line, or a fault line for a request that says `fault`.
 const ADAPTER: &str = r#"printf '%s\n' '{"ready":true,"adapter":"shell/1","model":"fixed","kinds":["land"]}'
 while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
   case "$line" in
-    *fault*) printf '%s\n' '{"error":"the model is not loaded"}' ;;
-    *) printf '%s\n' '{"directive":{"kind":"land"},"probabilities":{},"model_ms":1.0}' ;;
+    *fault*) printf '{"id":%s,"error":"the model is not loaded"}\n' "$id" ;;
+    *) printf '{"id":%s,"directive":{"kind":"land"},"probabilities":{},"model_ms":1.0}\n' "$id" ;;
   esac
 done"#;
 

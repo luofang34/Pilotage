@@ -23,12 +23,18 @@ impl Pilot {
         match line {
             input::Line::Message(text) => self.ask(text, Source::Operator).await,
             input::Line::Quit => {
-                tracing::info!("the operator ended the run; the vehicle returns and lands");
                 self.quitting = true;
                 let now_s = self.elapsed_s();
                 let home = Directive::ReturnToBase {};
-                if self.flight.fly(&home, now_s).is_err() {
-                    tracing::error!("the executor refused the return to base");
+                // A vehicle on the ground stays there: the run then ends at
+                // once, and no model reply can fly it after this point.
+                match self.flight.fly(&home, now_s) {
+                    Ok(()) => {
+                        tracing::info!("the operator ended the run; the vehicle returns and lands")
+                    }
+                    Err(refusal) => {
+                        tracing::info!(%refusal, "the operator ended the run on the ground")
+                    }
                 }
             }
         }
@@ -52,6 +58,21 @@ impl Pilot {
                     .await;
             }
         };
+        // After the operator ends the run, the return to base is the last
+        // directive. A late reply is recorded and not flown.
+        if self.quitting {
+            tracing::info!(%text, "a reply after the end of the run is not flown");
+            return self
+                .record
+                .append(&Entry::Refused {
+                    at_s,
+                    text,
+                    reply: &reply,
+                    reason: "the operator ended the run".to_owned(),
+                    means: means.as_ref(),
+                })
+                .await;
+        }
         match self.flight.take_reply(text, &reply, at_s) {
             Ok(directive) => {
                 tracing::info!(?directive, model_ms = reply.model_ms, "directive");

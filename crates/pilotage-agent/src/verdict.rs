@@ -68,6 +68,9 @@ pub struct Verifier {
     max_height_m: Option<f64>,
     violations: Vec<String>,
     proof_anchor: Option<(f64, TruthState)>,
+    /// True once a sample carried an armed report. From then on a sample
+    /// without one cannot prove a landing.
+    saw_arm_state: bool,
 }
 
 impl Verifier {
@@ -81,7 +84,7 @@ impl Verifier {
             EndState::LandedAt { fix } | EndState::HoldingAt { fix } => {
                 Some(scenario.position(fix)?)
             }
-            EndState::CheckpointsOnly => None,
+            EndState::CheckpointsOnly {} => None,
         };
         let mut fixes = Vec::new();
         for checkpoint in &expect.checkpoints {
@@ -90,6 +93,7 @@ impl Verifier {
             }
         }
         Some(Self {
+            saw_arm_state: false,
             checkpoints: expect.checkpoints.clone(),
             next_checkpoint: 0,
             held_since_s: None,
@@ -119,6 +123,9 @@ impl Verifier {
         armed: Option<bool>,
         elapsed_s: f64,
     ) -> Option<Report> {
+        if armed.is_some() {
+            self.saw_arm_state = true;
+        }
         self.truth_samples = self.truth_samples.wrapping_add(1);
         if let Some(height) = truth.height_m {
             self.max_height_m = Some(self.max_height_m.map_or(height, |max| max.max(height)));
@@ -135,7 +142,7 @@ impl Verifier {
             self.proof_anchor = None;
             return None;
         }
-        if self.end == EndState::CheckpointsOnly {
+        if self.end == (EndState::CheckpointsOnly {}) {
             return Some(self.report(Verdict::Pass, elapsed_s));
         }
         if !self.end_state_holds(truth, armed) {
@@ -234,12 +241,19 @@ impl Verifier {
         match self.end {
             EndState::LandedAt { .. } => {
                 let down = truth.height_m.is_none_or(|height| height <= ON_GROUND_M);
-                down && armed != Some(true)
+                // A vehicle that reports its arm state must report disarmed.
+                // A sample with no report proves nothing once a report was
+                // seen; only a vehicle that never reports one lands without.
+                let disarmed = match armed {
+                    Some(is_armed) => !is_armed,
+                    None => !self.saw_arm_state,
+                };
+                down && disarmed
             }
             EndState::HoldingAt { .. } => truth.height_m.is_none_or(|height| {
                 (height - self.cruise_height_m).abs() <= HOLD_HEIGHT_TOLERANCE_M
             }),
-            EndState::CheckpointsOnly => true,
+            EndState::CheckpointsOnly {} => true,
         }
     }
 

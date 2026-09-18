@@ -79,6 +79,7 @@ async fn run(options: &cli::Options) -> Result<String, EvalError> {
     let mut results: Vec<CaseResult> = Vec::with_capacity(suite.cases.len());
     for case in &suite.cases {
         let request = ModelRequest {
+            id: 0,
             message: case.message.clone(),
             envelope: suite.envelope.clone(),
             legend: suite.legend.clone(),

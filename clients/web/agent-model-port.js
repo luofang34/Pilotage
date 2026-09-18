@@ -17,7 +17,11 @@ function faultLine(detail) {
  * `fetchImpl` and `timeoutMs` are parameters so that a test can drive the
  * port with no network and no wait.
  */
-export function createModelPort({ baseUrl, fetchImpl = globalThis.fetch, timeoutMs = 30_000 }) {
+// The gateway gives its adapter 120 s for one reply. The browser waits a
+// little longer, so a slow reply is a reply and not a fault on this side only.
+const DEFAULT_TIMEOUT_MS = 125_000;
+
+export function createModelPort({ baseUrl, fetchImpl = globalThis.fetch, timeoutMs = DEFAULT_TIMEOUT_MS }) {
   const root = String(baseUrl).replace(/\/+$/, "");
 
   async function exchange(path, init) {

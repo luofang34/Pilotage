@@ -1,5 +1,7 @@
 //! Grounding: what the operator said, and what a model made up.
 
+#![allow(clippy::panic)]
+
 use super::check_grounding;
 use crate::directive::{Arrival, Directive, HoldPoint, TurnDirection};
 
@@ -94,17 +96,113 @@ fn a_procedure_can_be_said_in_parts() {
 }
 
 #[test]
-fn a_directive_with_no_name_and_no_number_always_passes() {
-    for directive in [
-        Directive::Takeoff {},
-        Directive::Land {},
-        Directive::GoAround {},
-        Directive::ReturnToBase {},
-        Directive::Hold {
-            point: HoldPoint::PresentPosition,
-        },
+fn a_directive_with_no_slot_still_needs_its_word() {
+    let hold = Directive::Hold {
+        point: HoldPoint::PresentPosition,
+    };
+    let cases = [
+        (
+            Directive::Takeoff {},
+            "Cleared for takeoff.",
+            "Get airborne.",
+        ),
+        (Directive::Land {}, "Cleared to land.", "Land now."),
+        (
+            Directive::GoAround {},
+            "Go around.",
+            "Go around, go around.",
+        ),
+        (
+            Directive::ReturnToBase {},
+            "Return to base.",
+            "Come back home and land.",
+        ),
+        (hold, "Hold position.", "Hold present position."),
+    ];
+    for (directive, said, also_said) in cases {
+        assert!(check_grounding(said, &directive).is_ok(), "{said}");
+        assert!(
+            check_grounding(also_said, &directive).is_ok(),
+            "{also_said}"
+        );
+        assert!(
+            check_grounding("Proceed direct BRAVO.", &directive).is_err(),
+            "{directive:?} was not asked for"
+        );
+    }
+}
+
+#[test]
+fn the_arrival_must_be_the_one_that_was_said() {
+    let land = direct("BRAVO");
+    let hold = Directive::DirectTo {
+        fix: "BRAVO".to_owned(),
+        on_arrival: Arrival::Hold,
+    };
+    assert!(check_grounding("Proceed direct BRAVO and hold.", &hold).is_ok());
+    assert!(
+        check_grounding("Proceed direct BRAVO.", &hold).is_ok(),
+        "no landing asked"
+    );
+    assert!(
+        check_grounding("Proceed direct BRAVO and hold.", &land).is_err(),
+        "a landing nobody asked for"
+    );
+    assert!(check_grounding("Proceed direct BRAVO and land.", &land).is_ok());
+    assert!(
+        check_grounding("Proceed direct BRAVO and land.", &hold).is_err(),
+        "a lost landing"
+    );
+}
+
+#[test]
+fn a_number_bound_to_a_heading_is_not_a_height() {
+    let climb = Directive::Altitude { height_m: 12.0 };
+    let text = "Climb to 12 metres and turn left heading 270.";
+    assert!(check_grounding(text, &climb).is_ok());
+    assert!(check_grounding(text, &heading(270)).is_ok());
+    assert!(
+        check_grounding(text, &heading(12)).is_err(),
+        "12 is a height"
+    );
+    let low = Directive::Altitude { height_m: 270.0 };
+    assert!(check_grounding(text, &low).is_err(), "270 is a heading");
+    assert!(
+        check_grounding("Turn to 270.", &turn(270, TurnDirection::Shortest)).is_ok(),
+        "a turn binds its number"
+    );
+    assert!(
+        check_grounding("Proceed to 270.", &turn(270, TurnDirection::Shortest)).is_err(),
+        "no heading word and no turn"
+    );
+    assert!(check_grounding("Steer 200 degrees.", &turn(200, TurnDirection::Shortest)).is_ok());
+    assert!(
+        check_grounding("Turn to 200 degrees.", &turn(200, TurnDirection::Shortest)).is_ok(),
+        "the unit after the number binds it"
+    );
+    let speed = Directive::Speed { speed_mps: 2.0 };
+    assert!(check_grounding("Reduce speed to 2.", &speed).is_ok());
+    assert!(check_grounding("Fly at 2 metres per second.", &speed).is_ok());
+    assert!(check_grounding("Fly heading 2.", &speed).is_err());
+}
+
+/// The grounding check must stop no correct answer of the suites. Each
+/// expected directive of each case is grounded in its own message.
+#[test]
+fn every_expected_directive_of_the_suites_is_grounded_in_its_message() {
+    for text in [
+        include_str!("../../../../tools/intent-pilot/suites/atc-open-01.json"),
+        include_str!("../../../../tools/intent-pilot/suites/atc-heldout-01.json"),
     ] {
-        assert!(check_grounding("anything", &directive).is_ok());
+        let suite = match crate::eval::Suite::parse(text) {
+            Ok(suite) => suite,
+            Err(error) => panic!("the suite parses: {error}"),
+        };
+        for case in &suite.cases {
+            if let Err(refusal) = check_grounding(&case.message, &case.expect) {
+                panic!("{}: {refusal} (message: {})", case.id, case.message);
+            }
+        }
     }
 }
 

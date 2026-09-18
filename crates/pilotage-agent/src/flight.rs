@@ -71,6 +71,7 @@ impl AgentFlight {
     #[must_use]
     pub fn request(&self, message: &str, frames: Vec<Frame>) -> ModelRequest {
         ModelRequest {
+            id: 0,
             message: message.to_owned(),
             envelope: self.envelope.clone(),
             legend: self.legend.clone(),

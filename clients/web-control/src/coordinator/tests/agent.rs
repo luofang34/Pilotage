@@ -11,6 +11,8 @@ use crate::sample::{ButtonSample, DirectDemand, Mode, RawSample, SessionState};
 
 const AGENT_ID: &str = "automation.intent-pilot/v1";
 const ARM_BUTTON: usize = 9;
+/// The gimbal reset button of the default scheme.
+const RESET_BUTTON: usize = 11;
 
 const DEMAND: DirectDemand = DirectDemand {
     roll: 0.25,
@@ -157,12 +159,61 @@ fn an_operator_stick_disengages_the_agent_and_never_flies_the_deflection() {
 }
 
 #[test]
-fn an_operator_safety_press_disengages_the_agent() {
+fn an_operator_safety_press_disengages_the_agent_and_does_not_arm() {
     let mut coordinator = engaged();
     let state = session(true, true);
     let (tick, plan) = operator_tick(&mut coordinator, &[], &[ARM_BUTTON], flying(DEMAND), &state);
     assert_eq!(tick, AgentTick::OperatorOverride);
     assert!(!plan.arm, "the press that takes control does not also arm");
+    // The press stays down through the install and the first live ticks:
+    // its edge was consumed by the release, so it fires no arm later either.
+    for _ in 0..4 {
+        let (_, held) = operator_tick(&mut coordinator, &[], &[ARM_BUTTON], flying(DEMAND), &state);
+        assert!(!held.arm, "a held press is not a new edge");
+    }
+    operator_tick(&mut coordinator, &[], &[], flying(DEMAND), &state);
+    let (_, again) = operator_tick(&mut coordinator, &[], &[ARM_BUTTON], flying(DEMAND), &state);
+    assert!(
+        again.arm,
+        "a release and a new press is the operator's own arm"
+    );
+}
+
+#[test]
+fn an_operator_key_disengages_the_agent() {
+    let mut coordinator = engaged();
+    let state = session(true, true);
+    coordinator.key_event("w", true);
+    let (tick, taken) = agent_tick(&mut coordinator, flying(DEMAND), &state);
+    assert_eq!(tick, AgentTick::OperatorOverride);
+    assert!(!coordinator.agent_engaged());
+    assert_eq!(motion(&taken), Some([0.0; 4]), "the handover emits neutral");
+    coordinator.key_event("w", false);
+    for _ in 0..3 {
+        agent_tick(&mut coordinator, flying(DEMAND), &state);
+    }
+    assert_eq!(coordinator.device_label(), "Keyboard");
+}
+
+#[test]
+fn the_gimbal_reset_press_is_an_operator_input_too() {
+    let mut coordinator = engaged();
+    let state = session(true, true);
+    let (tick, _) = operator_tick(
+        &mut coordinator,
+        &[],
+        &[RESET_BUTTON],
+        flying(DEMAND),
+        &state,
+    );
+    assert_eq!(tick, AgentTick::OperatorOverride);
+}
+
+#[test]
+fn a_new_session_starts_with_the_operator_as_the_source() {
+    let mut coordinator = engaged();
+    coordinator.begin_session();
+    assert!(!coordinator.agent_engaged());
 }
 
 #[test]

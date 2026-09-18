@@ -206,7 +206,10 @@ impl Pilot {
     /// verdict is already decided, and this does not change it. A pilot that
     /// leaves with its vehicle in the air hands it to the link-loss policy.
     async fn recover(&mut self) {
-        if matches!(self.flight.phase(), Phase::Idle | Phase::Landed) {
+        if matches!(
+            self.flight.phase(),
+            Phase::Idle | Phase::Landed | Phase::Disarming
+        ) {
             return;
         }
         tracing::info!("the run is decided; the vehicle returns and lands");
@@ -233,7 +236,11 @@ impl Pilot {
             return Err(PilotError::ControlLost);
         }
         let flying_s = self.flight.flying_seconds(self.elapsed_s());
-        if let Some(message) = self.script.release(flying_s) {
+        // The return to base restarts the flying time, and a scripted message
+        // must not ride on it after the run ended.
+        if !self.quitting
+            && let Some(message) = self.script.release(flying_s)
+        {
             let text = message.text.clone();
             self.ask(text, Source::Script).await;
         }

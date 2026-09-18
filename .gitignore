@@ -76,3 +76,4 @@ clients/apple/Resources/SituationTerrain.mbtiles
 # Xcode writes one of these for each person who opens a package, under their own
 # account name, and rewrites it whenever a scheme is shown or hidden.
 xcuserdata/
+__pycache__/

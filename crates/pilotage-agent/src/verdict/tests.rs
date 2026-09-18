@@ -129,6 +129,31 @@ fn a_vehicle_that_is_armed_or_still_moving_has_not_landed() {
 }
 
 #[test]
+fn a_sample_without_an_armed_report_proves_no_landing_once_one_was_seen() {
+    let mut v = verifier(LAND_ALPHA);
+    dwell(&mut v, truth(7.0, 0.0, 5.0), true, 0.0, 1.0);
+    for step in 0..20_i32 {
+        let report = v.observe(&truth(14.6, 0.0, 0.1), None, 20.0 + f64::from(step) * 0.5);
+        assert_eq!(report, None, "the armed report went missing");
+    }
+    // A vehicle that never reports an arm state lands without one.
+    let mut planar = verifier(LAND_ALPHA);
+    for step in 0..4_i32 {
+        planar.observe(&truth(7.0, 0.0, 5.0), None, f64::from(step) * 0.5);
+    }
+    let mut verdict = None;
+    for step in 0..20_i32 {
+        if let Some(report) =
+            planar.observe(&truth(14.6, 0.0, 0.1), None, 20.0 + f64::from(step) * 0.5)
+        {
+            verdict = Some(report.verdict);
+            break;
+        }
+    }
+    assert_eq!(verdict, Some(Verdict::Pass));
+}
+
+#[test]
 fn a_hold_needs_the_cruise_height() {
     let mut v = verifier(r#"{"end":{"state":"holding_at","fix":"ALPHA"},"timeout_s":60}"#);
     dwell(&mut v, truth(7.0, 0.0, 5.0), true, 0.0, 1.0);

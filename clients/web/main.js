@@ -126,6 +126,8 @@ control = createControlLoop({
   agentSource: {
     tick: (nowMs) => agent.tick(nowMs),
     overridden: () => agent.overridden(),
+    release: (reason) => agent.release(reason),
+    sync: (engaged) => agent.sync(engaged),
     onActionResult: (isArm, accepted) => agent.onActionResult(isArm, accepted),
   },
 });

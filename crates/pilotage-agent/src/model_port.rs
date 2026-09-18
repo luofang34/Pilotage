@@ -76,6 +76,11 @@ pub struct AdapterDeclaration {
 /// One request to a model adapter.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModelRequest {
+    /// The number of this request on its port. A reply carries the number of
+    /// the request that it answers, so a late reply cannot answer the next
+    /// request. The port sets it; a builder leaves it at zero.
+    #[serde(default)]
+    pub id: u64,
     /// The newest operator message, word for word.
     pub message: String,
     /// What the agent can fly now.
@@ -94,6 +99,9 @@ pub type SlotProbabilities = BTreeMap<String, f64>;
 /// One reply from a model adapter.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModelReply {
+    /// The number of the request that this reply answers.
+    #[serde(default)]
+    pub id: u64,
     /// The directive that the model read from the message.
     pub directive: Directive,
     /// The probability of each slot.
@@ -131,6 +139,15 @@ pub enum Refusal {
         slot: &'static str,
         /// The refused value.
         value: f64,
+    },
+    /// The directive changes nothing in the present phase, so the vehicle
+    /// keeps its directive. A silent no-op would read as a flown directive.
+    #[error("the directive {kind:?} has no effect in the phase {phase:?}")]
+    NoEffect {
+        /// The directive kind.
+        kind: DirectiveKind,
+        /// The executor phase.
+        phase: crate::executor::Phase,
     },
 }
 
