@@ -72,6 +72,7 @@ impl Suite {
                 });
             }
             let expected = ModelReply {
+                id: 0,
                 directive: case.expect.clone(),
                 probabilities: BTreeMap::new(),
                 model_ms: 0.0,

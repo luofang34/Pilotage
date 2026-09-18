@@ -57,6 +57,7 @@ export function createControlLoop({
   lengthDelimit,
   maybeAnnounceProfileActivation,
   requestReconnect,
+  agentSource = null,
 }) {
   function motionGroup(scope) {
     return scope === directScope ? motionScope : scope;
@@ -128,7 +129,15 @@ export function createControlLoop({
     log("sent LeaseRelease for " + scope);
   }
 
+  /// An agent flies under this client's authority and its velocity law. A
+  /// change of either releases the agent first; the operator engages it again
+  /// on purpose.
+  function releaseAgent(reason) {
+    if (state.controlShell?.agentEngaged) agentSource?.release(reason);
+  }
+
   function suspendControlForInputLoss(token) {
+    releaseAgent("control authority was released");
     state.stopControlRun?.stop();
     const releaseNeeded =
       authorityFor(state.motionScope).granted || state.resumePendingToken === token;
@@ -553,9 +562,17 @@ export function createControlLoop({
       connected: state.connected, inputLost: controlGate.isLatched(),
       nowMs: performance.now(),
     };
-    const plan = pad
-      ? state.controlShell.tickFromPad(pad, sessionState)
-      : state.controlShell.tickFromKeys(sessionState);
+    // An engaged agent is the input source. The pad still goes in: the
+    // runtime releases the agent on the first operator input.
+    const agentEngaged = state.controlShell.agentEngaged;
+    agentSource?.sync(agentEngaged);
+    const agentInput = agentEngaged ? agentSource?.tick(sessionState.nowMs) : null;
+    const plan = agentInput
+      ? state.controlShell.tickFromAgent(pad, agentInput, sessionState)
+      : pad
+        ? state.controlShell.tickFromPad(pad, sessionState)
+        : state.controlShell.tickFromKeys(sessionState);
+    if (plan.agentOverridden) agentSource?.overridden();
     return { pad, plan };
   }
 
@@ -662,6 +679,7 @@ export function createControlLoop({
       log("sim reset not advertised (not a simulator host); not sent");
       return;
     }
+    releaseAgent("the simulation resets");
     if (authorityFor(lifecycleScope).granted) {
       if (requestAction(lifecycleScope, CONTROL_ACTION.simReset)) log("simulation reset requested");
       return;
@@ -688,6 +706,7 @@ export function createControlLoop({
       log("feel mode: no session stream; not sent");
       return false;
     }
+    releaseAgent("the control-feel law changes");
     const action = CONTROL_ACTION.feelModeRequest;
     const actionId = enqueueAction(state.actionTracker, scope, action, performance.now(), {
       feelTarget,
@@ -767,6 +786,9 @@ export function createControlLoop({
         state.lastFrameRejectionLogged = null;
         surface.armAccepted();
       }
+    }
+    if (entry.action === CONTROL_ACTION.arm || entry.action === CONTROL_ACTION.disarm) {
+      agentSource?.onActionResult(entry.action === CONTROL_ACTION.arm, message.accepted);
     }
     if (entry.scope === lifecycleScope) {
       const action = state.controlShell?.planAuthority("lifecycle", false);
@@ -862,6 +884,7 @@ export function createControlLoop({
         log("no heading telemetry yet; cannot enter direct flight");
         return;
       }
+      releaseAgent("the flight scope changes");
       state.pendingMotionScope = target;
       state.controlShell.reactivate();
       log(`flight-scope handover to ${target}: neutral fence + lease cycle opened`);
@@ -876,6 +899,7 @@ export function createControlLoop({
       ? pendingTarget === MODE_TARGET.fpvDirect
       : state.fpvActive;
     const modeTarget = fpvBase ? MODE_TARGET.cameraVelocity : MODE_TARGET.fpvDirect;
+    releaseAgent("the flight mode changes");
     if (
       requestAction(state.motionScope, CONTROL_ACTION.modeRequest, modeTarget, [
         CONTROL_ACTION.modeRequest,
@@ -939,6 +963,8 @@ export function createControlLoop({
     refreshFeelModeControl,
     showFeelMode,
     requestFeelMode,
+    requestFlightModeSwitch,
+    requestSimReset,
     resumeControlInPlace,
     runSessionStreamReader,
     sendLeaseRelease,

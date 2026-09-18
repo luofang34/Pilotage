@@ -38,3 +38,16 @@ wasm-bindgen \
 
 control_bytes="$(wc -c < clients/web/control-runtime_bg.wasm | tr -d ' ')"
 echo "built clients/web/control-runtime.js and control-runtime_bg.wasm (${control_bytes} bytes)"
+
+# The agent runtime (ADR-0042): the model request, the reply checks and the
+# directive executor. Same toolchain, a separate generated binding.
+cargo build -p pilotage-agent-web --target wasm32-unknown-unknown --release
+wasm-bindgen \
+  target/wasm32-unknown-unknown/release/pilotage_agent_web.wasm \
+  --target web \
+  --out-dir clients/web \
+  --out-name agent-runtime \
+  --no-typescript
+
+agent_bytes="$(wc -c < clients/web/agent-runtime_bg.wasm | tr -d ' ')"
+echo "built clients/web/agent-runtime.js and agent-runtime_bg.wasm (${agent_bytes} bytes)"

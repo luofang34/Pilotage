@@ -9,8 +9,8 @@ use std::time::{Duration, Instant};
 
 use intent_pilot::{ModelProcess, ModelProcessError};
 use pilotage_agent::{
-    Directive, Discrete, Executor, FlightEnvelope, FlightLimits, ModelReply, ModelRequest,
-    NumberRange, Phase, Report, Scenario, TruthState, VehicleState, Verifier,
+    AgentFlight, Directive, Discrete, ModelReply, ModelRequest, Phase, Report, Scenario,
+    TruthState, VehicleOffer, Verifier,
 };
 use pilotage_client_session::ModuleEvent;
 use pilotage_protocol::wire;
@@ -33,10 +33,6 @@ const FRAME_INTERVAL: Duration = Duration::from_millis(50);
 /// Interval between truth samples in the run record, in seconds. It is short
 /// enough to draw the flown path from the record.
 const TRACE_INTERVAL_S: f64 = 0.2;
-/// Share of the advertised speed limit used as the cruise speed.
-const CRUISE_SHARE: f64 = 0.8;
-/// The slowest speed that a `speed` directive can ask for.
-const MIN_SPEED_MPS: f64 = 0.3;
 /// Time allowed to bring the vehicle home after a verdict, in seconds.
 const RECOVERY_TIMEOUT: Duration = Duration::from_secs(120);
 /// Rejected frames written to the record before the rest are only counted.
@@ -90,27 +86,17 @@ pub(crate) async fn fly(options: &Options) -> Result<Outcome, PilotError> {
             detail: format!("{MOTION_SCOPE} advertises no arm action"),
         });
     }
-    let max_linear_mps = session.max_linear_mps();
-    let limits = FlightLimits {
-        cruise_height_m: scenario.cruise_height_m,
-        cruise_speed_mps: CRUISE_SHARE * max_linear_mps,
-        arrival_radius_m: scenario.arrival_radius_m,
-        max_range_m: scenario.max_range_m,
-        max_linear_mps,
+    let offer = VehicleOffer {
+        max_linear_mps: session.max_linear_mps(),
         disarm_offered: session.offers(Discrete::Disarm),
     };
-    tracing::info!(profile = PROFILE_ID, ?limits, "motion lease held");
+    tracing::info!(profile = PROFILE_ID, ?offer, "motion lease held");
 
     let (asks, ask_queue) = mpsc::channel(8);
     let (answer_queue, answers) = mpsc::channel(8);
     let model_task = tokio::spawn(serve_model(model, ask_queue, answer_queue));
     let mut pilot = Pilot {
-        envelope: scenario.envelope(NumberRange {
-            min: MIN_SPEED_MPS.min(max_linear_mps),
-            max: max_linear_mps,
-        }),
-        legend,
-        executor: Executor::new(limits, &scenario),
+        flight: AgentFlight::new(&scenario, offer),
         script: Script::new(scenario.messages.clone()),
         verifier,
         record,
@@ -121,7 +107,6 @@ pub(crate) async fn fly(options: &Options) -> Result<Outcome, PilotError> {
         live: options.live,
         quitting: false,
         planar_truth: options.planar_truth,
-        state: None,
         truth: None,
         traced_at_s: None,
         clock: None,
@@ -169,9 +154,7 @@ async fn serve_model(
 }
 
 struct Pilot {
-    envelope: FlightEnvelope,
-    legend: String,
-    executor: Executor,
+    flight: AgentFlight,
     script: Script,
     verifier: Verifier,
     record: RunRecord,
@@ -182,7 +165,6 @@ struct Pilot {
     live: bool,
     quitting: bool,
     planar_truth: bool,
-    state: Option<VehicleState>,
     truth: Option<TruthState>,
     traced_at_s: Option<f64>,
     /// Set when the first operator message is released. The verdict deadline
@@ -224,18 +206,17 @@ impl Pilot {
     /// verdict is already decided, and this does not change it. A pilot that
     /// leaves with its vehicle in the air hands it to the link-loss policy.
     async fn recover(&mut self) {
-        if matches!(self.executor.phase(), Phase::Idle | Phase::Landed) {
+        if matches!(
+            self.flight.phase(),
+            Phase::Idle | Phase::Landed | Phase::Disarming
+        ) {
             return;
         }
         tracing::info!("the run is decided; the vehicle returns and lands");
         self.live = true;
         self.quitting = true;
         let home = Directive::ReturnToBase {};
-        if self
-            .executor
-            .accept(&home, self.state.as_ref(), self.elapsed_s())
-            .is_err()
-        {
+        if self.flight.fly(&home, self.elapsed_s()).is_err() {
             return;
         }
         match tokio::time::timeout(RECOVERY_TIMEOUT, self.run()).await {
@@ -254,20 +235,23 @@ impl Pilot {
         if !self.session.holds_control() {
             return Err(PilotError::ControlLost);
         }
-        let flying_s = self.executor.flying_seconds(self.elapsed_s());
-        if let Some(message) = self.script.release(flying_s) {
+        let flying_s = self.flight.flying_seconds(self.elapsed_s());
+        // The return to base restarts the flying time, and a scripted message
+        // must not ride on it after the run ended.
+        if !self.quitting
+            && let Some(message) = self.script.release(flying_s)
+        {
             let text = message.text.clone();
             self.ask(text, Source::Script).await;
         }
         let now_s = self.elapsed_s();
-        let demand = match self.state {
-            Some(state) => {
-                let step = self.executor.step(&state, now_s);
+        let demand = match self.flight.step(now_s) {
+            Some(step) => {
                 if let Some(request) = step.action {
                     tracing::info!(?request, "discrete request");
                     self.session.send_action(request).await?;
                 }
-                self.note_phase(step.phase, &state, now_s).await?;
+                self.note_phase(step.phase, now_s).await?;
                 step.demand
             }
             // The lease needs frames before the first telemetry sample.
@@ -276,22 +260,20 @@ impl Pilot {
         self.session.send_demand(demand).await?;
         self.trace_truth(now_s).await?;
         if self.live {
-            let down = matches!(self.executor.phase(), Phase::Idle | Phase::Landed);
+            let down = matches!(self.flight.phase(), Phase::Idle | Phase::Landed);
             return Ok((self.quitting && down).then_some(Outcome::Live));
         }
         let report = self.clock.and_then(|_| self.verifier.on_clock(now_s));
         Ok(report.map(Outcome::Verdict))
     }
 
-    async fn note_phase(
-        &mut self,
-        phase: Phase,
-        state: &VehicleState,
-        at_s: f64,
-    ) -> Result<(), PilotError> {
+    async fn note_phase(&mut self, phase: Phase, at_s: f64) -> Result<(), PilotError> {
         if phase == self.last_phase {
             return Ok(());
         }
+        let Some(state) = self.flight.state().copied() else {
+            return Ok(());
+        };
         self.last_phase = phase;
         tracing::info!(?phase, north = state.north_m, east = state.east_m, "phase");
         self.record
@@ -320,7 +302,7 @@ impl Pilot {
                 east_m: truth.east_m,
                 height_m: truth.height_m,
                 heading_deg: truth.yaw_rad.map(|yaw| yaw.to_degrees().rem_euclid(360.0)),
-                armed: self.state.and_then(|state| state.armed),
+                armed: self.flight.state().and_then(|state| state.armed),
                 phase: self.last_phase,
             })
             .await
@@ -349,7 +331,9 @@ impl Pilot {
     }
 
     fn on_telemetry(&mut self, sample: &wire::TelemetrySample) -> Option<Report> {
-        self.state = control_state(sample).or(self.state);
+        if let Some(state) = control_state(sample) {
+            self.flight.observe(state);
+        }
         // The verifier starts with the clock. Truth from before the first
         // message is the vehicle on its pad and proves nothing.
         self.clock?;
@@ -358,7 +342,7 @@ impl Pilot {
         if self.live {
             return None;
         }
-        let armed = self.state.and_then(|state| state.armed);
+        let armed = self.flight.state().and_then(|state| state.armed);
         self.verifier.observe(&truth, armed, self.elapsed_s())
     }
 
@@ -373,7 +357,7 @@ impl Pilot {
         if !result.accepted {
             tracing::warn!(?request, detail = %result.detail, "the host refused the request");
         }
-        self.executor.on_action_result(request, result.accepted);
+        self.flight.on_action_result(request, result.accepted);
     }
 
     async fn on_rejected(&mut self, rejected: &wire::FrameRejected) -> Result<(), PilotError> {

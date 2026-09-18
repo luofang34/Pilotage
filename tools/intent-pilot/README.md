@@ -7,6 +7,12 @@ shared core is `crates/pilotage-agent`. The core has no I/O.
 - `intent-pilot` flies operator messages. A model reads each message and gives a
   directive. Deterministic code checks the directive and flies it.
 - `agent-eval` gives each model the same cases and the same score.
+- `model-gateway` gives the model port over HTTP to a client that cannot start a
+  process. The browser viewer uses it.
+
+The agent module has a second port in the browser viewer (`clients/web`, with the
+wasm crate `clients/web-agent`). The two ports fly through `AgentFlight` of the
+shared core, so the checks and the executor are the same.
 
 ## Terms
 
@@ -50,11 +56,16 @@ JSON object.
 ```
 declaration  {"ready":true,"adapter":"ollama-json/1","model":"gemma4:e4b",
               "kinds":["takeoff","direct_to",...],"frames":{"max_frames":0,"projections":[]}}
-request      {"message":"Turn left heading 270.","envelope":{...},"legend":"FIXES: ...","frames":[]}
-reply        {"directive":{"kind":"heading","degrees":270,"turn":"left"},
+request      {"id":7,"message":"Turn left heading 270.","envelope":{...},"legend":"FIXES: ...","frames":[]}
+reply        {"id":7,"directive":{"kind":"heading","degrees":270,"turn":"left"},
               "probabilities":{"kind":0.98},"model_ms":805.0}
-fault        {"error":"..."}
+fault        {"id":7,"error":"..."}
 ```
+
+The port numbers each request. The reply carries the number of the request that it
+answers. A reply to an earlier request, such as one that comes after its deadline,
+is skipped, so it cannot become the answer to the next request. A reply to a number
+that was never sent is a fault of the adapter.
 
 A request contains the newest operator message, the flight envelope, a legend, and
 zero or more frames. It contains no vehicle state and no earlier messages. A small
@@ -125,6 +136,39 @@ Scenarios: `direct-land`, `retarget-recall`, `vectors` (heading and altitude),
 A live run has no verdict. A person in the viewer can request the motion scope at
 any time, and the pilot gives it up.
 
+## Fly from the browser viewer
+
+In the viewer the agent is an input source of the client, beside the keyboard and a
+pad. It uses the lease that the viewer holds. It does not open a connection.
+
+1. Start the session with `cargo xtask sim --fc aviate --no-open --viewer-port 8099`.
+2. Start the gateway:
+
+   ```
+   model-gateway --model-cmd "PYTHONPATH=tools/intent-pilot/adapters python3 tools/intent-pilot/adapters/ollama_json.py"
+   ```
+
+   The gateway listens on `127.0.0.1:8098`. It accepts a page from
+   `http://localhost:8099` or `http://127.0.0.1:8099`. Give `--listen` and
+   `--allow-origin` for a different address.
+3. Open the viewer address that the launcher prints. Select a Quad control mode.
+4. Push **Engage agent**. The status shows `AGENT HAS CONTROL` and the executor
+   phase. The host log shows a profile activation with the device profile
+   `automation.intent-pilot/v1`.
+5. Type an instruction, or push a preset. The panel shows each directive that is
+   flown and each reply that is refused.
+6. Move a stick or push a flight key to take control. The agent stops at once, and
+   the vehicle holds its position until you move a control again. Push **Engage
+   agent** to give control back.
+
+The viewer reads the gateway address from the `agent` parameter of its address,
+for example `&agent=http://localhost:8098`. The default is port 8098 on the host
+that serves the page.
+
+A browser on a second machine needs a secure context for WebTransport. Forward the
+viewer port and the gateway port to `localhost` on that machine, and give the host
+name of the session machine in the `host` parameter.
+
 ## Score a model
 
 ```
@@ -153,23 +197,29 @@ Adapters in `adapters/`:
 
 ## Measured results
 
-Machine: Apple M4, 16 GB. Date: 2026-09-17. Suite `atc-heldout-01`, 46 cases, first
-run of each adapter. The same person wrote the suite and the adapters, so these
-numbers are not a blind test. The comparison between adapters is fair.
+Machine: Apple M4, 16 GB. Date: 2026-09-17. Suite `atc-heldout-01`, 46 cases. The
+same person wrote the suite and the adapters, so these numbers are not a blind test.
+The comparison between adapters is fair.
 
-| Adapter | Correct | Wrong and flown | Wrong and stopped | Median time |
+The ledger holds three runs of this suite for each adapter. The "Correct" column is
+the first run. The "flown" and "stopped" columns are the third run, with the checks
+as they are in this tree: the grounding rules for the turn side, the arrival, the
+slotless directives and the number binding were written after the first two runs
+showed wrong replies that would fly. A rule of the checks changes what the agent
+flies. It does not change the score of a model, and the correct count of the third
+run equals the first run for each adapter.
+
+| Adapter | Correct (run 1) | Wrong and flown (run 3) | Wrong and stopped (run 3) | Median time |
 | --- | --- | --- | --- | --- |
-| `ollama_json.py`, `gemma4:e4b` | 45 of 46 | 1 | 0 | 756 ms |
-| `qwen_json.py`, `Qwen2.5-1.5B-Instruct-4bit` | 36 of 46 | 7 | 3 | 601 ms |
-| `keyword_baseline.py` | 31 of 46 | 3 | 0 | 0 ms |
-| `rlcd_directive.py`, the same Qwen weights | 19 of 46 | 5 | 19 | 379 ms |
+| `ollama_json.py`, `gemma4:e4b` | 45 of 46 | 0 | 1 | 718 ms |
+| `qwen_json.py`, `Qwen2.5-1.5B-Instruct-4bit` | 36 of 46 | 3 | 7 | 545 ms |
+| `keyword_baseline.py` | 31 of 46 | 2 | 1 | 0 ms |
+| `rlcd_directive.py`, the same Qwen weights | 19 of 46 | 3 | 21 | 374 ms |
 
-The "flown" and "stopped" columns are from the second run, before the turn-side rule.
-That rule was written after the held-out run showed a reply with a lost turn side. It
-changes what the agent flies. It does not change the score of a model.
-The grounding check stopped no correct answer. The parallel engine is below the
-keyword baseline on this vocabulary: directive kind 21 of 30 and numbers 2 of 15 in
-the two suites. It is correct for kinds with one clear word, such as a procedure.
+The grounding check stopped no correct answer in any run. The parallel engine is
+below the keyword baseline on this vocabulary: directive kind 21 of 30 and numbers
+2 of 15 in the two suites. It is correct for kinds with one clear word, such as a
+procedure.
 
 The suite has no message with two instructions. `gemma4:e4b` read "Get airborne and
 go to ALPHA, hold overhead." as `takeoff` only. The model port gives one directive
@@ -192,6 +242,28 @@ Two live runs took operator messages from the keyboard. In the two runs the mess
 "Proceed direct ZULU and land." got the reply `ALPHA`. The first run had no grounding
 check, and the vehicle flew toward `ALPHA` for 4 s. The second run refused the reply.
 
+### Flights from the browser viewer
+
+A headless Chrome on a second machine flew this sequence through the agent panel,
+with `gemma4:e4b` behind the gateway: takeoff, "Turn left heading 270.", "Proceed
+direct ZULU and land.", "Proceed direct BRAVO and hold.", a flight key from the
+operator, a second engage, and "Cleared RNAV 27 approach.". Each check reads the
+vehicle pose from Gazebo (`gz model -p`). It does not read the agent or the page.
+
+| Run | Result | Notes |
+| --- | --- | --- |
+| 1 | 10 of 11 checks | The failed check was the first probe of the test rig. It read the wrong page element for the lease. Each flight check passed. |
+| 2 | lost | The test rig stopped on a failed truth sample. The browser closed, and the link-loss policy of the host landed the vehicle. |
+| 3 | 11 of 11 checks | 5.25 m after takeoff, heading 264 and 10.3 m west after 7 s, 0.9 m from `BRAVO`, 5.1 m under the operator, landed 0.19 m from `HOME`. |
+| 4 | 11 of 11 checks | Heading 271 and 13.9 m west after 7 s, 0.7 m from `BRAVO`, landed 0.45 m from `HOME`. |
+| 5 | 11 of 11 checks | Heading 267 and 13.5 m west after 7 s, 0.4 m from `BRAVO`, landed 0.30 m from `HOME`. This run is the recorded demonstration. |
+| 6 | 11 of 11 checks | Flown after the fix of the release source. Heading 265 and 10.3 m west after 7 s, 0.9 m from `BRAVO`, landed 0.28 m from `HOME`. |
+
+In each of the six runs the model gave `ALPHA` for `ZULU`, and the grounding check
+refused the reply. The host accepted four profile activations in run 1: the keyboard, the agent,
+the keyboard after the operator input, and the agent again. The host rejected no
+control frame.
+
 ## Known limits
 
 - The executor is a copy of what the mission core of ADR-0041 will do. The mission
@@ -201,5 +273,11 @@ check, and the vehicle flew toward `ALPHA` for 4 s. The second run refused the r
   `Disarm`. Aviate refuses `Disarm` while it reports the vehicle airborne, so the
   executor sends `Disarm` again each 2 s.
 - The telemetry has no energy state. The agent has no hazard response.
+- The model gateway has no authentication. It listens on loopback by default. On
+  another address, each host that reaches it can drive the adapter.
 - The host grant path does not mark an agent as different from a person.
 - A heading is a heading and not a track. The executor does not hold a ground track.
+- The browser port flies only while its window has the focus, as a person's input
+  does. A window that loses the focus releases its lease.
+- The Apple client links the same control runtime, so it has the agent input source.
+  It has no agent panel and no connection to a model gateway.

@@ -51,6 +51,7 @@ members = [
     "clients/web-instruments",
     "clients/web-instrument-shell",
     "clients/web-control",
+    "clients/web-agent",
     "clients/apple-instrument-bridge",
 ]
 

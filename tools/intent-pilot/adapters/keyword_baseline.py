@@ -1,8 +1,9 @@
 """A model adapter with no model: regular expressions.
 
 It is the floor for every comparison, and it tests the harness without a GPU. Its
-word lists come from the open suite only. Do not add a word because a held-out case
-uses it.
+instruction words come from the open suite only. The spoken digit map is general
+knowledge of the phraseology and not from a suite: it gives two held-out cases. Do
+not add a word because a held-out case uses it.
 """
 
 import re

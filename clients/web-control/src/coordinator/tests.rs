@@ -5,6 +5,8 @@
 //! neutral handover and installs only at the boundary, so a deflected input
 //! on the new pad can never drive the live session.
 
+mod agent;
+
 use super::ControlCoordinator;
 use pilotage_input::ProfileLayer;
 

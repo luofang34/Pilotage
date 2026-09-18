@@ -17,9 +17,12 @@ ALL_KINDS = ["takeoff", "direct_to", "heading", "altitude", "speed", "hold",
 def protect_stdout():
     """Returns the protocol stream. Every other write to stdout goes to stderr.
 
-    A model runtime prints progress text to stdout, and the port owns stdout.
+    A model runtime prints progress text to stdout, and the port owns stdout. A
+    native library writes to file descriptor 1 and not to sys.stdout, so the
+    descriptor is moved too.
     """
     port = os.fdopen(os.dup(sys.stdout.fileno()), "w", buffering=1)
+    os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
     sys.stdout = sys.stderr
     return port
 
@@ -33,12 +36,15 @@ def serve(port, declaration, answer):
         if not line:
             continue
         started = time.perf_counter()
+        request_id = 0
         try:
-            directive, probabilities = answer(json.loads(line))
-            reply = {"directive": directive, "probabilities": probabilities,
+            request = json.loads(line)
+            request_id = int(request.get("id", 0))
+            directive, probabilities = answer(request)
+            reply = {"id": request_id, "directive": directive, "probabilities": probabilities,
                      "model_ms": round((time.perf_counter() - started) * 1000.0, 1)}
         except Exception as fault:  # The caller records the fault and keeps its directive.
-            reply = {"error": f"{type(fault).__name__}: {fault}"}
+            reply = {"id": request_id, "error": f"{type(fault).__name__}: {fault}"}
         port.write(json.dumps(reply) + "\n")
         port.flush()
 
@@ -74,7 +80,11 @@ def clean_directive(raw, envelope):
         return {"kind": kind, "procedure": str(raw.get("procedure", "")).upper()}
     if kind in ("takeoff", "land", "go_around", "return_to_base"):
         return {"kind": kind}
-    return unable(str(raw.get("reason", "the model gave no usable kind")))
+    if kind == "unable":
+        return unable(str(raw.get("reason", "the model gave no reason")))
+    # An unknown kind is a fault of the model and not an "unable" answer: an
+    # "unable" scores as correct on a message that is not an instruction.
+    raise ValueError(f"the model gave no usable kind: {raw.get('kind')!r}")
 
 
 JSON_FORMS = """Reply with ONE JSON object and nothing else. Use exactly one of these forms:

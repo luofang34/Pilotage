@@ -15,6 +15,7 @@ mod directive;
 mod error;
 mod eval;
 mod executor;
+mod flight;
 mod grounding;
 mod guidance;
 mod model_port;
@@ -29,6 +30,7 @@ pub use eval::{
     Case, CaseResult, Outcome, SlotScore, Suite, SuiteReport, Tally, score_case, summarize,
 };
 pub use executor::{Discrete, Executor, FlightLimits, Phase, Step};
+pub use flight::{AgentFlight, VehicleOffer};
 pub use grounding::check_grounding;
 pub use guidance::Demand;
 pub use model_port::{
@@ -38,5 +40,5 @@ pub use model_port::{
 pub use scenario::{
     Checkpoint, EndState, Expectation, Fix, HOME, OperatorMessage, Procedure, Scenario, Trigger,
 };
-pub use state::{TruthState, VehicleState};
+pub use state::{TruthState, VehicleState, yaw_of_quaternion};
 pub use verdict::{Report, Verdict, Verifier};

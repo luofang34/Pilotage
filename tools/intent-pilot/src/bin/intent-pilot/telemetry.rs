@@ -3,7 +3,7 @@
 //! The control state and truth come from separate telemetry groups. The
 //! executor flies on the operational estimate. The verifier reads truth.
 
-use pilotage_agent::{TruthState, VehicleState};
+use pilotage_agent::{TruthState, VehicleState, yaw_of_quaternion};
 use pilotage_protocol::wire;
 
 /// `FcState.arm_state` value that the adapters publish for an armed vehicle.
@@ -92,25 +92,7 @@ pub(crate) fn truth_state(
     })
 }
 
-/// Yaw of a body-to-NED quaternion, in radians from north toward east.
+/// Yaw of a wire quaternion, in radians from north toward east.
 fn quat_yaw(w: f32, x: f32, y: f32, z: f32) -> f64 {
-    let (w, x, y, z) = (f64::from(w), f64::from(x), f64::from(y), f64::from(z));
-    (2.0 * (w * z + x * y)).atan2(1.0 - 2.0 * (y * y + z * z))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::quat_yaw;
-
-    #[test]
-    fn a_quarter_turn_about_down_reads_as_east() {
-        let half = std::f32::consts::FRAC_PI_4;
-        let yaw = quat_yaw(half.cos(), 0.0, 0.0, half.sin());
-        assert!((yaw - std::f64::consts::FRAC_PI_2).abs() < 1e-6);
-    }
-
-    #[test]
-    fn the_identity_quaternion_reads_as_north() {
-        assert!(quat_yaw(1.0, 0.0, 0.0, 0.0).abs() < 1e-9);
-    }
+    yaw_of_quaternion(f64::from(w), f64::from(x), f64::from(y), f64::from(z))
 }

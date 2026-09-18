@@ -70,6 +70,14 @@ pub enum ModelProcessError {
         /// The adapter's words.
         detail: String,
     },
+    /// The adapter answered a request that is not the one that was sent.
+    #[error("the model adapter answered request {actual} in place of request {expected}")]
+    Correlation {
+        /// The number of the request that was sent.
+        expected: u64,
+        /// The number that the reply carries.
+        actual: u64,
+    },
     /// The adapter declared that it is not ready.
     #[error("the model adapter declared that it is not ready")]
     NotReady,
@@ -86,6 +94,8 @@ pub struct ModelProcess {
     stdin: ChildStdin,
     stdout: Lines<BufReader<ChildStdout>>,
     declaration: AdapterDeclaration,
+    /// The number of the last request. A reply must carry it.
+    sent: u64,
 }
 
 impl ModelProcess {
@@ -118,6 +128,7 @@ impl ModelProcess {
             stdin,
             stdout,
             declaration,
+            sent: 0,
         })
     }
 
@@ -129,12 +140,22 @@ impl ModelProcess {
 
     /// Sends one request and reads its reply. The second value is the
     /// request-to-reply time in milliseconds, as this process measured it.
+    ///
+    /// The port numbers the request. A reply to an earlier request, such as
+    /// one that came after its deadline, is skipped, so it cannot become the
+    /// answer to this one. A reply to a later number is a fault of the
+    /// adapter.
     pub async fn ask(
         &mut self,
         request: &ModelRequest,
     ) -> Result<(ModelReply, f64), ModelProcessError> {
+        self.sent = self.sent.wrapping_add(1);
+        let numbered = ModelRequest {
+            id: self.sent,
+            ..request.clone()
+        };
         let mut line =
-            serde_json::to_string(request).map_err(|source| ModelProcessError::Decode {
+            serde_json::to_string(&numbered).map_err(|source| ModelProcessError::Decode {
                 stage: "request",
                 line: String::new(),
                 source,
@@ -149,14 +170,22 @@ impl ModelProcess {
             stage: "request write",
             source,
         })?;
-        let line = read_line(&mut self.stdout, "reply", REPLY_TIMEOUT_S).await?;
-        if let Ok(fault) = serde_json::from_str::<Fault>(&line) {
-            return Err(ModelProcessError::AdapterFault {
-                detail: fault.error,
-            });
+        let deadline = started + Duration::from_secs(REPLY_TIMEOUT_S);
+        loop {
+            let line = read_line_until(&mut self.stdout, "reply", deadline).await?;
+            let id = correlate(&line, self.sent)?;
+            if id < self.sent {
+                tracing::warn!(id, expected = self.sent, "a late reply is skipped");
+                continue;
+            }
+            if let Ok(fault) = serde_json::from_str::<Fault>(&line) {
+                return Err(ModelProcessError::AdapterFault {
+                    detail: fault.error,
+                });
+            }
+            let reply = decode("reply", &line)?;
+            return Ok((reply, started.elapsed().as_secs_f64() * 1000.0));
         }
-        let reply = decode("reply", &line)?;
-        Ok((reply, started.elapsed().as_secs_f64() * 1000.0))
     }
 
     /// Stops the adapter process.
@@ -172,12 +201,42 @@ async fn read_line(
     stage: &'static str,
     seconds: u64,
 ) -> Result<String, ModelProcessError> {
-    match tokio::time::timeout(Duration::from_secs(seconds), stdout.next_line()).await {
-        Err(_) => Err(ModelProcessError::Timeout { stage, seconds }),
+    read_line_until(stdout, stage, Instant::now() + Duration::from_secs(seconds)).await
+}
+
+async fn read_line_until(
+    stdout: &mut Lines<BufReader<ChildStdout>>,
+    stage: &'static str,
+    deadline: Instant,
+) -> Result<String, ModelProcessError> {
+    let seconds = deadline.saturating_duration_since(Instant::now());
+    match tokio::time::timeout(seconds, stdout.next_line()).await {
+        Err(_) => Err(ModelProcessError::Timeout {
+            stage,
+            seconds: REPLY_TIMEOUT_S,
+        }),
         Ok(Err(source)) => Err(ModelProcessError::Io { stage, source }),
         Ok(Ok(None)) => Err(ModelProcessError::Closed { stage }),
         Ok(Ok(Some(line))) => Ok(line),
     }
+}
+
+/// The request number that a reply line carries. A reply for a request that
+/// was never sent is a fault of the adapter.
+fn correlate(line: &str, sent: u64) -> Result<u64, ModelProcessError> {
+    #[derive(Deserialize)]
+    struct Numbered {
+        #[serde(default)]
+        id: u64,
+    }
+    let numbered: Numbered = decode("reply", line)?;
+    if numbered.id > sent {
+        return Err(ModelProcessError::Correlation {
+            expected: sent,
+            actual: numbered.id,
+        });
+    }
+    Ok(numbered.id)
 }
 
 fn decode<'a, T: Deserialize<'a>>(
@@ -190,3 +249,6 @@ fn decode<'a, T: Deserialize<'a>>(
         source,
     })
 }
+
+#[cfg(test)]
+mod tests;

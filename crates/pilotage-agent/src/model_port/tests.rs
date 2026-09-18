@@ -25,6 +25,7 @@ fn envelope() -> FlightEnvelope {
 
 fn reply(directive: Directive) -> ModelReply {
     ModelReply {
+        id: 0,
         directive,
         probabilities: Default::default(),
         model_ms: 0.0,
@@ -104,6 +105,7 @@ fn a_request_carries_frames_from_more_than_one_source() {
         data_base64: "AAEC".into(),
     };
     let request = ModelRequest {
+        id: 0,
         message: "land on the marked pad".into(),
         envelope: envelope(),
         legend: String::new(),
