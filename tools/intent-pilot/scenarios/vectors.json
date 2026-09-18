@@ -1,0 +1,110 @@
+{
+ "id": "vectors",
+ "fixes": {
+  "ALPHA": {
+   "north_m": 15,
+   "east_m": 0
+  },
+  "BRAVO": {
+   "north_m": 0,
+   "east_m": 15
+  },
+  "CHARLIE": {
+   "north_m": -15,
+   "east_m": 0
+  },
+  "DELTA": {
+   "north_m": 15,
+   "east_m": 15
+  }
+ },
+ "procedures": {
+  "RNAV27": {
+   "fixes": [
+    "DELTA",
+    "BRAVO",
+    "HOME"
+   ],
+   "then": "land"
+  },
+  "ILS09": {
+   "fixes": [
+    "CHARLIE",
+    "HOME"
+   ],
+   "then": "land"
+  }
+ },
+ "cruise_height_m": 5,
+ "arrival_radius_m": 1.5,
+ "max_range_m": 35,
+ "height_m": {
+  "min": 2,
+  "max": 30
+ },
+ "messages": [
+  {
+   "text": "Cleared for takeoff.",
+   "trigger": {
+    "when": "start"
+   },
+   "means": {
+    "kind": "takeoff"
+   }
+  },
+  {
+   "text": "Turn left heading 270.",
+   "trigger": {
+    "when": "flying_for",
+    "seconds": 3
+   },
+   "means": {
+    "kind": "heading",
+    "degrees": 270,
+    "turn": "left"
+   }
+  },
+  {
+   "text": "Climb and maintain 12 metres.",
+   "trigger": {
+    "when": "flying_for",
+    "seconds": 6
+   },
+   "means": {
+    "kind": "altitude",
+    "height_m": 12
+   }
+  },
+  {
+   "text": "Return to base.",
+   "trigger": {
+    "when": "flying_for",
+    "seconds": 14
+   },
+   "means": {
+    "kind": "return_to_base"
+   }
+  }
+ ],
+ "expect": {
+  "checkpoints": [
+   {
+    "check": "heading_held",
+    "degrees": 270,
+    "tolerance_deg": 10,
+    "for_s": 4
+   },
+   {
+    "check": "height_held",
+    "height_m": 12,
+    "tolerance_m": 1,
+    "for_s": 3
+   }
+  ],
+  "end": {
+   "state": "landed_at",
+   "fix": "HOME"
+  },
+  "timeout_s": 180
+ }
+}

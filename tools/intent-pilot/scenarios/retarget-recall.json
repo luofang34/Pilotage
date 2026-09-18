@@ -1,0 +1,103 @@
+{
+ "id": "retarget-recall",
+ "fixes": {
+  "ALPHA": {
+   "north_m": 15,
+   "east_m": 0
+  },
+  "BRAVO": {
+   "north_m": 0,
+   "east_m": 15
+  },
+  "CHARLIE": {
+   "north_m": -15,
+   "east_m": 0
+  },
+  "DELTA": {
+   "north_m": 15,
+   "east_m": 15
+  }
+ },
+ "procedures": {
+  "RNAV27": {
+   "fixes": [
+    "DELTA",
+    "BRAVO",
+    "HOME"
+   ],
+   "then": "land"
+  },
+  "ILS09": {
+   "fixes": [
+    "CHARLIE",
+    "HOME"
+   ],
+   "then": "land"
+  }
+ },
+ "cruise_height_m": 5,
+ "arrival_radius_m": 1.5,
+ "max_range_m": 35,
+ "height_m": {
+  "min": 2,
+  "max": 30
+ },
+ "messages": [
+  {
+   "text": "Get airborne and go to ALPHA, hold overhead.",
+   "trigger": {
+    "when": "start"
+   },
+   "means": {
+    "kind": "direct_to",
+    "fix": "ALPHA",
+    "on_arrival": "hold"
+   }
+  },
+  {
+   "text": "Forget ALPHA. Head to BRAVO and hold there.",
+   "trigger": {
+    "when": "flying_for",
+    "seconds": 3
+   },
+   "means": {
+    "kind": "direct_to",
+    "fix": "BRAVO",
+    "on_arrival": "hold"
+   }
+  },
+  {
+   "text": "That's enough, come back to base and land.",
+   "trigger": {
+    "when": "flying_for",
+    "seconds": 8
+   },
+   "means": {
+    "kind": "return_to_base"
+   }
+  }
+ ],
+ "expect": {
+  "checkpoints": [
+   {
+    "check": "approach",
+    "fix": "ALPHA",
+    "within_m": 12
+   },
+   {
+    "check": "approach",
+    "fix": "BRAVO",
+    "within_m": 12
+   }
+  ],
+  "end": {
+   "state": "landed_at",
+   "fix": "HOME"
+  },
+  "must_not_reach": [
+   "ALPHA",
+   "BRAVO"
+  ],
+  "timeout_s": 150
+ }
+}

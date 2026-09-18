@@ -16,10 +16,11 @@
 import assert from "node:assert/strict";
 
 import { FRAME_REJECTION_RELOG_MS, createControlLoop } from "./control-loop.js";
+import { CONTROL_ACTION, MODE_TARGET } from "./wire.js";
 
 globalThis.navigator ??= {};
 
-function harness({ mayPublish = true } = {}) {
+function harness({ mayPublish = true, agentSource = null } = {}) {
   const record = {
     active: true,
     latched: 0,
@@ -70,7 +71,7 @@ function harness({ mayPublish = true } = {}) {
       },
     },
     releaseTracker: { isPending: () => false },
-    vehicleId: "veh",
+    vehicleId: 1n,
     motionScope: "vehicle.motion",
     directScope: "vehicle.motion.direct",
     gimbalScope: "vehicle.gimbal",
@@ -91,6 +92,7 @@ function harness({ mayPublish = true } = {}) {
     lengthDelimit: (bytes) => bytes,
     maybeAnnounceProfileActivation() {},
     requestReconnect() {},
+    agentSource,
   });
   return { loop, state, record };
 }
@@ -170,6 +172,59 @@ function harness({ mayPublish = true } = {}) {
     3,
     "a different rejection key logs immediately",
   );
+}
+
+// ---- 4. an engaged agent is released before its law or its authority changes
+{
+  const releases = [];
+  const agentSource = {
+    release: (reason) => releases.push(reason),
+    sync() {},
+    tick: () => null,
+    overridden() {},
+    onActionResult() {},
+  };
+  const { loop, state } = harness({ agentSource });
+  state.controlShell.agentEngaged = true;
+  state.controlShell.activationRevision = () => 1;
+  state.controlShell.profileRevision = () => 1;
+  state.lifecycle = { pendingPress: false };
+  state.fpvActive = false;
+  state.advertisedScopes = [
+    {
+      vehicleId: 1n,
+      scope: "vehicle.lifecycle",
+      intents: [],
+      actions: [{ action: CONTROL_ACTION.simReset, modeTargets: [] }],
+    },
+    {
+      vehicleId: 1n,
+      scope: "vehicle.motion",
+      intents: [],
+      actions: [
+        { action: CONTROL_ACTION.modeRequest, modeTargets: [MODE_TARGET.fpvDirect] },
+        { action: CONTROL_ACTION.feelModeRequest, modeTargets: [], feelTargets: [2] },
+      ],
+    },
+  ];
+  state.sessionWriter = { write: async () => {} };
+  loop.requestFlightModeSwitch();
+  loop.requestSimReset();
+  loop.requestFeelMode(2);
+  loop.suspendControlForInputLoss(1);
+  assert.deepEqual(
+    releases,
+    [
+      "the flight mode changes",
+      "the simulation resets",
+      "the control-feel law changes",
+      "control authority was released",
+    ],
+    "each change of the law or the authority releases the agent first",
+  );
+  state.controlShell.agentEngaged = false;
+  loop.requestSimReset();
+  assert.equal(releases.length, 4, "no release when no agent is engaged");
 }
 
 console.log("all control-loop failsafe checks passed");

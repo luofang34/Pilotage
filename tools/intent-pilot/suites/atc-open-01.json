@@ -1,0 +1,321 @@
+{
+ "id": "atc-open-01",
+ "description": "Open cases for the development of adapters and prompts. Do not report these numbers as model quality.",
+ "held_out": false,
+ "envelope": {
+  "kinds": [
+   "takeoff",
+   "direct_to",
+   "heading",
+   "altitude",
+   "speed",
+   "hold",
+   "join_procedure",
+   "land",
+   "go_around",
+   "return_to_base",
+   "unable"
+  ],
+  "fixes": [
+   "ALPHA",
+   "BRAVO",
+   "CHARLIE",
+   "DELTA",
+   "HOME"
+  ],
+  "procedures": [
+   "ILS09",
+   "RNAV27"
+  ],
+  "height_m": {
+   "min": 2,
+   "max": 30
+  },
+  "speed_mps": {
+   "min": 0.3,
+   "max": 3
+  }
+ },
+ "legend": "FIXES: HOME is the launch point and base. ALPHA is 15 m north of HOME. BRAVO is 15 m east of HOME. CHARLIE is 15 m south of HOME. DELTA is 21 m north-east of HOME. PROCEDURES: ILS09 goes CHARLIE, HOME, then land. RNAV27 goes DELTA, BRAVO, HOME, then land.",
+ "cases": [
+  {
+   "id": "direct-01",
+   "category": "direct",
+   "message": "Proceed direct ALPHA and land.",
+   "expect": {
+    "kind": "direct_to",
+    "fix": "ALPHA",
+    "on_arrival": "land"
+   }
+  },
+  {
+   "id": "direct-02",
+   "category": "direct",
+   "message": "Direct BRAVO, hold overhead.",
+   "expect": {
+    "kind": "direct_to",
+    "fix": "BRAVO",
+    "on_arrival": "hold"
+   }
+  },
+  {
+   "id": "direct-03",
+   "category": "direct",
+   "message": "Go to CHARLIE and land there.",
+   "expect": {
+    "kind": "direct_to",
+    "fix": "CHARLIE",
+    "on_arrival": "land"
+   }
+  },
+  {
+   "id": "direct-04",
+   "category": "direct",
+   "message": "Fly to DELTA and hold.",
+   "expect": {
+    "kind": "direct_to",
+    "fix": "DELTA",
+    "on_arrival": "hold"
+   }
+  },
+  {
+   "id": "heading-05",
+   "category": "heading",
+   "message": "Turn left heading 270.",
+   "expect": {
+    "kind": "heading",
+    "degrees": 270,
+    "turn": "left"
+   }
+  },
+  {
+   "id": "heading-06",
+   "category": "heading",
+   "message": "Turn right heading 090.",
+   "expect": {
+    "kind": "heading",
+    "degrees": 90,
+    "turn": "right"
+   }
+  },
+  {
+   "id": "heading-07",
+   "category": "heading",
+   "message": "Fly heading 180.",
+   "expect": {
+    "kind": "heading",
+    "degrees": 180,
+    "turn": "shortest"
+   }
+  },
+  {
+   "id": "heading-08",
+   "category": "heading",
+   "message": "Fly heading 045.",
+   "expect": {
+    "kind": "heading",
+    "degrees": 45,
+    "turn": "shortest"
+   }
+  },
+  {
+   "id": "altitude-09",
+   "category": "altitude",
+   "message": "Climb and maintain 20 metres.",
+   "expect": {
+    "kind": "altitude",
+    "height_m": 20
+   }
+  },
+  {
+   "id": "altitude-10",
+   "category": "altitude",
+   "message": "Descend and maintain 5 metres.",
+   "expect": {
+    "kind": "altitude",
+    "height_m": 5
+   }
+  },
+  {
+   "id": "altitude-11",
+   "category": "altitude",
+   "message": "Maintain 12 metres.",
+   "expect": {
+    "kind": "altitude",
+    "height_m": 12
+   }
+  },
+  {
+   "id": "speed-12",
+   "category": "speed",
+   "message": "Reduce speed to 1 metre per second.",
+   "expect": {
+    "kind": "speed",
+    "speed_mps": 1
+   }
+  },
+  {
+   "id": "speed-13",
+   "category": "speed",
+   "message": "Increase speed to 3 metres per second.",
+   "expect": {
+    "kind": "speed",
+    "speed_mps": 3
+   }
+  },
+  {
+   "id": "hold-14",
+   "category": "hold",
+   "message": "Hold present position.",
+   "expect": {
+    "kind": "hold",
+    "point": {
+     "at": "present_position"
+    }
+   }
+  },
+  {
+   "id": "hold-15",
+   "category": "hold",
+   "message": "Hold at ALPHA.",
+   "expect": {
+    "kind": "hold",
+    "point": {
+     "at": "fix",
+     "fix": "ALPHA"
+    }
+   }
+  },
+  {
+   "id": "hold-16",
+   "category": "hold",
+   "message": "Hold over CHARLIE.",
+   "expect": {
+    "kind": "hold",
+    "point": {
+     "at": "fix",
+     "fix": "CHARLIE"
+    }
+   }
+  },
+  {
+   "id": "procedure-17",
+   "category": "procedure",
+   "message": "Cleared RNAV 27 approach.",
+   "expect": {
+    "kind": "join_procedure",
+    "procedure": "RNAV27"
+   }
+  },
+  {
+   "id": "procedure-18",
+   "category": "procedure",
+   "message": "Cleared ILS 09 approach.",
+   "expect": {
+    "kind": "join_procedure",
+    "procedure": "ILS09"
+   }
+  },
+  {
+   "id": "procedure-19",
+   "category": "procedure",
+   "message": "Join the RNAV27 procedure.",
+   "expect": {
+    "kind": "join_procedure",
+    "procedure": "RNAV27"
+   }
+  },
+  {
+   "id": "land-20",
+   "category": "land",
+   "message": "Cleared to land.",
+   "expect": {
+    "kind": "land"
+   }
+  },
+  {
+   "id": "land-21",
+   "category": "land",
+   "message": "Land now.",
+   "expect": {
+    "kind": "land"
+   }
+  },
+  {
+   "id": "go_around-22",
+   "category": "go_around",
+   "message": "Go around.",
+   "expect": {
+    "kind": "go_around"
+   }
+  },
+  {
+   "id": "rtb-23",
+   "category": "rtb",
+   "message": "Return to base.",
+   "expect": {
+    "kind": "return_to_base"
+   }
+  },
+  {
+   "id": "rtb-24",
+   "category": "rtb",
+   "message": "Come back home and land.",
+   "expect": {
+    "kind": "return_to_base"
+   }
+  },
+  {
+   "id": "takeoff-25",
+   "category": "takeoff",
+   "message": "Cleared for takeoff.",
+   "expect": {
+    "kind": "takeoff"
+   }
+  },
+  {
+   "id": "takeoff-26",
+   "category": "takeoff",
+   "message": "Take off.",
+   "expect": {
+    "kind": "takeoff"
+   }
+  },
+  {
+   "id": "chatter-27",
+   "category": "chatter",
+   "message": "Good morning, how do you read?",
+   "expect": {
+    "kind": "unable",
+    "reason": ""
+   }
+  },
+  {
+   "id": "chatter-28",
+   "category": "chatter",
+   "message": "Wind is calm today.",
+   "expect": {
+    "kind": "unable",
+    "reason": ""
+   }
+  },
+  {
+   "id": "chatter-29",
+   "category": "chatter",
+   "message": "Squawk 4521.",
+   "expect": {
+    "kind": "unable",
+    "reason": ""
+   }
+  },
+  {
+   "id": "chatter-30",
+   "category": "chatter",
+   "message": "Contact tower on 118.7.",
+   "expect": {
+    "kind": "unable",
+    "reason": ""
+   }
+  }
+ ]
+}

@@ -1,0 +1,90 @@
+{
+ "id": "approach",
+ "fixes": {
+  "ALPHA": {
+   "north_m": 15,
+   "east_m": 0
+  },
+  "BRAVO": {
+   "north_m": 0,
+   "east_m": 15
+  },
+  "CHARLIE": {
+   "north_m": -15,
+   "east_m": 0
+  },
+  "DELTA": {
+   "north_m": 15,
+   "east_m": 15
+  }
+ },
+ "procedures": {
+  "RNAV27": {
+   "fixes": [
+    "DELTA",
+    "BRAVO",
+    "HOME"
+   ],
+   "then": "land"
+  },
+  "ILS09": {
+   "fixes": [
+    "CHARLIE",
+    "HOME"
+   ],
+   "then": "land"
+  }
+ },
+ "cruise_height_m": 5,
+ "arrival_radius_m": 1.5,
+ "max_range_m": 35,
+ "height_m": {
+  "min": 2,
+  "max": 30
+ },
+ "messages": [
+  {
+   "text": "Cleared for takeoff.",
+   "trigger": {
+    "when": "start"
+   },
+   "means": {
+    "kind": "takeoff"
+   }
+  },
+  {
+   "text": "Cleared RNAV 27 approach.",
+   "trigger": {
+    "when": "flying_for",
+    "seconds": 3
+   },
+   "means": {
+    "kind": "join_procedure",
+    "procedure": "RNAV27"
+   }
+  }
+ ],
+ "expect": {
+  "checkpoints": [
+   {
+    "check": "approach",
+    "fix": "DELTA",
+    "within_m": 2
+   },
+   {
+    "check": "approach",
+    "fix": "BRAVO",
+    "within_m": 2
+   }
+  ],
+  "end": {
+   "state": "landed_at",
+   "fix": "HOME"
+  },
+  "must_not_reach": [
+   "ALPHA",
+   "CHARLIE"
+  ],
+  "timeout_s": 200
+ }
+}

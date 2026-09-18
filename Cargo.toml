@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/pilotage-navdata-cycle",
     "crates/pilotage-protocol",
+    "crates/pilotage-agent",
     "crates/pilotage-authority",
     "crates/pilotage-session",
     "crates/pilotage-ingress",
@@ -41,6 +42,7 @@ members = [
     "tools/flight-tune-campaign",
     "tools/flight-tune-xplane",
     "tools/flight-tune-aviate",
+    "tools/intent-pilot",
     "tools/loopback-probe",
     "tools/xtask",
     "hosts/session-host",
@@ -49,6 +51,7 @@ members = [
     "clients/web-instruments",
     "clients/web-instrument-shell",
     "clients/web-control",
+    "clients/web-agent",
     "clients/apple-instrument-bridge",
 ]
 
@@ -120,6 +123,7 @@ pilotage-timing = { path = "crates/pilotage-timing" }
 pilotage-protocol = { path = "crates/pilotage-protocol" }
 pilotage-client-session = { path = "crates/pilotage-client-session" }
 pilotage-instrument-feed = { path = "crates/pilotage-instrument-feed" }
+pilotage-agent = { path = "crates/pilotage-agent" }
 pilotage-authority = { path = "crates/pilotage-authority" }
 pilotage-ingress = { path = "crates/pilotage-ingress" }
 pilotage-input = { path = "crates/pilotage-input" }

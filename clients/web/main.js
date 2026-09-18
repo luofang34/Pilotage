@@ -12,6 +12,10 @@ import { createCockpitReadout } from "./cockpit-readout.js";
 import { loadCompositionForPage } from "./instrument-startup.js";
 import { resolveViewerElements } from "./viewer-elements.js";
 import { wireSituationMapStage } from "./situation-map.js";
+import { createAgentModule, loadAgentRuntime } from "./agent-module.js";
+import { createModelPort, gatewayAddress } from "./agent-model-port.js";
+import { renderAgentPanel } from "./agent-panel.js";
+import { agentOffer, agentTelemetry } from "./agent-inputs.js";
 
 const VEHICLE_ID = 1n;
 const INSTRUMENT_SOURCE_ID = 1n;
@@ -78,6 +82,7 @@ const releaseTracker = createReleaseTracker();
 let control;
 let bootstrap;
 let transport;
+let agent;
 let controlStarted = Promise.resolve();
 
 const readout = createCockpitReadout({
@@ -118,6 +123,26 @@ control = createControlLoop({
   lengthDelimit: (...args) => bootstrap.lengthDelimit(...args),
   maybeAnnounceProfileActivation: (...args) => bootstrap.maybeAnnounceProfileActivation(...args),
   requestReconnect: () => transport.reconnect.requestConnect(),
+  agentSource: {
+    tick: (nowMs) => agent.tick(nowMs),
+    overridden: () => agent.overridden(),
+    release: (reason) => agent.release(reason),
+    sync: (engaged) => agent.sync(engaged),
+    onActionResult: (isArm, accepted) => agent.onActionResult(isArm, accepted),
+  },
+});
+
+// The agent client module (ADR-0042): one more input source of this client.
+agent = createAgentModule({
+  loadRuntime: () => loadAgentRuntime(new URL("./agent-runtime_bg.wasm", import.meta.url)),
+  loadChart: () => fetch(new URL("./agent-chart.json", import.meta.url)).then((chart) => chart.text()),
+  modelPort: createModelPort({ baseUrl: gatewayAddress(window.location) }),
+  controlShell: () => state.controlShell,
+  offer: () => agentOffer(state, VEHICLE_ID, control.velocityCapabilityFor(state.motionScope)),
+  telemetry: () => agentTelemetry(readout.telemetrySnapshot(), state.lastFcView),
+  flightMode: () => els.flightMode?.value ?? "rover",
+  log: readout.log,
+  onChange: () => renderAgentPanel(els, agent.status(), document),
 });
 
 bootstrap = createSessionBootstrap({
@@ -194,6 +219,23 @@ document.getElementById("resetBtn").addEventListener("click", () => {
   state.pendingReset = true;
 });
 els.connectBtn.addEventListener("click", () => transport.reconnect.requestConnect());
+els.agentEngage?.addEventListener("click", () => {
+  if (agent.status().engaged) agent.release();
+  else void agent.engage();
+});
+els.agentSend?.addEventListener("click", () => {
+  void agent.submit(els.agentMessage.value);
+  els.agentMessage.value = "";
+});
+// A key in the instruction box is text. It must not reach the control
+// runtime, where it would be a flight input that takes control from the agent.
+els.agentMessage?.addEventListener("keydown", (event) => {
+  event.stopPropagation();
+  if (event.key === "Enter") els.agentSend.click();
+});
+for (const preset of els.agentPresets) {
+  preset.addEventListener("click", () => void agent.submit(preset.textContent));
+}
 els.resumeBtn.addEventListener("click", () => void control.resumeControlInPlace());
 
 transport.applyUrlParams();

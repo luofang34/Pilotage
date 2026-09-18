@@ -286,6 +286,7 @@ impl DeviceStage {
         buttons: &[ButtonSample],
         out: &mut RawSample,
     ) -> (usize, usize) {
+        out.direct = None;
         let Some(pad) = &self.pad else {
             out.axes.clear();
             out.buttons.clear();
@@ -298,6 +299,7 @@ impl DeviceStage {
     /// Synthesizes the canonical sample from held keys via the keyboard
     /// profile, returning the canonical axis/button counts.
     pub fn key_sample(&self, out: &mut RawSample) -> (usize, usize) {
+        out.direct = None;
         let Some(keyboard) = &self.keyboard else {
             out.axes.clear();
             out.buttons.clear();
