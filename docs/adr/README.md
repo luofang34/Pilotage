@@ -46,6 +46,7 @@ One file per decision, numbered in acceptance order. See
 | [0037](0037-modular-operator-client-composition.md) | Compose operator clients from shared function modules | Accepted |
 | [0041](0041-one-mission-sequencing-core.md) | Use one mission sequencing core for operational flights and calibration trials | Proposed |
 | [0042](0042-agent-client-module-and-model-port.md) | Compose an agent as a client module behind a model port | Proposed |
+| [0043](0043-gdl90-codec-of-its-own.md) | Keep the GDL 90 codec in a crate of its own | Proposed |
 
 ## Provenance
 
