@@ -164,6 +164,7 @@ impl ControlRuntime {
     pub fn operator_input_neutral(&self, sample: &RawSample) -> bool {
         self.active.as_ref().is_none_or(|active| {
             controls_neutral(sample, active)
+                && !reset_held(sample, &active.gimbal)
                 && !sample.pressed(usize::from(active.flight.arm_button))
                 && !sample.pressed(usize::from(active.flight.disarm_button))
         })

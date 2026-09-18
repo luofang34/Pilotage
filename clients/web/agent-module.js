@@ -37,7 +37,9 @@ export function createAgentModule({
   onChange = () => {},
 }) {
   let WebAgent = null;
+  let chartText = null;
   let agent = null;
+  let engaging = false;
   let startedMs = 0;
   let adapter = null;
   const history = [];
@@ -62,27 +64,44 @@ export function createAgentModule({
   }
 
   /** Engages the agent as the input source. Returns a refusal reason, or null. */
-  async function engage() {
-    const shell = controlShell();
-    if (!shell) return refuse("the control runtime is not ready");
+  /** The reason an engage cannot start now, or null. Read again after each
+   *  wait, because the session and the advertisement move meanwhile. */
+  function refusalNow() {
+    if (!controlShell()) return "the control runtime is not ready";
     if (!VELOCITY_MODES.has(flightMode())) {
-      return refuse("the agent flies the velocity law; select a Quad control mode");
+      return "the agent flies the velocity law; select a Quad control mode";
     }
-    const offered = offer();
-    if (offered.reason) return refuse(offered.reason);
+    return offer().reason ?? null;
+  }
+
+  async function engage() {
+    if (agent || engaging) return refuse("the agent is engaged already");
+    const early = refusalNow();
+    if (early) return refuse(early);
+    engaging = true;
     try {
       WebAgent ??= await loadRuntime();
-      const chart = await loadChart();
-      agent = new WebAgent(chart, offered.maxLinearMps, offered.disarmOffered);
+      chartText ??= await loadChart();
     } catch (error) {
-      agent = null;
+      engaging = false;
       return refuse(`the agent runtime did not start: ${error}`);
     }
-    startedMs = now();
-    if (!shell.engageAgent(WebAgent.profile_id())) {
-      agent = null;
+    engaging = false;
+    const late = refusalNow();
+    if (late) return refuse(late);
+    const offered = offer();
+    let started;
+    try {
+      started = new WebAgent(chartText, offered.maxLinearMps, offered.disarmOffered);
+    } catch (error) {
+      return refuse(`the agent runtime did not start: ${error}`);
+    }
+    if (!controlShell().engageAgent(WebAgent.profile_id())) {
+      started.free();
       return refuse("the control runtime refused the agent");
     }
+    agent = started;
+    startedMs = now();
     note("state", `engaged as ${WebAgent.profile_id()}; any control input takes control back`);
     void describeAdapter();
     return null;
@@ -120,6 +139,15 @@ export function createAgentModule({
     agent.free();
     agent = null;
     note("state", "an operator input took control from the agent");
+  }
+
+  /** Follows the control runtime: when it no longer has the agent as its
+   *  source (a new session, a release from elsewhere), the module lets go. */
+  function sync(engaged) {
+    if (!agent || engaged) return;
+    agent.free();
+    agent = null;
+    note("state", "the control runtime released the agent");
   }
 
   /** One control tick: the agent's input for the control runtime, or null. */
@@ -166,5 +194,5 @@ export function createAgentModule({
     agent?.on_action_result(isArm, accepted);
   }
 
-  return { engage, release, overridden, tick, submit, onActionResult, status };
+  return { engage, release, overridden, sync, tick, submit, onActionResult, status };
 }

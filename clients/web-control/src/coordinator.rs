@@ -84,8 +84,11 @@ impl ControlCoordinator {
     }
 
     /// Starts a fresh transport session and clears every authority slot.
+    /// A new session starts with the operator as the source. An agent that
+    /// was engaged in the session before must be engaged again on purpose.
     pub fn begin_session(&mut self) {
         self.runtime.begin_session();
+        self.disengage_agent();
     }
 
     /// Re-seeds discrete controls before a live datagram run starts.
