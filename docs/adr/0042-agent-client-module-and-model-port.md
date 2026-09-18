@@ -149,10 +149,10 @@ action to the mission core in a document.
 A flight plan comes from the flight-planning module. The lowering asks for the plan
 to a fix or along a procedure, and it has no answer when no plan is known.
 
-The executor of the agent core does not run these actions today. A directive changes
-the active target in flight, and the mission document of ADR-0041 does not change
-after a mission starts. This is the addition that the mission core needs before the
-agent can use it. Until then, the agent core has an executor of its own. That
+The executor of the agent core does not run these actions. A directive changes the
+active target in flight, and the mission document of ADR-0041 does not change after
+a mission starts. That is the addition that the mission core needs before the agent
+can fly through it. The agent core has an executor of its own for that reason. That
 executor sends the same typed velocity frames.
 
 ### Checks before a directive is flown
