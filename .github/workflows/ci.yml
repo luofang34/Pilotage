@@ -179,6 +179,16 @@ jobs:
       - name: cargo test
         run: cargo test --all-targets
 
+      - name: Single-crate builds of the flake measurement
+        # The nightly measures flakes with single-crate test runs. A
+        # single crate unifies fewer features than the workspace: on
+        # Linux no macOS-only dependency switches `std` on for
+        # thiserror, so a `PathBuf` in an error message compiles only
+        # when the crate asks for `std` itself.
+        run: |
+          cargo check -p flight-tune-aviate --all-targets
+          cargo check -p pilotage-tuning-feedback --all-targets
+
       - name: Campaign certification
         # Every ignored campaign test — the two full vehicle campaigns
         # and the calibration probe — split out of `cargo test` so the
