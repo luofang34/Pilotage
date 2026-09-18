@@ -20,16 +20,21 @@ const WEB_RUNTIME_STAMP: &str = "target/xtask-stamps/web-runtime.stamp";
 /// unions this floor with the DERIVED transitive workspace dependency
 /// closure — a hand-maintained crate list rots the moment a dependency is
 /// added, silently serving stale wasm.
-const WEB_RUNTIME_SOURCE_FLOOR: [&str; 5] = [
+const WEB_RUNTIME_SOURCE_FLOOR: [&str; 6] = [
     "Cargo.lock",
     "Cargo.toml",
+    "clients/web-agent",
     "clients/web-control",
     "clients/web-instruments",
     "scripts/build-web-instruments.sh",
 ];
 
 /// The wasm crates whose dependency closure decides staleness.
-const WEB_RUNTIME_ROOT_CRATES: [&str; 2] = ["pilotage-control-web", "pilotage-instruments-web"];
+const WEB_RUNTIME_ROOT_CRATES: [&str; 3] = [
+    "pilotage-agent-web",
+    "pilotage-control-web",
+    "pilotage-instruments-web",
+];
 
 /// Every source input of the viewer wasm build: the floor plus every
 /// WORKSPACE crate the wasm crates transitively depend on, derived from
@@ -123,8 +128,10 @@ pub(super) fn build_host(repo_root: &std::path::Path) -> Result<(), XtaskError> 
 /// The viewer's generated wasm runtime files (all gitignored). The viewer's
 /// `main.js` statically imports `instrument-runtime.js`, so a checkout missing
 /// these serves a viewer whose module graph fails to load — a dead page, not a
-/// visible error. All four must be present for the viewer to run.
-pub(super) const WEB_RUNTIME_ARTIFACTS: [&str; 4] = [
+/// visible error. Each of them must be present for the viewer to run.
+pub(super) const WEB_RUNTIME_ARTIFACTS: [&str; 6] = [
+    "clients/web/agent-runtime.js",
+    "clients/web/agent-runtime_bg.wasm",
     "clients/web/instrument-runtime.js",
     "clients/web/instrument-runtime_bg.wasm",
     "clients/web/control-runtime.js",

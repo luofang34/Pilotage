@@ -12,7 +12,7 @@ mod signal;
 mod trial;
 mod validation;
 
-pub use action::{FlightAction, MissionAction, TransportLane, TrialAction};
+pub use action::{FlightAction, MissionAction, TransportLane, TrialAction, TurnDirection};
 pub use condition::{
     Comparison, MissionCondition, NavigationCondition, SignalCondition, SimulatorCondition,
     VehicleCondition, VehicleLifecycleState,

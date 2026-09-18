@@ -1,5 +1,7 @@
 //! Mission action vocabularies and transport lanes.
 
+use core::f64::consts::TAU;
+
 use serde::{Deserialize, Serialize};
 
 use crate::{ArtifactIdentity, ControlChannel};
@@ -34,6 +36,18 @@ pub enum MissionAction {
     Trial(TrialAction),
 }
 
+/// The side of a turn to a new heading.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum TurnDirection {
+    /// Turn through the smaller angle.
+    Shortest,
+    /// Turn left.
+    Left,
+    /// Turn right.
+    Right,
+}
+
 /// An operational flight action.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -52,6 +66,25 @@ pub enum FlightAction {
     },
     /// Hold the current flight target.
     MaintainTarget {},
+    /// Fly a true heading. A heading has no end, so a completion condition or
+    /// a later phase ends the action.
+    Heading {
+        /// The true heading clockwise from north in radians. The value is at
+        /// least 0 and less than 2π, so that one heading has one encoding.
+        true_heading_rad: f64,
+        /// The side of the turn to the heading.
+        turn: TurnDirection,
+    },
+    /// Change the speed of the active flight target.
+    Speed {
+        /// The speed over the ground in meters per second.
+        speed_mps: f64,
+    },
+    /// Stop an approach or a landing, and climb to an altitude.
+    GoAround {
+        /// The target altitude in meters.
+        target_altitude_m: f64,
+    },
     /// Land the vehicle.
     Land {},
     /// Disarm the vehicle.
@@ -150,16 +183,34 @@ impl FlightAction {
                 *target_altitude_m,
             ),
             Self::FollowPlan { plan } => plan.validate(&format!("{field}.action.plan")),
-            _ => Ok(()),
+            Self::Heading {
+                true_heading_rad, ..
+            } => crate::validation::range(
+                &format!("{field}.action.true_heading_rad"),
+                *true_heading_rad,
+                0.0,
+                TAU.next_down(),
+            ),
+            Self::Speed { speed_mps } => {
+                crate::validation::positive(&format!("{field}.action.speed_mps"), *speed_mps)
+            }
+            Self::GoAround { target_altitude_m } => crate::validation::finite(
+                &format!("{field}.action.target_altitude_m"),
+                *target_altitude_m,
+            ),
+            Self::Arm {} | Self::MaintainTarget {} | Self::Land {} | Self::Disarm {} => Ok(()),
         }
     }
 
     const fn required_capability(&self) -> Option<MissionCapability> {
         match self {
             Self::Arm {} | Self::Disarm {} => Some(MissionCapability::ArmDisarm),
-            Self::Climb { .. } | Self::MaintainTarget {} | Self::Land {} => {
-                Some(MissionCapability::FlightControl)
-            }
+            Self::Climb { .. }
+            | Self::MaintainTarget {}
+            | Self::Heading { .. }
+            | Self::Speed { .. }
+            | Self::GoAround { .. }
+            | Self::Land {} => Some(MissionCapability::FlightControl),
             Self::FollowPlan { .. } => Some(MissionCapability::FlightPlan),
         }
     }
@@ -170,6 +221,9 @@ impl FlightAction {
             Self::Climb { .. } => "flight.climb",
             Self::FollowPlan { .. } => "flight.follow_plan",
             Self::MaintainTarget {} => "flight.maintain_target",
+            Self::Heading { .. } => "flight.heading",
+            Self::Speed { .. } => "flight.speed",
+            Self::GoAround { .. } => "flight.go_around",
             Self::Land {} => "flight.land",
             Self::Disarm {} => "flight.disarm",
         }

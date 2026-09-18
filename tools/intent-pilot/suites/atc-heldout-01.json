@@ -1,0 +1,473 @@
+{
+ "id": "atc-heldout-01",
+ "description": "Held-out ATC-style instructions. Written before any adapter ran on them. Run one time for each adapter and do not tune on them.",
+ "held_out": true,
+ "envelope": {
+  "kinds": [
+   "takeoff",
+   "direct_to",
+   "heading",
+   "altitude",
+   "speed",
+   "hold",
+   "join_procedure",
+   "land",
+   "go_around",
+   "return_to_base",
+   "unable"
+  ],
+  "fixes": [
+   "ALPHA",
+   "BRAVO",
+   "CHARLIE",
+   "DELTA",
+   "HOME"
+  ],
+  "procedures": [
+   "ILS09",
+   "RNAV27"
+  ],
+  "height_m": {
+   "min": 2,
+   "max": 30
+  },
+  "speed_mps": {
+   "min": 0.3,
+   "max": 3
+  }
+ },
+ "legend": "FIXES: HOME is the launch point and base. ALPHA is 15 m north of HOME. BRAVO is 15 m east of HOME. CHARLIE is 15 m south of HOME. DELTA is 21 m north-east of HOME. PROCEDURES: ILS09 goes CHARLIE, HOME, then land. RNAV27 goes DELTA, BRAVO, HOME, then land.",
+ "cases": [
+  {
+   "id": "direct-01",
+   "category": "direct",
+   "message": "Proceed direct to DELTA, land on arrival.",
+   "expect": {
+    "kind": "direct_to",
+    "fix": "DELTA",
+    "on_arrival": "land"
+   }
+  },
+  {
+   "id": "direct-02",
+   "category": "direct",
+   "message": "Cleared direct CHARLIE, then hold.",
+   "expect": {
+    "kind": "direct_to",
+    "fix": "CHARLIE",
+    "on_arrival": "hold"
+   }
+  },
+  {
+   "id": "direct-03",
+   "category": "direct",
+   "message": "Route direct BRAVO and put it on the ground there.",
+   "expect": {
+    "kind": "direct_to",
+    "fix": "BRAVO",
+    "on_arrival": "land"
+   }
+  },
+  {
+   "id": "direct-04",
+   "category": "direct",
+   "message": "Make your way to ALPHA and stay overhead.",
+   "expect": {
+    "kind": "direct_to",
+    "fix": "ALPHA",
+    "on_arrival": "hold"
+   }
+  },
+  {
+   "id": "direct-05",
+   "category": "direct",
+   "message": "Reposition to BRAVO, remain airborne.",
+   "expect": {
+    "kind": "direct_to",
+    "fix": "BRAVO",
+    "on_arrival": "hold"
+   }
+  },
+  {
+   "id": "direct-06",
+   "category": "direct",
+   "message": "Next destination DELTA, full stop landing.",
+   "expect": {
+    "kind": "direct_to",
+    "fix": "DELTA",
+    "on_arrival": "land"
+   }
+  },
+  {
+   "id": "heading-07",
+   "category": "heading",
+   "message": "Turn left heading three six zero.",
+   "expect": {
+    "kind": "heading",
+    "degrees": 0,
+    "turn": "left"
+   }
+  },
+  {
+   "id": "heading-08",
+   "category": "heading",
+   "message": "Turn right, heading 135.",
+   "expect": {
+    "kind": "heading",
+    "degrees": 135,
+    "turn": "right"
+   }
+  },
+  {
+   "id": "heading-09",
+   "category": "heading",
+   "message": "Left turn heading 225.",
+   "expect": {
+    "kind": "heading",
+    "degrees": 225,
+    "turn": "left"
+   }
+  },
+  {
+   "id": "heading-10",
+   "category": "heading",
+   "message": "Fly heading 315.",
+   "expect": {
+    "kind": "heading",
+    "degrees": 315,
+    "turn": "shortest"
+   }
+  },
+  {
+   "id": "heading-11",
+   "category": "heading",
+   "message": "Come right to heading 010.",
+   "expect": {
+    "kind": "heading",
+    "degrees": 10,
+    "turn": "right"
+   }
+  },
+  {
+   "id": "heading-12",
+   "category": "heading",
+   "message": "Steer 200 degrees.",
+   "expect": {
+    "kind": "heading",
+    "degrees": 200,
+    "turn": "shortest"
+   }
+  },
+  {
+   "id": "heading-13",
+   "category": "heading",
+   "message": "Turn left to 060.",
+   "expect": {
+    "kind": "heading",
+    "degrees": 60,
+    "turn": "left"
+   }
+  },
+  {
+   "id": "altitude-14",
+   "category": "altitude",
+   "message": "Climb to 25 metres.",
+   "expect": {
+    "kind": "altitude",
+    "height_m": 25
+   }
+  },
+  {
+   "id": "altitude-15",
+   "category": "altitude",
+   "message": "Descend to 8 metres and maintain.",
+   "expect": {
+    "kind": "altitude",
+    "height_m": 8
+   }
+  },
+  {
+   "id": "altitude-16",
+   "category": "altitude",
+   "message": "Climb and maintain 30 metres.",
+   "expect": {
+    "kind": "altitude",
+    "height_m": 30
+   }
+  },
+  {
+   "id": "altitude-17",
+   "category": "altitude",
+   "message": "Go down to 3 metres.",
+   "expect": {
+    "kind": "altitude",
+    "height_m": 3
+   }
+  },
+  {
+   "id": "altitude-18",
+   "category": "altitude",
+   "message": "Level off at 15 metres.",
+   "expect": {
+    "kind": "altitude",
+    "height_m": 15
+   }
+  },
+  {
+   "id": "speed-19",
+   "category": "speed",
+   "message": "Slow down to 0.5 metres per second.",
+   "expect": {
+    "kind": "speed",
+    "speed_mps": 0.5
+   }
+  },
+  {
+   "id": "speed-20",
+   "category": "speed",
+   "message": "Maintain 2 metres per second.",
+   "expect": {
+    "kind": "speed",
+    "speed_mps": 2
+   }
+  },
+  {
+   "id": "speed-21",
+   "category": "speed",
+   "message": "Speed 1.5 metres per second.",
+   "expect": {
+    "kind": "speed",
+    "speed_mps": 1.5
+   }
+  },
+  {
+   "id": "hold-22",
+   "category": "hold",
+   "message": "Hold where you are.",
+   "expect": {
+    "kind": "hold",
+    "point": {
+     "at": "present_position"
+    }
+   }
+  },
+  {
+   "id": "hold-23",
+   "category": "hold",
+   "message": "Stop and hover in place.",
+   "expect": {
+    "kind": "hold",
+    "point": {
+     "at": "present_position"
+    }
+   }
+  },
+  {
+   "id": "hold-24",
+   "category": "hold",
+   "message": "Hold at DELTA until advised.",
+   "expect": {
+    "kind": "hold",
+    "point": {
+     "at": "fix",
+     "fix": "DELTA"
+    }
+   }
+  },
+  {
+   "id": "hold-25",
+   "category": "hold",
+   "message": "Enter the hold over BRAVO.",
+   "expect": {
+    "kind": "hold",
+    "point": {
+     "at": "fix",
+     "fix": "BRAVO"
+    }
+   }
+  },
+  {
+   "id": "procedure-26",
+   "category": "procedure",
+   "message": "You are cleared for the ILS runway 09 approach.",
+   "expect": {
+    "kind": "join_procedure",
+    "procedure": "ILS09"
+   }
+  },
+  {
+   "id": "procedure-27",
+   "category": "procedure",
+   "message": "Cleared for the RNAV approach runway 27.",
+   "expect": {
+    "kind": "join_procedure",
+    "procedure": "RNAV27"
+   }
+  },
+  {
+   "id": "procedure-28",
+   "category": "procedure",
+   "message": "Fly the ILS09 procedure.",
+   "expect": {
+    "kind": "join_procedure",
+    "procedure": "ILS09"
+   }
+  },
+  {
+   "id": "procedure-29",
+   "category": "procedure",
+   "message": "Join the RNAV two seven approach.",
+   "expect": {
+    "kind": "join_procedure",
+    "procedure": "RNAV27"
+   }
+  },
+  {
+   "id": "land-30",
+   "category": "land",
+   "message": "Set it down right here.",
+   "expect": {
+    "kind": "land"
+   }
+  },
+  {
+   "id": "land-31",
+   "category": "land",
+   "message": "Cleared to land, present position.",
+   "expect": {
+    "kind": "land"
+   }
+  },
+  {
+   "id": "go_around-32",
+   "category": "go_around",
+   "message": "Abort the landing, go around.",
+   "expect": {
+    "kind": "go_around"
+   }
+  },
+  {
+   "id": "go_around-33",
+   "category": "go_around",
+   "message": "Go around, I say again, go around.",
+   "expect": {
+    "kind": "go_around"
+   }
+  },
+  {
+   "id": "rtb-34",
+   "category": "rtb",
+   "message": "Mission complete, return to base.",
+   "expect": {
+    "kind": "return_to_base"
+   }
+  },
+  {
+   "id": "rtb-35",
+   "category": "rtb",
+   "message": "RTB.",
+   "expect": {
+    "kind": "return_to_base"
+   }
+  },
+  {
+   "id": "rtb-36",
+   "category": "rtb",
+   "message": "Bring the aircraft back to the launch point and land.",
+   "expect": {
+    "kind": "return_to_base"
+   }
+  },
+  {
+   "id": "takeoff-37",
+   "category": "takeoff",
+   "message": "Lift off.",
+   "expect": {
+    "kind": "takeoff"
+   }
+  },
+  {
+   "id": "takeoff-38",
+   "category": "takeoff",
+   "message": "You are cleared for departure.",
+   "expect": {
+    "kind": "takeoff"
+   }
+  },
+  {
+   "id": "chatter-39",
+   "category": "chatter",
+   "message": "Say your fuel state.",
+   "expect": {
+    "kind": "unable",
+    "reason": ""
+   }
+  },
+  {
+   "id": "chatter-40",
+   "category": "chatter",
+   "message": "Traffic twelve o'clock, two miles, a helicopter.",
+   "expect": {
+    "kind": "unable",
+    "reason": ""
+   }
+  },
+  {
+   "id": "chatter-41",
+   "category": "chatter",
+   "message": "Altimeter 2992.",
+   "expect": {
+    "kind": "unable",
+    "reason": ""
+   }
+  },
+  {
+   "id": "chatter-42",
+   "category": "chatter",
+   "message": "Thanks, have a good day.",
+   "expect": {
+    "kind": "unable",
+    "reason": ""
+   }
+  },
+  {
+   "id": "negation-43",
+   "category": "negation",
+   "message": "Do not return yet, continue to ALPHA and hold.",
+   "expect": {
+    "kind": "direct_to",
+    "fix": "ALPHA",
+    "on_arrival": "hold"
+   }
+  },
+  {
+   "id": "negation-44",
+   "category": "negation",
+   "message": "Disregard the landing, climb to 20 metres.",
+   "expect": {
+    "kind": "altitude",
+    "height_m": 20
+   }
+  },
+  {
+   "id": "two_names-45",
+   "category": "two_names",
+   "message": "Leave BRAVO and proceed direct CHARLIE, then land.",
+   "expect": {
+    "kind": "direct_to",
+    "fix": "CHARLIE",
+    "on_arrival": "land"
+   }
+  },
+  {
+   "id": "two_names-46",
+   "category": "two_names",
+   "message": "After passing ALPHA earlier, now go to DELTA and hold.",
+   "expect": {
+    "kind": "direct_to",
+    "fix": "DELTA",
+    "on_arrival": "hold"
+   }
+  }
+ ]
+}

@@ -266,6 +266,9 @@ fn project_vehicle_directive(
                 FlightAction::Climb { .. }
                 | FlightAction::FollowPlan { .. }
                 | FlightAction::MaintainTarget {}
+                | FlightAction::Heading { .. }
+                | FlightAction::Speed { .. }
+                | FlightAction::GoAround { .. }
                 | FlightAction::Land {} => return Err(refused("unsupported operational action")),
             };
             (directive.context.clone(), action)

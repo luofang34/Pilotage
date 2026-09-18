@@ -758,6 +758,7 @@ export function createCockpitReadout({
     retireSessionPresentation,
     startInstruments,
     surface,
+    telemetrySnapshot: () => instruments.ingress?.snapshot(performance.now()) ?? null,
     updateControlReadout,
   };
 }

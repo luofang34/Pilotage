@@ -34,7 +34,7 @@ mod golden;
 pub use authority::{
     AuthorityDisposition, AuthorityEvent, AuthorityScope, AuthorityState, is_fresh_generation,
 };
-pub use coordinator::ControlCoordinator;
+pub use coordinator::{AgentInput, AgentTick, ControlCoordinator, InputSource};
 pub use device::{DeviceStage, MAX_AXES, MAX_BUTTONS, SelectOutcome, parse_gamepad_identity};
 pub use plan::{
     AXIS_PITCH, AXIS_ROLL, AXIS_THROTTLE, AXIS_YAW, ActivationPlan, BUTTON_EDGE_PRESSED,
@@ -44,5 +44,5 @@ pub use profile::{
     CompiledProfile, DEFAULT_PROFILE_BYTES, ProfileError, ProfileRuntime, SCHEMA_VERSION,
 };
 pub use runtime::ControlRuntime;
-pub use sample::{ButtonSample, Mode, RawSample, SessionState};
+pub use sample::{ButtonSample, DirectDemand, Mode, RawSample, SessionState};
 pub use telegraph::{ArmConfirmed, ArmOrder, ArmTelegraph, OrderAction, TelegraphPhase};
