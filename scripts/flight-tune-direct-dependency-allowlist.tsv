@@ -23,7 +23,7 @@ tools/flight-tune-aviate/Cargo.toml	serde_json	serde_json	normal		false	source	r
 tools/flight-tune-aviate/Cargo.toml	sha2	sha2	build		false	source	registry+https://github.com/rust-lang/crates.io-index	true		^0.10.9
 tools/flight-tune-aviate/Cargo.toml	sha2	sha2	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true		^0.10.9
 tools/flight-tune-aviate/Cargo.toml	sysctl	sysctl	normal	cfg(target_os = "macos")	false	source	registry+https://github.com/rust-lang/crates.io-index	true		=0.7.1
-tools/flight-tune-aviate/Cargo.toml	thiserror	thiserror	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	false		^2.0.18
+tools/flight-tune-aviate/Cargo.toml	thiserror	thiserror	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	false	std	^2.0.18
 tools/flight-tune-aviate/Cargo.toml	tracing	tracing	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true		^0.1.44
 tools/flight-tune-campaign/Cargo.toml	flight-tune	flight-tune	normal		false	path	tools/flight-tune	true		*
 tools/flight-tune-campaign/Cargo.toml	flight-tune-aviate	flight-tune-aviate	normal		false	path	tools/flight-tune-aviate	true		*
