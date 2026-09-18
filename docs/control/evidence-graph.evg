@@ -257,9 +257,29 @@ locator clients/web-control/src/coordinator/tests/agent.rs
 attr test an_operator_stick_disengages_the_agent_and_never_flies_the_deflection
 
 node CASE-CTRL-AGENT-PRESS verification-case
-title an operator safety press disengages the agent
+title an operator safety press disengages the agent and does not arm, through the install and the first live ticks
 locator clients/web-control/src/coordinator/tests/agent.rs
-attr test an_operator_safety_press_disengages_the_agent
+attr test an_operator_safety_press_disengages_the_agent_and_does_not_arm
+
+node CASE-CTRL-AGENT-KEY verification-case
+title an operator key disengages the agent
+locator clients/web-control/src/coordinator/tests/agent.rs
+attr test an_operator_key_disengages_the_agent
+
+node CASE-CTRL-AGENT-RESET-PRESS verification-case
+title the gimbal reset press is an operator input too
+locator clients/web-control/src/coordinator/tests/agent.rs
+attr test the_gimbal_reset_press_is_an_operator_input_too
+
+node CASE-CTRL-AGENT-SESSION verification-case
+title a new session starts with the operator as the source
+locator clients/web-control/src/coordinator/tests/agent.rs
+attr test a_new_session_starts_with_the_operator_as_the_source
+
+node CASE-CTRL-AGENT-ARM-EDGE verification-case
+title an agent arm request fires one typed edge
+locator clients/web-control/src/coordinator/tests/agent.rs
+attr test an_agent_arm_request_fires_one_typed_edge
 
 node CASE-CTRL-AGENT-BOUND verification-case
 title a demand that is not finite reads neutral and a large one is bounded
@@ -436,22 +456,22 @@ attr outcome pass
 node RESULT-CTRL-SOURCE verification-result
 title input-source coordinator suite — recorded pass
 attr command cargo test -p pilotage-control-web --lib coordinator
-attr config-digest 0b124860c105baa1289f09a79b8e7b5fbcd80638
+attr config-digest 2b6ac80388816807a96caf2b9151ffceeb564ea2
 attr tool-version rustc 1.98.0 (88d9e12ae 2026-08-18)
 attr source-digest git-blob:45d56efb1d214d65d3e368ab5a406a59bbbf9990
 attr artifact docs/control/evidence-artifacts/ctrl01/source-coordinator.run.txt
-attr output-digest sha256:5c28f1052bb4d443ed561bcf2a06c2374718275f7738bb18231248c246c2df99
-attr run-id local:0b124860c105baa1289f09a79b8e7b5fbcd80638
+attr output-digest sha256:952f8c909ad4177908b88bc0a7d628149ca2cdd494a41d927d347a4f80729020
+attr run-id local:2b6ac80388816807a96caf2b9151ffceeb564ea2
 attr outcome pass
 node RESULT-CTRL-AGENT verification-result
 title automation input source suite — recorded pass
 attr command cargo test -p pilotage-control-web --lib coordinator::tests::agent
-attr config-digest 0b124860c105baa1289f09a79b8e7b5fbcd80638
+attr config-digest 2b6ac80388816807a96caf2b9151ffceeb564ea2
 attr tool-version rustc 1.98.0 (88d9e12ae 2026-08-18)
-attr source-digest git-blob:f6274032f53ac630413e8f6546b1a698ba10f423
+attr source-digest git-blob:748915727c4a9d62cd60d4025dac8d59e751378c
 attr artifact docs/control/evidence-artifacts/ctrl01/agent-source.run.txt
-attr output-digest sha256:6d95df126be0c1f0356524321d089a954967ff51ad98632192fe19f1c33647ca
-attr run-id local:0b124860c105baa1289f09a79b8e7b5fbcd80638
+attr output-digest sha256:b39067fbc08f7e8350f0502231091b55b4cf7d77643a472434e486163472b387
+attr run-id local:2b6ac80388816807a96caf2b9151ffceeb564ea2
 attr outcome pass
 node RESULT-CTRL-FIXTURE verification-result
 title browser-encoded wire fixture suite — recorded pass
@@ -526,8 +546,8 @@ attr tree b43ad29521d5ff461ccfb1ccd8abbb47630ce382
 node CFG-CTRL-SOURCE configuration-item
 title committed input-source coordinator verification baseline
 attr scm git
-attr commit 0b124860c105baa1289f09a79b8e7b5fbcd80638
-attr tree 78131443f4e57607bcb62f6cad1e4006757059f7
+attr commit 2b6ac80388816807a96caf2b9151ffceeb564ea2
+attr tree e72d943d512b680398eaea265a7d034fe6ac0b20
 
 node TOOL-CTRL-CARGO tool
 title cargo test on Rust stable — not DO-330 tool-qualified
@@ -629,6 +649,10 @@ edge INPUT-AGENT-007 verified-by CASE-CTRL-AGENT-HANDOVER
 edge INPUT-AGENT-007 verified-by CASE-CTRL-AGENT-ANNOUNCE
 edge INPUT-AGENT-007 verified-by CASE-CTRL-AGENT-STICK
 edge INPUT-AGENT-007 verified-by CASE-CTRL-AGENT-PRESS
+edge INPUT-AGENT-007 verified-by CASE-CTRL-AGENT-KEY
+edge INPUT-AGENT-007 verified-by CASE-CTRL-AGENT-RESET-PRESS
+edge INPUT-AGENT-007 verified-by CASE-CTRL-AGENT-SESSION
+edge INPUT-AGENT-007 verified-by CASE-CTRL-AGENT-ARM-EDGE
 edge INPUT-AGENT-007 verified-by CASE-CTRL-AGENT-BOUND
 edge INPUT-AGENT-007 verified-by CASE-CTRL-AGENT-MODE
 edge CASE-CTRL-AGENT-PAD-RESUME covers INPUT-AGENT-007
@@ -638,6 +662,10 @@ edge CASE-CTRL-AGENT-HANDOVER covers INPUT-AGENT-007
 edge CASE-CTRL-AGENT-ANNOUNCE covers INPUT-AGENT-007
 edge CASE-CTRL-AGENT-STICK covers INPUT-AGENT-007
 edge CASE-CTRL-AGENT-PRESS covers INPUT-AGENT-007
+edge CASE-CTRL-AGENT-KEY covers INPUT-AGENT-007
+edge CASE-CTRL-AGENT-RESET-PRESS covers INPUT-AGENT-007
+edge CASE-CTRL-AGENT-SESSION covers INPUT-AGENT-007
+edge CASE-CTRL-AGENT-ARM-EDGE covers INPUT-AGENT-007
 edge CASE-CTRL-AGENT-BOUND covers INPUT-AGENT-007
 edge CASE-CTRL-AGENT-MODE covers INPUT-AGENT-007
 edge INPUT-SRC-004 verified-by CASE-CTRL-SOURCE-BOOT
@@ -713,6 +741,10 @@ edge RESULT-CTRL-AGENT result-of CASE-CTRL-AGENT-HANDOVER
 edge RESULT-CTRL-AGENT result-of CASE-CTRL-AGENT-ANNOUNCE
 edge RESULT-CTRL-AGENT result-of CASE-CTRL-AGENT-STICK
 edge RESULT-CTRL-AGENT result-of CASE-CTRL-AGENT-PRESS
+edge RESULT-CTRL-AGENT result-of CASE-CTRL-AGENT-KEY
+edge RESULT-CTRL-AGENT result-of CASE-CTRL-AGENT-RESET-PRESS
+edge RESULT-CTRL-AGENT result-of CASE-CTRL-AGENT-SESSION
+edge RESULT-CTRL-AGENT result-of CASE-CTRL-AGENT-ARM-EDGE
 edge RESULT-CTRL-AGENT result-of CASE-CTRL-AGENT-BOUND
 edge RESULT-CTRL-AGENT result-of CASE-CTRL-AGENT-MODE
 edge RESULT-CTRL-AGENT covers INPUT-AGENT-007
