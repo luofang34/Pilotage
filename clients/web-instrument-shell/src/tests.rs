@@ -4,7 +4,7 @@
 
 #![allow(clippy::expect_used, clippy::panic)]
 
-use indicate_instrument_state::abi::v7::{VERSION, encode_state};
+use indicate_instrument_state::abi::v8::{VERSION, encode_state};
 use indicate_instrument_state::{AircraftState, Attitude, Quat, Stamped};
 use pilotage_instrument_runtime::RenderStatus;
 

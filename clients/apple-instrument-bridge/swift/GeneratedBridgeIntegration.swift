@@ -13,6 +13,7 @@ private enum BridgeIntegrationError: Error {
     case missingImage(index: UInt32)
     case missingReport(index: UInt32)
     case unsatisfiedReport(index: UInt32)
+    case unrepresentableStateVersion(UInt32)
 }
 
 @main
@@ -23,7 +24,14 @@ private enum GeneratedBridgeIntegration {
         }
         let verified = try GeneratedInstrumentRuntime.verifiedRuntime()
         let composition = PilotageInstrumentComposition(verifiedRuntime: verified)
-        try composition.writeState([7, 0], acceptedAtMs: 100)
+        // A state frame with no group proves that the linked runtime accepts
+        // a write. Its version byte comes from the gate, so an ABI advance
+        // cannot leave this probe on the previous version.
+        let stateABI = AppleInstrumentCompatibilityGate.stateABI
+        guard let version = UInt8(exactly: stateABI) else {
+            throw BridgeIntegrationError.unrepresentableStateVersion(stateABI)
+        }
+        try composition.writeState([version, 0], acceptedAtMs: 100)
         guard try composition.compose(nowMs: 100, pathHealthy: true) > 0 else {
             throw BridgeIntegrationError.emptyComposition
         }

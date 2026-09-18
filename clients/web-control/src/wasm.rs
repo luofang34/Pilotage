@@ -7,7 +7,7 @@
 use wasm_bindgen::prelude::wasm_bindgen;
 
 use crate::authority::{AuthorityDisposition, AuthorityEvent, AuthorityScope};
-use crate::coordinator::ControlCoordinator;
+use crate::coordinator::{AgentInput, ControlCoordinator};
 use crate::device::SelectOutcome;
 use crate::plan::{ControlPlan, LeaseAction};
 use crate::profile::DEFAULT_PROFILE_BYTES;
@@ -27,11 +27,15 @@ pub fn default_profile() -> Vec<u8> {
 
 use crate::device::{MAX_AXES, MAX_BUTTONS};
 
+mod agent;
+
 /// Raw-sample source selector for [`WebControl::evaluate`]: `0` reads the
 /// input buffer as a pad sample routed through the selected device profile;
 /// `1` ignores the buffer and synthesizes from held keys via the keyboard
-/// profile.
+/// profile; `2` flies the agent input, and reads the buffer as the operator's
+/// pad for the override check.
 const SOURCE_KEYS: u32 = 1;
+const SOURCE_AGENT: u32 = 2;
 // Input layout: axes f32[8] | values f32[24] | pressed-bitset u32.
 const IN_AXES: usize = 0;
 const IN_VALUES: usize = IN_AXES + MAX_AXES * 4;
@@ -52,6 +56,7 @@ const FLAG_DISARM: u32 = 1 << 4;
 const FLAG_CAPTURE: u32 = 1 << 5;
 const FLAG_ARM_SUPPRESSED: u32 = 1 << 6;
 const FLAG_DISARM_SUPPRESSED: u32 = 1 << 7;
+const FLAG_AGENT_OVERRIDE: u32 = 1 << 12; // an operator input disengaged the agent this tick.
 const LEASE_SHIFT: u32 = 8; // bits 8..9: gimbal lease 0 none, 1 request, 2 release.
 const MOTION_LEASE_SHIFT: u32 = 10; // bits 10..11: motion lease, same encoding.
 
@@ -62,6 +67,7 @@ const MOTION_LEASE_SHIFT: u32 = 10; // bits 10..11: motion lease, same encoding.
 pub struct WebControl {
     coordinator: ControlCoordinator,
     sample: RawSample,
+    agent_input: AgentInput,
     input: Vec<u8>,
     output: Vec<u8>,
 }
@@ -75,6 +81,7 @@ impl WebControl {
         Self {
             coordinator: ControlCoordinator::new(),
             sample: RawSample::default(),
+            agent_input: AgentInput::default(),
             input: vec![0u8; IN_LEN],
             output: vec![0u8; OUT_LEN],
         }
@@ -184,7 +191,7 @@ impl WebControl {
         input_lost: bool,
         source: u32,
     ) -> u32 {
-        self.load_sample(axis_count as usize, button_count as usize, source);
+        let source_flags = self.load_sample(axis_count as usize, button_count as usize, source);
         let state = SessionState {
             now_ms,
             mode: mode_from_u32(mode),
@@ -192,7 +199,7 @@ impl WebControl {
             input_lost,
         };
         let plan = self.coordinator.evaluate(&self.sample, &state);
-        self.store_plan(&plan)
+        self.store_plan(&plan, source_flags)
     }
 
     /// The active profile's identity string (empty before activation).
@@ -328,10 +335,10 @@ impl WebControl {
     /// profile; the key source ignores the buffer and synthesizes from held
     /// keys via the keyboard profile. Fixed scratch arrays keep the steady
     /// tick allocation-free.
-    fn load_sample(&mut self, axes: usize, buttons: usize, source: u32) {
+    fn load_sample(&mut self, axes: usize, buttons: usize, source: u32) -> u32 {
         if source == SOURCE_KEYS {
             self.coordinator.key_sample(&mut self.sample);
-            return;
+            return 0;
         }
         let axes = axes.min(MAX_AXES);
         let buttons = buttons.min(MAX_BUTTONS);
@@ -347,13 +354,17 @@ impl WebControl {
                 value: read_f32(&self.input, IN_VALUES + i * 4),
             };
         }
+        if source == SOURCE_AGENT {
+            return self.load_agent_sample(&raw_axes[..axes], &raw_buttons[..buttons]);
+        }
         self.coordinator
             .pad_sample(&raw_axes[..axes], &raw_buttons[..buttons], &mut self.sample);
+        0
     }
 
     /// Encodes the plan into the output buffer and returns its flags.
-    fn store_plan(&mut self, plan: &ControlPlan) -> u32 {
-        let mut flags = 0u32;
+    fn store_plan(&mut self, plan: &ControlPlan, source_flags: u32) -> u32 {
+        let mut flags = source_flags;
         write_f32x(&mut self.output, OUT_MOTION, [0.0; 4]);
         write_f32x(&mut self.output, OUT_GIMBAL, [0.0; 2]);
         if let Some(motion) = &plan.motion {

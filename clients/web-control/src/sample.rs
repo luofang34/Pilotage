@@ -14,6 +14,43 @@ pub struct ButtonSample {
     pub value: f32,
 }
 
+/// A motion demand that no stick produced. An automation source states the
+/// four flight demands itself, so no scheme mapping and no stick shaping
+/// applies: a mapping swap cannot change what the demand means.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct DirectDemand {
+    /// Roll demand in `[-1, 1]`, positive right.
+    pub roll: f32,
+    /// Pitch demand in `[-1, 1]`, positive forward.
+    pub pitch: f32,
+    /// Throttle demand in `[-1, 1]`, positive up.
+    pub throttle: f32,
+    /// Yaw demand in `[-1, 1]`, positive clockwise.
+    pub yaw: f32,
+}
+
+impl DirectDemand {
+    /// The demand with every component inside `[-1, 1]`. A component that is
+    /// not finite reads neutral: a broken automation source must not command
+    /// full deflection.
+    #[must_use]
+    pub fn bounded(self) -> Self {
+        let bound = |value: f32| {
+            if value.is_finite() {
+                value.clamp(-1.0, 1.0)
+            } else {
+                0.0
+            }
+        };
+        Self {
+            roll: bound(self.roll),
+            pitch: bound(self.pitch),
+            throttle: bound(self.throttle),
+            yaw: bound(self.yaw),
+        }
+    }
+}
+
 /// A raw device sample: the gamepad axes and buttons for one tick. The
 /// runtime indexes into these by the active profile's declared bindings, so
 /// no axis or button index ever lives outside a profile.
@@ -23,6 +60,8 @@ pub struct RawSample {
     pub axes: Vec<f32>,
     /// Button states, Standard Gamepad order.
     pub buttons: Vec<ButtonSample>,
+    /// The demand of an automation source. `None` for every physical device.
+    pub direct: Option<DirectDemand>,
 }
 
 impl RawSample {
@@ -71,6 +110,13 @@ impl Mode {
             "rover" => Self::Rover,
             _ => Self::QuadPilot,
         }
+    }
+
+    /// Whether this mode commands the velocity law that an automation source
+    /// flies. Attitude mode and the rover read the four demands differently.
+    #[must_use]
+    pub const fn carries_direct_demand(self) -> bool {
+        matches!(self, Self::QuadPilot | Self::QuadCruise)
     }
 
     /// Whether this mode operates a gimbal (everything but rover).

@@ -354,6 +354,11 @@ jobs:
         # drives the real wasm artifact built above.
         run: node clients/web/control-runtime.test.mjs
 
+      - name: agent client module (real agent wasm + real control wasm, scripted model)
+        # The browser port of the agent must fly through the control runtime:
+        # engage, typed arm, refusal of an ungrounded reply, operator override.
+        run: node clients/web/agent-module.test.mjs
+
       - name: control shell structural contract (no browser module holds mapping logic)
         run: node clients/web/control-structure.test.mjs
 

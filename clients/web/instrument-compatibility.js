@@ -4,13 +4,13 @@ import { InstrumentFault, REASON } from "./instrument-health.js";
 import { STATE_ABI_VERSION } from "./state-abi.js";
 
 export const EXPECTED_SCENE_FORMAT_VERSION = 1;
-export const EXPECTED_CORPUS_VERSION = 4;
+export const EXPECTED_CORPUS_VERSION = 8;
 export const EXPECTED_CORPUS_DIGEST =
-  "1fb8e6de2734ff7506843b05869f39d501f0926599636c6110a7e3b0c6e1625e";
+  "0b0c7ccb135bfc4107bc110e4b24dceffd84adf1b767fcd14d2c5ace7391f962";
 export const EXPECTED_SCENE_DIGEST =
-  "f82d905643b48822de25665761ad3e29daa334d937f18b1e98a3e215353cb704";
+  "f6fb603bf2e1f7889ddc9b5d534f329a0379d34a8f00d954f366e9b270ddc273";
 export const EXPECTED_COMPOSITION_DIGEST =
-  "6761e8e1ed137e682530274c8f02353d2ab40e7142a36cd4321a6835323b463c";
+  "2912562c50aa7f6dd4bfd3b3be2c83fe69ab0ef225b6081496b5a0a5dd8f18f4";
 
 export const COMPATIBILITY_BINDING_FNS = [
   "scene_format_version",

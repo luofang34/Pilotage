@@ -63,7 +63,7 @@ const GLYPH_HEADER_LEN = 8;
 const GLYPH_RECORD_LEN = 12;
 const GLYPH_ROWS = 7;
 export { STATE_ABI_VERSION } from "./state-abi.js";
-// The v7 state frame is self-delimiting; the wasm side publishes a
+// The state frame is self-delimiting; the wasm side publishes a
 // buffer capacity the writer stays within. The floor is the largest
 // canonical frame the writer can produce, measured, not mirrored.
 const STATE_MIN_CAPACITY = maxFrameBytes();

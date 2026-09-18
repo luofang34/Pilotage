@@ -307,9 +307,10 @@ func stateAcceptanceInvalidatesCachedScenes() throws {
     let composition = PilotageInstrumentComposition(verifiedRuntime: verified)
     try composition.compose(nowMs: 100, pathHealthy: true)
 
-    try composition.writeState([7, 0], acceptedAtMs: 250)
+    let version = try #require(UInt8(exactly: AppleInstrumentCompatibilityGate.stateABI))
+    try composition.writeState([version, 0], acceptedAtMs: 250)
     #expect(runtime.writes.count == 1)
-    #expect(runtime.writes[0].bytes == [7, 0])
+    #expect(runtime.writes[0].bytes == [version, 0])
     #expect(runtime.writes[0].acceptedAtMs == 250)
     do {
         _ = try composition.producer(panel: 0).frame(

@@ -158,7 +158,7 @@ function packRenderResult(status, sceneLen, generation) {
   );
 }
 
-// The wasm side's state-buffer capacity (abi/v7.rs CAPACITY).
+// The wasm side's state-buffer capacity (the Rust codec's CAPACITY).
 const STATE_CAPACITY = 1024;
 
 // A fake WASM export surface with programmable behavior.
@@ -480,16 +480,15 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
       }),
     )) === REASON.ABI_MISMATCH,
   );
+  // A pinned digest can start with any hex digit. The mismatch changes
+  // the first digit to one that differs from it, so it never equals the pin.
+  const otherDigest = (hex) => `${hex[0] === "0" ? "1" : "0"}${hex.slice(1)}`;
   const identityCases = [
     ["scene format", "scene_format_version", EXPECTED_SCENE_FORMAT_VERSION + 1],
     ["corpus version", "corpus_version", EXPECTED_CORPUS_VERSION + 1],
-    ["corpus digest", "corpus_digest_hex", `0${EXPECTED_CORPUS_DIGEST.slice(1)}`],
-    ["registry scene digest", "scene_digest_hex", `0${EXPECTED_SCENE_DIGEST.slice(1)}`],
-    [
-      "screen composition digest",
-      "composition_digest_hex",
-      `0${EXPECTED_COMPOSITION_DIGEST.slice(1)}`,
-    ],
+    ["corpus digest", "corpus_digest_hex", otherDigest(EXPECTED_CORPUS_DIGEST)],
+    ["registry scene digest", "scene_digest_hex", otherDigest(EXPECTED_SCENE_DIGEST)],
+    ["screen composition digest", "composition_digest_hex", otherDigest(EXPECTED_COMPOSITION_DIGEST)],
   ];
   for (const [label, method, mismatch] of identityCases) {
     check(
@@ -1389,7 +1388,7 @@ function tickToCadence(health, target, interval = 250) {
   );
 }
 
-// ---- VAL-01: fail-safe write defaults mirror abi/v7.rs ------------------------
+// ---- VAL-01: fail-safe write defaults mirror the Rust codec -----------------
 
 {
   const exportsFake = fakeExports({});
@@ -1405,11 +1404,11 @@ function tickToCadence(health, target, interval = 250) {
     DYNAMICS: 11,
   });
 
-  // Walks the self-delimiting v7 frame: tag -> payload DataView.
+  // Walks the self-delimiting state frame: tag -> payload DataView.
   function frameGroups() {
     const base = exportsFake.state_ptr();
     const view = new DataView(exportsFake.memory.buffer, base, STATE_CAPACITY);
-    check("frame version byte is v7", view.getUint8(0) === STATE_ABI_VERSION);
+    check("frame version byte is the writer version", view.getUint8(0) === STATE_ABI_VERSION);
     const groups = new Map();
     let at = 2;
     for (let i = 0; i < view.getUint8(1); i += 1) {
@@ -1488,7 +1487,7 @@ function tickToCadence(health, target, interval = 250) {
   groups = frameGroups();
   const alt = groups.get(TAG.ALTITUDE);
   check(
-    "declared altitude datum encodes exactly (abi/v7.rs parity)",
+    "declared altitude datum encodes exactly (Rust codec parity)",
     alt?.getUint8(0) === 1 &&
       alt?.getUint8(1) === 2 &&
       Math.abs(alt?.getFloat32(4, true) - 457.2) < 1e-3 &&
@@ -1496,7 +1495,7 @@ function tickToCadence(health, target, interval = 250) {
   );
   const sel = groups.get(TAG.SELECTIONS);
   check(
-    "selection datum identity encodes exactly (abi/v7.rs parity)",
+    "selection datum identity encodes exactly (Rust codec parity)",
     sel?.getUint8(5) === 1 &&
       sel?.getUint8(6) === 4 &&
       sel?.getUint32(12, true) === 9 &&
@@ -1553,7 +1552,7 @@ function tickToCadence(health, target, interval = 250) {
   groups = frameGroups();
   const dynPayload = groups.get(TAG.DYNAMICS);
   check(
-    "declared dynamics encode exactly (abi/v7.rs parity)",
+    "declared dynamics encode exactly (Rust codec parity)",
     dynPayload?.getUint8(0) === 0 &&
       Math.abs(dynPayload?.getFloat32(4, true) - 0.05) < 1e-6 &&
       Math.abs(dynPayload?.getFloat32(8, true) + 0.8) < 1e-6 &&
@@ -1643,13 +1642,17 @@ function tickToCadence(health, target, interval = 250) {
   if (mod) {
     check("real wasm passes load, ABI, init, and exact-size validation", mod instanceof InstrumentModule);
     check(
-      "the real registry derives {PFD: 0, HSI: 1, MONITOR: 2}",
-      PANEL.PFD === 0 && PANEL.HSI === 1 && PANEL.MONITOR === 2 && Object.keys(PANEL).length === 3,
+      "the real registry derives {PFD: 0, HSI: 1, AUTOFLIGHT: 2, MONITOR: 3}",
+      PANEL.PFD === 0 &&
+        PANEL.HSI === 1 &&
+        PANEL.AUTOFLIGHT === 2 &&
+        PANEL.MONITOR === 3 &&
+        Object.keys(PANEL).length === 4,
     );
     check(
       "the composition rides the module instance",
       Array.isArray(mod.panels) &&
-        mod.panels.length === 3 &&
+        mod.panels.length === 4 &&
         mod.panels[0].id === "pfd" &&
         mod.panels[0].width === 480,
     );

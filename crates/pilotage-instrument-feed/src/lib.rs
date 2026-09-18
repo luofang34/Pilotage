@@ -6,7 +6,7 @@
 //! assemble into the state frame the panels read. The browser makes these
 //! decisions in viewer script today; a second client must not make them a
 //! second time. [`InstrumentFeed`] is that one implementation: wire
-//! telemetry samples in, encoded v7 state frames out, every judgement
+//! telemetry samples in, encoded state frames out, every judgement
 //! delegated to the shared feeder.
 //!
 //! The feed depends on the protocol AND the runtime, like the viewer glue

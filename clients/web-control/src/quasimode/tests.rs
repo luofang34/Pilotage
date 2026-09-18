@@ -21,6 +21,7 @@ fn sample(axes: &[f32], pressed: &[usize]) -> RawSample {
     RawSample {
         axes: axes.to_vec(),
         buttons,
+        direct: None,
     }
 }
 

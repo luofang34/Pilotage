@@ -1,24 +1,39 @@
 [package]
 name = "intent-pilot"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 publish = false
 
+[lib]
+name = "intent_pilot"
+path = "src/lib.rs"
+
 [[bin]]
 name = "intent-pilot"
-path = "src/main.rs"
+path = "src/bin/intent-pilot/main.rs"
+
+[[bin]]
+name = "agent-eval"
+path = "src/bin/agent-eval/main.rs"
+
+[[bin]]
+name = "model-gateway"
+path = "src/bin/model-gateway/main.rs"
 
 [lints]
 workspace = true
 
 [dependencies]
+httparse = "1.10"
+pilotage-agent = { workspace = true }
 pilotage-client-session = { workspace = true }
 pilotage-input = { workspace = true }
 pilotage-protocol = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync", "fs", "process", "io-util"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync", "fs", "process", "io-util", "io-std", "net", "signal"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 wtransport = { workspace = true }

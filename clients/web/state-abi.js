@@ -1,5 +1,5 @@
-// State-frame ABI v7 writer: the JS side of the tagged-group contract in
-// the indicate-instrument-state crate's abi/v7.rs (pinned upstream).
+// State-frame ABI writer: the JS side of the tagged-group contract in
+// the indicate-instrument-state crate's abi codec (pinned upstream).
 //
 // The frame is self-delimiting: [version u8][group count u8] then, per
 // present group in strictly ascending tag order, [tag u8][payload length
@@ -15,8 +15,11 @@
 // frames in the state crate's fixtures/ (at the pinned upstream rev) via
 // state-abi.test.mjs; the Rust codec pins against the same files, so
 // the two sides of the wasm boundary can only drift by turning CI red.
+// The equipment groups live in state-abi-equipment.js.
 
-export const STATE_ABI_VERSION = 7;
+import { EQUIPMENT_ENCODERS, EQUIPMENT_PROBE_STATE } from "./state-abi-equipment.js";
+
+export const STATE_ABI_VERSION = 8;
 
 const TAG = Object.freeze({
   ATTITUDE: 0x01,
@@ -31,7 +34,6 @@ const TAG = Object.freeze({
   VARIATION: 0x0a,
   DYNAMICS: 0x0b,
   MONITOR_TEXT: 0x0c,
-  FLIGHT_DIRECTOR: 0x0d,
 });
 
 const IDENT_CAPACITY = 8;
@@ -128,7 +130,10 @@ function groupEncoders() {
         f(view, off, air.iasMps);
         f(view, off + 4, air.baroHpa);
         f(view, off + 8, air.ageMs);
-        return 12;
+        // The display cannot derive true airspeed. A source that does
+        // not supply it writes NaN, and the readout shows Missing.
+        f(view, off + 12, air.tasMps);
+        return 16;
       },
     ],
     [
@@ -148,7 +153,10 @@ function groupEncoders() {
         f(view, off + 20, nav.ageMs);
         putIdent(view, off + 24, nav.toIdent);
         putIdent(view, off + 33, nav.fromIdent);
-        return 42;
+        // An undeclared scale is unknown (255), which fails the nav
+        // group: a dot has no distance until the source declares it.
+        b(view, off + 42, nav.scale ?? 255);
+        return 43;
       },
     ],
     [
@@ -188,7 +196,8 @@ function groupEncoders() {
         const v = s.valid ?? {};
         const flags =
           v.attitude || v.rates || v.position || v.velocityHorizontal ||
-          v.velocityVertical || v.heading || v.variation || v.turn || v.slip;
+          v.velocityVertical || v.heading || v.variation || v.turn || v.slip ||
+          v.iasTrend;
         const snap =
           (s.snapshot?.coherence ?? 0) !== 0 || (s.snapshot?.generation ?? 0) !== 0;
         return (s.quality ?? 255) !== 255 || flags || snap ? s : undefined;
@@ -196,9 +205,10 @@ function groupEncoders() {
       (view, off, s) => {
         // Undeclared quality is unknown (255, resolves Failed), and
         // validity is never assumed — unset flags mean "not declared
-        // valid" (VAL-01). v7 splits velocity: bit 3 is the horizontal
+        // valid" (VAL-01). Velocity is split: bit 3 is the horizontal
         // (north/east) pair, bit 8 is vertical speed; a source that
-        // declares only one loses the other on the Rust side.
+        // declares only one loses the other on the Rust side. Bit 9
+        // declares the airspeed trend.
         b(view, off, s.quality ?? 255);
         b(view, off + 1, s.snapshot?.coherence ?? 0);
         const v = s.valid ?? {};
@@ -211,7 +221,8 @@ function groupEncoders() {
           (v.variation ? 0x20 : 0) |
           (v.turn ? 0x40 : 0) |
           (v.slip ? 0x80 : 0) |
-          (v.velocityVertical ? 0x100 : 0);
+          (v.velocityVertical ? 0x100 : 0) |
+          (v.iasTrend ? 0x200 : 0);
         view.setUint16(off + 2, flags, true);
         view.setUint32(off + 4, s.snapshot?.generation ?? 0, true);
         return 8;
@@ -267,7 +278,10 @@ function groupEncoders() {
         f(view, off + 4, dyn.turnRps);
         f(view, off + 8, dyn.lateralMps2);
         f(view, off + 12, dyn.ageMs);
-        return 16;
+        // The trend is a rate that the source measures. The writer
+        // never derives it from two airspeed samples.
+        f(view, off + 16, dyn.iasTrendMps2);
+        return 20;
       },
     ],
     [
@@ -299,26 +313,14 @@ function groupEncoders() {
         return 6 + TEXT_MAX_LINES * atom + 4;
       },
     ],
-    [
-      TAG.FLIGHT_DIRECTOR,
-      (s) => s.director,
-      (view, off, fd) => {
-        b(view, off, fd.mode ?? 255);
-        b(view, off + 1, fd.engagement ?? 255);
-        b(view, off + 2, 0);
-        b(view, off + 3, 0);
-        f(view, off + 4, fd.pitchCmdRad);
-        f(view, off + 8, fd.rollCmdRad);
-        f(view, off + 12, fd.ageMs);
-        return 16;
-      },
-    ],
   ];
 }
 
-const ENCODERS = groupEncoders();
+// Every equipment tag sorts after every flight-state tag, so the joined
+// list stays in strictly ascending tag order.
+const ENCODERS = [...groupEncoders(), ...EQUIPMENT_ENCODERS];
 
-// Encodes `state` as a canonical v7 frame into `view` (a DataView over
+// Encodes `state` as a canonical frame into `view` (a DataView over
 // the wasm state buffer). Returns the used length, or throws RangeError
 // when the buffer cannot hold the frame — the caller surfaces that as a
 // state-write failure, never a partial frame.
@@ -358,6 +360,7 @@ const PROBE_STATE = {
   variation: { ageMs: 0 },
   dynamics: { ageMs: 0 },
   monitorText: { revision: 0, lines: [], ageMs: 0 },
+  ...EQUIPMENT_PROBE_STATE,
 };
 
 // The largest frame this writer can produce, measured by encoding the
