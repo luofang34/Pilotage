@@ -1,145 +1,205 @@
-# intent-pilot
+# intent-pilot and agent-eval
 
-`intent-pilot` is a Pilotage control source. A language model reads each
-operator message. A deterministic sequencer flies the vehicle. A verifier
-gives the verdict from simulator truth.
+This crate is the headless port of the agent client module
+([ADR-0042](../../docs/adr/0042-agent-client-module-and-model-port.md)). The
+shared core is `crates/pilotage-agent`. The core has no I/O.
+
+- `intent-pilot` flies operator messages. A model reads each message and gives a
+  directive. Deterministic code checks the directive and flies it.
+- `agent-eval` gives each model the same cases and the same score.
 
 ## Terms
 
 - **Operator message**: one line of free text from the operator.
-- **Intent**: a destination waypoint and an arrival behaviour (`LAND` or `HOLD`).
-- **Classifier**: the process that reads an operator message and gives an intent.
-- **Sequencer**: the state machine that changes an intent and the vehicle state
+- **Directive**: one instruction that the agent can fly, such as `direct_to`,
+  `heading`, `altitude`, `hold`, `join_procedure`, `land`, `go_around` or
+  `return_to_base`. `unable` means that the message is not an instruction.
+- **Slot**: a value in a directive, such as a fix name or a heading.
+- **Model adapter**: a separate program that connects one model to the model port.
+- **Model port**: the request and the reply between Pilotage and a model adapter.
+- **Flight envelope**: the directive kinds, names and number ranges that are
+  permitted now.
+- **Executor**: the state machine that changes a directive and the vehicle state
   into motion demands and arm or disarm requests.
 - **Verifier**: the module that compares simulator truth with the scenario.
-- **Scenario**: a JSON document with waypoints, operator messages, and the
-  expected result.
-- **Run record**: a JSON Lines file with one entry for each event of a flight.
+- **Scenario**: fixes, procedures, scripted operator messages, and the expected result.
+- **Suite**: cases for `agent-eval`. A case is an operator message and the expected directive.
 
-## How the control source connects
+## How the agent connects to the host
 
-The tool is a WebTransport client of `pilotage-session-host`. It uses
-`pilotage-client-session::ClientEngine`, as the native clients do. The host
-needs no change.
+The agent is a client, as the web client and the tablet client are. The host needs
+no change.
 
-1. The tool pins the SHA-256 of the host certificate. The tool has no mode
-   without a pinned certificate.
-2. The tool announces the profile identity `automation.intent-pilot/v1`. The
-   host records that identity as the source of the control frames.
-3. The tool requests the lease for the scope `vehicle.motion`. It selects the
-   scope by name.
-4. The tool sends one typed `Velocity` frame each 50 ms. The host drops a
-   holder that is silent for 1 s.
-5. The tool sends `Arm` and `Disarm` on the reliable action stream. It sends
-   `Disarm` only when the scope advertises `Disarm`.
-6. When a different principal requests the scope, the tool offers the
-   transfer. Then the tool stops. It does not request the lease again.
+1. It pins the SHA-256 of the host certificate. It has no mode without a pin.
+2. It announces the profile identity `automation.intent-pilot/v1`.
+3. It requests the lease for the scope `vehicle.motion`, by name.
+4. It sends one typed `Velocity` frame each 50 ms.
+5. It sends `Arm` and `Disarm` on the reliable action stream. It sends `Disarm`
+   only when the scope advertises `Disarm`.
+6. When a different principal requests the motion scope, it offers the transfer and
+   stops. It does not request the lease again.
+7. It reads telemetry, authority events and action results from the client-session
+   core, as each client module does.
 
-## How content gets to the classifier
+## The model port
 
-The classifier is a child process. The tool writes one JSON line and reads one
-JSON line.
+A model adapter is a child process. It writes its declaration as its first line.
+After that it reads one request line and writes one reply line. Each line is one
+JSON object.
 
-Request: `{"message": "...", "targets": ["ALPHA", "BRAVO", "HOME"], "legend": "..."}`
+```
+declaration  {"ready":true,"adapter":"ollama-json/1","model":"gemma4:e4b",
+              "kinds":["takeoff","direct_to",...],"frames":{"max_frames":0,"projections":[]}}
+request      {"message":"Turn left heading 270.","envelope":{...},"legend":"FIXES: ...","frames":[]}
+reply        {"directive":{"kind":"heading","degrees":270,"turn":"left"},
+              "probabilities":{"kind":0.98},"model_ms":805.0}
+fault        {"error":"..."}
+```
 
-Reply: `{"target": "BRAVO", "on_arrival": "LAND", "target_prob": 0.96, "on_arrival_prob": 0.95, "model_ms": 176.0}`
+A request contains the newest operator message, the flight envelope, a legend, and
+zero or more frames. It contains no vehicle state and no earlier messages. A small
+model reads state and history as instructions. "Measured results" gives the numbers.
 
-The request contains only the newest operator message, the permitted target
-names, and the waypoint legend. The request does not contain vehicle state.
-The request does not contain earlier messages. The measurements in
-"Measured limits" give the reason.
+A frame is one image for a model that reads images. It has a source identity, a
+source role, a capture stamp, a media type, a size, a projection and the image
+bytes. The projection is `rectilinear` or `equirectangular`. A panorama is one
+equirectangular frame, or a set of rectilinear frames with different source
+identities. No adapter in this directory reads frames. The port and the harness
+carry them.
 
-The tool calls the classifier only when an operator message arrives. The frame
-loop does not wait for the reply.
+## Three checks before a directive is flown
 
-`classifier/rlcd_intent_service.py` connects the parallel constrained-decoding
-engine from the Hugging Face repository `harshatheg/Qwen-2.5-1B-RLCD`. That
-repository contains no model weights. The engine loads
-`mlx-community/Qwen2.5-1.5B-Instruct-4bit`. A different classifier can replace
-it if it uses the same JSON lines.
+1. **Envelope.** The directive kind, each name and each number must be permitted. A
+   number outside its range is refused. It is not clamped.
+2. **Grounding.** Each name and each number of the directive must be in the words of
+   the operator message. "two seven zero" is 270, and "RNAV two seven" names
+   `RNAV27`. A turn side must be in the message, and a side in the message must be in
+   the directive. A model once gave `ALPHA` for a fix that does not exist. `ALPHA`
+   is permitted, so only this check stopped it.
+3. **Chart.** The executor finds each fix and each procedure in the scenario.
 
-## Measured limits of the classifier
+A refused directive is written to the run record. The vehicle keeps its last directive.
 
-These results are from probes on an Apple M4 with 16 GB. Each held-out set was
-written before its first run and was run one time.
+## Decisions that a model does not make
 
-| Task | Result | Decision |
-| --- | --- | --- |
-| Select the next flight action from vehicle state | 1 of 9, then 8 of 22. Wrong answers had a probability of 1.00. | The sequencer makes these decisions. |
-| Classify a hazard when the alert text does not contain the label word | 0 of 4. The answer was `NONE` with a probability above 0.9. | Hazard detection is not given to the classifier. |
-| Find a recall to `HOME` in a message history | 0 of 4 | The classifier gets the newest message only. |
-| Find the destination in one new message | 20 of 22. The target of 95 % was not met. | The verifier does not use the classifier output. |
-| Find the destination in the 6 scenario messages | 6 of 6 | — |
+The executor decides when to arm, when a climb is complete, when the vehicle is at a
+fix, when it is on the ground, and when it is too far away. A heading has no end, so
+the executor holds position at `max_range_m`. A climb that does not leave the ground
+in 3 s sends a new arm request, because an armed report can be old. When a run ends
+in the air, the pilot brings the vehicle home and lands it.
 
-The probability from the classifier is not a safe gate. Wrong answers had
-probabilities up to 0.99.
+The verifier reads the expected result from the scenario and the position from
+simulator truth. It does not read a model reply or the executor phase. Each scripted
+message must have an effect that truth can show. A scenario without such a
+checkpoint once passed a flight that did not fly its first leg.
 
-## Verdict rules
-
-The verifier reads the expected result from the scenario. It reads the
-position from simulator truth. It reads the armed state from the flight
-controller report. It does not read the classifier output or the sequencer
-phase. Thus an incorrect intent causes a `FAIL` verdict.
-
-- `PASS`: truth shows each `must_approach` checkpoint in sequence. Then truth
-  shows the end state for 3 s. For `LAND`, the vehicle is in the arrival
-  radius, on the ground, not armed, and not moving. For `HOLD`, the vehicle is
-  in the arrival radius and at cruise height.
-- `FAIL`: truth enters the arrival radius of a `must_not_reach` waypoint, or
-  the time limit ends.
-- `INCONCLUSIVE`: no simulator truth arrived. This is not a `PASS`.
-
-A vehicle that reports height must climb above 1 m before an end state at
-`HOME` is valid.
-
-Exit status: `0` pass, `1` fail, `2` inconclusive, `3` error.
-
-## Run
+## Run a scenario
 
 ```
 intent-pilot --url https://127.0.0.1:4433/pilotage \
   --cert <sha256-hex from the host LISTENING line> \
-  --scenario tools/intent-pilot/scenarios/retarget-recall.json \
+  --scenario tools/intent-pilot/scenarios/go-around.json \
   --record run.jsonl \
-  --classifier-cmd "PYTHONPATH=<engine repository> python tools/intent-pilot/classifier/rlcd_intent_service.py"
+  --model-cmd "PYTHONPATH=tools/intent-pilot/adapters python3 tools/intent-pilot/adapters/ollama_json.py"
 ```
 
-Add `--planar-truth` only for the host reference adapter. That adapter has a
-planar vehicle, and its pose is the simulator state.
+Exit status: `0` pass or live run ended, `1` fail, `2` inconclusive, `3` error.
+Add `--planar-truth` only for the host reference adapter.
 
-## Flight results
+Scenarios: `direct-land`, `retarget-recall`, `vectors` (heading and altitude),
+`approach` (a procedure), `go-around`, and `live` (no script).
 
-Vehicle: Aviate x500 in Gazebo Harmonic, physics only. Host: `pilotage-session-host`
-at `b57c7c2`. Date: 2026-09-17. The verdict of each flight is from stamped simulator
-truth.
+## Run a live demonstration
 
-| Scenario | Flights | Pass | End distance from the expected waypoint |
+1. Start the session with `cargo xtask sim --fc aviate --lan --no-open`. The launcher
+   prints a viewer address for a browser on the same network. The address uses the
+   name `pilotage.local`. If that name does not resolve, use the host name of the
+   machine. The viewer page, the connect manifest and the QUIC port were reached from
+   a second machine. The viewer was not operated in a browser in this work.
+2. Start the pilot with `--scenario tools/intent-pilot/scenarios/live.json --live`.
+3. Type one operator message on each line. Examples: `Cleared for takeoff.`,
+   `Turn left heading 270.`, `Climb and maintain 12 metres.`, `Proceed direct BRAVO
+   and hold.`, `Cleared RNAV 27 approach.`, `Go around.`, `Return to base.`
+4. Type `quit`. The vehicle returns to the launch point and lands. Then the pilot stops.
+
+A live run has no verdict. A person in the viewer can request the motion scope at
+any time, and the pilot gives it up.
+
+## Score a model
+
+```
+agent-eval --suite tools/intent-pilot/suites/atc-heldout-01.json \
+  --model-cmd "<adapter command>" --out out/ --ledger ledger.jsonl
+```
+
+The result names the suite by its SHA-256. The ledger is append-only. It counts the
+runs of each adapter and model on each suite digest, so a number from a second run
+cannot pass as a number from a first run. Develop an adapter on `atc-open-01`. Run
+`atc-heldout-01` one time, and do not tune on it.
+
+The report gives the score for each directive kind, category and slot. It keeps
+`unable`, a refused reply and an adapter fault apart from a wrong answer. It counts
+the wrong answers that pass every check, because the agent would fly them.
+
+Adapters in `adapters/`:
+
+| File | Model |
+| --- | --- |
+| `ollama_json.py` | A model on an Ollama server. JSON reply. |
+| `qwen_json.py` | An MLX model. Autoregressive JSON reply. |
+| `rlcd_directive.py` | The parallel constrained-decoding engine of `harshatheg/Qwen-2.5-1B-RLCD`. It fills enumeration fields only, so each number is a set of digit fields. |
+| `keyword_baseline.py` | No model. Regular expressions from the open suite. |
+| `oracle.py` | No model. It answers with the directive that the scenario author wrote. It separates the flight from the quality of a model. |
+
+## Measured results
+
+Machine: Apple M4, 16 GB. Date: 2026-09-17. Suite `atc-heldout-01`, 46 cases, first
+run of each adapter. The same person wrote the suite and the adapters, so these
+numbers are not a blind test. The comparison between adapters is fair.
+
+| Adapter | Correct | Wrong and flown | Wrong and stopped | Median time |
+| --- | --- | --- | --- | --- |
+| `ollama_json.py`, `gemma4:e4b` | 45 of 46 | 1 | 0 | 756 ms |
+| `qwen_json.py`, `Qwen2.5-1.5B-Instruct-4bit` | 36 of 46 | 7 | 3 | 601 ms |
+| `keyword_baseline.py` | 31 of 46 | 3 | 0 | 0 ms |
+| `rlcd_directive.py`, the same Qwen weights | 19 of 46 | 5 | 19 | 379 ms |
+
+The "flown" and "stopped" columns are from the second run, before the turn-side rule.
+That rule was written after the held-out run showed a reply with a lost turn side. It
+changes what the agent flies. It does not change the score of a model.
+The grounding check stopped no correct answer. The parallel engine is below the
+keyword baseline on this vocabulary: directive kind 21 of 30 and numbers 2 of 15 in
+the two suites. It is correct for kinds with one clear word, such as a procedure.
+
+The suite has no message with two instructions. `gemma4:e4b` read "Get airborne and
+go to ALPHA, hold overhead." as `takeoff` only. The model port gives one directive
+for each message.
+
+Flights: Aviate x500 in Gazebo Harmonic, physics only, `gemma4:e4b`. Each verdict is
+from stamped simulator truth.
+
+| Scenario | Flights | Pass | Notes |
 | --- | --- | --- | --- |
-| `direct-land` | 3 | 3 | 0.50 m, 0.51 m, 0.58 m |
-| `retarget-land` | 3 | 3 | 0.33 m, 0.32 m, 0.43 m |
-| `retarget-recall` | 4 | 4 | 0.41 m, 0.46 m, 0.38 m, 0.35 m |
+| `vectors` | 5 | 5 | heading 270 held, 12 m held, landed at `HOME` |
+| `approach` | 3 | 3 | `DELTA`, then `BRAVO`, then landed at `HOME` |
+| `go-around` | 3 | 3 | descent seen, then 5 m held, landed at `HOME` |
+| `direct-land` | 2 | 2 | 0.60 m and 0.71 m from `ALPHA` |
+| `retarget-recall` | 3 | 0 | The model misread the first message. One of these flights passed an earlier, weaker expectation. That pass does not count. With `oracle.py` the scenario passes. |
 
-The host rejected no control frame. The flight controller reported a disarm after
-each landing. Four more attempts did not fly. The cause was the test scripts: they
-used more flight-controller restarts than the launcher permits in one session. The
-cause was not the pilot.
+The host rejected no control frame in these flights.
 
-Before the Gazebo flights, the verifier failed two flights on the host reference
-vehicle. The first guidance law had no damping, and the vehicle went 8 m through the
-waypoint. The en-route time did not start again when the destination changed. The
-two defects are corrected, and each has a test.
-
-In `retarget-recall` the vehicle came 2.5 m to 3.4 m from `BRAVO` before the recall.
-The limit for `must_not_reach` is 1.5 m. The margin is smaller than the scenario
-author planned.
+Two live runs took operator messages from the keyboard. In the two runs the message
+"Proceed direct ZULU and land." got the reply `ALPHA`. The first run had no grounding
+check, and the vehicle flew toward `ALPHA` for 4 s. The second run refused the reply.
 
 ## Known limits
 
-- The guidance law is a speed schedule with a velocity correction. It is not
-  tuned for one vehicle.
-- The protocol has no typed `Land` action. The sequencer descends and then
-  sends `Disarm`. Aviate refuses `Disarm` while it reports the vehicle
-  airborne, so the sequencer sends `Disarm` again each 2 s.
-- The telemetry has no battery field. The tool has no hazard response.
-- The host grant path does not mark an automation principal as different from
-  a person.
+- The executor is a copy of what the mission core of ADR-0041 will do. The mission
+  core has no `heading`, `speed` or `go_around` action, and its document does not
+  change after a mission starts.
+- The protocol has no typed `Land` action. The executor descends and then sends
+  `Disarm`. Aviate refuses `Disarm` while it reports the vehicle airborne, so the
+  executor sends `Disarm` again each 2 s.
+- The telemetry has no energy state. The agent has no hazard response.
+- The host grant path does not mark an agent as different from a person.
+- A heading is a heading and not a track. The executor does not hold a ground track.

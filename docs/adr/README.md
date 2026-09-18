@@ -45,6 +45,7 @@ One file per decision, numbered in acceptance order. See
 | [0036](0036-situational-domain-ownership.md) | Separate situational state by lifecycle | Accepted |
 | [0037](0037-modular-operator-client-composition.md) | Compose operator clients from shared function modules | Accepted |
 | [0041](0041-one-mission-sequencing-core.md) | Use one mission sequencing core for operational flights and calibration trials | Proposed |
+| [0042](0042-agent-client-module-and-model-port.md) | Compose an agent as a client module behind a model port | Proposed |
 
 ## Provenance
 

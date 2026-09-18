@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/pilotage-navdata-cycle",
     "crates/pilotage-protocol",
+    "crates/pilotage-agent",
     "crates/pilotage-authority",
     "crates/pilotage-session",
     "crates/pilotage-ingress",
@@ -121,6 +122,7 @@ pilotage-timing = { path = "crates/pilotage-timing" }
 pilotage-protocol = { path = "crates/pilotage-protocol" }
 pilotage-client-session = { path = "crates/pilotage-client-session" }
 pilotage-instrument-feed = { path = "crates/pilotage-instrument-feed" }
+pilotage-agent = { path = "crates/pilotage-agent" }
 pilotage-authority = { path = "crates/pilotage-authority" }
 pilotage-ingress = { path = "crates/pilotage-ingress" }
 pilotage-input = { path = "crates/pilotage-input" }
