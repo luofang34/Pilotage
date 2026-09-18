@@ -132,6 +132,15 @@ pub enum Refusal {
         /// The refused value.
         value: f64,
     },
+    /// The directive changes nothing in the present phase, so the vehicle
+    /// keeps its directive. A silent no-op would read as a flown directive.
+    #[error("the directive {kind:?} has no effect in the phase {phase:?}")]
+    NoEffect {
+        /// The directive kind.
+        kind: DirectiveKind,
+        /// The executor phase.
+        phase: crate::executor::Phase,
+    },
 }
 
 /// Checks a reply against the envelope of its request. The agent flies only a

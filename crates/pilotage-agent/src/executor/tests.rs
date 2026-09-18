@@ -2,6 +2,8 @@
 
 #![allow(clippy::panic)]
 
+mod no_effect;
+
 use super::{Discrete, Executor, FlightLimits, Phase};
 use crate::directive::{Arrival, Directive, HoldPoint, TurnDirection};
 use crate::scenario::Scenario;
