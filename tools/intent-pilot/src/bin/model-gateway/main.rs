@@ -78,6 +78,14 @@ async fn run(options: cli::Options) -> Result<(), MainError> {
             address: options.listen.clone(),
             source,
         })?;
+    if let Ok(address) = listener.local_addr()
+        && !address.ip().is_loopback()
+    {
+        tracing::warn!(
+            %address,
+            "the gateway listens beyond loopback; it has no authentication, so each host that reaches it can drive the adapter"
+        );
+    }
     let declared = model.declaration();
     tracing::info!(
         listen = %options.listen,

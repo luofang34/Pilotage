@@ -204,8 +204,11 @@ impl Executor {
                 fix: self.fix(fix)?,
                 arrival: *on_arrival,
             }),
-            // A return from the ground is a takeoff that nobody asked for.
-            Directive::ReturnToBase {} if self.on_ground() => return Err(no_effect),
+            // A return from the ground is a takeoff that nobody asked for. A
+            // vehicle that disarms is on the ground too.
+            Directive::ReturnToBase {} if self.on_ground() || self.phase == Phase::Disarming => {
+                return Err(no_effect);
+            }
             Directive::ReturnToBase {}
             | Directive::Land {}
             | Directive::Hold {

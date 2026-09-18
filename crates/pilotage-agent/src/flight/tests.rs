@@ -30,6 +30,7 @@ fn flight() -> AgentFlight {
 
 fn reply(directive: Directive) -> ModelReply {
     ModelReply {
+        id: 0,
         directive,
         probabilities: Default::default(),
         model_ms: 1.0,

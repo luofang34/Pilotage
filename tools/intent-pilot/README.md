@@ -56,11 +56,16 @@ JSON object.
 ```
 declaration  {"ready":true,"adapter":"ollama-json/1","model":"gemma4:e4b",
               "kinds":["takeoff","direct_to",...],"frames":{"max_frames":0,"projections":[]}}
-request      {"message":"Turn left heading 270.","envelope":{...},"legend":"FIXES: ...","frames":[]}
-reply        {"directive":{"kind":"heading","degrees":270,"turn":"left"},
+request      {"id":7,"message":"Turn left heading 270.","envelope":{...},"legend":"FIXES: ...","frames":[]}
+reply        {"id":7,"directive":{"kind":"heading","degrees":270,"turn":"left"},
               "probabilities":{"kind":0.98},"model_ms":805.0}
-fault        {"error":"..."}
+fault        {"id":7,"error":"..."}
 ```
+
+The port numbers each request. The reply carries the number of the request that it
+answers. A reply to an earlier request, such as one that comes after its deadline,
+is skipped, so it cannot become the answer to the next request. A reply to a number
+that was never sent is a fault of the adapter.
 
 A request contains the newest operator message, the flight envelope, a legend, and
 zero or more frames. It contains no vehicle state and no earlier messages. A small
@@ -192,23 +197,29 @@ Adapters in `adapters/`:
 
 ## Measured results
 
-Machine: Apple M4, 16 GB. Date: 2026-09-17. Suite `atc-heldout-01`, 46 cases, first
-run of each adapter. The same person wrote the suite and the adapters, so these
-numbers are not a blind test. The comparison between adapters is fair.
+Machine: Apple M4, 16 GB. Date: 2026-09-17. Suite `atc-heldout-01`, 46 cases. The
+same person wrote the suite and the adapters, so these numbers are not a blind test.
+The comparison between adapters is fair.
 
-| Adapter | Correct | Wrong and flown | Wrong and stopped | Median time |
+The ledger holds three runs of this suite for each adapter. The "Correct" column is
+the first run. The "flown" and "stopped" columns are the third run, with the checks
+as they are in this tree: the grounding rules for the turn side, the arrival, the
+slotless directives and the number binding were written after the first two runs
+showed wrong replies that would fly. A rule of the checks changes what the agent
+flies. It does not change the score of a model, and the correct count of the third
+run equals the first run for each adapter.
+
+| Adapter | Correct (run 1) | Wrong and flown (run 3) | Wrong and stopped (run 3) | Median time |
 | --- | --- | --- | --- | --- |
-| `ollama_json.py`, `gemma4:e4b` | 45 of 46 | 1 | 0 | 756 ms |
-| `qwen_json.py`, `Qwen2.5-1.5B-Instruct-4bit` | 36 of 46 | 7 | 3 | 601 ms |
-| `keyword_baseline.py` | 31 of 46 | 3 | 0 | 0 ms |
-| `rlcd_directive.py`, the same Qwen weights | 19 of 46 | 5 | 19 | 379 ms |
+| `ollama_json.py`, `gemma4:e4b` | 45 of 46 | 0 | 1 | 718 ms |
+| `qwen_json.py`, `Qwen2.5-1.5B-Instruct-4bit` | 36 of 46 | 3 | 7 | 545 ms |
+| `keyword_baseline.py` | 31 of 46 | 2 | 1 | 0 ms |
+| `rlcd_directive.py`, the same Qwen weights | 19 of 46 | 3 | 21 | 374 ms |
 
-The "flown" and "stopped" columns are from the second run, before the turn-side rule.
-That rule was written after the held-out run showed a reply with a lost turn side. It
-changes what the agent flies. It does not change the score of a model.
-The grounding check stopped no correct answer. The parallel engine is below the
-keyword baseline on this vocabulary: directive kind 21 of 30 and numbers 2 of 15 in
-the two suites. It is correct for kinds with one clear word, such as a procedure.
+The grounding check stopped no correct answer in any run. The parallel engine is
+below the keyword baseline on this vocabulary: directive kind 21 of 30 and numbers
+2 of 15 in the two suites. It is correct for kinds with one clear word, such as a
+procedure.
 
 The suite has no message with two instructions. `gemma4:e4b` read "Get airborne and
 go to ALPHA, hold overhead." as `takeoff` only. The model port gives one directive
@@ -262,6 +273,8 @@ control frame.
   `Disarm`. Aviate refuses `Disarm` while it reports the vehicle airborne, so the
   executor sends `Disarm` again each 2 s.
 - The telemetry has no energy state. The agent has no hazard response.
+- The model gateway has no authentication. It listens on loopback by default. On
+  another address, each host that reaches it can drive the adapter.
 - The host grant path does not mark an agent as different from a person.
 - A heading is a heading and not a track. The executor does not hold a ground track.
 - The browser port flies only while its window has the focus, as a person's input

@@ -33,6 +33,7 @@ fn suite() -> Suite {
 
 fn reply(directive: Directive, probabilities: &[(&str, f64)]) -> ModelReply {
     ModelReply {
+        id: 0,
         directive,
         probabilities: probabilities
             .iter()

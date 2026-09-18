@@ -36,12 +36,15 @@ pub(super) enum RequestError {
     ContentLength,
 }
 
-/// One parsed request.
+/// One parsed request head, with the body still on the wire.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Request {
     pub(super) method: String,
     pub(super) path: String,
     pub(super) origin: Option<String>,
+    /// The body length that the head declares.
+    pub(super) body_len: usize,
+    /// The body bytes that came with the head.
     pub(super) body: Vec<u8>,
 }
 
@@ -88,8 +91,9 @@ impl Response {
     }
 }
 
-/// Reads one request: the head, then a body of `Content-Length` bytes.
-pub(super) async fn read_request<S>(stream: &mut S) -> Result<Request, RequestError>
+/// Reads one request head. The body stays on the wire until the caller
+/// admits the request, so a refused page costs no body read.
+pub(super) async fn read_head<S>(stream: &mut S) -> Result<Request, RequestError>
 where
     S: AsyncReadExt + Unpin,
 {
@@ -119,20 +123,30 @@ where
     }
     let mut body = buffer.split_off(head_len);
     body.truncate(body_len);
-    let missing = body_len - body.len();
-    if missing > 0 {
-        let start = body.len();
-        body.resize(body_len, 0);
-        stream
-            .read_exact(&mut body[start..])
-            .await
-            .map_err(|error| match error.kind() {
-                std::io::ErrorKind::UnexpectedEof => RequestError::Closed,
-                _ => RequestError::Io(error),
-            })?;
-    }
     request.body = body;
+    request.body_len = body_len;
     Ok(request)
+}
+
+/// Reads the rest of the body that the head declared. The buffer grows as
+/// the bytes arrive, so a declared length costs no memory before its bytes.
+pub(super) async fn read_body<S>(stream: &mut S, request: &mut Request) -> Result<(), RequestError>
+where
+    S: AsyncReadExt + Unpin,
+{
+    let missing = request.body_len.saturating_sub(request.body.len());
+    if missing == 0 {
+        return Ok(());
+    }
+    let read = stream
+        .take(missing as u64)
+        .read_to_end(&mut request.body)
+        .await
+        .map_err(RequestError::Io)?;
+    if read < missing {
+        return Err(RequestError::Closed);
+    }
+    Ok(())
 }
 
 /// Parses a complete head. `None` means that more bytes are needed. The
@@ -160,6 +174,7 @@ fn parse_head(buffer: &[u8]) -> Result<Option<(Request, usize, usize)>, RequestE
         method: parsed.method.unwrap_or_default().to_owned(),
         path: parsed.path.unwrap_or_default().to_owned(),
         origin: header("origin").map(str::to_owned),
+        body_len,
         body: Vec::new(),
     };
     Ok(Some((request, head_len, body_len)))
@@ -181,6 +196,7 @@ where
         400 => "Bad Request",
         403 => "Forbidden",
         404 => "Not Found",
+        503 => "Service Unavailable",
         _ => "Error",
     };
     let mut head = format!(
