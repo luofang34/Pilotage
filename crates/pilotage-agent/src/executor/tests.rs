@@ -340,7 +340,7 @@ fn a_directive_that_arrives_during_disarm_is_flown_after_it() {
     let down = state(14.8, 0.0, 0.2, false);
     assert!(
         executor
-            .accept(&Directive::ReturnToBase {}, Some(&down), 14.2)
+            .accept(&direct("ALPHA", Arrival::Hold), Some(&down), 14.2)
             .is_ok()
     );
     assert_eq!(executor.step(&down, 14.5).phase, Phase::Landed);

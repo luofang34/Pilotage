@@ -182,98 +182,122 @@ impl Executor {
         state: Option<&VehicleState>,
         now_s: f64,
     ) -> Result<(), Refusal> {
-        let here = state.map(|state| Fix {
-            north_m: state.north_m,
-            east_m: state.east_m,
-        });
         // A directive that changes nothing is refused and not dropped: a
         // silent drop would go into the run record as a flown directive.
         let no_effect = Refusal::NoEffect {
             kind: directive.kind(),
             phase: self.phase,
         };
-        let task = match directive {
-            Directive::Unable { .. } => None,
-            Directive::Takeoff {} => {
-                if !self.on_ground() {
-                    return Err(no_effect);
-                }
-                Some(Task::Takeoff)
-            }
-            Directive::DirectTo { fix, on_arrival } => Some(Task::GoTo {
-                fix: self.fix(fix)?,
-                arrival: *on_arrival,
-            }),
-            // A return from the ground is a takeoff that nobody asked for.
-            Directive::ReturnToBase {} if self.on_ground() => return Err(no_effect),
+        let stays_down = matches!(
+            directive,
             Directive::ReturnToBase {}
-            | Directive::Land {}
-            | Directive::Hold {
-                point: HoldPoint::PresentPosition,
-            } if self.phase == Phase::Arming => {
-                self.stay_down(now_s);
-                return Ok(());
-            }
-            Directive::ReturnToBase {} => Some(Task::GoTo {
-                fix: self.fix(HOME)?,
-                arrival: Arrival::Land,
-            }),
-            Directive::Hold {
-                point: HoldPoint::Fix(fix),
-            } => Some(Task::GoTo {
-                fix: self.fix(fix)?,
-                arrival: Arrival::Hold,
-            }),
-            Directive::Hold {
-                point: HoldPoint::PresentPosition,
-            } => Some(Task::HoldAt {
-                fix: self.present_fix(here, state, no_effect)?,
-            }),
-            Directive::Heading { degrees, turn } => Some(Task::FlyHeading {
-                heading_rad: f64::from(*degrees).to_radians(),
-                turn: *turn,
-            }),
-            Directive::JoinProcedure { procedure } => Some(self.route(procedure)?),
-            Directive::Land {} => {
-                let fix = self.present_fix(here, None, no_effect)?;
-                if self.phase == Phase::Climb {
-                    self.task = Some(Task::LandAt { fix });
-                    self.enter(Phase::Descending, now_s);
-                    return Ok(());
+                | Directive::Land {}
+                | Directive::Hold {
+                    point: HoldPoint::PresentPosition,
                 }
-                Some(Task::LandAt { fix })
-            }
-            // A go-around ends the approach: the vehicle climbs to the cruise
-            // height and holds where it is. It needs the air under it.
-            Directive::GoAround {} => {
-                if !self.airborne() {
-                    return Err(no_effect);
-                }
-                self.height_m = self.limits.cruise_height_m;
-                Some(Task::HoldAt {
-                    fix: here.ok_or(no_effect)?,
-                })
-            }
+        );
+        if self.phase == Phase::Arming && stays_down {
+            self.stay_down(now_s);
+            return Ok(());
+        }
+        let here = state.map(|state| Fix {
+            north_m: state.north_m,
+            east_m: state.east_m,
+        });
+        match directive {
+            Directive::Unable { .. } => {}
+            Directive::Speed { speed_mps } => self.speed_mps = *speed_mps,
             Directive::Altitude { height_m } => {
                 self.height_m = *height_m;
-                match self.phase {
-                    // A new height ends a descent where the vehicle is.
-                    Phase::Descending => Some(Task::HoldAt {
-                        fix: here.ok_or(no_effect)?,
-                    }),
-                    Phase::Idle | Phase::Landed if self.task.is_none() => Some(Task::Takeoff),
-                    _ => None,
+                if let Some(task) = self.altitude_task(here, no_effect)? {
+                    self.start(task, now_s);
                 }
             }
-            Directive::Speed { speed_mps } => {
-                self.speed_mps = *speed_mps;
-                None
+            Directive::Land {} if self.phase == Phase::Climb => {
+                let fix = self.present_fix(here, None, no_effect)?;
+                self.task = Some(Task::LandAt { fix });
+                self.enter(Phase::Descending, now_s);
             }
-        };
-        if let Some(task) = task {
-            self.start(task, now_s);
+            _ => {
+                let task = self.task_for(directive, here, state, no_effect)?;
+                self.start(task, now_s);
+            }
         }
         Ok(())
+    }
+
+    /// The task that a directive with a target starts.
+    fn task_for(
+        &mut self,
+        directive: &Directive,
+        here: Option<Fix>,
+        state: Option<&VehicleState>,
+        no_effect: Refusal,
+    ) -> Result<Task, Refusal> {
+        Ok(match directive {
+            Directive::Takeoff {} if !self.on_ground() => return Err(no_effect),
+            Directive::Takeoff {} => Task::Takeoff,
+            Directive::DirectTo { fix, on_arrival } => Task::GoTo {
+                fix: self.fix(fix)?,
+                arrival: *on_arrival,
+            },
+            // A return from the ground is a takeoff that nobody asked for. A
+            // vehicle that disarms is on the ground too.
+            Directive::ReturnToBase {} if self.on_ground() || self.phase == Phase::Disarming => {
+                return Err(no_effect);
+            }
+            Directive::ReturnToBase {} => Task::GoTo {
+                fix: self.fix(HOME)?,
+                arrival: Arrival::Land,
+            },
+            Directive::Hold {
+                point: HoldPoint::Fix(fix),
+            } => Task::GoTo {
+                fix: self.fix(fix)?,
+                arrival: Arrival::Hold,
+            },
+            Directive::Hold {
+                point: HoldPoint::PresentPosition,
+            } => Task::HoldAt {
+                fix: self.present_fix(here, state, no_effect)?,
+            },
+            Directive::Heading { degrees, turn } => Task::FlyHeading {
+                heading_rad: f64::from(*degrees).to_radians(),
+                turn: *turn,
+            },
+            Directive::JoinProcedure { procedure } => self.route(procedure)?,
+            Directive::Land {} => Task::LandAt {
+                fix: self.present_fix(here, None, no_effect)?,
+            },
+            // A go-around ends the approach: the vehicle climbs to the cruise
+            // height and holds where it is. It needs the air under it.
+            Directive::GoAround {} if !self.airborne() => return Err(no_effect),
+            Directive::GoAround {} => {
+                self.height_m = self.limits.cruise_height_m;
+                Task::HoldAt {
+                    fix: here.ok_or(no_effect)?,
+                }
+            }
+            Directive::Unable { .. } | Directive::Speed { .. } | Directive::Altitude { .. } => {
+                return Err(no_effect);
+            }
+        })
+    }
+
+    /// What a new height starts: a hold that ends a descent where the
+    /// vehicle is, a takeoff from the ground, or nothing in flight.
+    fn altitude_task(
+        &self,
+        here: Option<Fix>,
+        no_effect: Refusal,
+    ) -> Result<Option<Task>, Refusal> {
+        Ok(match self.phase {
+            Phase::Descending => Some(Task::HoldAt {
+                fix: here.ok_or(no_effect)?,
+            }),
+            Phase::Idle | Phase::Landed if self.task.is_none() => Some(Task::Takeoff),
+            _ => None,
+        })
     }
 
     /// The present position for a hold or a landing. A vehicle on the ground

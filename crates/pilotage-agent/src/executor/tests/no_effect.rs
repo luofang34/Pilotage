@@ -27,6 +27,33 @@ fn a_return_to_base_on_the_ground_is_refused_and_flies_nothing() {
 }
 
 #[test]
+fn a_return_to_base_during_the_disarm_does_not_relaunch() {
+    let mut executor = airborne(&Directive::Takeoff {});
+    let here = state(0.0, 0.0, 5.0, true);
+    executor.step(&here, 1.1);
+    assert!(
+        executor
+            .accept(&Directive::Land {}, Some(&here), 1.2)
+            .is_ok()
+    );
+    let down = state(0.0, 0.0, 0.2, true);
+    assert_eq!(executor.step(&down, 2.0).phase, Phase::Disarming);
+    assert!(no_effect(executor.accept(
+        &Directive::ReturnToBase {},
+        Some(&down),
+        2.1
+    )));
+    let landed = executor.step(&state(0.0, 0.0, 0.2, false), 2.2);
+    assert_eq!(landed.phase, Phase::Landed);
+    let still = executor.step(&state(0.0, 0.0, 0.2, false), 2.3);
+    assert_eq!(
+        (still.phase, still.action),
+        (Phase::Landed, None),
+        "no new arm"
+    );
+}
+
+#[test]
 fn a_takeoff_in_the_air_and_a_landing_on_the_ground_are_refused() {
     let mut flying = airborne(&Directive::Takeoff {});
     let here = state(0.0, 0.0, 5.0, true);
