@@ -3,7 +3,7 @@
 use indicate_instrument_scene::{
     LayerId, MAX_LAYER_COMMANDS, MAX_SCENE_BYTES, SceneCmds, SceneWriter,
 };
-use indicate_instrument_state::abi::v7::{CAPACITY, VERSION, encode_state};
+use indicate_instrument_state::abi::v8::{CAPACITY, VERSION, encode_state};
 use indicate_instrument_state::{AircraftState, Attitude, Quat, Stamped};
 
 use crate::runtime::SCENE_CAPACITY;
@@ -129,7 +129,15 @@ fn runtime_renders_each_panel_and_advances_generation_on_success() {
 
     let invalid_panel = runtime.render(99);
     assert_outcome(invalid_panel, RenderStatus::InvalidPanel, 0, 0);
-    assert_eq!(runtime.generation, [1, 1, 0]);
+    // The panel set can grow upstream. Only the two rendered panels
+    // advance, whatever the count.
+    assert_eq!(runtime.generation[..2], [1, 1]);
+    assert!(
+        runtime.generation[2..]
+            .iter()
+            .all(|generation| *generation == 0),
+        "a panel that did not render keeps generation zero"
+    );
 
     runtime.state[0..4].copy_from_slice(&99u32.to_le_bytes());
     let failed_after_success = runtime.render(0);
@@ -152,9 +160,8 @@ fn runtimes_are_independent() {
     let untouched = second.render(0);
     assert_eq!(untouched.status, RenderStatus::StateBadVersion);
     assert_eq!(untouched.generation, 0);
-    assert_eq!(
-        second.generation,
-        [0, 0, 0],
+    assert!(
+        second.generation.iter().all(|generation| *generation == 0),
         "one runtime cannot mutate another"
     );
 }
@@ -181,7 +188,7 @@ fn configuration_endpoints_validate_and_apply() {
 fn a_non_canonical_state_frame_fails_malformed() {
     // Tags out of ascending order must fail with the malformed-state
     // status, not truncation and never a render.
-    let mut frame = vec![7u8, 2];
+    let mut frame = vec![VERSION, 2];
     frame.extend_from_slice(&[0x05, 12, 0]);
     frame.extend_from_slice(&[0u8; 12]);
     frame.extend_from_slice(&[0x03, 12, 0]);

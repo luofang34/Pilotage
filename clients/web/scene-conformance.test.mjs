@@ -324,9 +324,9 @@ function conformCanvas(entry, v, out) {
 // upstream corpus edit arrives via a pin advance and MUST turn this suite
 // red until the interpreter is re-verified against the new corpus and the
 // literals are consciously moved. Never resolve a mismatch by unpinning.
-const EXPECTED_CORPUS_VERSION = 4;
+const EXPECTED_CORPUS_VERSION = 8;
 const EXPECTED_CORPUS_SHA256 =
-  "1fb8e6de2734ff7506843b05869f39d501f0926599636c6110a7e3b0c6e1625e";
+  "0b0c7ccb135bfc4107bc110e4b24dceffd84adf1b767fcd14d2c5ace7391f962";
 
 const golden = JSON.parse(
   readFileSync(
@@ -362,12 +362,12 @@ check(
 const entries = golden.entries.map((e) => ({ entry: e, bytes: entryBytes(e) }));
 
 // The gate-accept census is pinned alongside the corpus identity: a corpus
-// edit that flips a verdict (or adds a case, as frame-edge-overhang did in
-// v4) must move this count consciously, with the interpreter re-verified —
-// the count is read off the golden, never adjusted to make a run green.
+// edit that flips a verdict or adds a case must move this count
+// consciously, with the interpreter re-verified — the count is read off
+// the golden, never adjusted to make a run green.
 check(
-  "corpus v4 carries 26 gate-accepted cases",
-  golden.entries.filter((e) => e.gate.verdict === "accept").length === 26,
+  "the pinned corpus carries 28 gate-accepted cases",
+  golden.entries.filter((e) => e.gate.verdict === "accept").length === 28,
 );
 
 // Corpus hash drift guard: both backends recompute it from the reconstructed

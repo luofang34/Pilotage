@@ -78,14 +78,14 @@ navigate-guidance = { git = "https://github.com/luofang34/Navigate.git", rev = "
 # the scene vocabulary, the panels, and the registry digest cannot drift
 # apart. The pilot of a change that moves the cross-shell scene digest
 # advances this pin as part of that change (ADR-0034).
-indicate-frames = { git = "https://github.com/luofang34/Indicate.git", rev = "985eb3390d3e09abf83d730f356668fe6499d01e" }
-indicate-alerts = { git = "https://github.com/luofang34/Indicate.git", rev = "985eb3390d3e09abf83d730f356668fe6499d01e" }
-indicate-instrument-scene = { git = "https://github.com/luofang34/Indicate.git", rev = "985eb3390d3e09abf83d730f356668fe6499d01e" }
-indicate-instrument-state = { git = "https://github.com/luofang34/Indicate.git", rev = "985eb3390d3e09abf83d730f356668fe6499d01e" }
-indicate-instrument-glyphs = { git = "https://github.com/luofang34/Indicate.git", rev = "985eb3390d3e09abf83d730f356668fe6499d01e" }
-indicate-instrument-panels = { git = "https://github.com/luofang34/Indicate.git", rev = "985eb3390d3e09abf83d730f356668fe6499d01e" }
-indicate-instrument-feeder = { git = "https://github.com/luofang34/Indicate.git", rev = "985eb3390d3e09abf83d730f356668fe6499d01e" }
-indicate-instrument-registry = { git = "https://github.com/luofang34/Indicate.git", rev = "985eb3390d3e09abf83d730f356668fe6499d01e" }
+indicate-frames = { git = "https://github.com/luofang34/Indicate.git", rev = "9b2c2b895e2fe3ac061b4aeeb809b7a9d7bdf15f" }
+indicate-alerts = { git = "https://github.com/luofang34/Indicate.git", rev = "9b2c2b895e2fe3ac061b4aeeb809b7a9d7bdf15f" }
+indicate-instrument-scene = { git = "https://github.com/luofang34/Indicate.git", rev = "9b2c2b895e2fe3ac061b4aeeb809b7a9d7bdf15f" }
+indicate-instrument-state = { git = "https://github.com/luofang34/Indicate.git", rev = "9b2c2b895e2fe3ac061b4aeeb809b7a9d7bdf15f" }
+indicate-instrument-glyphs = { git = "https://github.com/luofang34/Indicate.git", rev = "9b2c2b895e2fe3ac061b4aeeb809b7a9d7bdf15f" }
+indicate-instrument-panels = { git = "https://github.com/luofang34/Indicate.git", rev = "9b2c2b895e2fe3ac061b4aeeb809b7a9d7bdf15f" }
+indicate-instrument-feeder = { git = "https://github.com/luofang34/Indicate.git", rev = "9b2c2b895e2fe3ac061b4aeeb809b7a9d7bdf15f" }
+indicate-instrument-registry = { git = "https://github.com/luofang34/Indicate.git", rev = "9b2c2b895e2fe3ac061b4aeeb809b7a9d7bdf15f" }
 # The presentation input crates use exact revisions. The FFI facade and the
 # portable adapter must read the same snapshot schemas.
 surveillance-core = { git = "https://github.com/luofang34/Surveillance.git", rev = "36b5d96052e817da92fc62d383196d11e449df10", default-features = false }

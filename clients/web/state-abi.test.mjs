@@ -1,4 +1,4 @@
-// Cross-language pin for the state-frame ABI v7 writer.
+// Cross-language pin for the state-frame ABI writer.
 //
 // Run: node clients/web/state-abi.test.mjs
 //
@@ -8,7 +8,7 @@
 // by the upstream `cargo xtask gen-state-fixture` from the shared Rust
 // posture fixtures and pinned by the Rust codec's own tests. This suite
 // rebuilds the same three states as writer input objects and requires
-// byte equality, so any drift between state-abi.js and abi/v7.rs —
+// byte equality, so any drift between state-abi.js and the Rust codec —
 // offsets, widths, endianness, enum codings, presence rules, ident
 // atoms — turns CI red on whichever side moved.
 
@@ -44,7 +44,10 @@ function encodedHex(state) {
 // NavFromTo To=1, HeadingReference Magnetic=0/True=1/SimLocalTrue=2,
 // AltitudeClass LocalRelative=0/BaroIndicated=1/Pressure=2,
 // SnapshotCoherence Insufficient=0/Coherent=1, EstimateQuality Good=0,
-// TurnBasis HeadingRate=0/TrackRate=1.
+// TurnBasis HeadingRate=0/TrackRate=1, NavScale Enroute=0/Terminal=1/
+// Approach=2, NavSource Nav1=2/Nav2=3, ApEngagement Autopilot=2,
+// LateralMode Roll=1/Approach=4, VerticalMode AltitudeCapture=3/
+// GlideSlope=6.
 
 const ALL_VALID = {
   attitude: true,
@@ -56,15 +59,17 @@ const ALL_VALID = {
   variation: true,
   turn: true,
   slip: true,
+  iasTrend: true,
 };
 
 function fullState() {
   return {
     attitude: { quat: { w: 0.5, x: 0.5, y: 0.5, z: 0.5 }, rates: [0.02, -0.01, 0.05], ageMs: 80 },
     kinematics: { posNed: [1200, 340, -305], velNed: [52, 9, -2], ageMs: 80 },
-    air: { iasMps: 53, baroHpa: 1013.2, ageMs: 80 },
+    air: { iasMps: 53, baroHpa: 1013.2, tasMps: 58, ageMs: 80 },
     nav: {
       source: 1,
+      scale: 1,
       fromto: 1,
       courseRad: 0.6,
       cdiDots: 0.7,
@@ -91,9 +96,41 @@ function fullState() {
     altitude: { referenceClass: 1, sampleM: 950, geoidModel: 0, originId: 7 },
     heading: { rad: 0.35, reference: 2, ageMs: 90 },
     variation: { eastRad: 0.15, sourceId: 3, ageMs: 120 },
-    dynamics: { turnRps: 0.05, turnBasis: 0, lateralMps2: 0.3, ageMs: 85 },
+    dynamics: { turnRps: 0.05, turnBasis: 0, lateralMps2: 0.3, iasTrendMps2: 0.35, ageMs: 85 },
     director: { pitchCmdRad: 0.08, rollCmdRad: -0.2, mode: 1, engagement: 2, ageMs: 80 },
     monitorText: { revision: 9, lines: ["ENG 1 OK", "FUEL 82.5"], ageMs: 500 },
+    bearings: {
+      first: { source: 2, bearingRad: 1.2, reference: 2, valid: true },
+      second: { source: 3, bearingRad: 4.1, reference: 2, valid: true },
+      ageMs: 80,
+    },
+    // Sensed and selected flap differ on purpose: a writer that swaps
+    // the two slots cannot match the golden frame.
+    airframe: {
+      flapRatio: 0.25,
+      flapSelectedRatio: 1.0,
+      elevatorTrimRatio: -0.2,
+      aileronTrimRatio: 0.05,
+      ageMs: 80,
+    },
+    // Five different mode bytes: a writer that swaps two mode slots
+    // cannot match the golden frame.
+    apModes: {
+      engagement: 2,
+      lateralActive: 1,
+      lateralArmed: 4,
+      verticalActive: 6,
+      verticalArmed: 3,
+      ageMs: 80,
+    },
+    apTargets: {
+      airspeedMps: 61,
+      verticalSpeedMps: 2.5,
+      altitudeM: 1200,
+      altitudeClass: 0,
+      altitudeOriginId: 7,
+      altitudeModel: 0,
+    },
   };
 }
 
@@ -102,6 +139,7 @@ function dataGatewayState() {
     kinematics: { posNed: [-2500, 800, -1200], velNed: [61, -4, 1.5], ageMs: 120 },
     nav: {
       source: 1,
+      scale: 1,
       fromto: 1,
       courseRad: 1.2,
       cdiDots: -0.3,
@@ -138,23 +176,23 @@ function flightControllerState() {
     altitude: { referenceClass: 1, sampleM: 320, geoidModel: 0, originId: 0 },
     heading: { rad: 1.9, reference: 0, ageMs: 60 },
     variation: { eastRad: -0.05, sourceId: 2, ageMs: 60 },
-    dynamics: { turnRps: -0.02, turnBasis: 1, lateralMps2: -0.1, ageMs: 50 },
+    dynamics: { turnRps: -0.02, turnBasis: 1, lateralMps2: -0.1, iasTrendMps2: 0.35, ageMs: 50 },
   };
 }
 
-check("writer version is the v7 wire version", STATE_ABI_VERSION === 7);
+check("writer version is the pinned wire version", STATE_ABI_VERSION === 8);
 
 for (const [stem, build] of [
-  ["state-abi-v7.full", fullState],
-  ["state-abi-v7.data-gateway", dataGatewayState],
-  ["state-abi-v7.flight-controller", flightControllerState],
+  ["state-abi-v8.full", fullState],
+  ["state-abi-v8.data-gateway", dataGatewayState],
+  ["state-abi-v8.flight-controller", flightControllerState],
 ]) {
   check(`${stem} matches the committed golden frame byte for byte`, encodedHex(build()) === goldenHex(stem));
 }
 
 {
   // Presence is meaning: an empty state is exactly the two-byte header.
-  check("an empty state encodes the empty frame", encodedHex({}) === "0700");
+  check("an empty state encodes the empty frame", encodedHex({}) === "0800");
 }
 
 {
@@ -174,19 +212,19 @@ for (const [stem, build] of [
   // Canonicalization: a trust group whose quality, flags, and snapshot
   // all equal their fail-closed defaults encodes as absent — matching
   // the Rust encoder, so equal states produce equal bytes.
-  check("an all-default trust group encodes as absent", encodedHex({ valid: {} }) === "0700");
+  check("an all-default trust group encodes as absent", encodedHex({ valid: {} }) === "0800");
   check(
     "explicitly declared defaults still omit the trust group",
-    encodedHex({ quality: 255, valid: {}, snapshot: { coherence: 0, generation: 0 } }) === "0700",
+    encodedHex({ quality: 255, valid: {}, snapshot: { coherence: 0, generation: 0 } }) === "0800",
   );
   check(
     "one set flag makes the trust group present",
-    encodedHex({ valid: { attitude: true } }) !== "0700",
+    encodedHex({ valid: { attitude: true } }) !== "0800",
   );
 }
 
 {
-  // v7 splits velocity validity: bit 3 (0x0008) is the horizontal
+  // Velocity validity is split: bit 3 (0x0008) is the horizontal
   // north/east pair, bit 8 (0x0100) is vertical speed. The trust flags
   // are the u16 LE at payload offset 2 of the trust group, which starts
   // after the two-byte frame header and the three-byte group header.
@@ -206,6 +244,55 @@ for (const [stem, build] of [
   check(
     "full-NED velocity validity sets both velocity bits",
     trustFlags({ velocityHorizontal: true, velocityVertical: true }) === 0x0108,
+  );
+  check(
+    "airspeed-trend validity sets bit 9 and no other bit",
+    trustFlags({ iasTrend: true }) === 0x0200,
+  );
+}
+
+{
+  // The decoder refuses the whole frame when a group is shorter than its
+  // minimum. The appended fields must therefore be on the wire even when
+  // the source does not supply them. Frame: [ver][count][tag][len lo]
+  // [len hi][payload...].
+  const payload = (state) => {
+    const bytes = encodedHex(state).match(/.{2}/g).map((b) => parseInt(b, 16));
+    return { len: bytes[3] | (bytes[4] << 8), bytes: bytes.slice(5) };
+  };
+  const air = payload({ air: { iasMps: 40, ageMs: 10 } });
+  check(
+    "an air group with no true airspeed writes 16 bytes with a NaN tail",
+    air.len === 16 && air.bytes.slice(12, 16).join(",") === "0,0,192,127",
+  );
+  const nav = payload({ nav: { source: 1, ageMs: 10 } });
+  check(
+    "a nav group with no declared scale writes 43 bytes and the unknown scale",
+    nav.len === 43 && nav.bytes[42] === 0xff,
+  );
+  const dyn = payload({ dynamics: { turnBasis: 0, turnRps: 0.1, ageMs: 10 } });
+  check(
+    "a dynamics group with no airspeed trend writes 20 bytes with a NaN tail",
+    dyn.len === 20 && dyn.bytes.slice(16, 20).join(",") === "0,0,192,127",
+  );
+}
+
+{
+  // An undeclared bearing-pointer north and an undeclared autoflight mode
+  // must reach the wire as the unknown byte, so the Rust side fails the
+  // group and draws nothing.
+  const bytesOf = (state) =>
+    encodedHex(state).match(/.{2}/g).map((b) => parseInt(b, 16)).slice(5);
+  const bearings = bytesOf({ bearings: { first: { source: 2, bearingRad: 1, valid: true }, ageMs: 5 } });
+  check(
+    "an undeclared bearing reference encodes the unknown byte",
+    bearings[1] === 0xff && bearings[9] === 0xff,
+  );
+  check("an absent second pointer encodes source none", bearings[8] === 0);
+  const modes = bytesOf({ apModes: { engagement: 2, ageMs: 5 } });
+  check(
+    "undeclared autoflight modes encode the unknown byte",
+    modes[1] === 0xff && modes[2] === 0xff && modes[3] === 0xff && modes[4] === 0xff,
   );
 }
 
