@@ -74,8 +74,9 @@ A request has these parts:
   `equirectangular`. A panorama is one equirectangular frame or a set of rectilinear
   frames with different source identities.
 
-A request does not contain vehicle state or earlier messages unless the adapter of
-one model asks for them in its declaration. The measurements above are the reason.
+A request does not contain vehicle state or earlier messages. The measurements
+above are the reason. An adapter that needs them for one model is a change to the
+port, and not a field of the request.
 
 A reply has one directive, a probability for each slot when the model has one, and
 the model time. A model can reply `unable`. An adapter must reply `unable` when the
@@ -83,7 +84,7 @@ model cannot fill a slot that the directive needs.
 
 A **model adapter** is the small program that connects one model to the model port.
 It owns the prompt, the decoding method and the image encoding of that model. It
-declares what it supports: directive kinds, number slots, frames, and projections.
+declares what it supports: directive kinds, frames, and projections.
 
 ### One directive vocabulary
 
@@ -135,8 +136,9 @@ A refused directive goes to the run record, and the vehicle keeps its last direc
 ### Decisions that a model does not make
 
 Deterministic code makes each decision that depends on vehicle state. Examples are
-arm, arrival, touchdown and disarm. Deterministic code reads hazards from telemetry.
-A model does not make a decision that protects the vehicle.
+arm, arrival, touchdown and disarm. A hazard response is deterministic code too,
+when the telemetry carries the state that it needs (see the open questions). A
+model does not make a decision that protects the vehicle.
 
 A verdict never uses the output of a model. The verifier reads the expected result
 from the scenario and the position from a truth source. A wrong directive then
