@@ -1,0 +1,12 @@
+{
+  "id": "direct-land",
+  "waypoints": {"ALPHA": {"north_m": 15.0, "east_m": 0.0}, "BRAVO": {"north_m": 0.0, "east_m": 15.0}, "CHARLIE": {"north_m": -15.0, "east_m": 0.0}},
+  "cruise_height_m": 5.0,
+  "arrival_radius_m": 1.5,
+  "messages": [
+    {"text": "Lift off and make for ALPHA. Land once you are there.",
+     "trigger": {"when": "start"},
+     "means": {"target": "ALPHA", "on_arrival": "LAND"}}
+  ],
+  "expect": {"final_target": "ALPHA", "final_on_arrival": "LAND", "timeout_s": 90.0}
+}

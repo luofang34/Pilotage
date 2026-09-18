@@ -1405,6 +1405,22 @@ version = "0.1.0"
 source = "git+https://github.com/luofang34/Indicate.git?rev=985eb3390d3e09abf83d730f356668fe6499d01e#985eb3390d3e09abf83d730f356668fe6499d01e"
 
 [[package]]
+name = "intent-pilot"
+version = "0.1.0"
+dependencies = [
+ "pilotage-client-session",
+ "pilotage-input",
+ "pilotage-protocol",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "wtransport",
+]
+
+[[package]]
 name = "itertools"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
