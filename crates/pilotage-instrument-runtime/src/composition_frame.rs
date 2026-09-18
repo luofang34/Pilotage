@@ -3,7 +3,7 @@
 use indicate_alerts::{AlertContext, ManagerHealth};
 use indicate_instrument_registry::{ConfigBlob, PanelDrawError};
 use indicate_instrument_scene::SceneWriter;
-use indicate_instrument_state::abi::v7::{self, AbiError};
+use indicate_instrument_state::abi::v8::{self, AbiError};
 use indicate_instrument_state::{AircraftState, FreshnessPolicy, PanelData, Stamped};
 
 use crate::RenderStatus;
@@ -94,7 +94,7 @@ impl Runtime {
         if !self.reset_composition_panels() {
             return self.fail_composition(RenderStatus::InvalidPanel);
         }
-        let report = match v7::decode_state(&self.state) {
+        let report = match v8::decode_state(&self.state) {
             Ok(report) => report,
             Err(error) => return self.fail_composition(abi_error_status(error)),
         };

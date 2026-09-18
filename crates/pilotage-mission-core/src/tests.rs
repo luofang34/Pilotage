@@ -1,5 +1,6 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
+mod flight_vectors;
 mod stimulus;
 
 use crate::{

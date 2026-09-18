@@ -82,6 +82,17 @@ pub(crate) fn finite(field: &str, value: f64) -> Result<(), ValidationError> {
     Ok(())
 }
 
+pub(crate) fn positive(field: &str, value: f64) -> Result<(), ValidationError> {
+    finite(field, value)?;
+    if value <= 0.0 {
+        return Err(ValidationError::NotPositive {
+            field: field.to_owned(),
+            actual: value,
+        });
+    }
+    Ok(())
+}
+
 pub(crate) fn nonzero_u64(field: &str, value: u64) -> Result<(), ValidationError> {
     if value == 0 {
         return Err(ValidationError::ZeroDuration {

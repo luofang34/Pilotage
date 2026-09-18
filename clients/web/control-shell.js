@@ -28,6 +28,7 @@ const FLAG_ARM_SUPPRESSED = 1 << 6;
 const FLAG_DISARM_SUPPRESSED = 1 << 7;
 const LEASE_SHIFT = 8; // bits 8..9: gimbal lease 0 none, 1 request, 2 release.
 const MOTION_LEASE_SHIFT = 10; // bits 10..11: motion lease, same encoding.
+const FLAG_AGENT_OVERRIDE = 1 << 12; // an operator input released the agent this tick.
 
 const MODE_IDS = { "quad-pilot": 0, "quad-cruise": 1, fpv: 2, rover: 3 };
 
@@ -42,6 +43,10 @@ const LAYER_IDS = { organization: 1, user: 2, vehicle: 3, session: 4 };
 // shell forwards Gamepad.id strings and key events verbatim.
 const SOURCE_PAD = 0;
 const SOURCE_KEYS = 1;
+// The agent's input flies; the input buffer carries the operator's pad for
+// the override check (ADR-0042).
+const SOURCE_AGENT = 2;
+const NO_PAD = Object.freeze({ axes: [], buttons: [] });
 
 const AUTHORITY_SCOPE = { motion: 0, gimbal: 1, lifecycle: 2 };
 const AUTHORITY_EVENT = {
@@ -266,6 +271,31 @@ export class ControlShell {
     return this.#evaluate(0, 0, session, SOURCE_KEYS);
   }
 
+  /** Engages an agent as the input source under the identity it announces. */
+  engageAgent(profileId) {
+    return this.#control.engage_agent(profileId);
+  }
+
+  /** Returns control to the operator's devices. */
+  disengageAgent() {
+    this.#control.disengage_agent();
+  }
+
+  /** Whether an agent is the input source (or will be at the open handover). */
+  get agentEngaged() {
+    return this.#control.agent_engaged();
+  }
+
+  /** Evaluates one tick of an engaged agent. `pad` (or null) is the
+   *  operator's pad: the runtime releases the agent on any operator input. */
+  tickFromAgent(pad, input, session) {
+    const axisCount = this.#writePad(pad ?? NO_PAD);
+    this.#control.set_agent_demand(
+      input.roll, input.pitch, input.throttle, input.yaw, input.arm, input.disarm,
+    );
+    return this.#evaluate(axisCount, pad ? MAX_BUTTONS : 0, session, SOURCE_AGENT);
+  }
+
   #memoryViews() {
     const buffer = this.#wasm.memory.buffer;
     if (this.#viewBuffer === buffer && this.#views) return this.#views;
@@ -336,6 +366,7 @@ export class ControlShell {
       captureActive: (flags & FLAG_CAPTURE) !== 0,
       lease: leaseName(leaseCode),
       motionLease: leaseName(motionLeaseCode),
+      agentOverridden: (flags & FLAG_AGENT_OVERRIDE) !== 0,
     };
   }
 }

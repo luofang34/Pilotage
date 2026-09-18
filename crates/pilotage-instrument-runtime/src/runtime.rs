@@ -13,7 +13,7 @@ use indicate_alerts::{
 use indicate_instrument_registry::{ConfigBlob, PanelDrawError};
 use indicate_instrument_scene::{LayerError, SceneError, SceneWriter, validate_layers};
 use indicate_instrument_state::FreshnessPolicy;
-use indicate_instrument_state::abi::v7::{self, AbiError};
+use indicate_instrument_state::abi::v8::{self, AbiError};
 use indicate_instrument_state::{NavSource, SignalStatus};
 
 use crate::registry::{canonical_frame, descriptor, registry, splice_v_speeds};
@@ -79,7 +79,7 @@ impl Runtime {
         let panels = registry().map_or(0, |registry| registry.panels().count());
         let slots = crate::composition_slot_count() as usize;
         Self {
-            state: vec![0u8; v7::CAPACITY],
+            state: vec![0u8; v8::CAPACITY],
             scene: vec![0u8; SCENE_CAPACITY],
             generation: vec![0; panels],
             composition_scene: vec![0; SCENE_CAPACITY.saturating_mul(slots)],
@@ -107,11 +107,11 @@ impl Runtime {
         &mut self.state
     }
 
-    /// Capacity of the state-frame buffer in bytes. The v7 frame is
+    /// Capacity of the state-frame buffer in bytes. The state frame is
     /// self-delimiting, so the writer needs a bound, not an exact size;
     /// growing the capacity is not a wire break.
     pub const fn state_capacity() -> usize {
-        v7::CAPACITY
+        v8::CAPACITY
     }
 
     /// The encoded-scene scratch buffer. Its committed prefix is the
@@ -168,7 +168,7 @@ impl Runtime {
         };
         let panel_idx = panel as usize;
         let generation = self.panel_generation(panel_idx);
-        let state = match v7::decode_state(&self.state) {
+        let state = match v8::decode_state(&self.state) {
             Ok(report) => report.state,
             Err(AbiError::Truncated) => {
                 return RenderOutcome::failure(RenderStatus::StateTruncated, generation);
@@ -218,7 +218,7 @@ impl Runtime {
     /// display/alerting path monitor faulted, which flags the output
     /// untrusted without suppressing it.
     pub fn step_alerts(&mut self, now_ms: u64, path_healthy: bool) -> AlertStepOutcome {
-        let state = match v7::decode_state(&self.state) {
+        let state = match v8::decode_state(&self.state) {
             Ok(report) => {
                 // Counted here, once per frame step, so a frame rendered
                 // across N panels does not multiply its tag counts.
@@ -453,7 +453,7 @@ pub fn derive_alert_events(data: &indicate_instrument_state::PanelData) -> [Aler
 
 /// The state-frame ABI version this crate was built against.
 pub fn abi_version() -> u32 {
-    u32::from(v7::VERSION)
+    u32::from(v8::VERSION)
 }
 
 /// The scene format version this crate was built against.

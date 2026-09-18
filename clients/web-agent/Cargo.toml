@@ -1,0 +1,21 @@
+[package]
+name = "pilotage-agent-web"
+description = "Rust/WASM web port of the agent client module: the model request, the three reply checks and the directive executor for the browser viewer (ADR-0042)"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+pilotage-agent = { path = "../../crates/pilotage-agent" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = { workspace = true }

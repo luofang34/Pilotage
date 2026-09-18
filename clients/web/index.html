@@ -280,6 +280,16 @@
   #status.expanded {
     max-height: 16rem;
   }
+  /* The agent panel (ADR-0042). */
+  .agent { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; }
+  .agent #agentStatus { font-weight: 600; padding: 2px 8px; border-radius: 4px; background: #333; color: #ddd; }
+  .agent #agentStatus[data-engaged="true"] { background: #a15c00; color: #fff; }
+  .agent #agentMessage { flex: 1 1 260px; min-width: 200px; }
+  .agent #agentModel { opacity: 0.7; font-size: 12px; }
+  .agent #agentPresets { display: flex; flex-wrap: wrap; gap: 4px; flex-basis: 100%; }
+  .agent #agentLog { flex-basis: 100%; margin: 0; padding-left: 0; list-style: none; font-size: 12px; max-height: 9.5em; overflow-y: auto; }
+  .agent #agentLog li[data-kind="refused"], .agent #agentLog li[data-kind="fault"] { color: #e0853a; }
+  .agent #agentLog li[data-kind="flown"] { color: #6cc070; }
 </style>
 
 <div class="masthead">
@@ -333,6 +343,27 @@
   <button id="fpvBtn">FPV mode</button><button id="resetBtn" title="Reset the simulation world and restart the FC">Reset sim</button>
   <button id="armBtn" title="Arm the vehicle (asks once to confirm; same action as Enter)">ARM</button>
   <button id="disarmBtn" title="Disarm the vehicle (same action as Backspace)">Disarm</button>
+</div>
+
+<!-- The agent client module (ADR-0042). The agent flies under the lease of
+     this client, and any control input takes control back. -->
+<div class="agent" id="agentPanel">
+  <span id="agentStatus" data-engaged="false">agent off</span>
+  <button id="agentEngage" title="Give the motion demand to the agent. Any key or stick input takes it back.">Engage agent</button>
+  <input id="agentMessage" placeholder="Instruction, for example: Turn left heading 270." autocomplete="off" disabled />
+  <button id="agentSend" disabled>Send</button>
+  <span id="agentModel"></span>
+  <div id="agentPresets">
+    <button disabled>Cleared for takeoff.</button>
+    <button disabled>Turn left heading 270.</button>
+    <button disabled>Climb and maintain 12 metres.</button>
+    <button disabled>Proceed direct BRAVO and hold.</button>
+    <button disabled>Cleared RNAV 27 approach.</button>
+    <button disabled>Go around.</button>
+    <button disabled>Cleared to land.</button>
+    <button disabled>Return to base.</button>
+  </div>
+  <ul id="agentLog"></ul>
 </div>
 
 <div class="cockpit">

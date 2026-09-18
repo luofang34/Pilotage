@@ -8,7 +8,9 @@
 import { bindings } from "./feeder-wasm.js";
 
 // Full-scale lateral deflection is ±2 dots, so ±2 dots = ±50 m of cross-track
-// error — the terminal-area scale a small unmanned airframe is flown to.
+// error — the terminal-area scale a small unmanned airframe is flown to. The
+// feeder declares that scale on the nav group, and this value mirrors the
+// feeder's terminal row.
 export const LATERAL_M_PER_DOT = 25;
 // Full-scale vertical deflection is ±2.5 dots, so ±2.5 dots = ±20 m off the
 // vertical profile.
@@ -52,6 +54,9 @@ export function navDisplayState(snapshot) {
     fromto: out.fromto,
     courseRad: out.courseRad,
     courseReference: out.courseReference,
+    // The feeder declares the scale the dots are on. The panel fails the
+    // nav group when no scale arrives.
+    scale: out.scale,
     cdiDots: out.cdiDots,
     // The instrument model codes "no vertical sample" as NaN.
     vdevDots: out.vdevDots ?? NaN,
