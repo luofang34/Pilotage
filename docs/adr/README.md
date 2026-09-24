@@ -53,6 +53,7 @@ One file per decision, numbered in acceptance order. See
 | [0047](0047-agents-read-one-context-port-and-act-through-intents.md) | Agents read one context port and act only through authority-checked intents | Proposed |
 | [0048](0048-a-pack-follows-the-planned-route.md) | A pack follows the planned route and is checked before flight | Proposed |
 | [0049](0049-collaboration-ready-records-and-authority.md) | Shared records and authority are ready for collaboration across organizations | Proposed |
+| [0050](0050-authentication-and-authorization-across-organizations.md) | Authentication and authorization across units and organizations | Proposed |
 
 ## Provenance
 
