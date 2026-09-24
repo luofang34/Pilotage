@@ -53,6 +53,7 @@ members = [
     "clients/web-control",
     "clients/web-agent",
     "clients/apple-instrument-bridge",
+    "crates/pilotage-aircraft",
 ]
 
 [workspace.package]
