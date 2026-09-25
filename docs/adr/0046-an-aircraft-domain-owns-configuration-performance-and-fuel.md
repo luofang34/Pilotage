@@ -62,8 +62,9 @@ each profile. It makes no airworthiness or certification claim.
 - The profile schema, the first calculators, and the `avionics-link` engine
   and fuel adapters are tracked as separate work.
 - A live-state adapter needs a link that carries engine, fuel, or battery
-  records first. The endurance calculator accepts a measured fuel flow, but
-  no adapter supplies one. Until an adapter exists, the fuel state comes from
-  the loading record.
-- The profile must tell whether the aircraft stores fuel or battery energy.
+  records first. The endurance calculator accepts a measured fuel flow or
+  electrical power, but no adapter supplies one. Until an adapter exists, the
+  energy on board comes from the loading record: the fuel in each tank, or
+  the battery energy at the start of the flight.
+- The profile must state whether the aircraft stores fuel or battery energy.
   The calculators must not treat battery energy as litres of fuel.
