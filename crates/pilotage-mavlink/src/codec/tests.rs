@@ -478,3 +478,6 @@ fn gimbal_rate_setpoint_locks_the_wire_layout() {
 /// The truth lane: the payload a simulator's ground-truth report arrives
 /// in, and what a report short of that payload decodes to.
 mod sim_truth;
+
+/// BATTERY_STATUS against frames from an independent encoder.
+mod battery;

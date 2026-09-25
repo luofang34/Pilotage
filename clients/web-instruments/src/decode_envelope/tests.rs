@@ -29,6 +29,7 @@ fn empty_sample() -> wire::TelemetrySample {
         fc_state: None,
         gimbal: None,
         nav_guidance: None,
+        battery: None,
     }
 }
 

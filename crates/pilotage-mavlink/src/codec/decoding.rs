@@ -1,8 +1,8 @@
 //! Payload decoding with MAVLink 2 trailing-zero extension.
 
 use super::{
-    ATTITUDE_QUATERNION_ID, AVIATE_ESTIMATOR_STATUS_ID, COMMAND_ACK_ID, ESTIMATOR_STATUS_ID,
-    FcMessage, GIMBAL_DEVICE_ATTITUDE_STATUS_ID, GNSS_RAW_ID, HEARTBEAT_ID,
+    ATTITUDE_QUATERNION_ID, AVIATE_ESTIMATOR_STATUS_ID, BATTERY_STATUS_ID, COMMAND_ACK_ID,
+    ESTIMATOR_STATUS_ID, FcMessage, GIMBAL_DEVICE_ATTITUDE_STATUS_ID, GNSS_RAW_ID, HEARTBEAT_ID,
     HIL_STATE_QUATERNION_ID, LOCAL_POSITION_NED_ID, SCALED_PRESSURE_ID,
 };
 
@@ -116,6 +116,44 @@ fn decode_gnss_fix(payload: &[u8]) -> Option<FcMessage> {
     })
 }
 
+/// BATTERY_STATUS wire order: current_consumed i32 @0, energy_consumed i32
+/// @4, temperature i16 @8, voltages u16[10] @10..30, current_battery i16
+/// @30, id @32, battery_function @33, type @34, battery_remaining i8 @35,
+/// then the version-2 extensions: time_remaining i32 @36, charge_state @40,
+/// voltages_ext u16[4] @41..49, mode @49, fault_bitmask u32 @50.
+///
+/// Each field has its own "unknown" value: -1 for the remaining percent,
+/// the current, and the energy; UINT16_MAX for a cell of `voltages`; 0 for a
+/// cell of `voltages_ext` and for the time remaining. A trimmed trailing
+/// zero decodes as zero, which is a real value for the remaining percent
+/// and "unknown" for the extensions, as the definitions intend.
+fn decode_battery_status(payload: &[u8]) -> FcMessage {
+    let known_i32 = |off| Some(u32_at(payload, off) as i32).filter(|v| *v != -1);
+    let cells = (0..10)
+        .map(|i| u16_at(payload, 10 + 2 * i))
+        .filter(|mv| *mv != u16::MAX)
+        .chain(
+            (0..4)
+                .map(|i| u16_at(payload, 41 + 2 * i))
+                .filter(|mv| *mv != 0),
+        )
+        .map(u32::from);
+    let voltage_mv = cells.fold(None, |sum: Option<u32>, mv| {
+        Some(sum.unwrap_or(0).saturating_add(mv))
+    });
+    let remaining = payload.get(35).copied().unwrap_or(0) as i8;
+    FcMessage::BatteryStatus {
+        instance: payload.get(32).copied().unwrap_or(0),
+        remaining_percent: u8::try_from(remaining).ok().filter(|p| *p <= 100),
+        voltage_mv,
+        current_ca: Some(u16_at(payload, 30) as i16).filter(|v| *v != -1),
+        energy_consumed_hj: known_i32(4),
+        time_remaining_s: u32::try_from(u32_at(payload, 36) as i32)
+            .ok()
+            .filter(|s| *s != 0),
+    }
+}
+
 pub(super) fn decode_known(msg_id: u32, payload: &[u8]) -> Option<FcMessage> {
     match msg_id {
         HEARTBEAT_ID => Some(FcMessage::Heartbeat {
@@ -172,6 +210,7 @@ pub(super) fn decode_known(msg_id: u32, payload: &[u8]) -> Option<FcMessage> {
             quality: payload.get(9).copied().unwrap_or(0),
         }),
         GIMBAL_DEVICE_ATTITUDE_STATUS_ID => Some(decode_gimbal_status(payload)),
+        BATTERY_STATUS_ID => Some(decode_battery_status(payload)),
         _ => None,
     }
 }

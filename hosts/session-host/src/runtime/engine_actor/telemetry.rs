@@ -1,8 +1,9 @@
 //! Lossless adapter-to-wire telemetry mapping.
 
 use pilotage_adapter_api::{
-    AvionicsSample, FcStateSample, GeodeticFixSample, GimbalAttitudeSample, MeasurementClock,
-    MeasurementStamp, SimTruthSample, SourceIntegrity, SourceRole, TelemetrySample,
+    AvionicsSample, BatterySample, FcStateSample, GeodeticFixSample, GimbalAttitudeSample,
+    MeasurementClock, MeasurementStamp, SimTruthSample, SourceIntegrity, SourceRole,
+    TelemetrySample,
 };
 use pilotage_geo::SIMULATOR_GEOID_MODEL_ID;
 use pilotage_protocol::wire;
@@ -44,6 +45,9 @@ pub(super) fn sample_to_wire(
             .fc_state
             .map(|state| Box::new(fc_state_to_wire(state))),
         gimbal: sample.gimbal.map(|gimbal| Box::new(gimbal_to_wire(gimbal))),
+        battery: sample
+            .battery
+            .map(|battery| Box::new(battery_to_wire(battery))),
         // Guidance does not come from the adapter; the engine actor
         // attaches the navigation component's own state (ADR-0031).
         nav_guidance: None,
@@ -62,6 +66,18 @@ fn gimbal_to_wire(sample: GimbalAttitudeSample) -> wire::GimbalAttitude {
         stamp: Some(measurement_stamp_to_wire(sample.stamp)),
         flags: sample.flags,
         failure_flags: sample.failure_flags,
+    }
+}
+
+fn battery_to_wire(sample: BatterySample) -> wire::BatteryState {
+    wire::BatteryState {
+        stamp: Some(measurement_stamp_to_wire(sample.stamp)),
+        instance: sample.instance,
+        remaining_fraction: sample.remaining_fraction.unwrap_or(f32::NAN),
+        voltage_v: sample.voltage_v.unwrap_or(f32::NAN),
+        current_a: sample.current_a.unwrap_or(f32::NAN),
+        consumed_energy_j: sample.consumed_energy_j.unwrap_or(f32::NAN),
+        time_remaining_s: sample.time_remaining_s.unwrap_or(0),
     }
 }
 

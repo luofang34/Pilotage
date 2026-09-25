@@ -1,7 +1,7 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use pilotage_adapter_api::{
-    AvionicsAttitudeSample, AvionicsKinematicsSample, AvionicsSample, FcStateSample,
+    AvionicsAttitudeSample, AvionicsKinematicsSample, AvionicsSample, BatterySample, FcStateSample,
     MeasurementClock, MeasurementStamp, Pose2d, SimTruthSample, SourceIncarnation, SourceIntegrity,
     SourceRole, TelemetrySample,
 };
@@ -25,6 +25,7 @@ fn one_vehicle_sample(avionics: AvionicsSample) -> TelemetrySample {
         sim_truth: None,
         fc_state: None,
         gimbal: None,
+        battery: None,
     }
 }
 
@@ -151,6 +152,7 @@ fn kinematics_only_omits_planar_projection_while_group_flows() {
         sim_truth: None,
         fc_state: None,
         gimbal: None,
+        battery: None,
     };
 
     let wire_sample = sample_to_wire(sample, MonoTimestamp::from_nanos(1));
@@ -192,6 +194,7 @@ fn attitude_only_omits_planar_projection_while_group_flows() {
         sim_truth: None,
         fc_state: None,
         gimbal: None,
+        battery: None,
     };
 
     let wire_sample = sample_to_wire(sample, MonoTimestamp::from_nanos(1));
@@ -247,6 +250,7 @@ fn truth_and_fc_state_survive_the_wire_under_their_own_identities() {
             stamp: fc_stamp,
         }),
         gimbal: None,
+        battery: None,
     };
 
     let wire_sample = sample_to_wire(sample, MonoTimestamp::from_nanos(5));
@@ -322,3 +326,50 @@ fn the_fc_command_verdict_crosses_the_wire() {
 }
 
 mod geodetic;
+
+#[test]
+fn a_battery_sample_survives_the_wire_with_unknown_values_as_nan() {
+    use prost::Message;
+
+    let stamp = MeasurementStamp {
+        role: SourceRole::FcState,
+        integrity: SourceIntegrity::ChecksummedOnly,
+        source_id: 1,
+        source_incarnation: SourceIncarnation::new([3; 16]),
+        source_epoch: 1,
+        sequence: 12,
+        acquired_at_ns: 5_000,
+        clock: MeasurementClock::HostMonotonic,
+    };
+    let sample = TelemetrySample {
+        vehicle: VehicleId::new(1),
+        tick: SimTick::new(1),
+        pose: None,
+        speed: None,
+        avionics: None,
+        sim_truth: None,
+        fc_state: None,
+        gimbal: None,
+        battery: Some(BatterySample {
+            instance: 0,
+            remaining_fraction: Some(0.73),
+            voltage_v: Some(16.2),
+            current_a: None,
+            consumed_energy_j: Some(432_100.0),
+            time_remaining_s: None,
+            stamp,
+        }),
+    };
+    let encoded = sample_to_wire(sample, MonoTimestamp::from_nanos(9)).encode_to_vec();
+    let decoded = wire::TelemetrySample::decode(encoded.as_slice()).expect("decode");
+    let battery = decoded.battery.expect("battery on the wire");
+    assert_eq!(battery.remaining_fraction, 0.73);
+    assert_eq!(battery.voltage_v, 16.2);
+    assert!(battery.current_a.is_nan(), "unknown current is NaN");
+    assert_eq!(battery.consumed_energy_j, 432_100.0);
+    assert_eq!(battery.time_remaining_s, 0, "unknown time is zero");
+    let wire_stamp = battery.stamp.expect("stamp");
+    assert_eq!(wire_stamp.role, wire::SourceRole::FcState as i32);
+    assert_eq!(wire_stamp.sequence, 12);
+    assert!(decoded.fc_state.is_none(), "battery is its own lane");
+}

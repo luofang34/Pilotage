@@ -28,8 +28,8 @@ use estimator::EstimatorStatusUpdate;
 pub use outbound::{GimbalRateDemand, OutboundCommand};
 use outbound::{send_gimbal_rate, send_outbound_command};
 pub use updates::{
-    AttitudeUpdate, BaroUpdate, CommandAckReport, GimbalDeviceAttitude, GnssFixUpdate,
-    KinematicsUpdate, SimTruthUpdate, TruthOrigin,
+    AttitudeUpdate, BaroUpdate, BatteryReport, CommandAckReport, GimbalDeviceAttitude,
+    GnssFixUpdate, KinematicsUpdate, SimTruthUpdate, TruthOrigin,
 };
 
 /// Which message carries the estimator authorization for cached numeric
@@ -197,6 +197,9 @@ pub struct LinkState {
     /// estimate measurement discipline: it is payload-device status,
     /// never an input to vehicle state or control validation.
     pub gimbal_device: Option<GimbalDeviceAttitude>,
+    /// Latest battery report. Cached outside the estimate measurement
+    /// discipline: it is vehicle state, never an input to an estimate.
+    pub battery: Option<BatteryReport>,
     /// Latest command acknowledgement, kept so uplink senders can
     /// surface a typed denial instead of a silently dead command path.
     pub last_command_ack: Option<CommandAckReport>,

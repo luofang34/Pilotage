@@ -88,8 +88,15 @@ impl Px4Config {
         // autopilots stream it by default, and a lane that draws a vehicle
         // should not rest on a default: 5 Hz is the rate a receiver solves
         // at, and asking costs one message at startup.
-        config.stream_interval_requests =
-            &[(24, 200_000), (31, 33_333), (32, 33_333), (230, 100_000)];
+        // BATTERY_STATUS at 1 Hz: the battery changes slowly, and the
+        // sample is withheld after three missed reports.
+        config.stream_interval_requests = &[
+            (24, 200_000),
+            (31, 33_333),
+            (32, 33_333),
+            (147, 1_000_000),
+            (230, 100_000),
+        ];
         config
     }
 }
