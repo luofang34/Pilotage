@@ -43,3 +43,25 @@ fn unknown_stations_limits_and_foreign_profiles_are_refused() {
         Err(AircraftError::ProfileMismatch { .. })
     ));
 }
+
+#[test]
+fn a_battery_aircraft_has_no_fuel_to_load() {
+    let p = crate::profile::tests::multirotor();
+    let mut l = Loading {
+        profile: p.id().expect("id"),
+        revision: 1,
+        stations_kg: vec![("payload".into(), 0.3)],
+        fuel_l: vec![],
+    };
+    let wb = weight_and_balance(&p, &l).expect("wb");
+    assert!((wb.weight_kg - 2.3).abs() < 1e-9);
+    assert!(wb.within_max_weight && wb.within_envelope);
+    l.fuel_l.push(("main".into(), 1.0));
+    assert!(matches!(
+        weight_and_balance(&p, &l),
+        Err(AircraftError::InvalidLoading {
+            reason: "unknown tank",
+            ..
+        })
+    ));
+}

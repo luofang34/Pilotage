@@ -33,14 +33,59 @@ pub struct Tank {
     pub usable_l: f64,
 }
 
+/// Where the aircraft stores its energy.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum EnergyStore {
+    /// Fuel in tanks. Fuel mass changes the weight and balance.
+    Fuel {
+        /// Fuel density, in kilograms per litre.
+        density_kg_per_l: f64,
+        /// Fuel tanks.
+        tanks: Vec<Tank>,
+    },
+    /// A battery. Its mass is part of the empty weight and does not change in
+    /// flight.
+    Battery {
+        /// Usable energy when full, in watt-hours.
+        usable_wh: f64,
+    },
+}
+
+/// Rate at which the aircraft uses its stored energy.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Draw {
+    /// Fuel flow, in litres per hour.
+    FuelFlowLph(f64),
+    /// Electrical power, in watts.
+    PowerW(f64),
+}
+
+impl Draw {
+    pub(crate) fn per_hour(self) -> f64 {
+        match self {
+            Self::FuelFlowLph(v) | Self::PowerW(v) => v,
+        }
+    }
+
+    pub(crate) fn matches(self, store: &EnergyStore) -> bool {
+        matches!(
+            (self, store),
+            (Self::FuelFlowLph(_), EnergyStore::Fuel { .. })
+                | (Self::PowerW(_), EnergyStore::Battery { .. })
+        )
+    }
+}
+
 /// Cruise performance at one planned power setting.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CruiseModel {
     /// True airspeed, in metres per second.
     pub true_airspeed_mps: f64,
-    /// Fuel flow, in litres per hour.
-    pub fuel_flow_lph: f64,
+    /// Energy draw, in the unit of the profile's energy store.
+    pub draw: Draw,
 }
 
 /// Configuration, limits, and performance of one aircraft (ADR-0046).
@@ -62,12 +107,10 @@ pub struct AircraftProfile {
     pub empty_arm_m: f64,
     /// Maximum takeoff weight, in kilograms.
     pub max_takeoff_weight_kg: f64,
-    /// Fuel density, in kilograms per litre.
-    pub fuel_density_kg_per_l: f64,
+    /// Fuel or battery.
+    pub energy: EnergyStore,
     /// Loading stations.
     pub stations: Vec<Station>,
-    /// Fuel tanks.
-    pub tanks: Vec<Tank>,
     /// Center-of-gravity envelope as (weight kg, arm m) vertices, in order.
     pub cg_envelope: Vec<[f64; 2]>,
     /// Planned cruise performance.
@@ -91,6 +134,12 @@ impl AircraftProfile {
     /// Names the first refused field.
     pub fn validate(&self) -> Result<(), AircraftError> {
         let positive = |v: f64| v.is_finite() && v > 0.0;
+        let energy = match &self.energy {
+            EnergyStore::Fuel {
+                density_kg_per_l, ..
+            } => positive(*density_kg_per_l),
+            EnergyStore::Battery { usable_wh } => positive(*usable_wh),
+        };
         let checks: [(&'static str, bool); 7] = [
             ("schema_version", self.schema_version == 1),
             ("empty_weight_kg", positive(self.empty_weight_kg)),
@@ -99,10 +148,7 @@ impl AircraftProfile {
                 "max_takeoff_weight_kg",
                 positive(self.max_takeoff_weight_kg),
             ),
-            (
-                "fuel_density_kg_per_l",
-                positive(self.fuel_density_kg_per_l),
-            ),
+            ("energy", energy),
             (
                 "cg_envelope",
                 self.cg_envelope.len() >= 3
@@ -110,7 +156,9 @@ impl AircraftProfile {
             ),
             (
                 "cruise",
-                positive(self.cruise.true_airspeed_mps) && positive(self.cruise.fuel_flow_lph),
+                positive(self.cruise.true_airspeed_mps)
+                    && positive(self.cruise.draw.per_hour())
+                    && self.cruise.draw.matches(&self.energy),
             ),
         ];
         if let Some((field, _)) = checks.iter().find(|(_, ok)| !ok) {
@@ -122,7 +170,7 @@ impl AircraftProfile {
             .iter()
             .all(|s| s.arm_m.is_finite() && positive(s.max_kg) && names.insert(s.name.as_str()));
         let tanks = self
-            .tanks
+            .tanks()
             .iter()
             .all(|t| t.arm_m.is_finite() && positive(t.usable_l) && names.insert(t.name.as_str()));
         if !stations || !tanks {
@@ -131,6 +179,15 @@ impl AircraftProfile {
             });
         }
         Ok(())
+    }
+
+    /// Fuel tanks. A battery aircraft has none.
+    #[must_use]
+    pub fn tanks(&self) -> &[Tank] {
+        match &self.energy {
+            EnergyStore::Fuel { tanks, .. } => tanks,
+            EnergyStore::Battery { .. } => &[],
+        }
     }
 }
 
@@ -144,7 +201,7 @@ pub struct Loading {
     pub revision: u32,
     /// Weight at each named station, in kilograms.
     pub stations_kg: Vec<(String, f64)>,
-    /// Fuel in each named tank, in litres.
+    /// Fuel in each named tank, in litres. Empty for a battery aircraft.
     pub fuel_l: Vec<(String, f64)>,
 }
 

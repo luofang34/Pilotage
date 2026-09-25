@@ -1,6 +1,6 @@
 //! Weight and balance for one loading.
 
-use crate::{AircraftError, AircraftProfile, Loading, ProfileId};
+use crate::{AircraftError, AircraftProfile, EnergyStore, Loading, ProfileId};
 
 /// Total weight and center of gravity, with the inputs that produced them.
 #[derive(Clone, Debug, PartialEq)]
@@ -67,16 +67,24 @@ fn loaded_items(
         }
         Ok((*kg, station.arm_m))
     });
-    let tanks = loading.fuel_l.iter().map(|(name, litres)| {
+    let density = match profile.energy {
+        EnergyStore::Fuel {
+            density_kg_per_l, ..
+        } => density_kg_per_l,
+        // A battery aircraft has no tanks, so every fuel entry is refused
+        // before this density applies.
+        EnergyStore::Battery { .. } => 0.0,
+    };
+    let tanks = loading.fuel_l.iter().map(move |(name, litres)| {
         let tank = profile
-            .tanks
+            .tanks()
             .iter()
             .find(|t| &t.name == name)
             .ok_or_else(|| invalid(name, "unknown tank"))?;
         if !(litres.is_finite() && *litres >= 0.0 && *litres <= tank.usable_l) {
             return Err(invalid(name, "fuel outside the tank capacity"));
         }
-        Ok((litres * profile.fuel_density_kg_per_l, tank.arm_m))
+        Ok((litres * density, tank.arm_m))
     });
     stations.chain(tanks).collect()
 }
