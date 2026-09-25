@@ -274,6 +274,27 @@ message GimbalAttitude {
   uint32 failure_flags = 10;
 }
 
+// Battery state as the flight controller reports it, under the FC-state
+// role: vehicle state, never an estimate and never a control input. Each
+// float is NaN when the flight controller reports it as unknown.
+message BatteryState {
+  // Identity and acquisition of the battery report. Absence makes the
+  // sample unconsumable.
+  MeasurementStamp stamp = 1;
+  // Battery instance on the vehicle.
+  uint32 instance = 2;
+  // Remaining capacity as a fraction, 0 to 1.
+  float remaining_fraction = 3;
+  // Pack voltage, volts.
+  float voltage_v = 4;
+  // Current out of the battery, amperes. Negative while charging.
+  float current_a = 5;
+  // Energy used since the battery was connected, joules.
+  float consumed_energy_j = 6;
+  // Time until empty at the present draw, seconds. Zero is unknown.
+  uint32 time_remaining_s = 7;
+}
+
 // Active-leg guidance from the vehicle's navigation component (ADR-0031)
 // under its own provenance stamp: display context in raw canonical units.
 // Scaling deviations to instrument dots is display policy and never
@@ -333,4 +354,6 @@ message TelemetrySample {
   // Active-leg navigation guidance with its own provenance stamp,
   // published by the navigation component rather than the FC adapter.
   NavGuidanceState nav_guidance = 10;
+  // Battery state with its own provenance stamp.
+  BatteryState battery = 11;
 }

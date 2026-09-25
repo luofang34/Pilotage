@@ -19,9 +19,9 @@ and takeoff performance. Both need data about the aircraft itself:
 
 No domain owns this data. ADR-0018 carries attitude, motion, and estimator
 state. It carries no engine, fuel, or battery values. No link that Pilotage
-reads decodes engine, fuel, or battery records. No `avionics-link` adapter
-exists in Pilotage. The MAVLink adapters do not decode battery records. The
-X-Plane path, `crates/pilotage-xplane-trial`, does not decode fuel records.
+reads decodes engine or fuel records. No `avionics-link` adapter exists in
+Pilotage. The X-Plane path, `crates/pilotage-xplane-trial`, does not decode
+fuel records. Only the PX4 adapter decodes battery records.
 Nothing owns the static configuration, the live state, or the derived
 results.
 
@@ -40,7 +40,7 @@ validity.
 |---|---|---|
 | Aircraft profile | Versioned and hashed, like calibration records (ADR-0021) | Operator, manufacturer data, or an installed pack |
 | Loading | One record for each flight, with revisions | Operator or mission plan |
-| Live engine, fuel, and battery state | Stamped samples with source and clock (ADR-0009) | Planned: an `avionics-link` adapter for engine and fuel, and MAVLink `BATTERY_STATUS` for electric vehicles |
+| Live engine, fuel, and battery state | Stamped samples with source and clock (ADR-0009) | MAVLink `BATTERY_STATUS` through the PX4 adapter for electric vehicles. Planned: an `avionics-link` adapter for engine and fuel |
 | Derived results | Immutable results that name their inputs | The domain's calculators |
 
 Each derived result names the profile hash and the inputs that it used.
@@ -70,10 +70,13 @@ each profile. It makes no airworthiness or certification claim.
   release against the same profile that the onboard host uses.
 - The profile schema, the first calculators, and the `avionics-link` engine
   and fuel adapters are tracked as separate work.
-- A live-state adapter needs a link that carries engine, fuel, or battery
-  records first. The endurance calculator accepts a measured fuel flow or
-  electrical power, but no adapter supplies one. Until an adapter exists, the
-  energy on board comes from the loading record: the fuel in each tank, or
-  the battery energy at the start of the flight.
+- The PX4 adapter decodes MAVLink `BATTERY_STATUS` and sends a stamped
+  battery sample on the telemetry wire. No adapter supplies engine or fuel
+  values.
+- A battery sample becomes an energy state only with the profile, because
+  the profile holds the usable energy. The host composition (ADR-0045) makes
+  this conversion. Until it does, the energy on board comes from the loading
+  record: the fuel in each tank, or the battery energy at the start of the
+  flight.
 - The profile must state whether the aircraft stores fuel or battery energy.
   The calculators must not treat battery energy as litres of fuel.

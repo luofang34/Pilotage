@@ -192,6 +192,29 @@ pub struct GimbalAttitudeSample {
     pub stamp: MeasurementStamp,
 }
 
+/// Battery state as the flight controller reports it, with its own
+/// provenance under the FC-state role: vehicle state, never an estimate and
+/// never an input to control validation. Each value is `None` when the
+/// flight controller reports it as unknown.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BatterySample {
+    /// Battery instance on the vehicle.
+    pub instance: u32,
+    /// Remaining capacity as a fraction, 0 to 1.
+    pub remaining_fraction: Option<f32>,
+    /// Pack voltage, volts.
+    pub voltage_v: Option<f32>,
+    /// Current out of the battery, amperes. Negative while charging.
+    pub current_a: Option<f32>,
+    /// Energy used since the battery was connected, joules.
+    pub consumed_energy_j: Option<f32>,
+    /// Time until empty at the present draw, as the flight controller
+    /// estimates it, seconds.
+    pub time_remaining_s: Option<u32>,
+    /// Identity and acquisition time of the battery report.
+    pub stamp: MeasurementStamp,
+}
+
 /// A single vehicle's telemetry at one simulation tick.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TelemetrySample {
@@ -216,6 +239,8 @@ pub struct TelemetrySample {
     pub fc_state: Option<FcStateSample>,
     /// Gimbal payload-device orientation with its own provenance stamp.
     pub gimbal: Option<GimbalAttitudeSample>,
+    /// Battery state with its own provenance stamp.
+    pub battery: Option<BatterySample>,
 }
 
 /// A batch of telemetry samples returned from a single `sample_telemetry`
@@ -264,6 +289,7 @@ mod tests {
             sim_truth: None,
             fc_state: None,
             gimbal: None,
+            battery: None,
         };
         assert_eq!(sample.pose.expect("pose").x, 1.0);
         assert_eq!(sample.speed, Some(3.0));

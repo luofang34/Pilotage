@@ -331,6 +331,7 @@ mod tests {
                 fc_state: None,
                 gimbal: None,
                 nav_guidance: None,
+                battery: None,
             },
         ));
         let event = decode_datagram_event(&bytes, MonoTimestamp::from_nanos(5)).expect("telemetry");
@@ -382,6 +383,7 @@ mod tests {
                 })),
                 gimbal: None,
                 nav_guidance: None,
+                battery: None,
             },
         ));
         let event = decode_datagram_event(&bytes, MonoTimestamp::from_nanos(9)).expect("telemetry");

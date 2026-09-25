@@ -305,6 +305,7 @@ pub(crate) fn mavlink_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -
             sim_truth: sim_truth_sample(&latest),
             fc_state: None,
             gimbal: None,
+            battery: None,
         }],
     }
 }

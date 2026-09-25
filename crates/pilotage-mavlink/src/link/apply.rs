@@ -8,8 +8,8 @@ use std::time::Instant;
 use super::estimator::{accept_status, authorization_at, invalidate_cached_authorization};
 use super::measurement::{next_attitude_stamp, next_baro_stamp, next_kinematics_stamp};
 use super::{
-    AttitudeUpdate, AuthorizationSource, CommandAckReport, GimbalDeviceAttitude, KinematicsUpdate,
-    LinkState, estimator,
+    AttitudeUpdate, AuthorizationSource, BatteryReport, CommandAckReport, GimbalDeviceAttitude,
+    KinematicsUpdate, LinkState, estimator,
 };
 use crate::codec::{FcMessage, FrameSource};
 
@@ -317,24 +317,68 @@ fn apply_message(latest: &mut LinkState, message: FcMessage, now: Instant) {
             vel_ned_mps,
             lat_lon_alt,
         } => apply_sim_truth(latest, time_usec, quat_wxyz, vel_ned_mps, lat_lon_alt, now),
-        FcMessage::GimbalDeviceAttitudeStatus {
-            time_boot_ms,
-            quat_wxyz,
-            rates_rps,
-            flags,
-            failure_flags,
-        } => {
-            if failure_flags != 0 {
-                tracing::warn!(failure_flags, "gimbal device reports a failure condition");
-            }
-            latest.gimbal_device = Some(GimbalDeviceAttitude {
-                quat_wxyz,
-                rates_rps,
-                time_boot_ms,
-                flags,
-                failure_flags,
-                received_at: now,
-            });
-        }
+        FcMessage::BatteryStatus { .. } => apply_battery(latest, message, now),
+        FcMessage::GimbalDeviceAttitudeStatus { .. } => apply_gimbal(latest, message, now),
     }
+}
+
+/// Caches the latest report of battery instance 0, the primary battery. A
+/// flight controller sends every instance back to back, so a cache of the
+/// latest report of any instance would hold the last instance and hide the
+/// primary; reports of other instances are counted and dropped.
+/// BATTERY_STATUS carries no time of its own, so the receive time and a
+/// receive sequence identify the report.
+fn apply_battery(latest: &mut LinkState, message: FcMessage, now: Instant) {
+    let FcMessage::BatteryStatus {
+        instance,
+        remaining_percent,
+        voltage_mv,
+        current_ca,
+        energy_consumed_hj,
+        time_remaining_s,
+    } = message
+    else {
+        return;
+    };
+    if instance != 0 {
+        latest.other_battery_reports = latest.other_battery_reports.wrapping_add(1);
+        return;
+    }
+    let sequence = latest
+        .battery
+        .map_or(0, |report| report.sequence.wrapping_add(1));
+    latest.battery = Some(BatteryReport {
+        instance,
+        remaining_percent,
+        voltage_mv,
+        current_ca,
+        energy_consumed_hj,
+        time_remaining_s,
+        sequence,
+        received_at: now,
+    });
+}
+
+fn apply_gimbal(latest: &mut LinkState, message: FcMessage, now: Instant) {
+    let FcMessage::GimbalDeviceAttitudeStatus {
+        time_boot_ms,
+        quat_wxyz,
+        rates_rps,
+        flags,
+        failure_flags,
+    } = message
+    else {
+        return;
+    };
+    if failure_flags != 0 {
+        tracing::warn!(failure_flags, "gimbal device reports a failure condition");
+    }
+    latest.gimbal_device = Some(GimbalDeviceAttitude {
+        quat_wxyz,
+        rates_rps,
+        time_boot_ms,
+        flags,
+        failure_flags,
+        received_at: now,
+    });
 }

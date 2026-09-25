@@ -50,6 +50,8 @@ pub const COMMAND_ACK_ID: u32 = 77;
 pub const ESTIMATOR_STATUS_ID: u32 = 230;
 /// Aviate's lossless estimator authorization message id.
 pub const AVIATE_ESTIMATOR_STATUS_ID: u32 = 20_000;
+/// BATTERY_STATUS message id.
+pub const BATTERY_STATUS_ID: u32 = 147;
 
 /// One parsed frame event from the Aviate subset.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -147,6 +149,22 @@ pub enum FcMessage {
         /// Source quality enum: 0 unusable, 1 degraded, 2 good.
         quality: u8,
     },
+    /// Battery report, in wire units. `None` is the sender's "unknown"
+    /// value for that field.
+    BatteryStatus {
+        /// Battery instance on the vehicle.
+        instance: u8,
+        /// Remaining capacity, percent (0 to 100).
+        remaining_percent: Option<u8>,
+        /// Pack voltage: the sum of the reported cell voltages, millivolts.
+        voltage_mv: Option<u32>,
+        /// Current out of the battery, centiamperes. Negative while charging.
+        current_ca: Option<i16>,
+        /// Energy used since the battery was connected, hectojoules.
+        energy_consumed_hj: Option<i32>,
+        /// Time until the battery is empty at the present draw, seconds.
+        time_remaining_s: Option<u32>,
+    },
     /// Gimbal device orientation report (Gimbal Protocol v2).
     GimbalDeviceAttitudeStatus {
         /// Milliseconds since gimbal/FC boot.
@@ -226,6 +244,7 @@ fn crc_extra(msg_id: u32) -> Option<u8> {
         SET_POSITION_TARGET_ID => Some(143),
         GIMBAL_MANAGER_SET_ATTITUDE_ID => Some(123),
         GIMBAL_DEVICE_ATTITUDE_STATUS_ID => Some(137),
+        BATTERY_STATUS_ID => Some(154),
         _ => None,
     }
 }

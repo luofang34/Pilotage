@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use pilotage_adapter_api::{
     ActionResult, AdapterCapabilities, ApplyOutcome, Disposition, LinkLossEnactError,
-    LinkLossPolicy, RejectReason, StepBudget, StepOutcome, TelemetryBatch, TelemetrySample,
-    VehicleAdapter, VideoSource,
+    LinkLossPolicy, RejectReason, StepBudget, StepOutcome, TelemetryBatch, VehicleAdapter,
+    VideoSource,
 };
 use pilotage_protocol::VehicleId;
 use std::collections::BTreeMap;
@@ -24,6 +24,7 @@ use crate::error::Px4AdapterError;
 use crate::uplink::{Px4Uplink, StickFrameDisposition};
 
 mod advertisement;
+mod battery;
 #[cfg(feature = "sim")]
 mod camera;
 mod camera_link;
@@ -433,31 +434,34 @@ impl VehicleAdapter for Px4Adapter {
             .is_some()
             .then(|| self.gimbal_attitude())
             .flatten();
+        let battery = battery::battery_sample(
+            self.estimate
+                .as_ref()
+                .and_then(|source| source.state.lock().ok()?.battery),
+            self.arm_incarnation,
+            self.started_at,
+        );
         let mut batch = self
             .estimate
             .as_ref()
             .map(|source| sampling::mavlink_batch(self.vehicle, &source.state))
             .unwrap_or_default();
-        // When no coherent avionics group is available the batch is
-        // empty, but FC-state and gimbal-device reports are independent
-        // sources that must still reach clients: carry them on a sample
-        // even with no pose. Their own stamps drive freshness.
-        if batch.samples.is_empty() && (fc_state.is_some() || gimbal_attitude.is_some()) {
-            batch.samples.push(TelemetrySample {
-                vehicle: self.vehicle,
-                tick: self.step(StepBudget { ticks: 0 }).now,
-                pose: None,
-                speed: None,
-                avionics: None,
-                sim_truth: None,
-                fc_state: None,
-                gimbal: None,
-            });
+        let reports = sampling::VehicleReports {
+            fc_state,
+            gimbal: gimbal_attitude,
+            battery,
+        };
+        // FC-state, gimbal-device, and battery reports are independent
+        // sources that must reach clients with no coherent avionics group:
+        // carry them on a sample even with no pose. Their own stamps drive
+        // freshness.
+        if batch.samples.is_empty() && reports.any() {
+            let tick = self.step(StepBudget { ticks: 0 }).now;
+            batch
+                .samples
+                .push(sampling::report_only_sample(self.vehicle, tick));
         }
-        for sample in &mut batch.samples {
-            sample.fc_state = fc_state;
-            sample.gimbal = gimbal_attitude;
-        }
+        reports.attach(&mut batch);
         if let Some(uplink) = self.uplink.as_mut() {
             uplink.maintain();
         }

@@ -211,6 +211,7 @@ impl AviateAdapter {
                     sim_truth: truth,
                     fc_state,
                     gimbal: None,
+                    battery: None,
                 }],
             };
         }
