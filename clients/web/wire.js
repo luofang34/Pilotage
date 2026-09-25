@@ -1071,8 +1071,7 @@ function decodeControlFeelIdentity(hostCapabilitiesBytes) {
 }
 
 // telemetry.proto TelemetrySample: vehicle=1, tick=2, observed_at=3, pose=4,
-// velocity=5, avionics=6, sim_truth=7, fc_state=8, gimbal=9, nav_guidance=10,
-// battery=11 (not decoded: no web consumer reads the battery lane)
+// velocity=5, avionics=6, sim_truth=7, fc_state=8, gimbal=9, nav_guidance=10, battery=11 (not decoded)
 // Pose2d: x_m=1, y_m=2, heading_rad=3 (all float, wire type 5)
 function decodeTelemetrySample(bytes) {
   if (!bytes) return {};
