@@ -13,12 +13,13 @@
 
 mod balance;
 mod endurance;
+mod envelope;
 mod error;
+mod loading;
 mod profile;
 
 pub use balance::{WeightAndBalance, weight_and_balance};
 pub use endurance::{Endurance, EnergyState, Remaining, endurance};
 pub use error::AircraftError;
-pub use profile::{
-    AircraftProfile, CruiseModel, Draw, EnergyStore, Loading, ProfileId, Station, Tank,
-};
+pub use loading::Loading;
+pub use profile::{AircraftProfile, CruiseModel, Draw, EnergyStore, ProfileId, Station, Tank};

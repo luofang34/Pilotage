@@ -70,3 +70,23 @@ fn a_battery_aircraft_has_no_fuel_to_load() {
         "no battery entry on a fuel aircraft"
     );
 }
+
+#[test]
+fn a_repeated_station_is_not_counted_twice() {
+    let mut l = loading(100.0, 0.0, 0.0);
+    l.stations_kg.push(("front".into(), 100.0));
+    assert!(matches!(
+        weight_and_balance(&trainer(), &l),
+        Err(AircraftError::InvalidLoading { ref name, reason: "listed twice" }) if name == "front"
+    ));
+}
+
+#[test]
+fn a_loading_at_maximum_weight_on_the_limit_is_inside() {
+    // 750 kg empty + 200 front + 150 rear = 1100 kg, the maximum and the
+    // envelope's right edge; the CG is inside the arm range there.
+    let wb = weight_and_balance(&trainer(), &loading(200.0, 150.0, 0.0)).expect("wb");
+    assert!((wb.weight_kg - 1100.0).abs() < 1e-9);
+    assert!(wb.within_max_weight);
+    assert!(wb.within_envelope);
+}

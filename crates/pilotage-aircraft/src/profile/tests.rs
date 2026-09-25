@@ -63,7 +63,7 @@ pub(crate) fn multirotor() -> AircraftProfile {
 }
 
 #[test]
-fn the_profile_id_changes_with_any_field() {
+fn the_profile_id_is_stable_and_changes_with_the_data() {
     let a = trainer();
     let mut b = trainer();
     b.empty_weight_kg += 1.0;
@@ -93,10 +93,11 @@ fn invalid_profiles_name_the_refused_field() {
             usable_l: 10.0,
         });
     }
-    assert!(
-        p.validate().is_err(),
-        "names are unique across stations and tanks"
-    );
+    assert!(matches!(
+        p.validate(),
+        Err(AircraftError::InvalidProfileEntry { ref name, reason: "name listed twice" })
+            if name == "front"
+    ));
 }
 
 #[test]
@@ -126,4 +127,45 @@ fn the_energy_store_is_tagged_data() {
         serde_json::from_value::<AircraftProfile>(unknown).is_err(),
         "a battery store has no tanks field"
     );
+}
+
+#[test]
+fn profile_ranges_names_and_envelope_are_checked() {
+    let mut p = trainer();
+    p.empty_weight_kg = 2000.0;
+    assert!(matches!(
+        p.validate(),
+        Err(AircraftError::InvalidProfile {
+            field: "empty_weight_kg"
+        })
+    ));
+    let mut p = trainer();
+    p.stations[0].name = String::new();
+    assert!(matches!(
+        p.validate(),
+        Err(AircraftError::InvalidProfileEntry {
+            reason: "empty name",
+            ..
+        })
+    ));
+    let mut p = trainer();
+    p.cg_envelope.swap(1, 2);
+    assert!(matches!(
+        p.validate(),
+        Err(AircraftError::InvalidProfile {
+            field: "cg_envelope"
+        })
+    ));
+}
+
+#[test]
+fn equal_profiles_hash_equal_and_non_finite_profiles_have_no_hash() {
+    let mut a = trainer();
+    a.empty_arm_m = 0.0;
+    let mut b = trainer();
+    b.empty_arm_m = -0.0;
+    assert_eq!(a.id().expect("id"), b.id().expect("id"));
+    let mut nan = trainer();
+    nan.empty_arm_m = f64::NAN;
+    assert!(nan.id().is_err());
 }

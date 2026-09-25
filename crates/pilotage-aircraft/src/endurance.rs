@@ -1,6 +1,6 @@
 //! Endurance and range from the energy on board.
 
-use crate::{AircraftError, AircraftProfile, Draw, EnergyStore, Loading, ProfileId};
+use crate::{AircraftError, AircraftProfile, Draw, EnergyStore, ProfileId};
 
 /// Usable energy on board, in the unit of its store.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -18,60 +18,19 @@ impl Remaining {
         }
     }
 
+    fn kind(self) -> &'static str {
+        match self {
+            Self::FuelL(_) => "fuel",
+            Self::BatteryWh(_) => "battery",
+        }
+    }
+
     fn matches(self, store: &EnergyStore) -> bool {
         matches!(
             (self, store),
             (Self::FuelL(_), EnergyStore::Fuel { .. })
                 | (Self::BatteryWh(_), EnergyStore::Battery { .. })
         )
-    }
-}
-
-impl Loading {
-    /// Usable energy that this loading puts on board: the sum of the tank
-    /// fuel, or the start-of-flight battery energy.
-    ///
-    /// # Errors
-    /// Refuses a loading for another profile, an unknown tank, fuel outside a
-    /// tank capacity, a battery value outside the battery capacity, and
-    /// energy of the other store kind.
-    pub fn remaining(&self, profile: &AircraftProfile) -> Result<Remaining, AircraftError> {
-        let id = profile.id()?;
-        if self.profile != id {
-            return Err(AircraftError::ProfileMismatch {
-                loading: self.profile.0.clone(),
-                profile: id.0,
-            });
-        }
-        let refuse = |reason| AircraftError::InvalidLoading {
-            name: "energy".into(),
-            reason,
-        };
-        match (&profile.energy, self.battery_wh) {
-            (EnergyStore::Fuel { tanks, .. }, None) => {
-                let litres = self.fuel_l.iter().map(|(name, litres)| {
-                    let tank = tanks.iter().find(|t| &t.name == name);
-                    match tank {
-                        Some(t)
-                            if litres.is_finite() && *litres >= 0.0 && *litres <= t.usable_l =>
-                        {
-                            Ok(*litres)
-                        }
-                        Some(_) => Err(refuse("fuel outside the tank capacity")),
-                        None => Err(refuse("unknown tank")),
-                    }
-                });
-                Ok(Remaining::FuelL(litres.sum::<Result<f64, _>>()?))
-            }
-            (EnergyStore::Battery { usable_wh }, Some(wh)) if self.fuel_l.is_empty() => {
-                if wh.is_finite() && wh >= 0.0 && wh <= *usable_wh {
-                    Ok(Remaining::BatteryWh(wh))
-                } else {
-                    Err(refuse("battery energy outside the battery capacity"))
-                }
-            }
-            _ => Err(refuse("fuel and battery quantities do not mix")),
-        }
     }
 }
 
@@ -115,37 +74,54 @@ const VALIDITY_NS: u64 = 60_000_000_000;
 ///
 /// # Errors
 /// Refuses an invalid profile, an energy state or draw of the other store
-/// kind, and non-finite or negative inputs.
+/// kind, energy beyond the store capacity, and non-finite or negative
+/// inputs.
 pub fn endurance(
     profile: &AircraftProfile,
     energy: EnergyState,
     reserve_minutes: f64,
 ) -> Result<Endurance, AircraftError> {
-    profile.validate()?;
+    let id = profile.id()?;
     let draw = energy.measured_draw.unwrap_or(profile.cruise.draw);
-    if !(energy.remaining.matches(&profile.energy) && draw.matches(&profile.energy)) {
-        return Err(AircraftError::InvalidLoading {
-            name: "energy state".into(),
-            reason: "fuel and battery quantities do not mix",
-        });
+    for (offered, matches) in [
+        (
+            energy.remaining.kind(),
+            energy.remaining.matches(&profile.energy),
+        ),
+        (draw.kind(), draw.matches(&profile.energy)),
+    ] {
+        if !matches {
+            return Err(AircraftError::EnergyKindMismatch {
+                store: profile.energy.kind(),
+                offered,
+            });
+        }
     }
     let amount = energy.remaining.amount();
     let rate = draw.per_hour();
-    let valid = amount.is_finite()
-        && amount >= 0.0
-        && rate.is_finite()
-        && rate > 0.0
-        && reserve_minutes.is_finite()
-        && reserve_minutes >= 0.0;
-    if !valid {
-        return Err(AircraftError::InvalidLoading {
-            name: "energy state".into(),
-            reason: "non-finite or negative energy, draw, or reserve",
-        });
+    let refusal = [
+        (
+            amount.is_finite() && amount >= 0.0,
+            "energy on board is non-finite or negative",
+        ),
+        (
+            amount <= profile.energy.capacity(),
+            "energy on board is more than the store holds",
+        ),
+        (rate.is_finite() && rate > 0.0, "draw is not positive"),
+        (
+            reserve_minutes.is_finite() && reserve_minutes >= 0.0,
+            "reserve is non-finite or negative",
+        ),
+    ]
+    .into_iter()
+    .find(|(ok, _)| !ok);
+    if let Some((_, reason)) = refusal {
+        return Err(AircraftError::InvalidEnergyState { reason });
     }
     let minutes = (amount / rate * 60.0 - reserve_minutes).max(0.0);
     Ok(Endurance {
-        profile: profile.id()?,
+        profile: id,
         energy,
         reserve_minutes,
         draw,
