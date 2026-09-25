@@ -9,9 +9,14 @@ use pilotage_mavlink::BatteryReport;
 
 use super::WITHHOLD_AFTER;
 
+/// Source id of the battery lane. Each lane from this flight controller has
+/// its own id (FC state 1, gimbal device 2), so no consumer that tracks
+/// sequences by role and source can read two lanes as one stream.
+pub(super) const BATTERY_SOURCE_ID: u64 = 3;
+
 /// The latest battery report as a sample, or `None` when no report is
-/// fresh. The flight controller is the only author, so the sample shares
-/// the FC-state identity. BATTERY_STATUS has no time of its own, so the
+/// fresh. The flight controller is the only author, so the sample has the
+/// FC-state role. BATTERY_STATUS has no time of its own, so the
 /// receive time is the acquisition time.
 pub(super) fn battery_sample(
     report: Option<BatteryReport>,
@@ -34,7 +39,7 @@ pub(super) fn battery_sample(
             role: SourceRole::FcState,
             // MAVLink frames are CRC-checked but unsigned.
             integrity: SourceIntegrity::ChecksummedOnly,
-            source_id: 1,
+            source_id: BATTERY_SOURCE_ID,
             source_incarnation: incarnation,
             source_epoch: 1,
             sequence: report.sequence,

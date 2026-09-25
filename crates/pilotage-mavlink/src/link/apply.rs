@@ -322,8 +322,12 @@ fn apply_message(latest: &mut LinkState, message: FcMessage, now: Instant) {
     }
 }
 
-/// Caches the latest battery report. BATTERY_STATUS carries no time of its
-/// own, so the receive time and a receive sequence identify the report.
+/// Caches the latest report of battery instance 0, the primary battery. A
+/// flight controller sends every instance back to back, so a cache of the
+/// latest report of any instance would hold the last instance and hide the
+/// primary; reports of other instances are counted and dropped.
+/// BATTERY_STATUS carries no time of its own, so the receive time and a
+/// receive sequence identify the report.
 fn apply_battery(latest: &mut LinkState, message: FcMessage, now: Instant) {
     let FcMessage::BatteryStatus {
         instance,
@@ -336,6 +340,10 @@ fn apply_battery(latest: &mut LinkState, message: FcMessage, now: Instant) {
     else {
         return;
     };
+    if instance != 0 {
+        latest.other_battery_reports = latest.other_battery_reports.wrapping_add(1);
+        return;
+    }
     let sequence = latest
         .battery
         .map_or(0, |report| report.sequence.wrapping_add(1));

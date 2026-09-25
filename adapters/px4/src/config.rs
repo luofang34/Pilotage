@@ -108,6 +108,12 @@ mod tests {
     use super::{Px4Config, Px4Profile};
 
     #[test]
+    fn the_battery_report_is_requested_at_one_hertz() {
+        let config = Px4Config::new(Px4Profile::Simulation).link_config();
+        assert!(config.stream_interval_requests.contains(&(147, 1_000_000)));
+    }
+
+    #[test]
     fn simulation_profile_enables_only_the_simulator_reset_policy() {
         let config = Px4Config::new(Px4Profile::Simulation).link_config();
         assert_eq!(config.reset_policy, ResetPolicy::SimulatorHeuristic);

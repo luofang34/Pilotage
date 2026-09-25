@@ -197,9 +197,11 @@ pub struct LinkState {
     /// estimate measurement discipline: it is payload-device status,
     /// never an input to vehicle state or control validation.
     pub gimbal_device: Option<GimbalDeviceAttitude>,
-    /// Latest battery report. Cached outside the estimate measurement
+    /// Latest report of battery instance 0. Cached outside the estimate measurement
     /// discipline: it is vehicle state, never an input to an estimate.
     pub battery: Option<BatteryReport>,
+    /// Battery reports of instances other than 0, dropped.
+    pub other_battery_reports: u64,
     /// Latest command acknowledgement, kept so uplink senders can
     /// surface a typed denial instead of a silently dead command path.
     pub last_command_ack: Option<CommandAckReport>,

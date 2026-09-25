@@ -156,8 +156,7 @@ pub struct GimbalDeviceAttitude {
 
 /// The latest battery report, in wire units, with its receive stamp.
 /// BATTERY_STATUS carries no time of its own, so the receive time is the
-/// only acquisition time. One report is kept: the vehicles that Pilotage
-/// flies have one battery, and a later instance replaces an earlier one.
+/// only acquisition time. The link keeps the report of instance 0 only.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BatteryReport {
     /// Battery instance on the vehicle.

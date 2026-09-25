@@ -1,0 +1,65 @@
+# Pilotage + language-model agent on claw.local — state at 2026-09-18 (phase 4)
+
+## Try it
+
+Fly the agent from the browser viewer (the agent is a module of the client):
+
+```
+ssh claw.local 'zsh -l ~/rlcd/web_sim_up.sh; zsh -l ~/rlcd/web_sim_wait.sh'     # session + model gateway (gemma4:e4b)
+ssh -f -N -L 8099:127.0.0.1:8099 -L 8098:127.0.0.1:8098 claw.local               # on the machine with the browser
+# open: http://localhost:8099/index.html?host=claw.local&port=4433&cert=<sha-256 from web_sim_wait>&autoconnect=1&agent=http://localhost:8098
+ssh claw.local 'zsh -l ~/rlcd/web_sim_down.sh'
+```
+
+In the page: push "Engage agent", then a preset or type an instruction. Any flight key, stick or safety press takes control back.
+Automated run of the same thing (headless Chrome, truth from Gazebo): `node ~/rlcd/e2e/e2e-agent.mjs <cert> <outDir>` on the machine with Chrome.
+Headless live demo (no browser): `ssh -t claw.local 'zsh -l ~/rlcd/live_demo.sh'`.
+
+The session scripts start from `~/Pilotage-agent-web`. That worktree is at the merged content; `main` has the same code.
+
+## What is merged on main
+
+| PR | Content | Merge |
+| --- | --- | --- |
+| #602 | headless `intent-pilot`, model port, adapters, `agent-eval`, ADR-0042 | merge commit `2179fdc6` |
+| #604 | `crates/pilotage-agent` core: directives, three checks, executor, verifier | merge commit `39f6b3ce` |
+| #607 | the agent as a client module: `InputSource::Agent`, web-agent wasm, browser module, model gateway, INPUT-AGENT-007 evidence | merge commit `183a84ab` |
+| #606 | mission core `heading`, `speed`, `go_around` actions (issue #605) | squash `72775234` |
+| #608 | directive → mission flight action lowering | merge commit `6ad31112` |
+| #603 | Indicate pin 9b2c2b8 (state ABI v8), IndicateAppleDisplay corpus 8, Apple probe header from the gate | squash `c90de807` |
+| #609 | ADR-0043: GDL 90 codec in its own crate | squash `c90382a9` |
+| #610 | nightly fix: `flight-tune-aviate` asks thiserror for `std` (recorded in the reviewed dependency baseline); quality gates run the nightly's single-crate checks | squash `34952d00` |
+
+The evidence-bound stack (#602/#604/#607/#608) was merged with merge commits, so the evidence baseline commit `2b6ac803` stays reachable from `main`; the evidence trace gate is green on `main` after each merge. Each PR received a "Merge main into <branch>" commit before its merge because `main` requires an up-to-date branch. Those commits carried no content of their own: the trees of the stacked branches (#604, #607, #608) did not change; #606, #603 and #610 took the content of `main` into their branches; #609's merge commit holds one conflict resolution, the row order of the ADR index. The admin bypass of the rule was available and was not used. The rebased workstation lanes sit on `c90382a9`, one merge (#610: `tools/flight-tune-aviate/Cargo.toml`, `ci.yml`, the dependency allowlist) behind `main`; the lanes do not touch those files.
+
+Merge log: `~/rlcd/merge-train.log`. `main` is `34952d00`; CI and the evidence trace gate are green on `main` through `c90382a9`, at `34952d00` the evidence trace gate is green and the CI run was in progress when this report was written (the merged tree equals the tree that #610's own CI passed).
+
+## Where things are
+
+| Thing | Place |
+| --- | --- |
+| Claw worktrees of the merged branches | `~/Pilotage` (agent-core), `~/Pilotage-agent-web`, `~/Pilotage-agent-lowering`, `~/Pilotage-mission-actions`, `~/Pilotage-indicate-local` (remote `github`, NOT `origin`), `~/Pilotage-adr43`, `~/Pilotage-nightly` (#610) |
+| GDL 90 codec crate | `~/Gdl90` = github.com/luofang34/Gdl90 (private), commit `b5b4056a` |
+| Browser E2E rig, run logs, video builder | `~/rlcd/e2e/` |
+| Videos | `~/rlcd/video/` and the workstation `~/Movies/sokoly-autonomy-browser-agent.mp4` |
+| Session scripts | `~/rlcd/web_sim_{up,wait,reset,down}.sh`, `gz_pose.sh`, `live_demo.sh`, `eval_run.sh` |
+| Held-out evaluation, run 3 (current checks) | `~/rlcd/eval/held3.log`, `~/rlcd/eval/atc-heldout-01/*-run3/summary.json` |
+| Verification logs | `~/verify/*.log` |
+| Every probe, evaluation and flight, failures included | `~/rlcd/probe-log.md` |
+
+## Measured in phase 4
+
+- Independent review (four reviewer agents: agent core, headless tool + gateway + adapters, client module, Indicate ABI). Three blockers, all fixed and re-verified: silent no-op of `land`/`hold` during arming or climb (now a typed `NoEffect` refusal), `quit` on the ground flew a return-to-base (phase guard), an FPV-scope toggle under the agent reinterpreted the velocity demand as attitude (the agent is released before every scope, mode, reset, feel or authority change).
+- Held-out suite with the current checks (46 ATC-style cases, run 3): gemma4:e4b 45 correct (0 wrong flown, 1 stopped), Qwen2.5-1.5B 36 (3 / 7), keyword baseline 31 (2 / 1), the "RLCD" engine 19 (3 / 21). No correct answer was stopped by the checks in any run.
+- Browser E2E with the fixed runtime: runs 3 to 7 all 11 of 11 (run 1: 10 of 11, a rig probe; run 2: lost to the rig).
+- Pilotage's Apple binding reads GDL 90 through the `gdl90` crate with the PINNED AeroLink 241970ee: check, clippy, fmt, 59 tests on claw; iOS simulator build on the workstation. This is on the workstation lane #600, not yet pushed.
+
+## Left for the owner
+
+1. **Publish the rebased workstation stack.** `~/Pilotage` on the workstation has #598/#599/#600 rebased onto the merged `main` (`c90382a9`) with conflicts resolved, the lockfile, five gate fixes and the `gdl90` dependency. Verified after the last rebase: `cargo check --locked` of the workspace and of the Apple binding, 59 binding tests (claw, `~/verify/lanes-locked.log`, `~/verify/lanes-ffi.log`), and the local iOS simulator build (BUILD SUCCEEDED, workstation scratchpad `xcodebuild_rebased2.log`). The push rewrites three remote branches and my session was refused it. Run `but push feat/mission-planner` there.
+2. **Gdl90 visibility.** The repository is private, so GitHub refuses its CI for billing and the Pilotage `apple-client` job cannot fetch it. Make it public (a codec of a public specification) or add `GDL90_DEPLOY_KEY` to the Pilotage secrets and the `apple-client` job. AeroLink adoption: aero-link issue #100.
+3. **#606**: the mission schema version stays at 3 for additive variants. Say if you want a version change.
+4. `xtask` test `viewer_server_sets_cache_control_no_store` fails on claw on `main` (3 of 3, also with no session running). Cause not found.
+5. Small follow-ups from the review, not done: `try_send` on the operator-line queue, stdin blocking the runtime at exit, typed error in the gateway CLI, `--help` on stderr, the ledger key, exit status 3 on a cooperative yield without a `LiveEnded` line; `surveillance-gdl90` and `airmass-gdl90` mappings; `SituationClientModel.swift` 655 lines and two `check-apple-client.sh` rules on the #598–#600 lanes.
+6. Merge queue: `main` requires up-to-date branches, so a seven-PR train cost seven CI cycles. A merge queue would batch them.
+7. Still open from phase 2: `brew trust osrf/simulation` (not run; Gazebo is from conda, so no simulator camera), the 26 uncommitted Indicate files on the workstation (another agent's session).

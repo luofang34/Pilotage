@@ -53,6 +53,7 @@ fn a_report_becomes_an_si_sample_under_the_fc_state_role() {
     assert_eq!(sample.time_remaining_s, Some(900));
     assert_eq!(sample.stamp.role, SourceRole::FcState);
     assert_eq!(sample.stamp.sequence, 4);
+    assert_eq!(sample.stamp.source_id, BATTERY_SOURCE_ID);
     assert_eq!(sample.stamp.clock, MeasurementClock::HostMonotonic);
 }
 
@@ -123,4 +124,29 @@ fn a_battery_report_rides_beside_the_estimate() {
         assert!(sample.avionics.is_some());
         assert_eq!(sample.battery.and_then(|b| b.remaining_fraction), Some(0.8));
     }
+}
+
+#[test]
+fn only_the_primary_battery_is_kept() {
+    let state = Arc::new(Mutex::new(LinkState::default()));
+    let second = FcMessage::BatteryStatus {
+        instance: 1,
+        remaining_percent: Some(10),
+        voltage_mv: None,
+        current_ca: None,
+        energy_consumed_hj: None,
+        time_remaining_s: None,
+    };
+    let now = Instant::now();
+    apply_messages_at(
+        &state,
+        &[(SOURCE, battery_message(Some(90))), (SOURCE, second)],
+        0,
+        0,
+        now,
+    );
+    let latest = state.lock().expect("state");
+    let kept = latest.battery.expect("primary kept");
+    assert_eq!((kept.instance, kept.remaining_percent), (0, Some(90)));
+    assert_eq!(latest.other_battery_reports, 1);
 }
