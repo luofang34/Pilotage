@@ -71,8 +71,9 @@ Planes are contract boundaries; deployables are a deployment decision.
 | Navdata | Cycle-dated NASR and CIFP baseline | [ADR-0036](adr/0036-situational-domain-ownership.md) |
 | FlightPlanning | Plan drafts, resolution, validation, filing state, and immutable revisions | [ADR-0036](adr/0036-situational-domain-ownership.md) |
 | Briefing | Immutable evidence results from fixed inputs | [ADR-0036](adr/0036-situational-domain-ownership.md) |
+| Aircraft | Aircraft profile, loading, live engine, fuel, and battery state, and derived performance results | [ADR-0046](adr/0046-an-aircraft-domain-owns-configuration-performance-and-fuel.md) |
 | AeroContext (repository `v99n62`) | Temporary compatibility facade for existing consumers | [ADR-0036](adr/0036-situational-domain-ownership.md) |
-| Pilotage host | Composition, session and authority services, media endpoint, and read-only `SituationView` | [ADR-0003](adr/0003-separate-responsibility-planes.md), [ADR-0004](adr/0004-host-oriented-topology.md), [ADR-0023](adr/0023-vehicle-side-decomposition-fc-navigate-communicate.md), [ADR-0036](adr/0036-situational-domain-ownership.md) |
+| Pilotage host | Composition, session and authority services, media endpoint, read-only `SituationView`, and the agent context port. The composition is a library that an EFB can embed | [ADR-0003](adr/0003-separate-responsibility-planes.md), [ADR-0004](adr/0004-host-oriented-topology.md), [ADR-0023](adr/0023-vehicle-side-decomposition-fc-navigate-communicate.md), [ADR-0036](adr/0036-situational-domain-ownership.md), [ADR-0045](adr/0045-the-host-is-a-library-that-a-client-can-embed.md), [ADR-0047](adr/0047-agents-read-one-context-port-and-act-through-intents.md) |
 | Operator client | Shared function modules selected from source data, platform ports, and authorization | [ADR-0037](adr/0037-modular-operator-client-composition.md), [ADR-0029](adr/0029-panel-layout-look-plugins.md) |
 | Coordination server (optional) | Identity, host registry, rendezvous, entitlement-gated data services | [ADR-0027](adr/0027-optional-coordination-server.md) |
 

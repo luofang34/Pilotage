@@ -48,6 +48,12 @@ One file per decision, numbered in acceptance order. See
 | [0042](0042-agent-client-module-and-model-port.md) | Compose an agent as a client module behind a model port | Proposed |
 | [0043](0043-gdl90-codec-of-its-own.md) | Keep the GDL 90 codec in a crate of its own | Proposed |
 | [0044](0044-one-logical-store-for-offline-data.md) | One logical store for offline data on every platform | Proposed |
+| [0045](0045-the-host-is-a-library-that-a-client-can-embed.md) | The host is a library that a client can embed | Proposed |
+| [0046](0046-an-aircraft-domain-owns-configuration-performance-and-fuel.md) | An aircraft domain owns configuration, performance, and fuel | Proposed |
+| [0047](0047-agents-read-one-context-port-and-act-through-intents.md) | Agents read one context port and act only through authority-checked intents | Proposed |
+| [0048](0048-a-pack-follows-the-planned-route.md) | A pack follows the planned route and is checked before flight | Proposed |
+| [0049](0049-collaboration-ready-records-and-authority.md) | Shared records and authority are ready for collaboration across organizations | Proposed |
+| [0050](0050-authentication-and-authorization-across-organizations.md) | Authentication and authorization across units and organizations | Proposed |
 
 ## Provenance
 
