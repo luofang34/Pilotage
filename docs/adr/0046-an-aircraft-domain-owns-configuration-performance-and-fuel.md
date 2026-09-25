@@ -15,9 +15,14 @@ performance. Both need data about the aircraft itself:
 - the fuel system: tanks, capacities, and usable fuel,
 - the live state: engine parameters, fuel quantity, and fuel flow.
 
-No domain owns this data. ADR-0018 carries avionics telemetry, which contains
-some live engine values. Nothing owns the static configuration or the derived
-results.
+No domain owns this data. ADR-0018 carries attitude, motion, and estimator
+state. It carries no engine or fuel values. No link that Pilotage reads
+decodes engine, fuel, or battery records: `avionics-link` has no such records,
+and the MAVLink, PX4, and X-Plane adapters do not decode them. Nothing owns
+the static configuration, the live state, or the derived results.
+
+The vehicles that Pilotage flies in simulation are electric. For them, the
+only onboard energy is the battery.
 
 ## Decision
 
@@ -56,3 +61,8 @@ each profile. It makes no airworthiness or certification claim.
   same profile that the onboard host uses.
 - The profile schema, the first calculators, and the `avionics-link` engine
   and fuel adapters are tracked as separate work.
+- A live-state adapter needs a link that carries engine, fuel, or battery
+  records first. Until then, the calculators use the fuel in the loading
+  record only.
+- The profile must tell whether the aircraft stores fuel or battery energy.
+  The calculators must not treat battery energy as litres of fuel.
