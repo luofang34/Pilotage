@@ -36,6 +36,7 @@ pub fn weight_and_balance(
             profile: id.0,
         });
     }
+    loading.remaining(profile)?;
     let items = loaded_items(profile, loading)?;
     let weight = profile.empty_weight_kg + items.iter().map(|(kg, _)| kg).sum::<f64>();
     let moment = profile.empty_weight_kg * profile.empty_arm_m

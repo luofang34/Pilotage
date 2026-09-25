@@ -1,6 +1,6 @@
 //! Endurance and range from the energy on board.
 
-use crate::{AircraftError, AircraftProfile, Draw, EnergyStore, ProfileId};
+use crate::{AircraftError, AircraftProfile, Draw, EnergyStore, Loading, ProfileId};
 
 /// Usable energy on board, in the unit of its store.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -24,6 +24,54 @@ impl Remaining {
             (Self::FuelL(_), EnergyStore::Fuel { .. })
                 | (Self::BatteryWh(_), EnergyStore::Battery { .. })
         )
+    }
+}
+
+impl Loading {
+    /// Usable energy that this loading puts on board: the sum of the tank
+    /// fuel, or the start-of-flight battery energy.
+    ///
+    /// # Errors
+    /// Refuses a loading for another profile, an unknown tank, fuel outside a
+    /// tank capacity, a battery value outside the battery capacity, and
+    /// energy of the other store kind.
+    pub fn remaining(&self, profile: &AircraftProfile) -> Result<Remaining, AircraftError> {
+        let id = profile.id()?;
+        if self.profile != id {
+            return Err(AircraftError::ProfileMismatch {
+                loading: self.profile.0.clone(),
+                profile: id.0,
+            });
+        }
+        let refuse = |reason| AircraftError::InvalidLoading {
+            name: "energy".into(),
+            reason,
+        };
+        match (&profile.energy, self.battery_wh) {
+            (EnergyStore::Fuel { tanks, .. }, None) => {
+                let litres = self.fuel_l.iter().map(|(name, litres)| {
+                    let tank = tanks.iter().find(|t| &t.name == name);
+                    match tank {
+                        Some(t)
+                            if litres.is_finite() && *litres >= 0.0 && *litres <= t.usable_l =>
+                        {
+                            Ok(*litres)
+                        }
+                        Some(_) => Err(refuse("fuel outside the tank capacity")),
+                        None => Err(refuse("unknown tank")),
+                    }
+                });
+                Ok(Remaining::FuelL(litres.sum::<Result<f64, _>>()?))
+            }
+            (EnergyStore::Battery { usable_wh }, Some(wh)) if self.fuel_l.is_empty() => {
+                if wh.is_finite() && wh >= 0.0 && wh <= *usable_wh {
+                    Ok(Remaining::BatteryWh(wh))
+                } else {
+                    Err(refuse("battery energy outside the battery capacity"))
+                }
+            }
+            _ => Err(refuse("fuel and battery quantities do not mix")),
+        }
     }
 }
 

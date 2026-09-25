@@ -8,6 +8,7 @@ fn loading(front: f64, rear: f64, fuel: f64) -> Loading {
         revision: 3,
         stations_kg: vec![("front".into(), front), ("rear".into(), rear)],
         fuel_l: vec![("main".into(), fuel)],
+        battery_wh: None,
     }
 }
 
@@ -52,16 +53,20 @@ fn a_battery_aircraft_has_no_fuel_to_load() {
         revision: 1,
         stations_kg: vec![("payload".into(), 0.3)],
         fuel_l: vec![],
+        battery_wh: Some(80.0),
     };
     let wb = weight_and_balance(&p, &l).expect("wb");
     assert!((wb.weight_kg - 2.3).abs() < 1e-9);
     assert!(wb.within_max_weight && wb.within_envelope);
     l.fuel_l.push(("main".into(), 1.0));
-    assert!(matches!(
-        weight_and_balance(&p, &l),
-        Err(AircraftError::InvalidLoading {
-            reason: "unknown tank",
-            ..
-        })
-    ));
+    assert!(
+        weight_and_balance(&p, &l).is_err(),
+        "no fuel on a battery aircraft"
+    );
+    let mut fuel = loading(170.0, 0.0, 100.0);
+    fuel.battery_wh = Some(1.0);
+    assert!(
+        weight_and_balance(&trainer(), &fuel).is_err(),
+        "no battery entry on a fuel aircraft"
+    );
 }

@@ -203,6 +203,10 @@ pub struct Loading {
     pub stations_kg: Vec<(String, f64)>,
     /// Fuel in each named tank, in litres. Empty for a battery aircraft.
     pub fuel_l: Vec<(String, f64)>,
+    /// Usable battery energy at the start of the flight, in watt-hours. Only
+    /// a battery aircraft has it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub battery_wh: Option<f64>,
 }
 
 #[cfg(test)]

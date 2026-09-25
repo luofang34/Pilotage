@@ -1,5 +1,6 @@
 #![allow(clippy::expect_used)]
 use super::*;
+use crate::Loading;
 use crate::profile::tests::{multirotor, trainer};
 
 fn fuel(usable_l: f64, flow: Option<f64>) -> EnergyState {
@@ -59,4 +60,44 @@ fn fuel_and_battery_quantities_do_not_mix() {
     let mut crossed = battery(80.0, None);
     crossed.measured_draw = Some(Draw::FuelFlowLph(30.0));
     assert!(refused(endurance(&multirotor(), crossed, 0.0)));
+}
+
+#[test]
+fn a_loading_gives_the_start_of_flight_energy() {
+    let p = multirotor();
+    let mut l = Loading {
+        profile: p.id().expect("id"),
+        revision: 1,
+        stations_kg: vec![],
+        fuel_l: vec![],
+        battery_wh: Some(80.0),
+    };
+    assert_eq!(
+        l.remaining(&p).expect("remaining"),
+        Remaining::BatteryWh(80.0)
+    );
+    l.battery_wh = Some(81.0);
+    assert!(l.remaining(&p).is_err(), "more than the battery holds");
+    l.battery_wh = None;
+    assert!(
+        l.remaining(&p).is_err(),
+        "a battery aircraft needs a charge"
+    );
+
+    let t = trainer();
+    let fuel = Loading {
+        profile: t.id().expect("id"),
+        revision: 1,
+        stations_kg: vec![],
+        fuel_l: vec![("main".into(), 60.0)],
+        battery_wh: None,
+    };
+    assert_eq!(
+        fuel.remaining(&t).expect("remaining"),
+        Remaining::FuelL(60.0)
+    );
+    assert!(
+        fuel.remaining(&p).is_err(),
+        "a loading names its own profile"
+    );
 }
