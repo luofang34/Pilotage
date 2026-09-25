@@ -36,7 +36,7 @@ validity.
 |---|---|---|
 | Aircraft profile | Versioned and hashed, like calibration records (ADR-0021) | Operator, manufacturer data, or an installed pack |
 | Loading | One record for each flight, with revisions | Operator or mission plan |
-| Live engine and fuel state | Stamped samples with source and clock (ADR-0009) | `avionics-link` adapters |
+| Live engine, fuel, and battery state | Stamped samples with source and clock (ADR-0009) | `avionics-link` adapters for engine and fuel; MAVLink battery telemetry for electric vehicles |
 | Derived results | Immutable results that name their inputs | The domain's calculators |
 
 A derived result, such as endurance, range, or a weight-and-balance check,
@@ -62,7 +62,8 @@ each profile. It makes no airworthiness or certification claim.
 - The profile schema, the first calculators, and the `avionics-link` engine
   and fuel adapters are tracked as separate work.
 - A live-state adapter needs a link that carries engine, fuel, or battery
-  records first. Until then, the calculators use the fuel in the loading
-  record only.
+  records first. The endurance calculator accepts a measured fuel flow, but
+  no adapter supplies one. Until an adapter exists, the fuel state comes from
+  the loading record.
 - The profile must tell whether the aircraft stores fuel or battery energy.
   The calculators must not treat battery energy as litres of fuel.
