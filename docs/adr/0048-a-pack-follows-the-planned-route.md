@@ -8,12 +8,15 @@
 An operator must prepare all the data for a flight in one step: select the
 route or the area, and download everything. The data includes navigation data
 (NASR and CIFP), charts, terrain, obstacles, imagery, and visual reference
-features. The same data must be available on the web client, the iPad, and
-the onboard host.
+features. Visual reference features are map data. `navigate-visual` makes
+reference views from them and matches camera frames against those views
+(Navigate ADR-0007). The same data must be available on the web
+client, the iPad, and the onboard host.
 
-These parts exist:
+These parts exist or are proposed:
 
-- signed catalogs, releases, and installation (`pilotage-data-packages`),
+- signed catalogs, releases, and installation, from the offline aviation
+  data work,
 - route and area coverage planning (`navigate-imagery`),
 - content-addressed chunks and package lineage (Navigate),
 - one logical store with storage classes (ADR-0044).
@@ -34,7 +37,7 @@ A `PackSpec` names:
 Some products have national coverage: the pack includes the whole release,
 for example a NASR cycle. Other products are tiled: the pack includes the
 tiles inside the corridor, for example terrain, obstacles, imagery, charts,
-and visual reference features (Navigate ADR-0009).
+and visual reference features.
 
 Resolving a spec gives a `PackPlan`: the chunks for each product, the total
 size, and the size that is not installed yet. The operator sees the size
@@ -49,23 +52,24 @@ Briefing domain. Agents (ADR-0047) and the EFB read the same result.
 
 ### Currency
 
-Each release has a validity period: 28 days for AIRAC data and 56 days for
-NASR. A pack shows its state: current, expiring, or expired. An update
+Each release has a validity period. The period is 28 days for NASR and CIFP
+data. The period is 56 days for charts. A pack shows its state: current, expiring, or expired. An update
 downloads only the changed chunks, because releases share chunks.
 
 ### Delivery between devices
 
 The EFB can download a pack on a ground network and deliver it to the onboard
-host over the session bulk class (ADR-0011). The host requests only the
+host over the Bulk configuration message class (ADR-0011). The host requests only the
 chunks it does not have. The transfer can resume after an interruption,
 because each chunk is identified by its digest.
 
 ### Platform limits
 
 - The web client compares the pack size with the storage quota before the
-  download, and offers a lower imagery zoom when the pack does not fit.
-- Packs use the `Offline` storage class (ADR-0044). On Apple platforms they
-  are excluded from backup.
+  download. When the pack does not fit, the web client offers a lower
+  imagery zoom.
+- Packs use the `Offline` storage class (ADR-0044). On Apple platforms, the
+  Apple host excludes the `Offline` root from backup.
 - Licensed products require an entitlement (ADR-0027).
 
 ### Performance

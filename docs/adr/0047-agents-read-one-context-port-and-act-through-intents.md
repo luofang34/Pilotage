@@ -36,11 +36,19 @@ does not change.
 
 ### Actions are intents
 
-An agent never calls a domain or an adapter to act. It submits an intent,
-such as "change the destination" or "request a hold", as an automation-class
-principal (ADR-0025). The authority engine checks the intent against the
-agent's scopes and leases, like an intent from a person. Escalation rules
-apply.
+An **intent** is a typed request from a principal for a change in mission or
+vehicle state, such as "change the destination" or "request a hold". The
+authority engine checks an intent before a domain or an adapter acts on it.
+
+An agent never calls a domain or an adapter to act. It submits an intent as
+an automation-class principal (ADR-0025). The authority engine checks the
+intent against the agent's scopes and leases, like an intent from a person.
+Escalation rules apply.
+
+A lease request and a discrete action are intents. A typed control frame
+under a held lease (ADR-0042) is not a separate intent. The lease that the
+authority engine granted covers the frame, and fencing (ADR-0006) checks the
+frame.
 
 ### Performance
 
@@ -54,6 +62,15 @@ apply.
 
 - One context serves every agent location. An agent tested against a client
   session works on the onboard host.
-- The model port of ADR-0042 does not change. This decision fixes what the
-  agent reads and how it acts.
+- This decision amends ADR-0042. These parts of ADR-0042 stay: the model
+  port, the agent module in a client, and its lease, control frames, and
+  discrete actions. These parts change:
+  - An agent can also run on the onboard host, as an automation-class
+    principal of the host library. ADR-0042 rejected a model inside the host
+    as a privileged control path. A host agent has no privileged path: the
+    authority engine checks each of its intents.
+  - An agent reads the `AgentContext` port, not only the typed module inputs
+    of the client session.
+  - An agent acts only through intents and through frames under a lease that
+    an intent got.
 - The port surface and the intent vocabulary are tracked as separate work.

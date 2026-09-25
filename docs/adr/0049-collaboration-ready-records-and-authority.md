@@ -22,8 +22,6 @@ Several records already support this:
   many vehicles, and a coordinator host can control members (ADR-0028).
 - The coordination server gives identity, rendezvous, and entitlements, and
   never carries session data (ADR-0027).
-- The coordinated-missions proposal defines missions with participants from
-  several organizations, private assignments, and signed acceptances.
 
 One part blocks collaboration. `PrincipalId`, `VehicleId`, and `SessionId`
 are session-local integers (`pilotage-protocol`). They cannot identify a
@@ -32,8 +30,8 @@ record that stores them loses its meaning when it leaves the session.
 
 ## Decision
 
-This record does not design collaboration. It sets the rules that current
-code must follow, so that collaboration can be added without a redesign.
+This record does not design collaboration. It sets the rules that code
+must follow, so that collaboration can be added without a redesign.
 
 ### 1. Shared records use global, issuer-qualified identities
 
@@ -61,8 +59,10 @@ Each shared record carries:
 - `releasability`: the organizations or roles that can receive it.
 
 The owner filters a record before it leaves its organization. A receiver
-gets only what the owner releases. The coordinated-missions example, where a
-boat receives a site but not an aircraft's track, follows this rule.
+gets only what the owner releases. For example, a mission has an aircraft
+from one organization and a boat from a second organization. The owner
+releases the search site to the boat. The owner does not release the track
+of the aircraft to the boat.
 
 ### 3. Marks and moving targets are domain records, not map drawings
 
@@ -70,6 +70,9 @@ boat receives a site but not an aircraft's track, follows this rule.
 - A moving target is a track of the Surveillance domain (ADR-0036). A report
   from a person is an observation with a source and a confidence, fused like
   any other track source. The map renders the track.
+- ADR-0036 defines the Surveillance domain for traffic. This rule widens the
+  Surveillance domain to non-cooperative tracks, such as a ground vehicle
+  that does not report its position.
 
 The renderer never owns shared state. The same record reaches the map, the
 agent context (ADR-0047), and other organizations.

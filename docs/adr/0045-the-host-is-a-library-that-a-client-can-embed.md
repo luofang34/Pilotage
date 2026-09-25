@@ -40,15 +40,32 @@ exists once.
 ### Local sources join through the same adapters
 
 An EFB's local sources, such as a GDL 90 receiver, downloaded weather, and
-installed packs (ADR-0044), are host adapters in the embedded library. They
+installed packs (ADR-0048), are host adapters in the embedded library. They
 are not client code. When the EFB later connects to an onboard host, the
 same adapters can run there.
 
-### What ADR-0037 keeps
+### What ADR-0037 keeps and what changes
 
 ADR-0037 rejected a local host process. This decision does not add a
-process. The embedded library runs on the app's own threads. The client
-module selection of ADR-0037 does not change.
+process. The embedded library runs on the app's own threads.
+
+These parts of ADR-0037 stay:
+
+- the client modules and the module availability rule (offered inputs,
+  installed platform port, and authorization),
+- the source catalog and its semantic descriptors,
+- the portable client-session core,
+- the rule that JavaScript and Swift do not decode Pilotage messages.
+
+These parts of ADR-0037 change:
+
+- In ADR-0037, local adapters feed typed module inputs inside the client. In
+  this decision, local adapters are host adapters in the embedded library.
+  The client-session core receives their data through the in-process
+  transport, as it receives data from a remote host.
+- In ADR-0037, the transport port moves bytes and stream lifecycle events. In
+  this decision, the in-process transport also carries message values without
+  encoding.
 
 ### Performance
 
@@ -67,5 +84,8 @@ module selection of ADR-0037 does not change.
   at the edges.
 - A client that moves from standalone to connected changes only its
   transport. Its modules and its data do not move.
+- This decision amends ADR-0037. It changes where local adapters run and
+  what the in-process transport carries. It keeps the module selection of
+  ADR-0037.
 - Migration: the local situation composition in the Apple client moves into
   host adapters. This migration is tracked separately.
