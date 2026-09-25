@@ -5,6 +5,9 @@
 /// counts a point on the limit as inside it.
 const ON_EDGE_M: f64 = 1e-9;
 
+/// Area, as a part of the bounding box, below which a polygon is flat.
+const FLAT_RATIO: f64 = 1e-9;
+
 type Point = [f64; 2];
 
 /// Whether the point is inside the envelope or on its boundary.
@@ -20,7 +23,13 @@ pub(crate) fn is_simple(polygon: &[Point]) -> bool {
     let twice_area: f64 = edges(polygon)
         .map(|([w1, a1], [w2, a2])| w1 * a2 - w2 * a1)
         .sum();
-    if n < 3 || twice_area == 0.0 {
+    let span = |axis: usize| {
+        let values = polygon.iter().map(|p| p[axis]);
+        values.clone().fold(f64::MIN, f64::max) - values.fold(f64::MAX, f64::min)
+    };
+    // Relative to the bounding box, so rounding cannot make a flat polygon
+    // look like it has an area.
+    if n < 3 || twice_area.abs() <= FLAT_RATIO * span(0) * span(1) {
         return false;
     }
     let all: Vec<(Point, Point)> = edges(polygon).collect();

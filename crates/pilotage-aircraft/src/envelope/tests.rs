@@ -27,5 +27,7 @@ fn a_crossing_or_flat_polygon_is_not_simple() {
     assert!(!is_simple(&bowtie));
     let flat = [[700.0, 1.0], [900.0, 1.0], [1100.0, 1.0]];
     assert!(!is_simple(&flat));
+    let rounded_flat = [[700.0, 0.89], [900.0, 0.99], [1100.0, 1.09]];
+    assert!(!is_simple(&rounded_flat));
     assert!(!is_simple(&TRAINER[..2]));
 }

@@ -53,6 +53,17 @@ impl Loading {
                 profile: id.0,
             });
         }
+        let offered = match &profile.energy {
+            EnergyStore::Fuel { .. } if self.battery_wh.is_some() => Some("battery"),
+            EnergyStore::Battery { .. } if !self.fuel_l.is_empty() => Some("fuel"),
+            _ => None,
+        };
+        if let Some(offered) = offered {
+            return Err(AircraftError::EnergyKindMismatch {
+                store: profile.energy.kind(),
+                offered,
+            });
+        }
         let stations = entries(&self.stations_kg, &profile.stations, |s| {
             (s.name.as_str(), s.max_kg)
         })?;
@@ -60,27 +71,17 @@ impl Loading {
             (t.name.as_str(), t.usable_l)
         })?;
         let remaining = match (&profile.energy, self.battery_wh) {
-            (EnergyStore::Fuel { .. }, None) => {
+            (EnergyStore::Fuel { .. }, _) => {
                 Remaining::FuelL(tanks.iter().map(|(_, litres)| litres).sum())
             }
-            (EnergyStore::Battery { usable_wh }, Some(wh)) if self.fuel_l.is_empty() => {
+            (EnergyStore::Battery { usable_wh }, Some(wh)) => {
                 if !(wh.is_finite() && wh >= 0.0 && wh <= *usable_wh) {
                     return Err(invalid("battery_wh", "outside the battery capacity"));
                 }
                 Remaining::BatteryWh(wh)
             }
-            (EnergyStore::Battery { .. }, None) if self.fuel_l.is_empty() => {
+            (EnergyStore::Battery { .. }, None) => {
                 return Err(invalid("battery_wh", "missing for a battery aircraft"));
-            }
-            (store, _) => {
-                return Err(AircraftError::EnergyKindMismatch {
-                    store: store.kind(),
-                    offered: if store.kind() == "fuel" {
-                        "battery"
-                    } else {
-                        "fuel"
-                    },
-                });
             }
         };
         Ok(CheckedLoading {
@@ -116,6 +117,9 @@ fn entries<'a, T>(
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests;
 
 fn invalid(name: &str, reason: &'static str) -> AircraftError {
     AircraftError::InvalidLoading {

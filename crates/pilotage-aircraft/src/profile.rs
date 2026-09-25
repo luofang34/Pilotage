@@ -157,10 +157,11 @@ impl AircraftProfile {
     /// encoding failure.
     pub fn id(&self) -> Result<ProfileId, AircraftError> {
         self.validate()?;
-        let mut value = serde_json::to_value(self).map_err(AircraftError::Encoding)?;
-        unsign_zeros(&mut value);
-
-        let bytes = serde_json::to_vec(&value).map_err(AircraftError::Encoding)?;
+        // Serializing the struct itself keeps the declared field order; a
+        // `serde_json::Value` map would sort or keep keys depending on a
+        // feature that any crate in the build can enable.
+        let bytes =
+            serde_json::to_vec(&self.without_negative_zeros()).map_err(AircraftError::Encoding)?;
         Ok(ProfileId(format!("{:x}", Sha256::digest(bytes))))
     }
 
@@ -201,6 +202,12 @@ impl AircraftProfile {
                     && self.cruise.draw.matches(&self.energy),
             ),
         ];
+        if self.cg_envelope.len() > 1 && self.cg_envelope.first() == self.cg_envelope.last() {
+            return Err(AircraftError::InvalidProfileEntry {
+                name: "cg_envelope".into(),
+                reason: "last vertex repeats the first; list each vertex once",
+            });
+        }
         if let Some((field, _)) = checks.iter().find(|(_, ok)| !ok) {
             return Err(AircraftError::InvalidProfile { field });
         }
@@ -234,6 +241,40 @@ impl AircraftProfile {
         Ok(())
     }
 
+    /// A copy with every negative zero made positive. Adding positive zero
+    /// changes no other value.
+    fn without_negative_zeros(&self) -> Self {
+        let z = |v: f64| v + 0.0;
+        let mut p = self.clone();
+        p.empty_weight_kg = z(p.empty_weight_kg);
+        p.empty_arm_m = z(p.empty_arm_m);
+        p.max_takeoff_weight_kg = z(p.max_takeoff_weight_kg);
+        match &mut p.energy {
+            EnergyStore::Fuel {
+                density_kg_per_l,
+                tanks,
+            } => {
+                *density_kg_per_l = z(*density_kg_per_l);
+                for t in tanks {
+                    t.arm_m = z(t.arm_m);
+                    t.usable_l = z(t.usable_l);
+                }
+            }
+            EnergyStore::Battery { usable_wh } => *usable_wh = z(*usable_wh),
+        }
+        for s in &mut p.stations {
+            s.arm_m = z(s.arm_m);
+            s.max_kg = z(s.max_kg);
+        }
+        p.cg_envelope.iter_mut().flatten().for_each(|v| *v = z(*v));
+        p.cruise.true_airspeed_mps = z(p.cruise.true_airspeed_mps);
+        p.cruise.draw = match p.cruise.draw {
+            Draw::FuelFlowLph(v) => Draw::FuelFlowLph(z(v)),
+            Draw::PowerW(v) => Draw::PowerW(z(v)),
+        };
+        p
+    }
+
     /// Fuel tanks. A battery aircraft has none.
     #[must_use]
     pub fn tanks(&self) -> &[Tank] {
@@ -241,17 +282,6 @@ impl AircraftProfile {
             EnergyStore::Fuel { tanks, .. } => tanks,
             EnergyStore::Battery { .. } => &[],
         }
-    }
-}
-
-fn unsign_zeros(value: &mut serde_json::Value) {
-    match value {
-        serde_json::Value::Number(n) if n.as_f64() == Some(0.0) => {
-            *n = serde_json::Number::from(0);
-        }
-        serde_json::Value::Array(items) => items.iter_mut().for_each(unsign_zeros),
-        serde_json::Value::Object(fields) => fields.values_mut().for_each(unsign_zeros),
-        _ => {}
     }
 }
 

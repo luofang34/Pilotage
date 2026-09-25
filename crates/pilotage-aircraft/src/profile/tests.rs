@@ -169,3 +169,23 @@ fn equal_profiles_hash_equal_and_non_finite_profiles_have_no_hash() {
     nan.empty_arm_m = f64::NAN;
     assert!(nan.id().is_err());
 }
+
+#[test]
+fn the_profile_id_is_pinned() {
+    // A change here re-keys every stored loading, so it must be deliberate.
+    assert_eq!(
+        trainer().id().expect("id").0,
+        "653abfeb9b5dc3b12dc89e09e44b0ff346942017e87d02539da310f595e8777a"
+    );
+}
+
+#[test]
+fn a_closed_ring_envelope_is_refused_with_its_reason() {
+    let mut p = trainer();
+    let first = p.cg_envelope[0];
+    p.cg_envelope.push(first);
+    assert!(matches!(
+        p.validate(),
+        Err(AircraftError::InvalidProfileEntry { ref name, .. }) if name == "cg_envelope"
+    ));
+}

@@ -1,6 +1,5 @@
 #![allow(clippy::expect_used, clippy::panic)]
 use super::*;
-use crate::Loading;
 use crate::profile::tests::{multirotor, trainer};
 
 fn fuel(usable_l: f64, flow: Option<f64>) -> EnergyState {
@@ -102,85 +101,4 @@ fn invalid_energy_states_are_refused_with_a_reason() {
         reason(endurance(&multirotor(), battery(80.0, Some(0.0)), 0.0)),
         "draw is not positive"
     );
-}
-
-#[test]
-fn a_loading_gives_the_start_of_flight_energy() {
-    let p = multirotor();
-    let mut l = Loading {
-        profile: p.id().expect("id"),
-        revision: 1,
-        stations_kg: vec![],
-        fuel_l: vec![],
-        battery_wh: Some(80.0),
-    };
-    assert_eq!(
-        l.remaining(&p).expect("remaining"),
-        Remaining::BatteryWh(80.0)
-    );
-    l.battery_wh = Some(81.0);
-    assert!(l.remaining(&p).is_err(), "more than the battery holds");
-    l.battery_wh = None;
-    assert!(
-        l.remaining(&p).is_err(),
-        "a battery aircraft needs a charge"
-    );
-
-    let t = trainer();
-    let fuel = Loading {
-        profile: t.id().expect("id"),
-        revision: 1,
-        stations_kg: vec![],
-        fuel_l: vec![("main".into(), 60.0)],
-        battery_wh: None,
-    };
-    assert_eq!(
-        fuel.remaining(&t).expect("remaining"),
-        Remaining::FuelL(60.0)
-    );
-    assert!(
-        fuel.remaining(&p).is_err(),
-        "a loading names its own profile"
-    );
-}
-
-#[test]
-fn a_repeated_or_unknown_tank_is_refused_by_name() {
-    let t = trainer();
-    let mut l = Loading {
-        profile: t.id().expect("id"),
-        revision: 1,
-        stations_kg: vec![],
-        fuel_l: vec![("main".into(), 150.0), ("main".into(), 150.0)],
-        battery_wh: None,
-    };
-    assert!(matches!(
-        l.remaining(&t),
-        Err(AircraftError::InvalidLoading { ref name, reason: "listed twice" }) if name == "main"
-    ));
-    l.fuel_l = vec![("aux".into(), 10.0)];
-    assert!(matches!(
-        l.remaining(&t),
-        Err(AircraftError::InvalidLoading { ref name, reason: "not in the profile" })
-            if name == "aux"
-    ));
-}
-
-#[test]
-fn a_loading_is_checked_against_a_valid_profile_only() {
-    let mut p = multirotor();
-    p.energy = EnergyStore::Battery {
-        usable_wh: f64::INFINITY,
-    };
-    let l = Loading {
-        profile: ProfileId("any".into()),
-        revision: 1,
-        stations_kg: vec![],
-        fuel_l: vec![],
-        battery_wh: Some(1e300),
-    };
-    assert!(matches!(
-        l.remaining(&p),
-        Err(AircraftError::InvalidProfile { field: "energy" })
-    ));
 }
