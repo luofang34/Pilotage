@@ -28,6 +28,8 @@ impl Default for LinkState {
             started_at: Instant::now(),
             truth_origin: None,
             gimbal_device: None,
+            battery: None,
+            other_battery_reports: 0,
             last_command_ack: None,
             gimbal_configure_ack: None,
             last_heartbeat: None,

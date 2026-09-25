@@ -154,6 +154,29 @@ pub struct GimbalDeviceAttitude {
     pub received_at: Instant,
 }
 
+/// The latest battery report, in wire units, with its receive stamp.
+/// BATTERY_STATUS carries no time of its own, so the receive time is the
+/// only acquisition time. The link keeps the report of instance 0 only.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BatteryReport {
+    /// Battery instance on the vehicle.
+    pub instance: u8,
+    /// Remaining capacity, percent.
+    pub remaining_percent: Option<u8>,
+    /// Pack voltage, millivolts.
+    pub voltage_mv: Option<u32>,
+    /// Current out of the battery, centiamperes.
+    pub current_ca: Option<i16>,
+    /// Energy used since the battery was connected, hectojoules.
+    pub energy_consumed_hj: Option<i32>,
+    /// Time until empty at the present draw, seconds.
+    pub time_remaining_s: Option<u32>,
+    /// Wrapping count of battery reports received on this link.
+    pub sequence: u32,
+    /// When this report was received.
+    pub received_at: Instant,
+}
+
 /// One command acknowledgement with its receive stamp.
 #[derive(Debug, Clone, Copy)]
 pub struct CommandAckReport {

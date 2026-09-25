@@ -6,7 +6,7 @@
 use std::sync::{Arc, Mutex};
 
 use pilotage_adapter_api::{
-    AvionicsAttitudeSample, AvionicsKinematicsSample, AvionicsSample, FcStateSample,
+    AvionicsAttitudeSample, AvionicsKinematicsSample, AvionicsSample, BatterySample, FcStateSample,
     GimbalAttitudeSample, MeasurementClock, MeasurementStamp, SourceIncarnation, SourceIntegrity,
     SourceRole, TelemetryBatch, TelemetrySample,
 };
@@ -152,6 +152,7 @@ pub(super) fn mavlink_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -
             sim_truth: None,
             fc_state: None,
             gimbal: None,
+            battery: None,
         }],
     }
 }
@@ -276,6 +277,44 @@ impl super::Px4Adapter {
             failure_flags: device.failure_flags,
             stamp: self.gimbal_stamp.stamp_for(device.time_boot_ms),
         })
+    }
+}
+
+/// Reports that the flight controller sends beside its estimate, each under
+/// its own stamp.
+#[derive(Clone, Copy)]
+pub(super) struct VehicleReports {
+    pub(super) fc_state: Option<FcStateSample>,
+    pub(super) gimbal: Option<GimbalAttitudeSample>,
+    pub(super) battery: Option<BatterySample>,
+}
+
+impl VehicleReports {
+    pub(super) fn any(&self) -> bool {
+        self.fc_state.is_some() || self.gimbal.is_some() || self.battery.is_some()
+    }
+
+    pub(super) fn attach(self, batch: &mut TelemetryBatch) {
+        for sample in &mut batch.samples {
+            sample.fc_state = self.fc_state;
+            sample.gimbal = self.gimbal;
+            sample.battery = self.battery;
+        }
+    }
+}
+
+/// A sample with no avionics group, to carry the vehicle reports alone.
+pub(super) fn report_only_sample(vehicle: VehicleId, tick: SimTick) -> TelemetrySample {
+    TelemetrySample {
+        vehicle,
+        tick,
+        pose: None,
+        speed: None,
+        avionics: None,
+        sim_truth: None,
+        fc_state: None,
+        gimbal: None,
+        battery: None,
     }
 }
 
