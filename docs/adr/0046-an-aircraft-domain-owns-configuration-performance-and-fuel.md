@@ -19,9 +19,9 @@ and takeoff performance. Both need data about the aircraft itself:
 
 No domain owns this data. ADR-0018 carries attitude, motion, and estimator
 state. It carries no engine, fuel, or battery values. No link that Pilotage
-reads decodes engine, fuel, or battery records. No `avionics-link` adapter
-exists in Pilotage. The MAVLink adapters do not decode battery records. The
-X-Plane path, `crates/pilotage-xplane-trial`, does not decode fuel records.
+reads decodes engine or fuel records. No `avionics-link` adapter exists in
+Pilotage. The X-Plane path, `crates/pilotage-xplane-trial`, does not decode
+fuel records. Only the PX4 adapter decodes battery records.
 Nothing owns the static configuration, the live state, or the derived
 results.
 
