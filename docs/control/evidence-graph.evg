@@ -455,23 +455,23 @@ attr run-id local:57887c15ba4a2c87bf696adf4aa8dc6123795214
 attr outcome pass
 node RESULT-CTRL-SOURCE verification-result
 title input-source coordinator suite — recorded pass
-attr command cargo test -p pilotage-control-web --lib coordinator
-attr config-digest 2b6ac80388816807a96caf2b9151ffceeb564ea2
-attr tool-version rustc 1.98.0 (88d9e12ae 2026-08-18)
+attr command cargo test -p pilotage-control --lib coordinator
+attr config-digest 62f19c4c9e4bac4488c94e8925bfbc884b60e2e8
+attr tool-version rustc 1.99.0 (b940084d7 2026-09-28)
 attr source-digest git-blob:45d56efb1d214d65d3e368ab5a406a59bbbf9990
 attr artifact docs/control/evidence-artifacts/ctrl01/source-coordinator.run.txt
-attr output-digest sha256:952f8c909ad4177908b88bc0a7d628149ca2cdd494a41d927d347a4f80729020
-attr run-id local:2b6ac80388816807a96caf2b9151ffceeb564ea2
+attr output-digest sha256:5c400d92b073dd1b20d97b6ef890886e12b506410597c037f6ac6b88af753bda
+attr run-id local:62f19c4c9e4bac4488c94e8925bfbc884b60e2e8
 attr outcome pass
 node RESULT-CTRL-AGENT verification-result
 title automation input source suite — recorded pass
-attr command cargo test -p pilotage-control-web --lib coordinator::tests::agent
-attr config-digest 2b6ac80388816807a96caf2b9151ffceeb564ea2
-attr tool-version rustc 1.98.0 (88d9e12ae 2026-08-18)
+attr command cargo test -p pilotage-control --lib coordinator::tests::agent
+attr config-digest 62f19c4c9e4bac4488c94e8925bfbc884b60e2e8
+attr tool-version rustc 1.99.0 (b940084d7 2026-09-28)
 attr source-digest git-blob:748915727c4a9d62cd60d4025dac8d59e751378c
 attr artifact docs/control/evidence-artifacts/ctrl01/agent-source.run.txt
-attr output-digest sha256:b39067fbc08f7e8350f0502231091b55b4cf7d77643a472434e486163472b387
-attr run-id local:2b6ac80388816807a96caf2b9151ffceeb564ea2
+attr output-digest sha256:16a184682b509d4384f8e955815f0dbd8daf5826b84ffac57e2dc12979856ce2
+attr run-id local:62f19c4c9e4bac4488c94e8925bfbc884b60e2e8
 attr outcome pass
 node RESULT-CTRL-FIXTURE verification-result
 title browser-encoded wire fixture suite — recorded pass
@@ -546,8 +546,8 @@ attr tree b43ad29521d5ff461ccfb1ccd8abbb47630ce382
 node CFG-CTRL-SOURCE configuration-item
 title committed input-source coordinator verification baseline
 attr scm git
-attr commit 2b6ac80388816807a96caf2b9151ffceeb564ea2
-attr tree e72d943d512b680398eaea265a7d034fe6ac0b20
+attr commit 62f19c4c9e4bac4488c94e8925bfbc884b60e2e8
+attr tree 8fc93d8333feeda16d0912db40ac877f6e99e786
 
 node TOOL-CTRL-CARGO tool
 title cargo test on Rust stable — not DO-330 tool-qualified
