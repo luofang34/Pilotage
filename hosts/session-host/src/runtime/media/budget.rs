@@ -46,7 +46,7 @@ pub(super) struct PressureSignals {
 impl PressureSignals {
     pub(super) fn record_busy_drop(&self) {
         self.busy_drops
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |value| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |value| {
                 Some(value.wrapping_add(1))
             })
             .ok();
@@ -54,7 +54,7 @@ impl PressureSignals {
 
     pub(super) fn record_deadline_stall(&self) {
         self.deadline_stalls
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |value| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |value| {
                 Some(value.wrapping_add(1))
             })
             .ok();
@@ -62,7 +62,7 @@ impl PressureSignals {
 
     pub(super) fn reaper_started(&self) {
         self.active_reapers
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |value| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |value| {
                 Some(value.saturating_add(1))
             })
             .ok();
@@ -70,7 +70,7 @@ impl PressureSignals {
 
     pub(super) fn reaper_finished(&self) {
         self.active_reapers
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |value| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |value| {
                 Some(value.saturating_sub(1))
             })
             .ok();
