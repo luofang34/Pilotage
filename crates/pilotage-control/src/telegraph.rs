@@ -94,7 +94,15 @@ impl ArmTelegraph {
     /// Moves the lever. Returns the one command this move sends, or
     /// `None` when the vehicle already answers the ordered state — an
     /// idempotent move is a display act, not a command.
+    ///
+    /// Moving the lever from SAFE to ARMED always sends, even onto a
+    /// vehicle that already reports armed: that is an operator taking
+    /// over a live vehicle someone else left armed (a ground station
+    /// that dropped and came back, a failsafe flying it), and the arm is
+    /// what brings it back under command. Re-ordering ARMED is still a
+    /// display act.
     pub fn set_order(&mut self, order: ArmOrder) -> Option<OrderAction> {
+        let taking_over = order == ArmOrder::Armed && self.order == ArmOrder::Safe;
         self.order = order;
         self.phase = TelegraphPhase::InSync;
         self.verdict_at_order = self.verdict;
@@ -104,7 +112,7 @@ impl ArmTelegraph {
             (order, self.confirmed),
             (ArmOrder::Armed, ArmConfirmed::Armed) | (ArmOrder::Safe, ArmConfirmed::Disarmed)
         );
-        if answered {
+        if answered && !taking_over {
             return None;
         }
         self.phase = TelegraphPhase::AwaitingAnswer;
