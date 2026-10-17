@@ -72,6 +72,9 @@ impl Link {
             input_lost: false,
         };
         let plan = self.control.evaluate(sample, &session);
+        // An order nothing answers must not wait in silence.
+        self.telegraph.on_tick(session.now_ms);
+        self.publish_telegraph();
         self.announce_device();
         self.execute_plan(&plan)
     }
