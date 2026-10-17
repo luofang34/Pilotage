@@ -1258,7 +1258,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "pilotage-control-web"
+name = "pilotage-control"
 version = "0.1.0"
 dependencies = [
  "pilotage-input",
@@ -1266,6 +1266,14 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+]
+
+[[package]]
+name = "pilotage-control-web"
+version = "0.1.0"
+dependencies = [
+ "pilotage-control",
+ "pilotage-input",
  "wasm-bindgen",
 ]
 
