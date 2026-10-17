@@ -123,7 +123,7 @@ fn inspect_process_from(
 mod arguments;
 #[path = "linux/procfs.rs"]
 mod procfs;
-use procfs::{lifetime, parse_pid, parse_real_user_id, parse_stat, read_stat};
+use procfs::{lifetime, parse_pid, parse_real_user_id, parse_stat, read_stat, vanished};
 
 fn bind_lifetime_anchor(
     anchor: &mut Option<LifetimeIdentity>,
@@ -239,7 +239,7 @@ pub(super) fn inspect_lifetime(
     let status_path = PathBuf::from(format!("/proc/{pid}/status"));
     let status = match std::fs::read_to_string(&status_path) {
         Ok(status) => status,
-        Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) if vanished(&source) => return Ok(None),
         Err(source) => return Err(io_error("inspect process owner", &status_path, source)),
     };
     let first_user_id = parse_real_user_id(&status)?;
@@ -256,7 +256,7 @@ pub(super) fn inspect_lifetime(
     }
     let final_status = match std::fs::read_to_string(&status_path) {
         Ok(status) => status,
-        Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) if vanished(&source) => return Ok(None),
         Err(source) => return Err(io_error("reinspect process owner", &status_path, source)),
     };
     let real_user_id = parse_real_user_id(&final_status)?;

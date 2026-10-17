@@ -2,7 +2,7 @@
 
 use std::collections::VecDeque;
 
-use super::procfs::{observe_open_executable, parse_stat};
+use super::procfs::{observe_open_executable, parse_stat, vanished};
 use super::{ExecutableObservation, ProcessSource, STABLE_SNAPSHOT_ATTEMPTS, inspect_process_from};
 use crate::AviateSupervisorError;
 use crate::document::ProcessStartIdentity;
@@ -372,4 +372,30 @@ fn executable(path: &str, byte: u8) -> ExecutableObservation {
         inode: u64::from(byte),
         bytes: 1024,
     }
+}
+
+#[test]
+fn a_process_that_exits_mid_read_reads_as_gone() {
+    // A /proc read of a process that exits after the open fails with ESRCH, which
+    // std reports as an uncategorized error rather than NotFound.
+    assert!(vanished(&std::io::Error::from_raw_os_error(
+        rustix::io::Errno::SRCH.raw_os_error()
+    )));
+    assert!(vanished(&std::io::Error::from(
+        std::io::ErrorKind::NotFound
+    )));
+    assert!(!vanished(&std::io::Error::from(
+        std::io::ErrorKind::PermissionDenied
+    )));
+}
+
+#[test]
+fn a_process_gone_from_proc_has_no_lifetime() {
+    let mut child = std::process::Command::new("true")
+        .spawn()
+        .expect("a short-lived child spawns");
+    let pid = child.id();
+    child.wait().expect("the child is reaped");
+    let lifetime = super::inspect_lifetime(pid).expect("a reaped process is not an error");
+    assert_eq!(lifetime, None);
 }
