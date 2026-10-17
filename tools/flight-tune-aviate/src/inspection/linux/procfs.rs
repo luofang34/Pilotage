@@ -34,7 +34,7 @@ impl ProcessSource for Procfs {
         let path = PathBuf::from(format!("/proc/{pid}/cmdline"));
         let command = match std::fs::read(&path) {
             Ok(command) => Ok(Some(command)),
-            Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(source) if vanished(&source) => Ok(None),
             Err(source) => Err(io_error("read live argument vector", &path, source)),
         }?;
         self.check_deadline()?;
@@ -62,7 +62,7 @@ pub(super) fn observe_executable(
     }
     let file = match File::open(&live_path) {
         Ok(file) => file,
-        Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) if vanished(&source) => return Ok(None),
         Err(source) => return Err(io_error("open live executable", &live_path, source)),
     };
     observe_open_executable_with_deadline(file, &live_path, deadline).map(Some)
@@ -101,10 +101,18 @@ pub(super) fn observe_open_executable_with_deadline(
     })
 }
 
+/// Whether a procfs read failed because the process is gone. Its directory may already be
+/// absent (`NotFound`), or the process may exit between the open and the read, which Linux
+/// reports as `ESRCH`; both mean the same as a process that was never there.
+pub(super) fn vanished(source: &std::io::Error) -> bool {
+    source.kind() == std::io::ErrorKind::NotFound
+        || source.raw_os_error() == Some(rustix::io::Errno::SRCH.raw_os_error())
+}
+
 pub(super) fn read_stat(path: &Path) -> Result<Option<String>, AviateSupervisorError> {
     match std::fs::read_to_string(path) {
         Ok(stat) => Ok(Some(stat)),
-        Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(source) if vanished(&source) => Ok(None),
         Err(source) => Err(io_error("read process lifetime", path, source)),
     }
 }
