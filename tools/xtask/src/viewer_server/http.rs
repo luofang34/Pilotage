@@ -216,20 +216,17 @@ pub(super) fn content_type(path: &Path) -> &'static str {
 /// Decodes `%XX` escapes; `None` for a malformed escape, a NUL byte, or
 /// a result that is not UTF-8.
 fn percent_decode(raw: &str) -> Option<String> {
-    let bytes = raw.as_bytes();
-    let mut decoded = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while let Some(&byte) = bytes.get(index) {
+    let mut decoded = Vec::with_capacity(raw.len());
+    let mut bytes = raw.bytes();
+    while let Some(byte) = bytes.next() {
         if byte == b'%' {
-            let hex = bytes.get(index + 1..index + 3)?;
+            let hex = [bytes.next()?, bytes.next()?];
             if !hex.iter().all(u8::is_ascii_hexdigit) {
                 return None;
             }
-            decoded.push(u8::from_str_radix(std::str::from_utf8(hex).ok()?, 16).ok()?);
-            index += 3;
+            decoded.push(u8::from_str_radix(std::str::from_utf8(&hex).ok()?, 16).ok()?);
         } else {
             decoded.push(byte);
-            index += 1;
         }
     }
     if decoded.contains(&0) {
