@@ -50,10 +50,10 @@ check_enum() {
         status=1
         return
     fi
-    comment="$(grep -A 8 "pilotage_geo::$enum" "$proto" | head -8)"
+    comment="$(grep -A 8 "pilotage_geo::$enum" "$proto" | sed -n 1,8p)"
     code=1
     while [ "$code" -le "$top" ]; do
-        if ! printf '%s' "$comment" | grep -Eq "(^|[^0-9])$code [a-zA-Z]"; then
+        if ! printf '%s' "$comment" | grep -E "(^|[^0-9])$code [a-zA-Z]" >/dev/null; then
             echo "FORBIDDEN: telemetry.proto does not name $enum code $code" >&2
             status=1
         fi
@@ -201,14 +201,14 @@ for step in 'clients/web/geodetic-fix.test.mjs' 'scripts/check-geodetic-datum-co
         # obligation is that CI runs the runner, not that it names the
         # script.
         scripts/check-*.sh|scripts/test-check-*.sh)
-            if ! grep -E '^[[:space:]]*run:' "$ci" | grep -Fq -- '-- guards' \
-                && ! grep -E '^[[:space:]]*run:' "$ci" | grep -Fq "$step"; then
+            if ! grep -E '^[[:space:]]*run:' "$ci" | grep -F -- '-- guards' >/dev/null \
+                && ! grep -E '^[[:space:]]*run:' "$ci" | grep -F "$step" >/dev/null; then
                 echo "FORBIDDEN: CI must run $step" >&2
                 status=1
             fi
             ;;
         *)
-            if ! grep -E '^[[:space:]]*run:' "$ci" | grep -Fq "$step"; then
+            if ! grep -E '^[[:space:]]*run:' "$ci" | grep -F "$step" >/dev/null; then
                 echo "FORBIDDEN: CI must run $step" >&2
                 status=1
             fi

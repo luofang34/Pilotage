@@ -52,7 +52,7 @@ fi
 mkdir -p "${CAPTURE_DIR}"
 # Prune oldest first, leaving room for the capture about to start.
 while [[ "$(find "${CAPTURE_DIR}" -maxdepth 1 -name 'netlog-*.json' | wc -l)" -ge "${KEEP}" ]]; do
-  OLDEST="$(find "${CAPTURE_DIR}" -maxdepth 1 -name 'netlog-*.json' | sort | head -1)"
+  OLDEST="$(find "${CAPTURE_DIR}" -maxdepth 1 -name 'netlog-*.json' | sort | sed -n 1p)"
   [[ -n "${OLDEST}" ]] || break
   echo "pruning older capture $(basename "${OLDEST}")"
   rm -f "${OLDEST}"
