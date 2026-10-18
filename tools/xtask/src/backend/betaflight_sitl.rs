@@ -27,9 +27,12 @@ const ORIGIN: SpawnPoint = SpawnPoint {
 /// A plain `sim` session's spawn offset north of the origin, m: apart
 /// from a PX4 vehicle at the origin and an ArduPilot one 30 m east.
 const DEFAULT_NORTH_M: &str = "30";
-/// Betaflight SITL's fixed ports: state in, RC in, motors out (the sidecar
-/// listens), and UART1's MSP. `sitl.c` has no option to move them.
-const SITL_UDP: [u16; 3] = [9_002, 9_003, 9_004];
+/// Betaflight SITL's fixed UDP ports: raw PWM out (no listener here, but a
+/// second simulator listening there would read it), motors out (the
+/// sidecar listens), state in, RC in. `sitl.c` has no option to move them.
+/// Its TCP ports are 5760 + n for the UARTs with a serial function; the
+/// configuration gives one only to UART1, so 5761 is the one it binds.
+const SITL_UDP: [u16; 4] = [9_001, 9_002, 9_003, 9_004];
 const SITL_MSP_TCP: u16 = 5_761;
 const BUILD_HINT: &str = "build it in the Betaflight checkout (serial make; -j races the \
     submodule hydration): make TARGET=SITL EXTRA_FLAGS=\"-DENABLE_GAZEBO_BRIDGE=0\"";
