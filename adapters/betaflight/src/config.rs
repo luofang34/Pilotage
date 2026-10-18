@@ -10,6 +10,14 @@ pub const MAX_VERTICAL_MPS: f32 = 1.5;
 /// Full-envelope yaw rate, rad/s.
 pub const MAX_YAW_RATE_RPS: f32 = 1.5;
 
+/// Full-envelope body rate on every axis in direct flight, rad/s: the
+/// 670 deg/s Betaflight's rate curve gives at full stick in
+/// `sim/betaflight/sitl.cli`.
+pub const MAX_BODY_RATE_RPS: f32 = 11.693_706;
+/// The largest tilt an attitude demand may ask for, rad: Betaflight's
+/// `angle_limit` of 30 deg.
+pub const MAX_TILT_RAD: f32 = core::f32::consts::FRAC_PI_6;
+
 /// Betaflight operating profiles supported by this adapter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BetaflightProfile {

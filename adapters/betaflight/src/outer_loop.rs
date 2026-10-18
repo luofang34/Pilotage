@@ -18,7 +18,7 @@
 //! On the ground the throttle stays at idle until the demand asks to
 //! climb, so take-off is the operator's climb command.
 
-use crate::rc::{ANGLE_LIMIT_DEG, Sticks, YAW_RATE_LIMIT_DPS};
+use crate::rc::{ANGLE_LIMIT_DEG, MAX_RATE_DPS, Sticks};
 
 /// Standard gravity, m/s².
 const GRAVITY: f64 = 9.806_65;
@@ -152,12 +152,24 @@ impl OuterLoop {
         };
     }
 
+    /// Takes over a quad another mode was flying: airborne or not as
+    /// `airborne` says, with `throttle` as the hover estimate, so the first
+    /// assisted step neither drops nor jumps it. Position and altitude are
+    /// captured afresh, the brake first.
+    pub(crate) fn resume(&mut self, throttle: f64, airborne: bool) {
+        *self = Self {
+            flying: airborne,
+            hover: throttle.clamp(HOVER_RANGE.0, HOVER_RANGE.1),
+            ..Self::new(self.envelope)
+        };
+    }
+
     /// One step: the stick positions (arm switch left off; the caller
     /// owns it) for `demand` given `estimate`, `dt` seconds after the last.
     pub(crate) fn update(&mut self, demand: Demand, estimate: &Estimate, dt: f64) -> Sticks {
         let dt = dt.clamp(0.0, 0.1);
         self.update_phase(demand, estimate, dt);
-        let yaw = (demand.yaw_rate.to_degrees() / YAW_RATE_LIMIT_DPS).clamp(-1.0, 1.0);
+        let yaw = (demand.yaw_rate.to_degrees() / MAX_RATE_DPS).clamp(-1.0, 1.0);
         if !self.flying {
             return Sticks {
                 yaw: 0.0,
@@ -174,6 +186,7 @@ impl OuterLoop {
             throttle,
             yaw,
             arm: false,
+            angle: true,
         }
     }
 

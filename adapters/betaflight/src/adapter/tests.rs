@@ -85,7 +85,19 @@ fn the_advertisement_is_one_velocity_scope_with_arm_and_disarm() {
     let vehicle = &capabilities.vehicles[0];
     assert_eq!(vehicle.class, pilotage_protocol::VehicleClass::Multicopter);
     assert_eq!(vehicle.display_name, "Betaflight quad");
-    assert_eq!(vehicle.scopes.len(), 1);
+    assert_eq!(vehicle.scopes.len(), 2);
+    let direct = &vehicle.scopes[1];
+    assert_eq!(direct.scope.as_str(), super::DIRECT_SCOPE);
+    assert_eq!(direct.authority_group, vehicle.scopes[0].authority_group);
+    assert!(direct.authority_group.is_some());
+    let families: Vec<IntentFamily> = direct.intents.iter().map(|i| i.family).collect();
+    assert_eq!(
+        families,
+        vec![IntentFamily::BodyRate, IntentFamily::AttitudeThrust]
+    );
+    assert!((direct.intents[0].max_angular - 670f32.to_radians()).abs() < 1e-4);
+    assert!((direct.intents[1].max_angular - 30f32.to_radians()).abs() < 1e-6);
+    assert!(direct.legacy.is_none());
     let scope = &vehicle.scopes[0];
     assert_eq!(scope.scope.as_str(), FLIGHT_SCOPE);
     let intent = &scope.intents[0];
@@ -166,7 +178,7 @@ fn disarm_is_accepted_even_without_telemetry() {
     assert!(outcome.action_results[0].accepted);
     assert_eq!(h.commands.borrow().requests.disarm, 1);
     assert!(
-        h.commands.borrow().demand_at.is_none(),
+        h.commands.borrow().demands.velocity_at.is_none(),
         "the demand was not taken"
     );
 }
@@ -189,11 +201,11 @@ fn a_demand_is_clamped_to_the_envelope_and_handed_to_the_link() {
         .apply_control(&frame(Some([5.0, -1.0, -1.0, f32::NAN]), vec![]));
     assert_eq!(outcome.disposition, Disposition::Constrained);
     let command = *h.commands.borrow();
-    assert_eq!(command.demand.forward, 3.0);
-    assert_eq!(command.demand.right, -1.0);
-    assert_eq!(command.demand.up, 1.0, "body-FRD -z is up");
-    assert_eq!(command.demand.yaw_rate, 0.0);
-    assert!(command.demand_at.is_some());
+    assert_eq!(command.demands.velocity.forward, 3.0);
+    assert_eq!(command.demands.velocity.right, -1.0);
+    assert_eq!(command.demands.velocity.up, 1.0, "body-FRD -z is up");
+    assert_eq!(command.demands.velocity.yaw_rate, 0.0);
+    assert!(command.demands.velocity_at.is_some());
 }
 
 #[test]
@@ -218,7 +230,7 @@ fn link_loss_holds_and_suppresses_until_cleared() {
     h.adapter
         .set_link_loss_policy(VehicleId::new(1), &scope, Some(LinkLossPolicy::Neutralize))
         .expect("engages");
-    assert_eq!(h.commands.borrow().demand.forward, 0.0, "a hold");
+    assert_eq!(h.commands.borrow().demands.velocity.forward, 0.0, "a hold");
     assert_eq!(
         h.adapter
             .apply_control(&frame(Some([2.0, 0.0, 0.0, 0.0]), vec![]))
@@ -301,4 +313,122 @@ fn a_stale_poll_is_withheld() {
             .disposition,
         Disposition::Rejected(RejectReason::MeasurementUnavailable)
     );
+}
+
+fn direct_frame(intent: ControlIntent) -> ScopedControlFrame {
+    ScopedControlFrame {
+        scope: ScopeId::new(super::DIRECT_SCOPE),
+        intent: Some(intent),
+        ..frame(None, vec![])
+    }
+}
+
+#[test]
+fn body_rates_on_the_direct_scope_hand_a_direct_demand_to_the_link() {
+    let mut h = harness(Some(observation(true, 0, true)));
+    let outcome = h
+        .adapter
+        .apply_control(&direct_frame(ControlIntent::BodyRate(
+            pilotage_protocol::BodyRateIntent {
+                roll_rate: 1.0,
+                pitch_rate: -0.5,
+                yaw_rate: 20.0,
+                thrust: 0.6,
+            },
+        )));
+    assert_eq!(
+        outcome.disposition,
+        Disposition::Constrained,
+        "yaw clamps at 670 deg/s"
+    );
+    let demands = h.commands.borrow().demands;
+    assert_eq!(demands.family, crate::link::Family::Direct);
+    let Some(crate::direct::DirectDemand::Rates {
+        roll, yaw, thrust, ..
+    }) = demands.direct
+    else {
+        panic!("rates expected: {demands:?}");
+    };
+    assert!((roll - 1.0).abs() < 1e-6 && (thrust - 0.6).abs() < 1e-6);
+    assert!((yaw - f64::from(670f32.to_radians())).abs() < 1e-4);
+}
+
+#[test]
+fn an_attitude_on_the_direct_scope_becomes_angles_and_a_heading() {
+    let mut h = harness(Some(observation(true, 0, true)));
+    let half = 10f32.to_radians() / 2.0;
+    let outcome = h
+        .adapter
+        .apply_control(&direct_frame(ControlIntent::AttitudeThrust(
+            pilotage_protocol::AttitudeThrustIntent {
+                frame: ReferenceFrame::LocalNed,
+                qw: half.cos(),
+                qx: half.sin(),
+                qy: 0.0,
+                qz: 0.0,
+                thrust: 0.5,
+            },
+        )));
+    assert_eq!(outcome.disposition, Disposition::Accepted);
+    let Some(crate::direct::DirectDemand::Attitude {
+        roll,
+        pitch,
+        heading,
+        ..
+    }) = h.commands.borrow().demands.direct
+    else {
+        panic!("attitude expected");
+    };
+    assert!((roll.to_degrees() - 10.0).abs() < 1e-3);
+    assert!(pitch.abs() < 1e-6 && heading.abs() < 1e-6);
+}
+
+#[test]
+fn each_scope_takes_only_its_own_families() {
+    let mut h = harness(Some(observation(true, 0, true)));
+    let velocity_on_direct = ScopedControlFrame {
+        scope: ScopeId::new(super::DIRECT_SCOPE),
+        ..frame(Some([1.0, 0.0, 0.0, 0.0]), vec![])
+    };
+    assert!(matches!(
+        h.adapter.apply_control(&velocity_on_direct).disposition,
+        Disposition::Rejected(RejectReason::Other(_))
+    ));
+    let rates_on_flight = ScopedControlFrame {
+        scope: ScopeId::new(FLIGHT_SCOPE),
+        ..direct_frame(ControlIntent::BodyRate(pilotage_protocol::BodyRateIntent {
+            roll_rate: 0.0,
+            pitch_rate: 0.0,
+            yaw_rate: 0.0,
+            thrust: 0.5,
+        }))
+    };
+    assert!(matches!(
+        h.adapter.apply_control(&rates_on_flight).disposition,
+        Disposition::Rejected(RejectReason::Other(_))
+    ));
+}
+
+#[test]
+fn a_direct_link_loss_falls_back_to_the_assisted_hold() {
+    let mut h = harness(Some(observation(true, 0, true)));
+    h.adapter
+        .apply_control(&direct_frame(ControlIntent::BodyRate(
+            pilotage_protocol::BodyRateIntent {
+                roll_rate: 1.0,
+                pitch_rate: 0.0,
+                yaw_rate: 0.0,
+                thrust: 0.6,
+            },
+        )));
+    h.adapter
+        .set_link_loss_policy(
+            VehicleId::new(1),
+            &ScopeId::new(super::DIRECT_SCOPE),
+            Some(LinkLossPolicy::Neutralize),
+        )
+        .expect("engages");
+    let demands = h.commands.borrow().demands;
+    assert_eq!(demands.family, crate::link::Family::Assisted);
+    assert!(demands.direct_at.is_none() && demands.velocity_at.is_some());
 }

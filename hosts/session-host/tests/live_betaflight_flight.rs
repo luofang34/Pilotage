@@ -17,8 +17,10 @@
 //! client is: it is admitted, takes the motion lease, arms through the
 //! reliable action path, and sends typed velocity intents scaled by the
 //! envelope the host advertises. The flight: arm, climb at least 2 m, hold
-//! within 1 m for 5 s at neutral, at least 5 m forward, at least 45 degrees
-//! of yaw, land, disarm.
+//! within 1 m for 5 s at neutral; lease the direct scope and fly a 1 rad/s
+//! roll-rate step (measured within 0.3 rad/s), lease the velocity scope
+//! back and hold level; at least 5 m forward, at least 45 degrees of yaw,
+//! land, disarm.
 
 #![allow(clippy::expect_used, clippy::panic)]
 
@@ -47,6 +49,7 @@ struct Reading {
     up: f64,
     heading: f64,
     tilt_deg: f64,
+    roll_rate: f64,
 }
 
 struct Client {
@@ -124,6 +127,7 @@ impl Client {
                     .clamp(-1.0, 1.0)
                     .acos()
                     .to_degrees(),
+                roll_rate: f64::from(avionics.rate_p_rad_s),
             });
         }
         self.events.push(event);
@@ -199,7 +203,7 @@ impl Client {
         &mut self,
         sticks: [f32; 4],
         limit: Duration,
-        mut done: impl FnMut(&Reading) -> bool,
+        done: impl FnMut(&Reading) -> bool,
     ) -> Reading {
         let (vehicle, scope) = self.engine.control_target().expect("holds control");
         let [roll, pitch, throttle, yaw] = sticks;
@@ -218,12 +222,23 @@ impl Client {
             ),
         )
         .expect("the advertised envelope admits a body-frame velocity");
+        self.fly_intent(&intent, limit, done).await
+    }
+
+    /// Flies one typed intent on the held scope until `done` holds or
+    /// `limit` passes.
+    async fn fly_intent(
+        &mut self,
+        intent: &wire::ControlIntent,
+        limit: Duration,
+        mut done: impl FnMut(&Reading) -> bool,
+    ) -> Reading {
+        let (vehicle, scope) = self.engine.control_target().expect("holds control");
         let start = Instant::now();
         loop {
             let sampled = u64::try_from(self.started.elapsed().as_nanos()).unwrap_or(u64::MAX);
-            let actions =
-                self.engine
-                    .control_frame(vehicle, &scope, ControlCommand::Intent(intent), sampled);
+            let command = ControlCommand::Intent(*intent);
+            let actions = self.engine.control_frame(vehicle, &scope, command, sampled);
             self.execute(actions).await;
             self.pump_datagram().await;
             self.events.clear();
@@ -233,6 +248,20 @@ impl Client {
                     return reading;
                 }
             }
+        }
+    }
+}
+
+impl Client {
+    /// Swaps the held flight scope for `scope`, as a scheme switch does.
+    async fn switch_to(&mut self, scope: &str) {
+        let (vehicle, held) = self.engine.control_target().expect("holds control");
+        let actions = self.engine.release_lease(vehicle, &held);
+        self.execute(actions).await;
+        let actions = self.engine.request_lease(vehicle, scope);
+        self.execute(actions).await;
+        while !self.engine.holds(vehicle, scope) {
+            self.pump_bootstrap().await;
         }
     }
 }
@@ -298,6 +327,7 @@ async fn flight() {
     arm(&mut client).await;
     climb(&mut client).await;
     hold(&mut client).await;
+    direct(&mut client).await;
     forward(&mut client).await;
     yaw(&mut client).await;
     land_and_disarm(&mut client).await;
@@ -362,6 +392,58 @@ async fn hold(client: &mut Client) {
         worst <= 1.0 && worst_up <= 1.0,
         "drifted {worst:.2} m / {worst_up:.2} m"
     );
+}
+
+fn body_rate(roll_rate: f32) -> wire::ControlIntent {
+    wire::ControlIntent {
+        family: Some(wire::control_intent::Family::BodyRate(
+            wire::BodyRateIntent {
+                roll_rate,
+                pitch_rate: 0.0,
+                yaw_rate: 0.0,
+                // Near hover, so the operator's thrust takes over at once.
+                thrust: 0.57,
+            },
+        )),
+    }
+}
+
+/// The racing scheme: a body-rate step on the direct scope, then back.
+async fn direct(client: &mut Client) {
+    client.switch_to("vehicle.motion.direct").await;
+    client
+        .fly_intent(&body_rate(0.0), Duration::from_millis(500), |_| false)
+        .await;
+    let start = Instant::now();
+    let mut samples = Vec::new();
+    client
+        .fly_intent(&body_rate(1.0), Duration::from_millis(400), |r| {
+            if start.elapsed() >= Duration::from_millis(200) {
+                samples.push(r.roll_rate);
+            }
+            false
+        })
+        .await;
+    client
+        .fly_intent(&body_rate(-1.0), Duration::from_millis(400), |_| false)
+        .await;
+    client
+        .fly_intent(&body_rate(0.0), Duration::from_millis(300), |_| false)
+        .await;
+    samples.sort_by(f64::total_cmp);
+    let measured = samples.get(samples.len() / 2).copied().unwrap_or(f64::NAN);
+    tracing::info!(roll_rate = measured, "body rate for a 1 rad/s demand");
+    assert!((measured - 1.0).abs() <= 0.3, "roll rate {measured:.2}");
+    client.switch_to("vehicle.motion").await;
+    let settled = client
+        .fly([0.0; 4], Duration::from_secs(4), |_| false)
+        .await;
+    tracing::info!(
+        up = settled.up,
+        tilt_deg = settled.tilt_deg,
+        "assisted again"
+    );
+    assert!(settled.up > 1.0 && settled.tilt_deg < 5.0, "{settled:?}");
 }
 
 /// Pitch 2/3 of the 3 m/s envelope: 2 m/s forward.

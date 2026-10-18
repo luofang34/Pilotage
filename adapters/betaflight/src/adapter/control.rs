@@ -13,8 +13,11 @@ use pilotage_protocol::{
 };
 use pilotage_timing::SimTick;
 
-use super::{BetaflightAdapter, FLIGHT_SCOPE, PITCH_AXIS, ROLL_AXIS, THROTTLE_AXIS, YAW_AXIS};
+use super::{
+    BetaflightAdapter, DIRECT_SCOPE, FLIGHT_SCOPE, PITCH_AXIS, ROLL_AXIS, THROTTLE_AXIS, YAW_AXIS,
+};
 use crate::config::{MAX_HORIZONTAL_MPS, MAX_VERTICAL_MPS, MAX_YAW_RATE_RPS};
+use crate::link::Family;
 use crate::link::Observation;
 use crate::outer_loop::Demand;
 
@@ -59,18 +62,30 @@ impl BetaflightAdapter {
             .iter()
             .map(|action| self.apply_action(*action, &observed))
             .collect();
-        let Some(ControlIntent::Velocity(velocity)) = frame.intent else {
-            return ApplyOutcome {
-                tick,
-                disposition: Disposition::Accepted,
-                action_results,
-            };
+        let now = Instant::now();
+        let constrained = match frame.intent {
+            Some(ControlIntent::Velocity(velocity)) => {
+                let (demand, constrained) = demand_from_velocity(&velocity);
+                self.commands.send_modify(|command| {
+                    command.demands.family = Family::Assisted;
+                    command.demands.velocity = demand;
+                    command.demands.velocity_at = Some(now);
+                });
+                constrained
+            }
+            Some(intent) => {
+                let Some((demand, constrained)) = super::direct_intent::demand(&intent) else {
+                    return rejected(tick, RejectReason::UnknownScope);
+                };
+                self.commands.send_modify(|command| {
+                    command.demands.family = Family::Direct;
+                    command.demands.direct = Some(demand);
+                    command.demands.direct_at = Some(now);
+                });
+                constrained
+            }
+            None => false,
         };
-        let (demand, constrained) = demand_from_velocity(&velocity);
-        self.commands.send_modify(|command| {
-            command.demand = demand;
-            command.demand_at = Some(Instant::now());
-        });
         ApplyOutcome {
             tick,
             disposition: if constrained {
@@ -86,9 +101,11 @@ impl BetaflightAdapter {
         if frame.vehicle != self.vehicle {
             return Err(RejectReason::UnknownVehicle);
         }
-        if frame.scope.as_str() != FLIGHT_SCOPE {
-            return Err(RejectReason::UnknownScope);
-        }
+        let direct = match frame.scope.as_str() {
+            FLIGHT_SCOPE => false,
+            DIRECT_SCOPE => true,
+            _ => return Err(RejectReason::UnknownScope),
+        };
         let known = [ROLL_AXIS, PITCH_AXIS, THROTTLE_AXIS, YAW_AXIS].map(LogicalAxisId::new);
         if frame
             .payload
@@ -105,12 +122,27 @@ impl BetaflightAdapter {
                 "the flight scope consumes typed commands only".to_owned(),
             ));
         }
-        if let Some(ControlIntent::Velocity(velocity)) = frame.intent
-            && velocity.frame != ReferenceFrame::BodyFrd
-        {
-            return Err(RejectReason::Other(
-                "the flight scope takes BODY_FRD velocity only".to_owned(),
-            ));
+        // Each scope takes its own families: velocity in BODY_FRD on the
+        // assisted scope; body rates, or an attitude in LOCAL_NED, on the
+        // direct one.
+        let admitted = match (direct, frame.intent) {
+            (_, None) => true,
+            (false, Some(ControlIntent::Velocity(velocity))) => {
+                velocity.frame == ReferenceFrame::BodyFrd
+            }
+            (true, Some(ControlIntent::BodyRate(_))) => true,
+            (true, Some(ControlIntent::AttitudeThrust(attitude))) => {
+                attitude.frame == ReferenceFrame::LocalNed
+            }
+            _ => false,
+        };
+        if !admitted {
+            return Err(RejectReason::Other(if direct {
+                "the direct scope takes body rates, or an attitude in LOCAL_NED, with thrust"
+                    .to_owned()
+            } else {
+                "the flight scope takes BODY_FRD velocity only".to_owned()
+            }));
         }
         Ok(())
     }

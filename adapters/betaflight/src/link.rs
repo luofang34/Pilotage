@@ -20,17 +20,21 @@ use tokio::net::TcpStream;
 use tokio::sync::watch;
 
 use crate::local_frame::LocalFrame;
-use crate::outer_loop::{Demand, Envelope, Estimate, Horizontal, OuterLoop};
+use crate::outer_loop::{Envelope, Estimate, Horizontal};
 use crate::rc::Sticks;
 use crate::snapshot::{FcSnapshot, PollReplies};
 
 mod arming;
+mod pilot;
 mod port;
 mod setup;
 #[cfg(test)]
 mod tests;
 
 pub(crate) use arming::Requests;
+pub(crate) use pilot::{Demands, Family};
+
+use pilot::Pilot;
 
 use arming::ArmSwitch;
 pub(crate) use setup::ConfigIssue;
@@ -39,8 +43,6 @@ use port::MspPort;
 
 /// Poll and RC period: 50 Hz.
 pub(crate) const POLL_PERIOD: Duration = Duration::from_millis(20);
-/// A demand older than this is replaced by a hold.
-const DEMAND_TIMEOUT: Duration = Duration::from_millis(500);
 /// Pause between connection attempts.
 const RECONNECT_DELAY: Duration = Duration::from_millis(500);
 /// The replies one poll batches, in reply order.
@@ -78,10 +80,8 @@ pub(crate) enum LinkError {
 /// What the adapter asks of the link.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub(crate) struct LinkCommand {
-    /// The latest velocity demand.
-    pub(crate) demand: Demand,
-    /// When the demand was written; `None` before the first.
-    pub(crate) demand_at: Option<Instant>,
+    /// The latest demands of each family, and which family flies.
+    pub(crate) demands: Demands,
     /// Arm, disarm, and refused-arm requests so far.
     pub(crate) requests: Requests,
 }
@@ -143,9 +143,9 @@ pub(crate) async fn run(
 /// One connection's state.
 struct Session<'a> {
     epoch: u32,
-    commands: &'a watch::Receiver<LinkCommand>,
+    commands: watch::Receiver<LinkCommand>,
     reports: &'a watch::Sender<LinkReport>,
-    outer: OuterLoop,
+    pilot: Pilot,
     anchor: Option<LocalFrame>,
     anchor_deg: Option<[f64; 2]>,
     sequence: u32,
@@ -161,9 +161,9 @@ impl<'a> Session<'a> {
     ) -> Self {
         Self {
             epoch,
-            commands,
+            commands: commands.clone(),
             reports,
-            outer: OuterLoop::new(envelope),
+            pilot: Pilot::new(envelope),
             anchor: None,
             anchor_deg: None,
             sequence: 0,
@@ -194,7 +194,9 @@ impl<'a> Session<'a> {
     /// The steady state. RC leaves on its own 50 Hz tick and never waits
     /// for a reply, so a slow telemetry reply (a loaded host, a slow serial
     /// task) delays the next poll but not the next RC frame: Betaflight's
-    /// receiver sees a steady stream and its RX-loss timer stays quiet.
+    /// receiver sees a steady stream and its RX-loss timer stays quiet. A
+    /// direct demand leaves the moment it arrives; the tick then only
+    /// repeats it when no frame came.
     async fn stream(
         &mut self,
         port: &mut MspPort<TcpStream>,
@@ -207,13 +209,26 @@ impl<'a> Session<'a> {
         poll_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut sticks = Sticks::IDLE;
         let mut polled_at: Option<Instant> = None;
+        let mut sent_at: Option<Instant> = None;
         loop {
             let deadline =
                 polled_at.map(|at| tokio::time::Instant::from_std(at + port::REPLY_TIMEOUT));
             tokio::select! {
                 biased;
+                changed = self.commands.changed() => {
+                    changed.map_err(|_| LinkError::Closed)?;
+                    let demands = self.commands.borrow_and_update().demands;
+                    if let Some(next) = self.pilot.on_demands(&demands, Instant::now()) {
+                        sticks = next;
+                        port.send(command::MSP_SET_RAW_RC, encode_set_raw_rc(&sticks.channels())?).await?;
+                        sent_at = Some(Instant::now());
+                    }
+                }
                 _ = rc_tick.tick() => {
-                    port.send(command::MSP_SET_RAW_RC, encode_set_raw_rc(&sticks.channels())?).await?;
+                    if sent_at.is_none_or(|at| at.elapsed() >= POLL_PERIOD / 2) {
+                        port.send(command::MSP_SET_RAW_RC, encode_set_raw_rc(&sticks.channels())?).await?;
+                        sent_at = Some(Instant::now());
+                    }
                 }
                 frames = port.frames() => {
                     for frame in frames? {
@@ -256,8 +271,8 @@ impl<'a> Session<'a> {
             snapshot,
             north_east,
             anchor: self.anchor_deg,
-            flying: self.outer.is_flying(),
-            hover_throttle: self.outer.hover_throttle(),
+            flying: self.pilot.is_flying(),
+            hover_throttle: self.pilot.hover_throttle(),
             sticks,
         };
         if self.sequence.is_multiple_of(50) {
@@ -323,23 +338,6 @@ impl<'a> Session<'a> {
             .last_step
             .replace(now)
             .map_or(POLL_PERIOD.as_secs_f64(), |last| (now - last).as_secs_f64());
-        if !snapshot.armed {
-            // Disarmed (or arming): sticks centred and throttle cut, which
-            // Betaflight's arming check requires.
-            self.outer.reset();
-            return Sticks {
-                arm: arm_high,
-                ..Sticks::IDLE
-            };
-        }
-        let fresh = command
-            .demand_at
-            .is_some_and(|at| now.saturating_duration_since(at) <= DEMAND_TIMEOUT);
-        let demand = if fresh {
-            command.demand
-        } else {
-            Demand::default()
-        };
         let estimate = Estimate {
             heading: snapshot.heading,
             roll: snapshot.roll,
@@ -353,10 +351,14 @@ impl<'a> Session<'a> {
             altitude: snapshot.altitude_m,
             climb_rate: snapshot.climb_rate,
         };
-        Sticks {
-            arm: arm_high,
-            ..self.outer.update(demand, &estimate, dt)
-        }
+        self.pilot.on_poll(
+            &command.demands,
+            &estimate,
+            snapshot.armed,
+            arm_high,
+            now,
+            dt,
+        )
     }
 }
 

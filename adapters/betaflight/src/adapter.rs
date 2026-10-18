@@ -18,13 +18,19 @@ use crate::outer_loop::Envelope;
 
 mod advertisement;
 mod control;
+mod direct_intent;
 mod link_loss;
 mod sampling;
 #[cfg(test)]
 mod tests;
 
-/// The control scope: four canonical flight axes as velocity demands.
+/// The assisted control scope: four canonical flight axes as velocity
+/// demands.
 pub const FLIGHT_SCOPE: &str = "vehicle.motion";
+/// The direct control scope: body rates or an attitude with thrust, in
+/// the same authority group as [`FLIGHT_SCOPE`], so one client flies one
+/// of them at a time.
+pub const DIRECT_SCOPE: &str = "vehicle.motion.direct";
 /// Canonical `roll` axis (0): lateral velocity, + = right.
 pub const ROLL_AXIS: u16 = 0;
 /// Canonical `pitch` axis (1): forward velocity, + = forward.

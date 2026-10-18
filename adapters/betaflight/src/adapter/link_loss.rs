@@ -1,6 +1,6 @@
 //! Per-scope link-loss enactment (ADR-0008).
 //!
-//! Neutralizing the flight scope replaces the demand with a hold: the
+//! Neutralizing either flight scope replaces the demand with a hold: the
 //! outer loop brakes, captures position and altitude, and keeps the quad
 //! there, which is what PX4's Hold does for its vehicles. The link keeps
 //! streaming RC throughout, so Betaflight's own receiver-loss failsafe
@@ -12,7 +12,8 @@ use std::time::Instant;
 use pilotage_adapter_api::{LinkLossEnactError, LinkLossPolicy};
 use pilotage_protocol::{ScopeId, VehicleId};
 
-use super::{BetaflightAdapter, FLIGHT_SCOPE};
+use super::{BetaflightAdapter, DIRECT_SCOPE, FLIGHT_SCOPE};
+use crate::link::Family;
 use crate::outer_loop::Demand;
 
 impl BetaflightAdapter {
@@ -33,15 +34,18 @@ impl BetaflightAdapter {
             return Ok(());
         };
         self.link_loss_policy.insert(scope.clone(), policy);
-        if scope.as_str() != FLIGHT_SCOPE {
+        if scope.as_str() != FLIGHT_SCOPE && scope.as_str() != DIRECT_SCOPE {
             return Ok(());
         }
         if self.commands.is_closed() {
             return Err(LinkLossEnactError::NoActuationChannel);
         }
         self.commands.send_modify(|command| {
-            command.demand = Demand::default();
-            command.demand_at = Some(Instant::now());
+            // Either scope's failsafe is the assisted hold.
+            command.demands.family = Family::Assisted;
+            command.demands.velocity = Demand::default();
+            command.demands.velocity_at = Some(Instant::now());
+            command.demands.direct_at = None;
         });
         Ok(())
     }

@@ -1,7 +1,7 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use super::{Demand, Envelope, Estimate, Horizontal, OuterLoop};
-use crate::rc::{ANGLE_LIMIT_DEG, Sticks, YAW_RATE_LIMIT_DPS};
+use crate::rc::{ANGLE_LIMIT_DEG, MAX_RATE_DPS, Sticks};
 
 const ENVELOPE: Envelope = Envelope {
     horizontal: 3.0,
@@ -59,7 +59,7 @@ impl Plant {
         let nose_down_target = (sticks.pitch * ANGLE_LIMIT_DEG).to_radians();
         self.roll += (roll_target - self.roll) * lag;
         self.pitch += (-nose_down_target - self.pitch) * lag;
-        self.heading += (sticks.yaw * YAW_RATE_LIMIT_DPS).to_radians() * DT;
+        self.heading += (sticks.yaw * MAX_RATE_DPS).to_radians() * DT;
         let thrust = GRAVITY * sticks.throttle / self.hover;
         let forward = thrust * (-self.pitch).sin();
         let right = thrust * self.roll.sin();
@@ -205,7 +205,7 @@ fn yaw_rate_maps_to_the_yaw_stick() {
         &plant.estimate(),
         DT,
     );
-    assert!((sticks.yaw - 1f64.to_degrees() / YAW_RATE_LIMIT_DPS).abs() < 1e-9);
+    assert!((sticks.yaw - 1f64.to_degrees() / MAX_RATE_DPS).abs() < 1e-9);
 }
 
 #[test]
@@ -242,4 +242,17 @@ fn tilt_never_exceeds_the_limit() {
     );
     assert!(sticks.roll.abs() * ANGLE_LIMIT_DEG <= 25.0 + 1e-9);
     assert!(sticks.pitch.abs() * ANGLE_LIMIT_DEG <= 25.0 + 1e-9);
+}
+
+#[test]
+fn resuming_in_flight_keeps_the_throttle_and_holds_altitude() {
+    let mut outer = OuterLoop::new(ENVELOPE);
+    let mut plant = Plant::landed(0.6, 0.0);
+    plant.up = 5.0;
+    outer.resume(0.6, true);
+    assert!(outer.is_flying());
+    let first = outer.update(Demand::default(), &plant.estimate(), DT);
+    assert!((first.throttle - 0.6).abs() < 0.01, "{first:?}");
+    fly(&mut outer, &mut plant, Demand::default(), 5.0);
+    assert!((plant.up - 5.0).abs() < 0.3, "altitude {}", plant.up);
 }
