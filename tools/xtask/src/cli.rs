@@ -275,7 +275,9 @@ commands:
 
       --fc <name>          FC backend: aviate-gz (alias aviate, default),
                            px4-gz (alias px4), px4-xplane, or
-                           aviate-xplane
+                           aviate-xplane; px4-gz takes a vehicle model
+                           as px4-gz:<model>: x500_gimbal (default) or
+                           rc_cessna
       --profile <profile>  physical | simulation (default) | oracle-only
       --port <port>        host WebTransport port (default: 4433)
       --viewer-port <port> static viewer port (default: 8080)
