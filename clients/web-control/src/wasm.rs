@@ -6,12 +6,12 @@
 
 use wasm_bindgen::prelude::wasm_bindgen;
 
-use crate::authority::{AuthorityDisposition, AuthorityEvent, AuthorityScope};
-use crate::coordinator::{AgentInput, ControlCoordinator};
-use crate::device::SelectOutcome;
-use crate::plan::{ControlPlan, LeaseAction};
-use crate::profile::DEFAULT_PROFILE_BYTES;
-use crate::sample::{ButtonSample, Mode, RawSample, SessionState};
+use pilotage_control::DEFAULT_PROFILE_BYTES;
+use pilotage_control::SelectOutcome;
+use pilotage_control::{AgentInput, ControlCoordinator};
+use pilotage_control::{AuthorityDisposition, AuthorityEvent, AuthorityScope};
+use pilotage_control::{ButtonSample, Mode, RawSample, SessionState};
+use pilotage_control::{ControlPlan, LeaseAction};
 
 use pilotage_input::ProfileLayer;
 
@@ -25,7 +25,7 @@ pub fn default_profile() -> Vec<u8> {
     DEFAULT_PROFILE_BYTES.to_vec()
 }
 
-use crate::device::{MAX_AXES, MAX_BUTTONS};
+use pilotage_control::{MAX_AXES, MAX_BUTTONS};
 
 mod agent;
 
@@ -451,7 +451,12 @@ fn mode_from_u32(mode: u32) -> Mode {
 
 /// Writes the first `count` axis values of a frame into the buffer in axis-id
 /// order (the runtime emits them already ordered).
-fn write_frame_axes(buffer: &mut [u8], offset: usize, frame: &crate::plan::Frame, count: usize) {
+fn write_frame_axes(
+    buffer: &mut [u8],
+    offset: usize,
+    frame: &pilotage_control::Frame,
+    count: usize,
+) {
     for (slot, (_, value)) in frame.axes().iter().take(count).enumerate() {
         write_f32(buffer, offset + slot * 4, *value);
     }
