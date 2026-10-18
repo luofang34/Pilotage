@@ -27,6 +27,7 @@ mod quasimode;
 mod runtime;
 mod sample;
 mod telegraph;
+mod transition;
 
 #[cfg(test)]
 mod golden;
@@ -46,3 +47,4 @@ pub use profile::{
 pub use runtime::ControlRuntime;
 pub use sample::{ButtonSample, DirectDemand, Mode, RawSample, SessionState};
 pub use telegraph::{ArmConfirmed, ArmOrder, ArmTelegraph, OrderAction, TelegraphPhase};
+pub use transition::{AuthorityRoute, DIRECT_SCOPE, LIFECYCLE_SCOPE};
