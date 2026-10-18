@@ -12,7 +12,7 @@
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
-use pilotage_adapter_api::FcCommandAck;
+use pilotage_adapter_api::{CommandOutcome, FcCommandAck};
 use tracing::{info, warn};
 
 pub(crate) mod clock;
@@ -23,6 +23,7 @@ use pilotage_mavlink::codec::{
     MAV_CMD_DO_SET_MODE, encode_arm_command, encode_command_long, encode_gcs_heartbeat,
     encode_velocity_setpoint, parse_datagram,
 };
+use pilotage_mavlink::command_outcome;
 
 /// Full-stick horizontal velocity demand. Demand scaling is operator
 /// policy destined for per-vehicle profile configuration; these values
@@ -210,6 +211,12 @@ impl Px4Uplink {
         self.last_vel_ned = [0.0; 3];
         self.arm_phase = ArmPhase::Warmup;
         self.warmup_since = Some(self.clock.now());
+        // The arm goes out only after the warmup: the answer lane says the
+        // order is in work, so the client's answer window starts again.
+        self.last_arm_ack = Some(FcCommandAck {
+            arm: true,
+            outcome: CommandOutcome::InProgress,
+        });
         info!("offboard arm sequence: zero-velocity stream started");
         self.send_velocity([0.0; 3]);
     }
@@ -240,9 +247,13 @@ impl Px4Uplink {
         self.send(&arm);
         self.arm_phase = ArmPhase::Commanded;
         // A fresh command opens a fresh verdict: the ack lane reports the
-        // LATEST arm/disarm, never a stale answer to an earlier one.
+        // LATEST arm/disarm, never a stale answer to an earlier one. The
+        // arm is in work until the FC answers it.
         self.last_sent_arm = Some(true);
-        self.last_arm_ack = None;
+        self.last_arm_ack = Some(FcCommandAck {
+            arm: true,
+            outcome: CommandOutcome::InProgress,
+        });
         info!("offboard arm sequence: OFFBOARD and arm commanded");
     }
 
@@ -316,7 +327,7 @@ impl Px4Uplink {
         }
         self.last_arm_ack = Some(FcCommandAck {
             arm,
-            result: u32::from(result),
+            outcome: command_outcome(result),
         });
     }
 

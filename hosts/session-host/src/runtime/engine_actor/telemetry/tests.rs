@@ -301,12 +301,12 @@ fn the_fc_command_verdict_crosses_the_wire() {
         acquired_at_ns: 77,
         clock: MeasurementClock::HostMonotonic,
     };
-    // A refused arm: kind 1 with the raw MAV_RESULT.
+    // A refused arm: kind 1 with the typed outcome.
     let refused = super::fc_state_to_wire(FcStateSample {
         arm_state: 1,
         last_command: Some(pilotage_adapter_api::FcCommandAck {
             arm: true,
-            result: 4,
+            outcome: pilotage_adapter_api::CommandOutcome::Failed,
         }),
         stamp,
     });
@@ -314,7 +314,14 @@ fn the_fc_command_verdict_crosses_the_wire() {
         refused.last_command_kind, 1,
         "an arm verdict maps to kind 1"
     );
-    assert_eq!(refused.last_command_result, 4, "the raw MAV_RESULT crosses");
+    assert_eq!(
+        refused.last_command_outcome,
+        wire::CommandOutcome::Failed as i32,
+        "the typed outcome crosses"
+    );
+    #[allow(deprecated)]
+    let legacy = refused.last_command_result;
+    assert_eq!(legacy, 0, "the FC-specific result code is not written");
     // No verdict observed: the lane stays at kind 0.
     let none = super::fc_state_to_wire(FcStateSample {
         arm_state: 2,
@@ -322,7 +329,10 @@ fn the_fc_command_verdict_crosses_the_wire() {
         stamp,
     });
     assert_eq!(none.last_command_kind, 0);
-    assert_eq!(none.last_command_result, 0);
+    assert_eq!(
+        none.last_command_outcome,
+        wire::CommandOutcome::Unspecified as i32
+    );
 }
 
 mod geodetic;

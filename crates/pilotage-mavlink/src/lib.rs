@@ -11,9 +11,11 @@
 //! stamps. Adapters sample the cache; they never touch the socket.
 
 pub mod codec;
+mod command_result;
 pub mod link;
 
 pub use codec::{FcMessage, FrameSource, ParseStats, parse_datagram};
+pub use command_result::command_outcome;
 pub use link::{
     AttitudeUpdate, AuthorizationSource, BatteryReport, CommandAckReport, GimbalDeviceAttitude,
     GimbalRateDemand, KinematicsUpdate, LinkConfig, LinkError, LinkState, MavlinkLink,

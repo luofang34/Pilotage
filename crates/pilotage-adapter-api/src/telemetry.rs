@@ -145,15 +145,16 @@ pub struct SimTruthSample {
 }
 
 /// The FC's acknowledgement of the most recent commanded arm or disarm
-/// (COMMAND_ACK) — enactment truth for the operator. It rides FC-state
-/// provenance, so the verdict ages with the report that carried it; the
-/// action-result path's command-acceptance semantics are unchanged.
+/// — enactment truth for the operator. It rides FC-state provenance, so
+/// the verdict ages with the report that carried it; the action-result
+/// path's command-acceptance semantics are unchanged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FcCommandAck {
     /// True when the acknowledged command was an arm, false for a disarm.
     pub arm: bool,
-    /// The raw MAV_RESULT the FC returned (0 = accepted).
-    pub result: u32,
+    /// The FC's answer, translated by the adapter from its own result
+    /// codes.
+    pub outcome: pilotage_protocol::CommandOutcome,
 }
 
 /// FC-owned vehicle state (arm today; mode/failsafe belong here as they

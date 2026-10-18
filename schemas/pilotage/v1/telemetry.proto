@@ -241,14 +241,46 @@ message FcState {
   // Identity and acquisition of the FC report carrying this state.
   // Absence makes the sample unconsumable.
   MeasurementStamp stamp = 2;
-  // The FC's acknowledgement (COMMAND_ACK) of the most recent commanded
-  // arm or disarm: 0 none observed, 1 the command was an arm, 2 a disarm.
-  // Enactment truth for the operator — the action-result path's
-  // command-acceptance semantics are unchanged by this lane.
+  // The FC's acknowledgement of the most recent commanded arm or disarm:
+  // 0 none observed, 1 the command was an arm, 2 a disarm. Enactment
+  // truth for the operator — the action-result path's command-acceptance
+  // semantics are unchanged by this lane.
   uint32 last_command_kind = 3;
-  // Raw MAV_RESULT for that command (0 = accepted); meaningful only when
+  // A flight-controller-specific result code. Hosts do not write it.
+  // Read last_command_outcome.
+  uint32 last_command_result = 4 [deprecated = true];
+  // The typed answer to that command; meaningful only when
   // last_command_kind is non-zero.
-  uint32 last_command_result = 4;
+  CommandOutcome last_command_outcome = 5;
+}
+
+// The vehicle's answer to one discrete command, independent of the flight
+// controller family. The adapter translates its flight controller's own
+// result codes into this vocabulary, so a client never decodes them.
+//
+// Answer window: a host answers an arm or disarm within
+// pilotage_protocol::COMMAND_ANSWER_WINDOW_MS (5000 ms) of the command.
+// An adapter that needs more time reports IN_PROGRESS, and each new
+// IN_PROGRESS starts the window again. A client that sees no answer in the
+// window tells the operator that the vehicle did not answer.
+enum CommandOutcome {
+  // No answer is known. A client must not read this as accepted.
+  COMMAND_OUTCOME_UNSPECIFIED = 0;
+  // The vehicle accepted the command.
+  COMMAND_OUTCOME_ACCEPTED = 1;
+  // The vehicle works on the command and will answer again.
+  COMMAND_OUTCOME_IN_PROGRESS = 2;
+  // The vehicle cannot do the command now; it can be possible later (a
+  // failed preflight check is the usual cause).
+  COMMAND_OUTCOME_TEMPORARILY_REJECTED = 3;
+  // The vehicle refused the command.
+  COMMAND_OUTCOME_DENIED = 4;
+  // The vehicle does not support the command.
+  COMMAND_OUTCOME_UNSUPPORTED = 5;
+  // The vehicle tried the command and it failed.
+  COMMAND_OUTCOME_FAILED = 6;
+  // The vehicle stopped the command before it was complete.
+  COMMAND_OUTCOME_CANCELLED = 7;
 }
 
 // Gimbal device orientation (Gimbal Protocol v2 attitude status) under its

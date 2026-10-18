@@ -469,16 +469,19 @@ check(
     message.fcState?.lastCommand === null);
   check("no estimate lane is synthesized alongside truth", message.avionics === null);
 
-  // The FC's COMMAND_ACK verdict lane: kind (1 arm / 2 disarm) plus the
-  // raw MAV_RESULT survive decode — the enactment truth for a refusal.
+  // The FC's verdict lane: kind (1 arm / 2 disarm) plus the typed
+  // CommandOutcome survive decode — the enactment truth for a refusal.
+  // The deprecated FC-specific result code (field 4) is never read.
   const refused = [];
   varint(refused, (1 << 3) | 0); // arm_state
   varint(refused, 1); // DISARMED
   bytesField(refused, 2, measurementStamp(1, 1, 4, 78, 3, 0x22, 3));
   varint(refused, (3 << 3) | 0); // last_command_kind
   varint(refused, 1); // the refused command was an ARM
-  varint(refused, (4 << 3) | 0); // last_command_result
-  varint(refused, 4); // MAV_RESULT_TEMPORARILY_REJECTED
+  varint(refused, (4 << 3) | 0); // deprecated last_command_result
+  varint(refused, 9); // ignored by the decoder
+  varint(refused, (5 << 3) | 0); // last_command_outcome
+  varint(refused, 4); // COMMAND_OUTCOME_DENIED
   const refusedTelemetry = [];
   bytesField(refusedTelemetry, 1, uint64Message(1));
   bytesField(refusedTelemetry, 2, uint64Message(43));
