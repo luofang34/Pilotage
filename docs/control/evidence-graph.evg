@@ -426,12 +426,12 @@ attr outcome pass
 node RESULT-CTRL-GROUP verification-result
 title exclusive authority-group suite — recorded pass
 attr command cargo test -p pilotage-session --lib tests::authority_group
-attr config-digest 57887c15ba4a2c87bf696adf4aa8dc6123795214
-attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
-attr source-digest git-blob:46c81982ac7f8bce831d849af92a0f7e40c6637c
+attr config-digest 27bc04929ec212d25e45a1cb9ca6ec7f5fc34e7f
+attr tool-version rustc 1.99.0 (b940084d7 2026-09-28)
+attr source-digest git-blob:2d83a5ae7ac3f63cd7e106b8a4ff2aacc3af22a1
 attr artifact docs/control/evidence-artifacts/ctrl01/authority-group.run.txt
-attr output-digest sha256:39cc20345a6e10a409289de358298e2b9d7e723ea021f56f8013fae1aa72a0f6
-attr run-id local:57887c15ba4a2c87bf696adf4aa8dc6123795214
+attr output-digest sha256:110864da2ff5003478666ba29ec1dcf01add3985c212bc6a8a958208f6d302d3
+attr run-id local:27bc04929ec212d25e45a1cb9ca6ec7f5fc34e7f
 attr outcome pass
 node RESULT-CTRL-DEDUP verification-result
 title actor exactly-once dedup suite — recorded pass
@@ -446,12 +446,12 @@ attr outcome pass
 node RESULT-CTRL-WIRE verification-result
 title reliable action chain over the real transport — recorded pass
 attr command cargo test -p pilotage-session-host --test reliable_actions_wire
-attr config-digest 57887c15ba4a2c87bf696adf4aa8dc6123795214
-attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
+attr config-digest 27bc04929ec212d25e45a1cb9ca6ec7f5fc34e7f
+attr tool-version rustc 1.99.0 (b940084d7 2026-09-28)
 attr source-digest git-blob:ea41d4527e07c4b1f93dd09028d049fcaa4adc91
 attr artifact docs/control/evidence-artifacts/ctrl01/wire-chain.run.txt
-attr output-digest sha256:d1c0c706e7ac0a057f618f801343cf08848338a6147d8723c17c49185393373a
-attr run-id local:57887c15ba4a2c87bf696adf4aa8dc6123795214
+attr output-digest sha256:c5d9c92deade888904a5965c04433b2c14948157a3d3bba807f1d0eac46e3e57
+attr run-id local:27bc04929ec212d25e45a1cb9ca6ec7f5fc34e7f
 attr outcome pass
 node RESULT-CTRL-SOURCE verification-result
 title input-source coordinator suite — recorded pass
@@ -476,12 +476,12 @@ attr outcome pass
 node RESULT-CTRL-FIXTURE verification-result
 title browser-encoded wire fixture suite — recorded pass
 attr command cargo test -p pilotage-session --test typed_wire_e2e
-attr config-digest 57887c15ba4a2c87bf696adf4aa8dc6123795214
-attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
-attr source-digest git-blob:a09db38f372d4bffea39a2882cd1db0f045c59cf
+attr config-digest 27bc04929ec212d25e45a1cb9ca6ec7f5fc34e7f
+attr tool-version rustc 1.99.0 (b940084d7 2026-09-28)
+attr source-digest git-blob:da10e21494feef23aff8fc086d98d14f5b212d79
 attr artifact docs/control/evidence-artifacts/ctrl01/browser-fixture.run.txt
-attr output-digest sha256:1f55401585b1454208a9df4a2846873a826d98c84cf816e3364d2bbeb179639f
-attr run-id local:57887c15ba4a2c87bf696adf4aa8dc6123795214
+attr output-digest sha256:b2d136f9401b0ef8872be01f45cb630ce2bdf5f2cd1d7859c049f68107457642
+attr run-id local:27bc04929ec212d25e45a1cb9ca6ec7f5fc34e7f
 attr outcome pass
 
 node RESULT-CTRL-LIFECYCLE-PROFILE verification-result
@@ -534,8 +534,8 @@ attr tree 8a89376eb3ad1dcaf764336dde5ce54a783fa1fd
 node CFG-CTRL-FEEL-MODE configuration-item
 title committed baseline for the results re-run when the operator feel-mode path changed their test sources
 attr scm git
-attr commit 57887c15ba4a2c87bf696adf4aa8dc6123795214
-attr tree 020c82d6fee6426286784865bde0aa5c2af3f2b9
+attr commit 27bc04929ec212d25e45a1cb9ca6ec7f5fc34e7f
+attr tree 4f950ed3a499abe35ebe7c7bef6d0884ef410c9e
 
 node CFG-CTRL-VIDEO-V3 configuration-item
 title committed code baseline for session negotiation and transport results
