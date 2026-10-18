@@ -6,7 +6,10 @@ use pilotage_protocol::{
     BodyRateIntent, ControlIntent, IntentFamily, ScopeId, ScopedControlFrame, VehicleId,
 };
 
-use super::{fake_fc, frame, live_state, uplink_to};
+use pilotage_mavlink::codec::FcMessage;
+use pilotage_mavlink::link::apply_messages_at;
+
+use super::{SOURCE, fake_fc, frame, live_state, uplink_to};
 use crate::adapter::{DIRECT_SCOPE, FLIGHT_SCOPE, Px4Adapter};
 use crate::fixed_wing::FixedWingUplink;
 
@@ -111,4 +114,55 @@ fn direct_scope_link_loss_stops_the_stream_and_latches_the_scope() {
             .disposition,
         Disposition::Rejected(RejectReason::LinkLossEngaged)
     );
+}
+
+/// A scheme switch is release-first, so the host neutralizes the velocity
+/// scope before it grants the direct scope: the new holder's first direct
+/// frame must resume the stream while PX4 reports itself armed.
+#[test]
+fn the_next_holder_resumes_the_stream_of_an_armed_vehicle() {
+    let state = live_state();
+    let (_fc, addr) = fake_fc();
+    let mut adapter =
+        Px4Adapter::from_state(VehicleId::new(1), state.clone()).with_uplink(uplink_to(addr));
+    adapter.uplink.as_mut().expect("uplink").begin_arm(0.0);
+    adapter
+        .set_link_loss_policy(
+            VehicleId::new(1),
+            &ScopeId::new(FLIGHT_SCOPE),
+            Some(LinkLossPolicy::Neutralize),
+        )
+        .expect("neutralize");
+    let streaming = |adapter: &Px4Adapter| adapter.uplink.as_ref().expect("uplink").streaming();
+    assert!(!streaming(&adapter));
+
+    // Not yet reported armed: the stream stays stopped.
+    adapter.apply_control(&body_rate_frame(DIRECT_SCOPE));
+    assert!(!streaming(&adapter), "a disarmed vehicle is not resumed");
+
+    let heartbeat = FcMessage::Heartbeat {
+        armed: true,
+        custom_mode: 0,
+        autopilot: 12,
+    };
+    apply_messages_at(
+        &state,
+        &[(SOURCE, heartbeat)],
+        0,
+        0,
+        std::time::Instant::now(),
+    );
+    adapter.sample_telemetry();
+    adapter.apply_control(&body_rate_frame(DIRECT_SCOPE));
+    assert!(streaming(&adapter), "the armed vehicle's stream resumes");
+}
+
+#[test]
+fn a_disarm_is_never_resumed_by_a_frame() {
+    let (mut adapter, _fc) = multicopter();
+    let uplink = adapter.uplink.as_mut().expect("uplink");
+    uplink.begin_arm(0.0);
+    uplink.send_disarm();
+    uplink.resume_after_neutralize(true, 0.0, None);
+    assert!(!uplink.streaming());
 }

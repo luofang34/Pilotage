@@ -17,6 +17,7 @@ use tracing::{info, warn};
 
 pub(crate) mod clock;
 pub(crate) mod direct;
+mod resume;
 use clock::UplinkClock;
 
 use pilotage_mavlink::codec::{
@@ -100,6 +101,8 @@ pub struct Px4Uplink {
     expected_system_id: u8,
     expected_component_id: u8,
     direct: direct::DirectState,
+    // Set while a link-loss neutralize, not a disarm, stopped the stream.
+    neutralized: bool,
 }
 
 impl Px4Uplink {
@@ -131,6 +134,7 @@ impl Px4Uplink {
             expected_system_id: 1,
             expected_component_id: 1,
             direct: direct::DirectState::default(),
+            neutralized: false,
         })
     }
 
@@ -210,6 +214,7 @@ impl Px4Uplink {
     /// and the arm command follow after the warmup.
     pub fn begin_arm(&mut self, current_yaw_rad: f32) {
         self.leave_direct();
+        self.neutralized = false;
         self.heading_sp_rad = current_yaw_rad;
         self.last_vel_ned = [0.0; 3];
         self.arm_phase = ArmPhase::Warmup;
@@ -225,22 +230,7 @@ impl Px4Uplink {
     }
 
     fn command_offboard_and_arm(&mut self) {
-        let mode = encode_command_long(
-            self.seq,
-            MAV_CMD_DO_SET_MODE,
-            [
-                BASE_MODE_CUSTOM,
-                PX4_MAIN_MODE_OFFBOARD,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-            ],
-            self.expected_system_id,
-            self.expected_component_id,
-        );
-        self.send(&mode);
+        self.command_offboard();
         let arm = encode_arm_command(
             self.seq,
             true,
@@ -258,6 +248,25 @@ impl Px4Uplink {
             outcome: CommandOutcome::InProgress,
         });
         info!("offboard arm sequence: OFFBOARD and arm commanded");
+    }
+
+    fn command_offboard(&mut self) {
+        let mode = encode_command_long(
+            self.seq,
+            MAV_CMD_DO_SET_MODE,
+            [
+                BASE_MODE_CUSTOM,
+                PX4_MAIN_MODE_OFFBOARD,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+            ],
+            self.expected_system_id,
+            self.expected_component_id,
+        );
+        self.send(&mode);
     }
 
     /// The FC's answer to the most recent arm/disarm command, once its
@@ -349,6 +358,7 @@ impl Px4Uplink {
         );
         self.send(&frame);
         self.arm_phase = ArmPhase::Idle;
+        self.neutralized = false;
         self.warmup_since = None;
         self.last_vel_ned = [0.0; 3];
         self.last_sent_arm = Some(false);
@@ -422,6 +432,8 @@ impl Px4Uplink {
     pub fn neutralize(&mut self) {
         self.leave_direct();
         self.send_velocity([0.0; 3]);
+        // Only a stream that flowed can be resumed by the next holder.
+        self.neutralized = self.arm_phase != ArmPhase::Idle;
         self.arm_phase = ArmPhase::Idle;
         self.warmup_since = None;
         info!("neutralized: stream stopped; PX4 offboard-loss failsafe takes over");

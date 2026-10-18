@@ -265,9 +265,13 @@ impl Px4Adapter {
             return rejected_control(tick, RejectReason::MeasurementUnavailable);
         };
         let (current_yaw, current_vel) = (pose.yaw_rad, pose.vel_ned_mps);
+        let armed = self.arm.report().is_some_and(|report| report.armed);
         let Some(uplink) = self.uplink.as_mut() else {
             return rejected_control(tick, RejectReason::UnknownScope);
         };
+        if frame.intent.is_some() {
+            uplink.resume_after_neutralize(armed, current_yaw, current_vel);
+        }
         let mut action_results = Vec::with_capacity(frame.actions.len());
         for action in &frame.actions {
             match action.kind() {
