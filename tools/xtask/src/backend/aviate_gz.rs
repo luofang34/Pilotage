@@ -5,6 +5,7 @@
 use std::path::Path;
 
 use super::{SessionContext, SimBackend, Stage};
+use crate::conflicts::{Claim, Remedy};
 use crate::error::XtaskError;
 use crate::process::ProcessSpec;
 use crate::readiness::{Readiness, stage_log};
@@ -13,6 +14,35 @@ use crate::readiness::{Readiness, stage_log};
 /// (also what the reset script targets).
 const WORLD: &str = "sim/worlds/x500_flightdeck.sdf";
 const WORLD_NAME: &str = "aviate_sitl";
+/// This backend's `--fc` name; it also names its gz partitions.
+const BACKEND_NAME: &str = "aviate-gz";
+/// Where instance 0's FC streams telemetry and its host's link listens:
+/// the default of both ends (the FC's `AviateApp.toml`, the host's link).
+const DEFAULT_TELEMETRY_PORT: u16 = 14_550;
+/// The first telemetry port of the other instances. It is clear of every
+/// PX4 port (14550-14609 for instances 0-29), so an Aviate session runs
+/// beside PX4 ones; 14550 itself is also where PX4's instance-0 host
+/// listens.
+const SHIFTED_TELEMETRY_BASE: u16 = 14_700;
+
+/// The loopback port instance `instance`'s telemetry stream uses.
+///
+/// Both ends move together: the FC streams to `AVIATE_TELEMETRY_ENDPOINT`
+/// and the host listens on `PILOTAGE_AVIATE_ADDR`. The shared-memory
+/// block between the FC and the gz plugin does not move: the FC opens
+/// instance 0's block whatever the session's instance, so one Aviate
+/// session runs per machine (see the process claim).
+fn telemetry_port(instance: u16) -> u16 {
+    if instance == 0 {
+        DEFAULT_TELEMETRY_PORT
+    } else {
+        SHIFTED_TELEMETRY_BASE.saturating_add(instance)
+    }
+}
+
+fn telemetry_endpoint(ctx: &SessionContext) -> String {
+    format!("127.0.0.1:{}", telemetry_port(ctx.instance))
+}
 
 /// The X500's own control-feel law.
 ///
@@ -30,7 +60,7 @@ pub struct AviateGz;
 
 impl SimBackend for AviateGz {
     fn name(&self) -> &'static str {
-        "aviate-gz"
+        BACKEND_NAME
     }
 
     fn host_adapter(&self) -> &'static str {
@@ -41,19 +71,47 @@ impl SimBackend for AviateGz {
         Some(CONTROL_FEEL_PROFILE)
     }
 
-    fn host_env(&self, _ctx: &SessionContext) -> Vec<(String, String)> {
-        vec![
+    fn host_env(&self, ctx: &SessionContext) -> Vec<(String, String)> {
+        let mut env = vec![
             // The camera sidecar discovers gz topics through this.
             ("GZ_IP".to_owned(), "127.0.0.1".to_owned()),
             // A sensor's topic is scoped by the world it is in. The
             // launcher is what chooses the world, so it is what says which
             // one rather than the host guessing a name.
             ("PILOTAGE_GZ_WORLD".to_owned(), WORLD_NAME.to_owned()),
-        ]
+            ("PILOTAGE_AVIATE_ADDR".to_owned(), telemetry_endpoint(ctx)),
+        ];
+        env.extend(super::gz::partition_env(ctx, BACKEND_NAME));
+        env
+    }
+
+    fn claims(&self, ctx: &SessionContext) -> Vec<Claim> {
+        let mut claims = vec![
+            // The FC and the gz plugin meet in shared memory named for
+            // simulator instance 0, whatever the session's instance: a
+            // second FC would attach to the first one's block.
+            Claim::Process("sitl-gazebo-x500"),
+            Claim::Udp {
+                port: telemetry_port(ctx.instance),
+                holder: "session host Aviate telemetry link".to_owned(),
+                remedy: Remedy::Instance,
+            },
+        ];
+        claims.extend(super::gz::partition_claims(ctx, BACKEND_NAME));
+        claims
     }
 
     fn plan(&self, ctx: &SessionContext) -> Result<Vec<Stage>, XtaskError> {
         plan_with_aviate_dir(ctx, &super::aviate_dir(&ctx.repo_root))
+    }
+
+    fn spawn(
+        &self,
+        ctx: &SessionContext,
+        point: &super::SpawnPoint,
+        stages: &mut [Stage],
+    ) -> Result<(), XtaskError> {
+        super::gz::spawn_in_world(ctx, point, stages)
     }
 
     fn stale_process_patterns(&self) -> Vec<&'static str> {
@@ -139,7 +197,7 @@ fn plan_with_aviate_dir(ctx: &SessionContext, aviate: &Path) -> Result<Vec<Stage
 
 fn gz_stage(ctx: &SessionContext, aviate: &Path, path: &str, world: &Path) -> Stage {
     let models = aviate.join("external/PX4-gazebo-models/models");
-    let gz_env = vec![
+    let mut gz_env = vec![
         ("PATH".to_owned(), path.to_owned()),
         ("GZ_IP".to_owned(), "127.0.0.1".to_owned()),
         (
@@ -159,6 +217,7 @@ fn gz_stage(ctx: &SessionContext, aviate: &Path, path: &str, world: &Path) -> St
             ),
         ),
     ];
+    gz_env.extend(super::gz::partition_env(ctx, BACKEND_NAME));
     Stage {
         spec: ProcessSpec {
             name: "gazebo",
@@ -188,16 +247,22 @@ fn gz_stage(ctx: &SessionContext, aviate: &Path, path: &str, world: &Path) -> St
 }
 
 fn fc_stage(ctx: &SessionContext, aviate: &Path, path: &str, fc: &Path) -> Stage {
+    let mut env = vec![
+        ("PATH".to_owned(), path.to_owned()),
+        ("GZ_IP".to_owned(), "127.0.0.1".to_owned()),
+        (
+            "AVIATE_TELEMETRY_ENDPOINT".to_owned(),
+            telemetry_endpoint(ctx),
+        ),
+    ];
+    env.extend(super::gz::partition_env(ctx, BACKEND_NAME));
     Stage {
         spec: ProcessSpec {
             name: "flight-controller",
             program: fc.display().to_string(),
             args: vec![],
             cwd: Some(aviate.to_path_buf()),
-            env: vec![
-                ("PATH".to_owned(), path.to_owned()),
-                ("GZ_IP".to_owned(), "127.0.0.1".to_owned()),
-            ],
+            env,
             remove_env: vec![],
             log_path: stage_log(&ctx.log_dir, "flight-controller"),
         },
@@ -209,146 +274,4 @@ fn fc_stage(ctx: &SessionContext, aviate: &Path, path: &str, fc: &Path) -> Stage
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used, clippy::panic)]
-mod tests {
-    use std::path::PathBuf;
-
-    use super::plan_with_aviate_dir;
-    use crate::backend::SessionContext;
-    use crate::cli::Profile;
-    use crate::error::XtaskError;
-
-    fn context(repo_root: PathBuf) -> SessionContext {
-        let log_dir = repo_root.join("target/xtask-sim");
-        SessionContext {
-            repo_root,
-            host_port: 4433,
-            viewer_port: 8080,
-            profile: Profile::Simulation,
-            log_dir,
-            lan: false,
-        }
-    }
-
-    fn scaffold(tag: &str) -> (PathBuf, PathBuf) {
-        let base = std::env::temp_dir().join(format!("plt_xtask_{tag}_{}", std::process::id()));
-        let repo = base.join("repo");
-        let aviate = base.join("Aviate");
-        std::fs::create_dir_all(repo.join("sim/worlds")).expect("repo dirs");
-        std::fs::create_dir_all(aviate.join("aviate-hal/xil/backends/gz/plugin/build"))
-            .expect("plugin dir");
-        std::fs::create_dir_all(aviate.join("target/debug")).expect("fc dir");
-        (repo, aviate)
-    }
-
-    #[test]
-    fn missing_artifacts_fail_with_actionable_hints() {
-        let (repo, aviate) = scaffold("hints");
-        let ctx = context(repo.clone());
-
-        let refusal = plan_with_aviate_dir(&ctx, &aviate.join("nowhere"));
-        assert!(matches!(
-            refusal,
-            Err(XtaskError::MissingArtifact {
-                what: "Aviate checkout",
-                ..
-            })
-        ));
-
-        let refusal = plan_with_aviate_dir(&ctx, &aviate);
-        assert!(matches!(
-            refusal,
-            Err(XtaskError::MissingArtifact {
-                what: "Aviate gz plugin",
-                ..
-            })
-        ));
-
-        std::fs::write(
-            aviate.join("aviate-hal/xil/backends/gz/plugin/build/libAviateGzPlugin.dylib"),
-            b"",
-        )
-        .expect("plugin");
-        let refusal = plan_with_aviate_dir(&ctx, &aviate);
-        assert!(matches!(
-            refusal,
-            Err(XtaskError::MissingArtifact {
-                what: "Aviate SITL FC binary",
-                ..
-            })
-        ));
-
-        std::fs::write(aviate.join("target/debug/sitl-gazebo-x500"), b"").expect("fc");
-        let refusal = plan_with_aviate_dir(&ctx, &aviate);
-        assert!(matches!(
-            refusal,
-            Err(XtaskError::MissingArtifact {
-                what: "flight-deck world",
-                ..
-            })
-        ));
-        std::fs::remove_dir_all(repo.parent().expect("base")).ok();
-    }
-
-    #[test]
-    fn a_complete_checkout_plans_gz_then_fc_with_the_runbook_environment() {
-        let (repo, aviate) = scaffold("plan");
-        std::fs::write(
-            aviate.join("aviate-hal/xil/backends/gz/plugin/build/libAviateGzPlugin.dylib"),
-            b"",
-        )
-        .expect("plugin");
-        std::fs::write(aviate.join("target/debug/sitl-gazebo-x500"), b"").expect("fc");
-        std::fs::write(repo.join("sim/worlds/x500_flightdeck.sdf"), b"<sdf/>").expect("world");
-
-        let ctx = context(repo.clone());
-        let stages = plan_with_aviate_dir(&ctx, &aviate).expect("plans");
-        assert_eq!(stages.len(), 2);
-        assert_eq!(stages[0].spec.name, "gazebo");
-        assert_eq!(stages[1].spec.name, "flight-controller");
-
-        let env = |stage: usize, key: &str| -> String {
-            stages[stage]
-                .spec
-                .env
-                .iter()
-                .find(|(k, _)| k == key)
-                .map(|(_, v)| v.clone())
-                .unwrap_or_else(|| panic!("{key} missing"))
-        };
-        assert!(env(0, "GZ_SIM_SYSTEM_PLUGIN_PATH").contains("plugin/build"));
-        assert!(env(0, "GZ_SIM_RESOURCE_PATH").contains("PX4-gazebo-models"));
-        assert!(env(0, "GZ_SIM_RESOURCE_PATH").contains("sim/worlds"));
-        assert_eq!(env(0, "GZ_IP"), "127.0.0.1");
-        assert!(
-            stages[0].spec.remove_env.contains(&"DISPLAY"),
-            "gz must run headless without an X display"
-        );
-        assert_eq!(env(1, "GZ_IP"), "127.0.0.1");
-        std::fs::remove_dir_all(repo.parent().expect("base")).ok();
-    }
-
-    /// A sensor's topic is scoped by the world it is in. The launcher
-    /// chooses the world and the host builds the topic, so they agree
-    /// through this name and nothing else. A typo in either place
-    /// subscribes successfully to a topic nobody publishes: gz-transport
-    /// reports no error, the bridge reports no fix, and the map states no
-    /// position with nothing anywhere to say why.
-    #[test]
-    fn the_launcher_names_the_world_the_sensor_topic_is_scoped_by() {
-        use crate::backend::SimBackend;
-
-        let ctx = context(PathBuf::from("unused-for-host-environment"));
-        let env = super::AviateGz.host_env(&ctx);
-        let world = env
-            .iter()
-            .find(|(key, _)| key == "PILOTAGE_GZ_WORLD")
-            .map(|(_, value)| value.clone())
-            .expect("the launcher tells the host which world it started");
-        assert_eq!(world, super::WORLD_NAME);
-        assert!(
-            !world.is_empty(),
-            "an empty world name builds no topic and the host reads no position"
-        );
-    }
-}
+mod tests;

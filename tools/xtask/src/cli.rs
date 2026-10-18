@@ -55,6 +55,31 @@ pub struct SimArgs {
     /// its connect manifest become reachable from another device, and the
     /// native connect facts are printed.
     pub lan: bool,
+    /// Simulator instance index (`--instance`, default 0). A session on
+    /// another instance shifts its simulator and FC ports and isolates
+    /// its simulator, so it can run beside the instance-0 session.
+    pub instance: u16,
+}
+
+/// Options for `cargo xtask fleet`.
+#[derive(Debug, PartialEq, Eq)]
+pub struct FleetArgs {
+    /// One `<backend>[:<model>]` per vehicle, in launch order
+    /// (`--vehicle`, repeated).
+    pub vehicles: Vec<String>,
+    /// Session profile handed to every host (`--profile`).
+    pub profile: Profile,
+    /// The first vehicle's host port; vehicle `k` gets `host_port + k`.
+    pub host_port: u16,
+    /// The first vehicle's viewer port; vehicle `k` gets
+    /// `viewer_port + k`.
+    pub viewer_port: u16,
+    /// The first vehicle's simulator instance; vehicle `k` gets
+    /// `instance_base + k`.
+    pub instance_base: u16,
+    /// Open every vehicle's viewer URL (`--open`; off by default, since a
+    /// fleet opens one tab per vehicle).
+    pub open: bool,
 }
 
 /// A parsed xtask invocation.
@@ -62,8 +87,15 @@ pub struct SimArgs {
 pub enum Command {
     /// Launch a full SITL session and supervise it.
     Sim(SimArgs),
+    /// Launch one session per vehicle and supervise them all.
+    Fleet(FleetArgs),
     /// Reset the running simulation world and FC of the named backend.
-    Reset(String),
+    Reset {
+        /// The backend.
+        fc: String,
+        /// The simulator instance to reset.
+        instance: u16,
+    },
     /// Produce the Alia X-Plane runtime handshake into a directory.
     Handshake(std::path::PathBuf),
     /// Run every guard pair the repository declares.
@@ -90,7 +122,11 @@ pub fn parse_args(args: &[String]) -> Result<Command, XtaskError> {
     };
     match command.as_str() {
         "sim" => Ok(Command::Sim(parse_sim(rest)?)),
-        "reset" => Ok(Command::Reset(parse_reset(rest)?)),
+        "fleet" => Ok(Command::Fleet(parse_fleet(rest)?)),
+        "reset" => {
+            let (fc, instance) = parse_reset(rest)?;
+            Ok(Command::Reset { fc, instance })
+        }
         "handshake" => Ok(Command::Handshake(parse_handshake(rest)?)),
         "guards" => {
             if let Some(extra) = rest.first() {
@@ -106,7 +142,7 @@ pub fn parse_args(args: &[String]) -> Result<Command, XtaskError> {
         "help" | "--help" | "-h" => Ok(Command::Help),
         other => Err(XtaskError::Usage {
             message: format!(
-                "unknown command {other:?} (expected sim, reset, handshake, affected, guards, or help)"
+                "unknown command {other:?} (expected sim, fleet, reset, handshake, affected, guards, or help)"
             ),
         }),
     }
@@ -161,11 +197,13 @@ fn parse_affected(args: &[String]) -> Result<String, XtaskError> {
     })
 }
 
-fn parse_reset(args: &[String]) -> Result<String, XtaskError> {
+fn parse_reset(args: &[String]) -> Result<(String, u16), XtaskError> {
     let mut fc = "aviate".to_owned();
+    let mut instance: u16 = 0;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
+            "--instance" => instance = required_number(&mut iter, "--instance")?,
             "--fc" => {
                 fc = iter
                     .next()
@@ -176,12 +214,14 @@ fn parse_reset(args: &[String]) -> Result<String, XtaskError> {
             }
             other => {
                 return Err(XtaskError::Usage {
-                    message: format!("unknown reset argument {other:?} (expected --fc <name>)"),
+                    message: format!(
+                        "unknown reset argument {other:?} (expected --fc <name> or --instance <n>)"
+                    ),
                 });
             }
         }
     }
-    Ok(fc)
+    Ok((fc, instance))
 }
 
 fn parse_sim(args: &[String]) -> Result<SimArgs, XtaskError> {
@@ -191,10 +231,12 @@ fn parse_sim(args: &[String]) -> Result<SimArgs, XtaskError> {
     let mut viewer_port: u16 = 8080;
     let mut open = true;
     let mut lan = false;
+    let mut instance: u16 = 0;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "--fc" => fc = required_value(&mut iter, "--fc")?,
+            "--instance" => instance = required_number(&mut iter, "--instance")?,
             "--profile" => profile = Profile::parse(&required_value(&mut iter, "--profile")?)?,
             "--port" => host_port = required_port(&mut iter, "--port")?,
             "--viewer-port" => viewer_port = required_port(&mut iter, "--viewer-port")?,
@@ -215,6 +257,69 @@ fn parse_sim(args: &[String]) -> Result<SimArgs, XtaskError> {
         viewer_port,
         open,
         lan,
+        instance,
+    })
+}
+
+fn parse_fleet(args: &[String]) -> Result<FleetArgs, XtaskError> {
+    let mut fleet = FleetArgs {
+        vehicles: Vec::new(),
+        profile: Profile::Simulation,
+        host_port: 4433,
+        viewer_port: 8080,
+        instance_base: 0,
+        open: false,
+    };
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--vehicle" => fleet.vehicles.push(required_value(&mut iter, "--vehicle")?),
+            "--profile" => {
+                fleet.profile = Profile::parse(&required_value(&mut iter, "--profile")?)?;
+            }
+            "--port" => fleet.host_port = required_port(&mut iter, "--port")?,
+            "--viewer-port" => fleet.viewer_port = required_port(&mut iter, "--viewer-port")?,
+            "--instance-base" => {
+                fleet.instance_base = required_number(&mut iter, "--instance-base")?;
+            }
+            "--open" => fleet.open = true,
+            "--no-open" => fleet.open = false,
+            other => {
+                return Err(XtaskError::Usage {
+                    message: format!("unknown fleet flag {other:?}"),
+                });
+            }
+        }
+    }
+    if fleet.vehicles.is_empty() {
+        return Err(XtaskError::Usage {
+            message: "fleet needs at least one --vehicle <backend>[:<model>]".to_owned(),
+        });
+    }
+    // Every vehicle's port and instance must exist: a fleet whose last
+    // vehicle wraps past 65535 would collide with its first.
+    let last = u16::try_from(fleet.vehicles.len() - 1).unwrap_or(u16::MAX);
+    for (flag, base) in [
+        ("--port", fleet.host_port),
+        ("--viewer-port", fleet.viewer_port),
+        ("--instance-base", fleet.instance_base),
+    ] {
+        if base.checked_add(last).is_none() {
+            return Err(XtaskError::Usage {
+                message: format!("{flag} {base} leaves no room for {} vehicles", last + 1),
+            });
+        }
+    }
+    Ok(fleet)
+}
+
+fn required_number(
+    iter: &mut std::slice::Iter<'_, String>,
+    flag: &'static str,
+) -> Result<u16, XtaskError> {
+    let raw = required_value(iter, flag)?;
+    raw.parse().map_err(|_| XtaskError::Usage {
+        message: format!("{flag} expects a number, got {raw:?}"),
     })
 }
 
@@ -258,18 +363,45 @@ commands:
 
       --fc <name>          FC backend: aviate-gz (alias aviate, default),
                            px4-gz (alias px4), px4-xplane, or
-                           aviate-xplane
+                           aviate-xplane; px4-gz takes a vehicle model
+                           as px4-gz:<model>: x500_gimbal (default) or
+                           rc_cessna
       --profile <profile>  physical | simulation (default) | oracle-only
       --port <port>        host WebTransport port (default: 4433)
       --viewer-port <port> static viewer port (default: 8080)
+      --instance <n>       simulator instance (default: 0); another
+                           instance shifts the simulator and FC ports and
+                           runs beside instance 0 on other ports
       --open               open the ready URL (default)
       --no-open            do not open the ready URL
       --lan                serve the session to the local network
+
+  fleet --vehicle <backend>[:<model>] [--vehicle ...] [options]
+      Launch one session per vehicle, each with its own simulator,
+      host, and viewer, spawned 30 m apart east of 47.397742 N
+      8.545594 E. Writes target/xtask-fleet/fleet.json and serves the
+      first vehicle's clients/web/session.json; supervises every
+      session and tears all of them down on ctrl-c.
+
+      --vehicle <spec>     a backend with an optional model, as for
+                           sim --fc (repeat once per vehicle)
+      --profile <profile>  physical | simulation (default) | oracle-only
+      --port <port>        first host port (default: 4433); vehicle k
+                           gets port + k
+      --viewer-port <port> first viewer port (default: 8080); vehicle k
+                           gets viewer-port + k
+      --instance-base <n>  first simulator instance (default: 0);
+                           vehicle k gets instance-base + k
+      --open               open every vehicle's viewer URL
+      --no-open            open none (default)
 
   reset [options]
       Reset the running simulation world and restart its FC.
 
       --fc <name>          FC backend (default: aviate)
+      --instance <n>       simulator instance (default: 0); px4-gz
+                           resets only that instance, and only while an
+                           xtask supervisor runs it
 
   handshake [options]
       Produce the Alia X-Plane runtime handshake document and print its
@@ -294,165 +426,4 @@ commands:
       Print this help text.";
 
 #[cfg(test)]
-#[allow(clippy::expect_used, clippy::panic)]
-mod tests {
-    use super::{Command, Profile, USAGE, parse_args};
-    use crate::error::XtaskError;
-
-    fn args(list: &[&str]) -> Vec<String> {
-        list.iter().map(|s| (*s).to_owned()).collect()
-    }
-
-    #[test]
-    fn sim_defaults_are_the_documented_ones() {
-        let Command::Sim(sim) = parse_args(&args(&["sim"])).expect("parses") else {
-            panic!("expected sim");
-        };
-        assert_eq!(sim.fc, "aviate");
-        assert_eq!(sim.profile, Profile::Simulation);
-        assert_eq!(sim.host_port, 4433);
-        assert_eq!(sim.viewer_port, 8080);
-        assert!(sim.open, "the browser opens by default");
-        assert!(!sim.lan, "the session serves loopback only by default");
-    }
-
-    #[test]
-    fn help_groups_each_command_once_and_matches_parser_defaults() {
-        let sim_heading = "  sim [options]\n";
-        let reset_heading = "  reset [options]\n";
-        let handshake_heading = "  handshake [options]\n";
-        let affected_heading = "  affected --base <ref>\n";
-        let help_heading = "  help\n";
-
-        for heading in [
-            sim_heading,
-            reset_heading,
-            handshake_heading,
-            affected_heading,
-            help_heading,
-        ] {
-            assert_eq!(USAGE.matches(heading).count(), 1, "heading {heading:?}");
-        }
-
-        let sim_start = USAGE.find(sim_heading).expect("sim heading");
-        let reset_start = USAGE.find(reset_heading).expect("reset heading");
-        let handshake_start = USAGE.find(handshake_heading).expect("handshake heading");
-        let help_start = USAGE.find(help_heading).expect("help heading");
-        let affected_start = USAGE.find(affected_heading).expect("affected heading");
-        assert!(sim_start < reset_start && reset_start < handshake_start);
-        assert!(handshake_start < affected_start && affected_start < help_start);
-
-        let sim_help = &USAGE[sim_start..reset_start];
-        assert!(sim_help.contains("aviate-gz (alias aviate, default)"));
-        assert!(sim_help.contains("px4-xplane"));
-        assert!(sim_help.contains("simulation (default)"));
-        assert!(sim_help.contains("default: 4433"));
-        assert!(sim_help.contains("default: 8080"));
-        assert!(sim_help.contains("--open"));
-        assert!(sim_help.contains("--no-open"));
-        assert!(sim_help.contains("--lan"));
-
-        let reset_help = &USAGE[reset_start..handshake_start];
-        assert!(reset_help.contains("--fc <name>"));
-        assert!(reset_help.contains("default: aviate"));
-        assert!(!reset_help.contains("--profile"));
-
-        let handshake_help = &USAGE[handshake_start..help_start];
-        assert!(handshake_help.contains("--out-dir <dir>"));
-        assert!(handshake_help.contains("target/xtask-sim"));
-    }
-
-    #[test]
-    fn handshake_out_dir_parses_and_malformed_flags_fail_closed() {
-        assert_eq!(
-            parse_args(&args(&["handshake"])).expect("default handshake parses"),
-            Command::Handshake(std::path::PathBuf::from("target/xtask-sim"))
-        );
-        assert_eq!(
-            parse_args(&args(&["handshake", "--out-dir", "/tmp/attempt"]))
-                .expect("explicit out-dir parses"),
-            Command::Handshake(std::path::PathBuf::from("/tmp/attempt"))
-        );
-        for malformed in [
-            args(&["handshake", "--out-dir"]),
-            args(&["handshake", "--dir", "/tmp/attempt"]),
-        ] {
-            assert!(matches!(
-                parse_args(&malformed),
-                Err(XtaskError::Usage { .. })
-            ));
-        }
-    }
-
-    #[test]
-    fn no_open_suppresses_the_browser() {
-        let Command::Sim(sim) = parse_args(&args(&["sim", "--no-open", "--lan"])).expect("parses")
-        else {
-            panic!("expected sim");
-        };
-        assert!(!sim.open);
-        assert!(sim.lan, "--lan is honored");
-    }
-
-    #[test]
-    fn reset_fc_selection_parses_and_malformed_flags_fail_closed() {
-        assert_eq!(
-            parse_args(&args(&["reset"])).expect("default reset parses"),
-            Command::Reset("aviate".to_owned())
-        );
-        assert_eq!(
-            parse_args(&args(&["reset", "--fc", "px4-gz"])).expect("explicit PX4 reset parses"),
-            Command::Reset("px4-gz".to_owned())
-        );
-        for malformed in [
-            args(&["reset", "--fc"]),
-            args(&["reset", "--backend", "px4-gz"]),
-        ] {
-            assert!(matches!(
-                parse_args(&malformed),
-                Err(XtaskError::Usage { .. })
-            ));
-        }
-    }
-
-    #[test]
-    fn sim_flags_parse_and_unknown_values_fail_closed() {
-        let Command::Sim(sim) = parse_args(&args(&[
-            "sim",
-            "--profile",
-            "oracle-only",
-            "--port",
-            "5000",
-            "--viewer-port",
-            "9000",
-            "--open",
-        ]))
-        .expect("parses") else {
-            panic!("expected sim");
-        };
-        assert_eq!(sim.profile, Profile::OracleOnly);
-        assert_eq!(sim.host_port, 5000);
-        assert_eq!(sim.viewer_port, 9000);
-        assert!(sim.open);
-
-        let refusal = parse_args(&args(&["sim", "--profile", "simulaton"]));
-        assert!(matches!(refusal, Err(XtaskError::UnknownProfile { .. })));
-        let refusal = parse_args(&args(&["sim", "--port", "banana"]));
-        assert!(matches!(refusal, Err(XtaskError::Usage { .. })));
-        let refusal = parse_args(&args(&["fly"]));
-        assert!(matches!(refusal, Err(XtaskError::Usage { .. })));
-    }
-
-    #[test]
-    fn port_zero_is_rejected_on_both_port_flags() {
-        // Port 0 would bind an ephemeral port that readiness checks and
-        // the printed viewer URL never learn about.
-        for flag in ["--port", "--viewer-port"] {
-            let refusal = parse_args(&args(&["sim", flag, "0"]));
-            assert!(
-                matches!(refusal, Err(XtaskError::Usage { .. })),
-                "{flag} 0 must be refused"
-            );
-        }
-    }
-}
+mod tests;

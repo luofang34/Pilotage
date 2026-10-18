@@ -85,6 +85,8 @@ fn the_assembled_host_environment_carries_the_vehicles_law() {
         profile,
         log_dir: repo_root.join("target/xtask-sim"),
         lan: false,
+        web_root: std::env::temp_dir(),
+        instance: 0,
     };
 
     for (backend, vehicle) in [("aviate-gz", "x500"), ("aviate-xplane", "alia250")] {
@@ -169,6 +171,8 @@ fn no_backend_writes_the_control_feel_variable_itself() {
                 profile,
                 log_dir: repo_root.join("target/xtask-sim"),
                 lan: false,
+                web_root: std::env::temp_dir(),
+                instance: 0,
             };
             let env = backend_for(backend).expect("known backend").host_env(&ctx);
             assert!(
@@ -203,6 +207,8 @@ fn a_physical_session_is_handed_no_control_feel_law() {
             profile: Profile::Physical,
             log_dir: repo_root.join("target/xtask-sim"),
             lan: false,
+            web_root: std::env::temp_dir(),
+            instance: 0,
         };
         let declared = backend_for(backend)
             .expect("known backend")
@@ -237,6 +243,8 @@ fn an_operators_own_control_feel_law_is_not_replaced() {
         profile: Profile::Simulation,
         log_dir: repo_root.join("target/xtask-sim"),
         lan: false,
+        web_root: std::env::temp_dir(),
+        instance: 0,
     };
 
     let operators = std::ffi::OsString::from("/tmp/an-operators-own-tuning.json");

@@ -32,6 +32,58 @@ pub enum XtaskError {
         /// The rejected backend name.
         name: String,
     },
+    /// `--fc <backend>:<model>` named a model the backend does not launch.
+    #[error("the {backend} backend has no model {model:?} (models: {})", if known.is_empty() { "none".to_owned() } else { known.join(", ") })]
+    UnknownModel {
+        /// The backend asked for the model.
+        backend: &'static str,
+        /// The rejected model name.
+        model: String,
+        /// Every model the backend does launch.
+        known: Vec<&'static str>,
+    },
+    /// A fleet asked a backend to place its vehicle, and the backend
+    /// cannot. Refused before any session starts.
+    #[error("the {backend} backend cannot place its vehicle at a fleet spawn point")]
+    SpawnUnsupported {
+        /// The backend that has no spawn hook.
+        backend: &'static str,
+    },
+    /// Two fleet vehicles claim the same port or singleton.
+    #[error("fleet vehicles {first} and {second} both need {claim}")]
+    FleetClaimOverlap {
+        /// The earlier vehicle.
+        first: String,
+        /// The later vehicle.
+        second: String,
+        /// What both claim.
+        claim: String,
+    },
+    /// A world file has no single origin to move.
+    #[error("{} has no single <{tag}> to move the world origin with", world.display())]
+    WorldOrigin {
+        /// The world file.
+        world: PathBuf,
+        /// The tag found zero or several times.
+        tag: &'static str,
+    },
+    /// A reset named an instance no live xtask supervisor runs: the reset
+    /// would stop an FC that nothing starts again.
+    #[error(
+        "no xtask supervisor runs simulator instance {instance} of this checkout; nothing would restart its FC"
+    )]
+    Unsupervised {
+        /// The instance asked for.
+        instance: u16,
+    },
+    /// A backend that resets only instance 0 was asked for another.
+    #[error("the {backend} backend resets only instance 0 (asked for {instance})")]
+    ResetUnsupported {
+        /// The backend.
+        backend: &'static str,
+        /// The instance asked for.
+        instance: u16,
+    },
     /// `--profile` named an unknown session profile. Mirrors the host's
     /// own fail-closed parsing: a typo must never fail open.
     #[error("unknown --profile {value:?} (expected physical, simulation, or oracle-only)")]
@@ -49,14 +101,16 @@ pub enum XtaskError {
         /// How to produce it.
         hint: &'static str,
     },
-    /// Session processes from a previous run are still alive. The
-    /// launcher never kills processes it did not start.
+    /// Something the session must hold is already held: a port is bound
+    /// or a singleton process runs. The launcher never stops processes it
+    /// did not start, so it names each one and refuses.
     #[error(
-        "session processes are already running:\n{listing}\nstop them first: pkill -f \"gz sim\"; pkill -f sitl-gazebo-x500; pkill -f pilotage-session-host; pkill -f \"http.server\""
+        "the session conflicts with what is already running:\n{}",
+        conflicts.join("\n")
     )]
-    StaleSession {
-        /// `pgrep` listing of the offending processes.
-        listing: String,
+    SessionConflict {
+        /// One line per held claim.
+        conflicts: Vec<String>,
     },
     /// Spawning a managed process failed.
     #[error("spawning {name} failed: {source}")]
