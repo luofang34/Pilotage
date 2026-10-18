@@ -30,6 +30,37 @@ impl Attitude {
     }
 }
 
+/// `MSP_RAW_IMU`: raw sensor values on Betaflight's body axes, after
+/// board alignment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RawImu {
+    /// Accelerometer, sensor counts.
+    pub acc: [i16; 3],
+    /// Gyro rates, whole degrees per second: roll, pitch, yaw axes.
+    pub gyro_dps: [i16; 3],
+    /// Magnetometer, sensor counts.
+    pub mag: [i16; 3],
+}
+
+impl RawImu {
+    /// Decodes an `MSP_RAW_IMU` payload.
+    ///
+    /// # Errors
+    ///
+    /// [`PayloadError::Truncated`] when the payload is short.
+    pub fn decode(payload: &[u8]) -> Result<Self, PayloadError> {
+        let mut cursor = Cursor::new("MSP_RAW_IMU", payload);
+        let mut triple = || -> Result<[i16; 3], PayloadError> {
+            Ok([cursor.i16()?, cursor.i16()?, cursor.i16()?])
+        };
+        Ok(Self {
+            acc: triple()?,
+            gyro_dps: triple()?,
+            mag: triple()?,
+        })
+    }
+}
+
 /// `MSP_RAW_GPS`: the GNSS solution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RawGps {

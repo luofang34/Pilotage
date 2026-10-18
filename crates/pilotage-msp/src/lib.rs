@@ -16,7 +16,7 @@ pub mod message;
 pub use frame::{DecodeError, Decoder, Direction, EncodeError, Frame, Version, crc8_dvb_s2};
 pub use message::{
     Altitude, ApiVersion, ArmingBlocker, ArmingDisableFlags, Attitude, BatteryState, BoxIds,
-    FailsafeConfig, FailsafeProcedure, ModeFlags, ModeRange, PayloadError, RawGps, Status,
+    FailsafeConfig, FailsafeProcedure, ModeFlags, ModeRange, PayloadError, RawGps, RawImu, Status,
     decode_features, decode_multiple, encode_multiple_request, encode_set_mode_range,
     encode_set_raw_rc, feature, permanent_id,
 };

@@ -5,7 +5,7 @@
 
 use super::{
     Altitude, ApiVersion, ArmingBlocker, ArmingDisableFlags, Attitude, BatteryState, BoxIds,
-    FailsafeConfig, FailsafeProcedure, ModeFlags, ModeRange, PayloadError, RawGps, Status,
+    FailsafeConfig, FailsafeProcedure, ModeFlags, ModeRange, PayloadError, RawGps, RawImu, Status,
     decode_features, decode_multiple, encode_multiple_request, encode_set_mode_range,
     encode_set_raw_rc, feature, permanent_id,
 };
@@ -263,4 +263,18 @@ fn a_multiple_reply_cut_short_returns_the_entries_it_holds() {
     assert_eq!(entries, vec![(1, &[0xAA][..])]);
     assert!(decode_multiple(&[1], &[5, 0xAA]).is_err());
     assert!(encode_multiple_request(&[0x1001]).is_err());
+}
+
+#[test]
+fn a_captured_level_raw_imu_reads_one_g_up_and_the_synthetic_field() {
+    // SITL resting level, heading north: 1 g is 256 counts on +z, and the
+    // virtual magnetometer reports its NWU field.
+    let imu = RawImu::decode(&reply_payload(
+        "244d3e1266000000000001000000000000fe07b8ff25f21c",
+    ))
+    .expect("decodes");
+    assert_eq!(imu.acc, [0, 0, 256]);
+    assert_eq!(imu.gyro_dps, [0, 0, 0]);
+    assert_eq!(imu.mag, [2_046, -72, -3_547]);
+    assert!(RawImu::decode(&[0; 17]).is_err());
 }

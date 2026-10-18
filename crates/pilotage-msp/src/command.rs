@@ -12,6 +12,8 @@ pub const MSP_FEATURE_CONFIG: u16 = 36;
 pub const MSP_FAILSAFE_CONFIG: u16 = 75;
 /// Cycle time, sensors, active modes, and arming-disable flags.
 pub const MSP_STATUS: u16 = 101;
+/// Raw accelerometer, gyro (degrees per second), and magnetometer.
+pub const MSP_RAW_IMU: u16 = 102;
 /// The RC channel values the flight controller uses.
 pub const MSP_RC: u16 = 105;
 /// The GNSS solution: fix, satellites, position, speed, course.
