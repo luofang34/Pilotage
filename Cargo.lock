@@ -2199,6 +2199,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-multirotor-fdm"
+version = "0.1.0"
+dependencies = [
+ "pilotage-msp",
+ "thiserror",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "pilotage-navdata-cycle"
 version = "0.1.0"
 dependencies = [

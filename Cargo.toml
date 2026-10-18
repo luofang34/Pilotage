@@ -12,6 +12,7 @@ members = [
     "crates/pilotage-adapter-api",
     "crates/pilotage-mavlink",
     "crates/pilotage-msp",
+    "sim/multirotor-fdm",
     "crates/pilotage-conformance",
     "crates/pilotage-situation-view",
     "crates/pilotage-airspace-view",
