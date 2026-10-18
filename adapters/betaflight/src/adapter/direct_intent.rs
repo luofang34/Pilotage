@@ -73,3 +73,6 @@ fn from_attitude(attitude: &AttitudeThrustIntent) -> (DirectDemand, bool) {
         c0 || c1 || c2,
     )
 }
+
+#[cfg(test)]
+mod tests;
