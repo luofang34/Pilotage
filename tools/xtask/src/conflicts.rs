@@ -12,6 +12,29 @@ use std::time::Duration;
 
 use crate::error::XtaskError;
 
+/// What frees a held claim for the session being launched.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Remedy {
+    /// A launch flag moves the claim (`--port`, `--viewer-port`).
+    Flag(&'static str),
+    /// The claim moves with the simulator instance (`--instance`, or
+    /// `--instance-base` for a fleet).
+    Instance,
+    /// Nothing the launch can choose moves it: the other session must
+    /// stop first.
+    StopOther,
+}
+
+impl Remedy {
+    fn advice(self) -> String {
+        match self {
+            Remedy::Flag(flag) => format!("pick another {flag}"),
+            Remedy::Instance => "pick another --instance (--instance-base for a fleet)".to_owned(),
+            Remedy::StopOther => "stop the session that holds it".to_owned(),
+        }
+    }
+}
+
 /// One thing a session holds while it runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Claim {
@@ -21,6 +44,8 @@ pub enum Claim {
         port: u16,
         /// Which process binds it, for the refusal message.
         holder: String,
+        /// What moves it.
+        remedy: Remedy,
     },
     /// A TCP port a session process listens on.
     Tcp {
@@ -28,6 +53,8 @@ pub enum Claim {
         port: u16,
         /// Which process listens on it, for the refusal message.
         holder: String,
+        /// What moves it.
+        remedy: Remedy,
     },
     /// A machine-wide singleton: any process whose command line matches
     /// this `pgrep -f` pattern holds it.
@@ -48,10 +75,12 @@ pub(crate) fn session_claims(
         Claim::Udp {
             port: ctx.host_port,
             holder: "session host".to_owned(),
+            remedy: Remedy::Flag("--port"),
         },
         Claim::Tcp {
             port: ctx.viewer_port,
             holder: "viewer".to_owned(),
+            remedy: Remedy::Flag("--viewer-port"),
         },
     ];
     claims.extend(backend.claims(ctx));
@@ -75,20 +104,31 @@ pub(crate) fn refuse_conflicts(claims: &[Claim]) -> Result<(), XtaskError> {
 /// `Some(description)` when `claim` is held by something else now.
 fn held_by_another(claim: &Claim) -> Option<String> {
     match claim {
-        Claim::Udp { port, holder } => {
-            udp_port_in_use(*port).then(|| format!("UDP port {port} ({holder}) is in use"))
-        }
-        Claim::Tcp { port, holder } => {
-            tcp_port_in_use(*port).then(|| format!("TCP port {port} ({holder}) is in use"))
-        }
+        Claim::Udp {
+            port,
+            holder,
+            remedy,
+        } => udp_port_in_use(*port)
+            .then(|| format!("UDP port {port} ({holder}) is in use: {}", remedy.advice())),
+        Claim::Tcp {
+            port,
+            holder,
+            remedy,
+        } => tcp_port_in_use(*port)
+            .then(|| format!("TCP port {port} ({holder}) is in use: {}", remedy.advice())),
         Claim::Process(pattern) => {
             let listing = matching_processes(pattern);
-            (!listing.is_empty()).then(|| format!("{pattern:?} is running:\n{listing}"))
+            (!listing.is_empty()).then(|| {
+                format!(
+                    "{pattern:?} is running ({}):\n{listing}",
+                    Remedy::StopOther.advice()
+                )
+            })
         }
         Claim::DefaultGzPartition => default_gz_partition_world().map(|topic| {
             format!(
-                "a gz world runs in the default partition ({topic}); \
-                 pick another --instance"
+                "a gz world runs in the default partition ({topic}): {}",
+                Remedy::Instance.advice()
             )
         }),
     }

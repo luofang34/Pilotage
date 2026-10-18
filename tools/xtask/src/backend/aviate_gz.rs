@@ -5,7 +5,7 @@
 use std::path::Path;
 
 use super::{SessionContext, SimBackend, Stage};
-use crate::conflicts::Claim;
+use crate::conflicts::{Claim, Remedy};
 use crate::error::XtaskError;
 use crate::process::ProcessSpec;
 use crate::readiness::{Readiness, stage_log};
@@ -94,6 +94,7 @@ impl SimBackend for AviateGz {
             Claim::Udp {
                 port: telemetry_port(ctx.instance),
                 holder: "session host Aviate telemetry link".to_owned(),
+                remedy: Remedy::Instance,
             },
         ];
         claims.extend(super::gz::partition_claims(ctx, BACKEND_NAME));

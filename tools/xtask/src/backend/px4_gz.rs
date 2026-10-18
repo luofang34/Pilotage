@@ -36,7 +36,7 @@ use std::path::{Path, PathBuf};
 
 use super::{SessionContext, SimBackend, Stage};
 use crate::cli::Profile;
-use crate::conflicts::Claim;
+use crate::conflicts::{Claim, Remedy};
 use crate::error::XtaskError;
 use crate::output::print_line;
 use crate::process::ProcessSpec;
@@ -125,14 +125,17 @@ impl SimBackend for Px4Gz {
             Claim::Udp {
                 port: ports.gcs_local,
                 holder: format!("PX4 instance {instance} GCS link"),
+                remedy: Remedy::Instance,
             },
             Claim::Udp {
                 port: ports.offboard_local,
                 holder: format!("PX4 instance {instance} offboard link"),
+                remedy: Remedy::Instance,
             },
             Claim::Udp {
                 port: ports.host_telemetry,
                 holder: format!("session host MAVLink link for PX4 instance {instance}"),
+                remedy: Remedy::Instance,
             },
         ];
         claims.extend(super::gz::partition_claims(ctx, self.name()));

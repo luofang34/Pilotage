@@ -88,7 +88,7 @@ pub enum XtaskError {
     /// or a singleton process runs. The launcher never stops processes it
     /// did not start, so it names each one and refuses.
     #[error(
-        "the session conflicts with what is already running:\n{}\nstop that session, or pick other ports (--port, --viewer-port) or another --instance",
+        "the session conflicts with what is already running:\n{}",
         conflicts.join("\n")
     )]
     SessionConflict {

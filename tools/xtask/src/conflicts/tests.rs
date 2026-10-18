@@ -6,7 +6,8 @@
 use std::net::{TcpListener, UdpSocket};
 
 use super::{
-    Claim, first_world_topic, held_by_another, refuse_conflicts, tcp_port_in_use, udp_port_in_use,
+    Claim, Remedy, first_world_topic, held_by_another, refuse_conflicts, tcp_port_in_use,
+    udp_port_in_use,
 };
 use crate::error::XtaskError;
 
@@ -42,11 +43,13 @@ fn only_held_claims_are_refused_and_every_one_is_named() {
         Claim::Udp {
             port: udp_port,
             holder: "session host".to_owned(),
+            remedy: Remedy::Instance,
         },
         unheld,
         Claim::Tcp {
             port: tcp_port,
             holder: "viewer".to_owned(),
+            remedy: Remedy::Instance,
         },
     ];
     let Err(XtaskError::SessionConflict { conflicts }) = refuse_conflicts(&claims) else {
@@ -88,4 +91,69 @@ fn a_world_topic_marks_the_partition_as_used() {
         first_world_topic("/clock\n/world/default/clock\n/world/default/stats\n"),
         Some("/world/default/clock".to_owned())
     );
+}
+
+/// The refusal says what moves each held claim, and suggests another
+/// instance only for a claim that moves with the instance.
+#[test]
+fn each_refusal_names_what_frees_that_claim() {
+    let held = UdpSocket::bind("127.0.0.1:0").expect("bind");
+    let port = held.local_addr().expect("addr").port();
+    let message = |remedy| {
+        held_by_another(&Claim::Udp {
+            port,
+            holder: "test".to_owned(),
+            remedy,
+        })
+        .expect("held")
+    };
+    assert!(message(Remedy::Flag("--port")).ends_with("pick another --port"));
+    assert!(message(Remedy::Instance).contains("another --instance"));
+    let fixed = message(Remedy::StopOther);
+    assert!(fixed.ends_with("stop the session that holds it"));
+    assert!(!fixed.contains("--instance"), "{fixed}");
+}
+
+#[test]
+fn a_session_names_the_flag_that_moves_its_host_and_viewer_ports() {
+    use super::session_claims;
+    use crate::backend::SessionContext;
+
+    struct Bare;
+    impl crate::backend::SimBackend for Bare {
+        fn name(&self) -> &'static str {
+            "bare"
+        }
+        fn host_adapter(&self) -> &'static str {
+            "reference"
+        }
+        fn host_env(&self, _ctx: &SessionContext) -> Vec<(String, String)> {
+            Vec::new()
+        }
+        fn plan(&self, _ctx: &SessionContext) -> Result<Vec<crate::backend::Stage>, XtaskError> {
+            Ok(Vec::new())
+        }
+        fn stale_process_patterns(&self) -> Vec<&'static str> {
+            vec!["bare-singleton"]
+        }
+        fn reset(&self, _repo_root: &std::path::Path) -> Result<(), XtaskError> {
+            Ok(())
+        }
+    }
+    let claims = session_claims(&SessionContext::for_test("unused".into()), &Bare);
+    assert!(matches!(
+        claims[0],
+        Claim::Udp {
+            remedy: Remedy::Flag("--port"),
+            ..
+        }
+    ));
+    assert!(matches!(
+        claims[1],
+        Claim::Tcp {
+            remedy: Remedy::Flag("--viewer-port"),
+            ..
+        }
+    ));
+    assert_eq!(claims[2], Claim::Process("bare-singleton"));
 }
