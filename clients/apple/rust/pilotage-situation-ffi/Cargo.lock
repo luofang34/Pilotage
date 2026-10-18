@@ -1303,6 +1303,7 @@ version = "0.1.0"
 dependencies = [
  "indicate-instrument-feeder",
  "indicate-instrument-state",
+ "pilotage-client-session",
  "pilotage-instrument-runtime",
  "pilotage-protocol",
 ]

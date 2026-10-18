@@ -11,5 +11,6 @@ workspace = true
 [dependencies]
 indicate-instrument-feeder = { workspace = true }
 indicate-instrument-state = { workspace = true }
+pilotage-client-session = { workspace = true }
 pilotage-instrument-runtime = { workspace = true }
 pilotage-protocol = { workspace = true }

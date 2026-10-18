@@ -24,6 +24,7 @@ mod event;
 mod motion;
 mod reconnect;
 mod streams;
+pub mod telemetry;
 
 #[cfg(test)]
 mod tests;
