@@ -24,6 +24,27 @@ use pilotage_timing::{MonoTimestamp, StalenessPolicy};
 
 const FIXTURE: &str = include_str!("../../../clients/web-control/server-welcome-fixture.json");
 
+/// The motion scope's actions: an arm and a mode request whose
+/// multi-value target list the browser must decode PACKED.
+fn motion_actions() -> Vec<ActionCapability> {
+    vec![
+        ActionCapability {
+            action: ActionKind::Arm,
+            mode_targets: vec![],
+            feel_targets: vec![],
+        },
+        ActionCapability {
+            action: ActionKind::ModeRequest,
+            mode_targets: vec![
+                ModeTarget::CameraVelocity,
+                ModeTarget::FpvDirect,
+                ModeTarget::Hold,
+            ],
+            feel_targets: vec![],
+        },
+    ]
+}
+
 /// A two-scope advertisement exercising every list shape the browser must
 /// decode: multi-value reference frames, multi-value mode targets, the
 /// attitude family's `max_yaw_rate`, and a legacy-translated scope.
@@ -35,6 +56,8 @@ fn capabilities() -> AdapterCapabilities {
         },
         vehicles: vec![VehicleDescriptor {
             id: VehicleId::new(1),
+            class: pilotage_protocol::VehicleClass::GroundRover,
+            display_name: "test rover".to_owned(),
             scopes: vec![
                 ScopeDescriptor {
                     authority_group: None,
@@ -48,22 +71,7 @@ fn capabilities() -> AdapterCapabilities {
                         max_angular: 0.9,
                         max_yaw_rate: 0.0,
                     }],
-                    actions: vec![
-                        ActionCapability {
-                            action: ActionKind::Arm,
-                            mode_targets: vec![],
-                            feel_targets: vec![],
-                        },
-                        ActionCapability {
-                            action: ActionKind::ModeRequest,
-                            mode_targets: vec![
-                                ModeTarget::CameraVelocity,
-                                ModeTarget::FpvDirect,
-                                ModeTarget::Hold,
-                            ],
-                            feel_targets: vec![],
-                        },
-                    ],
+                    actions: motion_actions(),
                     legacy: Some(LegacyCommandMap::Velocity {
                         vx: None,
                         vy: None,

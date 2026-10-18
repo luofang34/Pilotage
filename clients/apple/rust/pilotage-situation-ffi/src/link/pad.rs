@@ -65,10 +65,16 @@ impl Link {
     /// One canonical sample through the shared runtime and out as
     /// engine actions, whatever device produced it.
     fn runtime_actions(&mut self, sample: &RawSample) -> Vec<ClientAction> {
+        // One host serves one vehicle (ADR-0028): its advertised class
+        // chooses the stick scheme, so the operator never picks it.
+        let admission = self.engine.admission();
+        let class = admission
+            .and_then(|admitted| admitted.vehicles.first())
+            .and_then(|vehicle| vehicle.vehicle_class);
         let session = SessionState {
             now_ms: self.now_ms() as f64,
-            mode: Mode::QuadPilot,
-            connected: self.engine.admission().is_some(),
+            mode: Mode::for_vehicle_class(class),
+            connected: admission.is_some(),
             input_lost: false,
         };
         let plan = self.control.evaluate(sample, &session);

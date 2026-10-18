@@ -105,12 +105,32 @@ message ScopeDescriptor {
   repeated ActionCapability actions = 5;
 }
 
+// The kind of vehicle, as the adapter declares it. A client chooses its
+// default control scheme from this value, so the operator does not select
+// the scheme for each vehicle.
+enum VehicleClass {
+  // The adapter did not declare a class.
+  VEHICLE_CLASS_UNSPECIFIED = 0;
+  // A rotorcraft with more than one rotor that can hover.
+  VEHICLE_CLASS_MULTICOPTER = 1;
+  // An aircraft that gets lift from a fixed wing and cannot hover.
+  VEHICLE_CLASS_FIXED_WING = 2;
+  // An aircraft that takes off and lands vertically and flies on a wing.
+  VEHICLE_CLASS_VTOL = 3;
+  // A vehicle that drives on the ground.
+  VEHICLE_CLASS_GROUND_ROVER = 4;
+  // A vehicle that moves on the water surface.
+  VEHICLE_CLASS_SURFACE_VESSEL = 5;
+}
+
 // Describes one vehicle a host can offer for control.
 message VehicleDescriptor {
   VehicleId vehicle = 1;
+  // The name of the vehicle for the operator, from the adapter.
   string display_name = 2;
   repeated ScopeDescriptor scopes = 3;
   repeated ExecutionMode supported_modes = 4;
+  VehicleClass vehicle_class = 5;
 }
 
 // Describes what a session host can offer at session setup (ADR-0008).
@@ -119,4 +139,7 @@ message HostCapabilities {
   repeated VehicleDescriptor vehicles = 2;
   repeated ExecutionMode supported_modes = 3;
   ControlFeelIdentity control_feel = 4;
+  // True when the adapter drives a physical vehicle. False for a
+  // simulation.
+  bool physically_embodied = 5;
 }

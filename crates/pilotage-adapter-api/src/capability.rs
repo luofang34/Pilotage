@@ -191,6 +191,11 @@ pub struct ScopeDescriptor {
 pub struct VehicleDescriptor {
     /// Identifies the vehicle.
     pub id: VehicleId,
+    /// The kind of vehicle. A client chooses its default control scheme
+    /// from it.
+    pub class: pilotage_protocol::VehicleClass,
+    /// The name of the vehicle for the operator. Not empty.
+    pub display_name: String,
     /// Control scopes assignable on this vehicle.
     pub scopes: Vec<ScopeDescriptor>,
     /// Link-loss actions this vehicle supports.
@@ -269,6 +274,8 @@ mod tests {
             },
             vehicles: vec![VehicleDescriptor {
                 id: VehicleId::new(1),
+                class: pilotage_protocol::VehicleClass::GroundRover,
+                display_name: "test rover".to_owned(),
                 scopes: vec![ScopeDescriptor {
                     authority_group: None,
                     scope: ScopeId::new("vehicle.motion"),

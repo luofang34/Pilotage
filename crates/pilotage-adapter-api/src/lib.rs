@@ -35,7 +35,9 @@ pub use pilotage_camera_calibration::{
     verify_camera, verify_sim_recovery,
 };
 // The typed vocabulary an adapter reports, shared with clients.
-pub use pilotage_protocol::{CommandOutcome, GimbalAxisLocks, GimbalReference, GimbalYawFrame};
+pub use pilotage_protocol::{
+    CommandOutcome, GimbalAxisLocks, GimbalReference, GimbalYawFrame, VehicleClass,
+};
 pub use step::{StepBudget, StepOutcome};
 pub use telemetry::{
     AvionicsAttitudeSample, AvionicsBaroSample, AvionicsKinematicsSample, AvionicsSample,

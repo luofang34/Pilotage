@@ -13,6 +13,7 @@ mod ids;
 mod intent;
 mod session;
 mod session_convert;
+mod vehicle_class;
 pub mod video_frame;
 pub mod wire;
 
@@ -36,6 +37,7 @@ pub use session::{
     Ping, Pong, ProfileActivation, SESSION_PROTOCOL_VERSION, ScopeHolderSnapshot,
     ScopeTransferAccept, ScopeTransferOffer, ScopeTransferRequest, ServerWelcome,
 };
+pub use vehicle_class::VehicleClass;
 pub use video_frame::{
     CaptureHeader, ContractFault, DecodedFrame, Offsets, encode_v2 as encode_video_frame_v2,
 };

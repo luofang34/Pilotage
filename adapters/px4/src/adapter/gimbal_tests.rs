@@ -78,6 +78,20 @@ pub(super) fn next_command(lanes: &mut GimbalLanes) -> u16 {
 }
 
 #[test]
+fn capabilities_declare_the_configured_airframe_with_a_name() {
+    use pilotage_protocol::VehicleClass;
+    let default = Px4Adapter::from_state(VehicleId::new(1), live_state());
+    let vehicle = &default.capabilities().vehicles[0];
+    assert_eq!(vehicle.class, VehicleClass::Multicopter);
+    assert_eq!(vehicle.display_name, "PX4 multicopter");
+    let plane = Px4Adapter::from_state(VehicleId::new(1), live_state())
+        .with_vehicle_class(VehicleClass::FixedWing);
+    let vehicle = &plane.capabilities().vehicles[0];
+    assert_eq!(vehicle.class, VehicleClass::FixedWing);
+    assert_eq!(vehicle.display_name, "PX4 fixed-wing");
+}
+
+#[test]
 fn capabilities_advertise_the_gimbal_scope_alongside_flight() {
     let (fc, addr) = fake_fc();
     drop(fc);

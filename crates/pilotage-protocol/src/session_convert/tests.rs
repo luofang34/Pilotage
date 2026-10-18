@@ -79,6 +79,7 @@ fn sample_welcome() -> ServerWelcome {
             vehicles: vec![],
             supported_modes: vec![],
             control_feel: None,
+            physically_embodied: false,
         },
         scope_holders: vec![sample_snapshot(Some(9)), sample_snapshot(None)],
     }

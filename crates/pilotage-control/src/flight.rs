@@ -86,6 +86,18 @@ pub(crate) fn flight_axes(
             yaw: right_x,
             label: "CRUISE: L=move RX=yaw R2/L2=climb",
         },
+        // The plane flies the same BODY_FRD velocity intent: pitch is
+        // forward speed (vx), throttle is climb (-vz), yaw is the turn
+        // rate. A fixed wing cannot slip sideways, so roll (vy) stays
+        // zero. Speed and turn share the right stick like a throttle
+        // quadrant and yoke; the left stick is the climb lever.
+        Mode::Plane => FlightAxes {
+            roll: 0.0,
+            pitch: -right_y,
+            throttle: -left_y,
+            yaw: right_x,
+            label: "PLANE: RY=speed RX=turn LY=climb",
+        },
         // Rover drives ground: throttle and yaw only; roll/pitch stay zero.
         Mode::Rover => FlightAxes {
             roll: 0.0,
