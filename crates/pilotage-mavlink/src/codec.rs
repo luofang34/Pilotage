@@ -11,13 +11,15 @@
 
 mod decoding;
 mod encoding;
+mod parameters;
 use decoding::decode_known;
 pub use encoding::{
     AttitudeTarget, GCS_COMPONENT_ID, GCS_SYSTEM_ID, GIMBAL_FLAGS_HORIZON_YAW_FOLLOW,
-    encode_arm_command, encode_attitude_setpoint, encode_command_ack, encode_command_long,
-    encode_gcs_heartbeat, encode_gimbal_rate_setpoint, encode_position_setpoint,
-    encode_velocity_setpoint,
+    ManualControlSticks, encode_arm_command, encode_attitude_setpoint, encode_autopilot_heartbeat,
+    encode_command_ack, encode_command_long, encode_gcs_heartbeat, encode_gimbal_rate_setpoint,
+    encode_manual_control, encode_position_setpoint, encode_velocity_setpoint,
 };
+pub use parameters::{PARAM_ID_LEN, ParamValue, encode_param_set, encode_param_value, param_id};
 
 /// MAVLink 2.0 start-of-frame marker.
 pub const MAGIC_V2: u8 = 0xFD;
@@ -52,6 +54,12 @@ pub const ESTIMATOR_STATUS_ID: u32 = 230;
 pub const AVIATE_ESTIMATOR_STATUS_ID: u32 = 20_000;
 /// BATTERY_STATUS message id.
 pub const BATTERY_STATUS_ID: u32 = 147;
+/// PARAM_VALUE message id (downlink: a parameter's current value).
+pub const PARAM_VALUE_ID: u32 = 22;
+/// PARAM_SET message id (uplink: a parameter write).
+pub const PARAM_SET_ID: u32 = 23;
+/// MANUAL_CONTROL message id (uplink: joystick sticks).
+pub const MANUAL_CONTROL_ID: u32 = 69;
 
 /// One parsed frame event from the Aviate subset.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -64,6 +72,17 @@ pub enum FcMessage {
     Heartbeat {
         /// Whether the sender reports itself armed.
         armed: bool,
+        /// The autopilot-specific flight mode (PX4: main mode in bits
+        /// 16..24, sub mode in bits 24..32).
+        custom_mode: u32,
+    },
+    /// A parameter's current value, sent on request and as the echo of
+    /// every parameter write.
+    ParamValue {
+        /// The NUL-padded parameter name.
+        param_id: [u8; PARAM_ID_LEN],
+        /// The value the sender now holds.
+        value: ParamValue,
     },
     /// Command acknowledgement (arm/disarm feedback).
     CommandAck {
@@ -245,6 +264,7 @@ fn crc_extra(msg_id: u32) -> Option<u8> {
         GIMBAL_MANAGER_SET_ATTITUDE_ID => Some(123),
         GIMBAL_DEVICE_ATTITUDE_STATUS_ID => Some(137),
         BATTERY_STATUS_ID => Some(154),
+        PARAM_VALUE_ID => Some(220),
         _ => None,
     }
 }

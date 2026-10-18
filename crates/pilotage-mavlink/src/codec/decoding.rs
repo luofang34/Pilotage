@@ -3,7 +3,7 @@
 use super::{
     ATTITUDE_QUATERNION_ID, AVIATE_ESTIMATOR_STATUS_ID, BATTERY_STATUS_ID, COMMAND_ACK_ID,
     ESTIMATOR_STATUS_ID, FcMessage, GIMBAL_DEVICE_ATTITUDE_STATUS_ID, GNSS_RAW_ID, HEARTBEAT_ID,
-    HIL_STATE_QUATERNION_ID, LOCAL_POSITION_NED_ID, SCALED_PRESSURE_ID,
+    HIL_STATE_QUATERNION_ID, LOCAL_POSITION_NED_ID, PARAM_VALUE_ID, SCALED_PRESSURE_ID,
 };
 
 fn f32_at(payload: &[u8], off: usize) -> f32 {
@@ -160,7 +160,9 @@ pub(super) fn decode_known(msg_id: u32, payload: &[u8]) -> Option<FcMessage> {
             // Payload: custom_mode u32 @0, type @4, autopilot @5,
             // base_mode @6 (bit 0x80 = SAFETY_ARMED).
             armed: payload.get(6).is_some_and(|b| b & 0x80 != 0),
+            custom_mode: u32_at(payload, 0),
         }),
+        PARAM_VALUE_ID => super::parameters::decode_param_value(payload),
         COMMAND_ACK_ID => Some(FcMessage::CommandAck {
             command: u16::from(payload.first().copied().unwrap_or(0))
                 | (u16::from(payload.get(1).copied().unwrap_or(0)) << 8),

@@ -44,6 +44,7 @@ pub(crate) fn encode_frame(msg_id: u32, payload: &[u8], truncate: bool) -> Vec<u
         115 => 4,
         24 => 24,
         20_000 => 171,
+        22 => 220,
         // The table is kept apart from the decoder's on purpose, so the
         // two are independent statements of the same wire fact. An id the
         // decoder knows and this table does not would make a frame the
@@ -323,7 +324,16 @@ fn garbage_prefix_resyncs_to_the_next_frame() {
     let mut out: Vec<(FrameSource, FcMessage)> = Vec::new();
     let stats = parse_datagram(&datagram, &mut out);
     assert_eq!(stats.garbage_bytes, 3);
-    assert_eq!(out, vec![(SOURCE, FcMessage::Heartbeat { armed: false })]);
+    assert_eq!(
+        out,
+        vec![(
+            SOURCE,
+            FcMessage::Heartbeat {
+                armed: false,
+                custom_mode: 0
+            }
+        )]
+    );
 }
 
 #[test]
@@ -340,7 +350,10 @@ fn gcs_heartbeat_parses_back_as_heartbeat() {
                 component_id: 190,
                 frame_sequence: 4,
             },
-            FcMessage::Heartbeat { armed: false }
+            FcMessage::Heartbeat {
+                armed: false,
+                custom_mode: 0
+            }
         )]
     );
 }
@@ -481,3 +494,6 @@ mod sim_truth;
 
 /// BATTERY_STATUS against frames from an independent encoder.
 mod battery;
+
+/// The joystick and parameter-protocol subset against an independent encoder.
+mod stick_and_parameter;
