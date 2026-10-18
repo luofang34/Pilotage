@@ -21,6 +21,10 @@ pub struct Px4Config {
     pub stream_command_endpoint: SocketAddr,
     /// PX4 onboard endpoint receiving offboard commands.
     pub command_endpoint: SocketAddr,
+    /// The MAVLink system id of the PX4 instance this adapter flies. PX4
+    /// SITL instance `N` reports system id `N + 1`, so concurrent instances
+    /// are told apart by this id, never by port alone.
+    pub system_id: u8,
     /// Whether this vehicle carries a MAVLink Gimbal Protocol v2 gimbal.
     /// Off by default: a bare airframe has no gimbal, and advertising
     /// the `vehicle.gimbal` scope on one would let a client lease a
@@ -45,6 +49,7 @@ impl Px4Config {
             telemetry_endpoint: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 14_550)),
             stream_command_endpoint: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 18_570)),
             command_endpoint: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 14_580)),
+            system_id: 1,
             gimbal: false,
             drop_gimbal_link_loss_stop: false,
         }
@@ -80,6 +85,7 @@ impl Px4Config {
             Px4Profile::Simulation => LinkConfig::simulator(),
         };
         config.endpoint = self.telemetry_endpoint;
+        config.system_id = self.system_id;
         config.authorization_source = AuthorizationSource::StandardEstimatorStatus;
         config.standard_status_max_lag_ms = 300;
         config.reset_candidate_max_ms = 60_000;
@@ -123,6 +129,14 @@ mod tests {
         let config = Px4Config::new(Px4Profile::Simulation).link_config();
         let gimbal = pilotage_mavlink::codec::GIMBAL_DEVICE_ATTITUDE_STATUS_ID;
         assert!(config.stream_interval_requests.contains(&(gimbal, 20_000)));
+    }
+
+    #[test]
+    fn the_link_listens_to_the_configured_system_only() {
+        let mut px4 = Px4Config::new(Px4Profile::Simulation);
+        assert_eq!(px4.link_config().system_id, 1);
+        px4.system_id = 7;
+        assert_eq!(px4.link_config().system_id, 7);
     }
 
     #[test]
