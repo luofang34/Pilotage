@@ -20,9 +20,10 @@ const MAVLINK_PORT_BASE: u16 = 14_700;
 /// SITL's own ports for instance 0; `-I<n>` adds 10·n to each.
 const SITL_RC_IN_UDP: u16 = 5_501;
 const SITL_SERIAL_TCP: [u16; 2] = [5_762, 5_763];
-/// Home altitude, metres above mean sea level: the ground height the
-/// other demo vehicles use around the origin.
-const HOME_ALTITUDE_M: f64 = 488.0;
+/// Home altitude, metres above mean sea level: the elevation the PX4
+/// flight-deck worlds (`sim/worlds/px4_flightdeck.sdf`) give their origin,
+/// so a copter beside a PX4 vehicle reports the same ground height.
+const HOME_ALTITUDE_M: f64 = 0.0;
 /// A plain `sim` session's home: the demo origin moved 30 m east, so the
 /// copter stands apart from a vehicle at the origin.
 const DEFAULT_HOME: SpawnPoint = SpawnPoint {

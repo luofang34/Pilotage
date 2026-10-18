@@ -73,7 +73,7 @@ fn spawn_places_the_home_at_the_fleet_point() {
         .expect("spawn");
     let args = &stages[0].spec.args;
     let at = args.iter().position(|arg| arg == "--home").expect("--home");
-    assert_eq!(args[at + 1], "47.3977420,8.5463920,488,0");
+    assert_eq!(args[at + 1], "47.3977420,8.5463920,0,0");
 }
 
 #[test]
