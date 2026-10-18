@@ -19,7 +19,7 @@ if [ -z "$device" ]; then
         || true)
 fi
 if [ -z "$device" ]; then
-    device=$(xcrun simctl list devices available | grep -m1 -oE '[0-9A-F]{8}-[0-9A-F-]{27}')
+    device=$(xcrun simctl list devices available | grep -oE '[0-9A-F]{8}-[0-9A-F-]{27}' | sed -n 1p)
 fi
 [ -n "$device" ] || { echo "no simulator to photograph on" >&2; exit 1; }
 

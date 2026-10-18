@@ -22,7 +22,7 @@ bash "$fixture/scripts/check-scenario-matrix-corpus.sh" "$fixture" >/dev/null
 
 # One edited byte in one artifact is refused, which is the hand-maintained
 # artifact this guard exists to catch.
-edited=$(find "$corpus/conditions" -name '*.json' | LC_ALL=C sort | head -1)
+edited=$(find "$corpus/conditions" -name '*.json' | LC_ALL=C sort | sed -n 1p)
 python3 - "$edited" <<'PY'
 import pathlib
 import sys
