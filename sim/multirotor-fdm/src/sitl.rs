@@ -65,6 +65,8 @@ impl Sitl {
             .map_err(|_| SitlError::PortBusy { what: "UDP 9003" })?;
         TcpListener::bind(("0.0.0.0", SITL_MSP_PORT))
             .map_err(|_| SitlError::PortBusy { what: "TCP 5761" })?;
+        TcpListener::bind(("0.0.0.0", pilotage_multirotor_fdm::msp_watch::WATCH_PORT))
+            .map_err(|_| SitlError::PortBusy { what: "TCP 5762" })?;
         let (line_sender, lines) = mpsc::channel();
         Ok(Self {
             config,

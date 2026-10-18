@@ -17,6 +17,7 @@
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
+use pilotage_multirotor_fdm::msp_watch::{MspWatch, WATCH_PORT};
 use pilotage_multirotor_fdm::quad::GRAVITY;
 use pilotage_multirotor_fdm::supervisor::{Action, Event, Supervisor};
 use pilotage_multirotor_fdm::{
@@ -112,6 +113,7 @@ fn run_blocking(args: &Args) -> Result<(), FdmError> {
     let mut model = Model::new(args);
     let mut sitl = args.betaflight.clone().map(Sitl::new).transpose()?;
     let mut supervisor = sitl.as_ref().map(|sitl| Supervisor::new(sitl.provisions()));
+    let mut watch = MspWatch::new(SocketAddr::from(([127, 0, 0, 1], WATCH_PORT)));
     // Without a child to supervise, Betaflight is someone else's: stream
     // from the start.
     let mut streaming = sitl.is_none();
@@ -141,6 +143,13 @@ fn run_blocking(args: &Args) -> Result<(), FdmError> {
                 events.push(Event::MotorPackets(arrived));
             }
             events.extend(sitl.poll());
+            if supervisor.is_flying() {
+                if watch.poll(Instant::now()) {
+                    events.push(Event::MspSilent);
+                }
+            } else {
+                watch.reset();
+            }
             events.push(Event::Tick);
             supervise(sitl, supervisor, &mut events, &mut model, &mut streaming)?;
         }
@@ -199,6 +208,10 @@ fn supervise(
                     ok: sitl.msp_listening_blocking(),
                 }),
                 Action::ReportFlying => tracing::info!("Betaflight is flying the model"),
+                Action::ReportHang => tracing::error!(
+                    "Betaflight SITL hung (no MSP reply on UART2 for the silence limit); \
+                     restarting it, and the vehicle restarts on the ground"
+                ),
                 Action::GiveUp { reason } => return Err(FdmError::GaveUp { reason }),
             }
         }

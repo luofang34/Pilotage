@@ -55,6 +55,9 @@ pub enum Event {
         /// Whether the port accepted a connection.
         ok: bool,
     },
+    /// A flying Betaflight stopped answering MSP (see
+    /// [`crate::msp_watch`]).
+    MspSilent,
     /// The Betaflight process exited.
     Exited,
     /// Time passed.
@@ -82,6 +85,9 @@ pub enum Action {
     ProbeMsp,
     /// Motor commands flow: Betaflight is flying the model.
     ReportFlying,
+    /// A flying Betaflight hung; a restart follows, and the vehicle is back
+    /// on the ground at its spawn.
+    ReportHang,
     /// Stop supervising and fail.
     GiveUp {
         /// Why.
@@ -167,6 +173,11 @@ impl Supervisor {
             }
             (Phase::Probing, Event::MspProbed { ok: false }) => {
                 self.stop("Betaflight's MSP port does not accept connections")
+            }
+            (Phase::Flying, Event::MspSilent) => {
+                let mut actions = vec![Action::ReportHang];
+                actions.extend(self.stop("Betaflight stopped answering MSP"));
+                actions
             }
             (Phase::Streaming { since, .. }, Event::Tick) if now - since >= MOTOR_TIMEOUT => {
                 self.stop("Betaflight sent no motor commands: its PID loop is not running")

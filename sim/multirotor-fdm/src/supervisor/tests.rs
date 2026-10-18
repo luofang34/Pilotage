@@ -173,3 +173,37 @@ fn a_start_without_a_listening_msp_port_is_killed_and_relaunched() {
         vec![Action::StopStreaming, Action::Launch]
     );
 }
+
+/// A supervisor whose Betaflight is flying the model.
+fn flying(t0: Instant) -> Supervisor {
+    let mut s = started(false, t0);
+    s.handle(Event::InitComplete, t0);
+    s.handle(Event::Tick, t0 + INIT_SETTLE);
+    s.handle(Event::MotorPackets(MOTOR_PACKETS_TO_FLY), t0);
+    s.handle(Event::MspProbed { ok: true }, t0);
+    assert!(s.is_flying());
+    s
+}
+
+#[test]
+fn a_flying_betaflight_that_stops_answering_msp_is_reported_and_relaunched() {
+    let t0 = Instant::now();
+    let mut s = flying(t0);
+    let actions = s.handle(Event::MspSilent, t0);
+    assert_eq!(actions[0], Action::ReportHang);
+    assert_eq!(actions[1], Action::StopStreaming);
+    assert!(matches!(actions[2], Action::Kill { .. }), "{actions:?}");
+    assert!(!s.is_flying());
+    assert_eq!(
+        s.handle(Event::Exited, t0),
+        vec![Action::StopStreaming, Action::Launch],
+        "the hang restarts Betaflight"
+    );
+}
+
+#[test]
+fn msp_silence_before_flying_is_left_to_the_start_checks() {
+    let t0 = Instant::now();
+    let mut s = started(false, t0);
+    assert!(s.handle(Event::MspSilent, t0).is_empty());
+}
