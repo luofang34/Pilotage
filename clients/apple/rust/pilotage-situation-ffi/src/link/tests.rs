@@ -75,8 +75,11 @@ fn two_scope_welcome() -> wire::Envelope {
                             },
                         ],
                         supported_modes: Vec::new(),
+                        // The quasimode tests below fly the multicopter scheme.
+                        vehicle_class: wire::VehicleClass::Multicopter as i32,
                     }],
                     supported_modes: Vec::new(),
+                    physically_embodied: false,
                     control_feel: Some(wire::ControlFeelIdentity {
                         profile_id: "alia250.legacy.v1".into(),
                         mode: wire::ControlFeelMode::LegacyCompatibility as i32,

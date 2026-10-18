@@ -139,16 +139,19 @@ function testFcRefusalVerdictSurfacesInTheArmReadout() {
       { pose: null, velocity: null },
       { armState: 1, ageMs: 100, stale: false, lastCommand: { arm: true, result: 4 } },
     ),
-    "DISARMED (FC refused arm: result 4) | pose Missing | alt(baro) \u2717 | velocity Missing",
+    "DISARMED (FC refused arm: outcome 4) | pose Missing | alt(baro) \u2717 | velocity Missing",
   );
-  // An accepted verdict adds nothing: the arm state already shows it.
-  assert.equal(
-    formatTelemetrySummary(
-      { pose: null, velocity: null },
-      { armState: 2, ageMs: 100, stale: false, lastCommand: { arm: true, result: 0 } },
-    ),
-    "ARMED | pose Missing | alt(baro) \u2717 | velocity Missing",
-  );
+  // An unknown (0), accepted (1) or in-progress (2) verdict adds nothing:
+  // the arm state already shows it.
+  for (const result of [0, 1, 2]) {
+    assert.equal(
+      formatTelemetrySummary(
+        { pose: null, velocity: null },
+        { armState: 2, ageMs: 100, stale: false, lastCommand: { arm: true, result } },
+      ),
+      "ARMED | pose Missing | alt(baro) \u2717 | velocity Missing",
+    );
+  }
   // A stale report suppresses the verdict along with the arm state.
   assert.equal(
     formatTelemetrySummary(

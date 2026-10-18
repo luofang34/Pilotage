@@ -32,6 +32,8 @@ impl AviateAdapter {
             // telemetry-only as required by ADR-0018.
             vehicles: vec![VehicleDescriptor {
                 id: self.vehicle,
+                class: pilotage_protocol::VehicleClass::Multicopter,
+                display_name: "Aviate multicopter".to_owned(),
                 scopes: {
                     #[cfg_attr(not(feature = "sim"), allow(unused_mut))]
                     let mut scopes = if self.uplink.is_some() {

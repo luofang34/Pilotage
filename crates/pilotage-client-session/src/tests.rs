@@ -4,6 +4,7 @@
 //! execute (`clients/web-control/*.json`), so the native and web paths
 //! cannot drift: a divergence reddens exactly one of them.
 
+mod catalog;
 mod lanes;
 mod stream_bounds;
 mod takeover;
@@ -61,9 +62,11 @@ pub(super) fn admit(engine: &mut ClientEngine, session: u64, principal: u64) -> 
                             ..Default::default()
                         }],
                         supported_modes: Vec::new(),
+                        vehicle_class: wire::VehicleClass::FixedWing as i32,
                     }],
                     supported_modes: Vec::new(),
                     control_feel: None,
+                    physically_embodied: false,
                 }),
                 scope_holders: Vec::new(),
             },

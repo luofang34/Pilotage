@@ -53,6 +53,8 @@ fn grouped_engine() -> SessionEngine {
         },
         vehicles: vec![VehicleDescriptor {
             id: VEHICLE,
+            class: pilotage_protocol::VehicleClass::GroundRover,
+            display_name: "test rover".to_owned(),
             scopes: vec![scope(MOTION), scope(DIRECT)],
             link_loss_actions: vec![LinkLossPolicy::Neutralize],
         }],
