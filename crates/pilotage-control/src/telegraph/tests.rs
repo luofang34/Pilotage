@@ -155,3 +155,21 @@ fn a_late_answer_is_forgotten_once_a_new_order_is_given() {
     telegraph.on_fc_arm_state(2);
     assert_eq!(telegraph.order(), ArmOrder::Safe);
 }
+
+#[test]
+fn arming_a_vehicle_left_armed_takes_it_back_under_command() {
+    // A fresh session finds the vehicle armed: a ground station dropped
+    // and came back while a failsafe flies it.
+    let mut telegraph = ArmTelegraph::default();
+    telegraph.on_fc_arm_state(2);
+    assert_eq!(telegraph.order(), ArmOrder::Safe);
+    let action = telegraph
+        .set_order(ArmOrder::Armed)
+        .expect("the arm is sent");
+    assert_eq!(action.action, 1);
+    assert_eq!(*telegraph.phase(), TelegraphPhase::AwaitingAnswer);
+    // The vehicle's next report, still armed, answers it.
+    telegraph.on_fc_arm_state(2);
+    assert_eq!(*telegraph.phase(), TelegraphPhase::InSync);
+    assert!(telegraph.set_order(ArmOrder::Armed).is_none());
+}
