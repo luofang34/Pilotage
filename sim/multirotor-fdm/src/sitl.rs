@@ -125,6 +125,13 @@ impl Sitl {
         Ok(())
     }
 
+    /// Whether Betaflight's MSP port accepts a connection. The connection
+    /// closes at once; Betaflight takes the next one as it took this.
+    pub(crate) fn msp_listening_blocking(&self) -> bool {
+        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], SITL_MSP_PORT));
+        std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(500)).is_ok()
+    }
+
     /// Kills the child; its exit is reported by the next [`Sitl::poll`].
     pub(crate) fn kill(&mut self) {
         if let Some(child) = self.child.as_mut() {

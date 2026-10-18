@@ -36,8 +36,10 @@ fn a_healthy_start_provisions_launches_streams_and_flies() {
         s.handle(Event::MotorPackets(MOTOR_PACKETS_TO_FLY - 1), t0)
             .is_empty()
     );
+    assert_eq!(s.handle(Event::MotorPackets(1), t0), vec![Action::ProbeMsp]);
+    assert!(!s.is_flying(), "not until MSP answers");
     assert_eq!(
-        s.handle(Event::MotorPackets(1), t0),
+        s.handle(Event::MspProbed { ok: true }, t0),
         vec![Action::ReportFlying]
     );
     assert!(s.is_flying());
@@ -142,6 +144,7 @@ fn a_crash_in_flight_relaunches_with_a_fresh_budget() {
     s.handle(Event::InitComplete, t0);
     s.handle(Event::Tick, t0 + INIT_SETTLE);
     s.handle(Event::MotorPackets(MOTOR_PACKETS_TO_FLY), t0 + INIT_SETTLE);
+    s.handle(Event::MspProbed { ok: true }, t0 + INIT_SETTLE);
     assert!(s.is_flying());
     let later = t0 + Duration::from_secs(60);
     assert_eq!(
@@ -149,4 +152,24 @@ fn a_crash_in_flight_relaunches_with_a_fresh_budget() {
         vec![Action::StopStreaming, Action::Launch]
     );
     assert!(!s.is_flying());
+}
+
+#[test]
+fn a_start_without_a_listening_msp_port_is_killed_and_relaunched() {
+    let t0 = Instant::now();
+    let mut s = started(false, t0);
+    s.handle(Event::InitComplete, t0);
+    s.handle(Event::Tick, t0 + INIT_SETTLE);
+    assert_eq!(
+        s.handle(Event::MotorPackets(MOTOR_PACKETS_TO_FLY), t0 + INIT_SETTLE),
+        vec![Action::ProbeMsp]
+    );
+    let actions = s.handle(Event::MspProbed { ok: false }, t0 + INIT_SETTLE);
+    assert!(
+        matches!(actions[..], [Action::StopStreaming, Action::Kill { reason }] if reason.contains("MSP"))
+    );
+    assert_eq!(
+        s.handle(Event::Exited, t0 + INIT_SETTLE),
+        vec![Action::StopStreaming, Action::Launch]
+    );
 }
