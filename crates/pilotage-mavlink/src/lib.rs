@@ -10,12 +10,13 @@
 //! epochs, reboot detection, inter-group skew budgets, and staleness
 //! stamps. Adapters sample the cache; they never touch the socket.
 
+pub mod ardupilot;
 pub mod codec;
 pub mod link;
 
 pub use codec::{FcMessage, FrameSource, ParseStats, parse_datagram};
 pub use link::{
-    AttitudeUpdate, AuthorizationSource, BatteryReport, CommandAckReport, GimbalDeviceAttitude,
-    GimbalRateDemand, KinematicsUpdate, LinkConfig, LinkError, LinkState, MavlinkLink,
-    OutboundCommand, ResetPolicy,
+    AttitudeUpdate, AuthorizationSource, BatteryReport, BodyVelocityDemand, CommandAckReport,
+    CommandTarget, FcReports, GimbalDeviceAttitude, GimbalRateDemand, KinematicsUpdate, LinkConfig,
+    LinkError, LinkState, MavlinkLink, OutboundCommand, ResetPolicy, StatusTextReport,
 };

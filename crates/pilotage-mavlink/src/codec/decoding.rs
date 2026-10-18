@@ -2,8 +2,9 @@
 
 use super::{
     ATTITUDE_QUATERNION_ID, AVIATE_ESTIMATOR_STATUS_ID, BATTERY_STATUS_ID, COMMAND_ACK_ID,
-    ESTIMATOR_STATUS_ID, FcMessage, GIMBAL_DEVICE_ATTITUDE_STATUS_ID, GNSS_RAW_ID, HEARTBEAT_ID,
-    HIL_STATE_QUATERNION_ID, LOCAL_POSITION_NED_ID, SCALED_PRESSURE_ID,
+    EKF_STATUS_REPORT_ID, ESTIMATOR_STATUS_ID, FcMessage, GIMBAL_DEVICE_ATTITUDE_STATUS_ID,
+    GNSS_RAW_ID, HEARTBEAT_ID, HIL_STATE_QUATERNION_ID, LOCAL_POSITION_NED_ID, SCALED_PRESSURE_ID,
+    STATUS_TEXT_LEN, STATUSTEXT_ID,
 };
 
 fn f32_at(payload: &[u8], off: usize) -> f32 {
@@ -154,13 +155,34 @@ fn decode_battery_status(payload: &[u8]) -> FcMessage {
     }
 }
 
+/// STATUSTEXT wire order: severity u8 @0, text char[50] @1..51, then the
+/// version-2 chunk id and sequence this decoder ignores: ArduPilot sends
+/// each reason it reports in one frame.
+fn decode_status_text(payload: &[u8]) -> FcMessage {
+    let mut text = [0_u8; STATUS_TEXT_LEN];
+    for (index, slot) in text.iter_mut().enumerate() {
+        *slot = payload.get(1 + index).copied().unwrap_or(0);
+    }
+    FcMessage::StatusText {
+        severity: payload.first().copied().unwrap_or(0),
+        text,
+    }
+}
+
 pub(super) fn decode_known(msg_id: u32, payload: &[u8]) -> Option<FcMessage> {
     match msg_id {
         HEARTBEAT_ID => Some(FcMessage::Heartbeat {
             // Payload: custom_mode u32 @0, type @4, autopilot @5,
             // base_mode @6 (bit 0x80 = SAFETY_ARMED).
             armed: payload.get(6).is_some_and(|b| b & 0x80 != 0),
+            custom_mode: u32_at(payload, 0),
+            autopilot: payload.get(5).copied().unwrap_or(0),
         }),
+        // Payload: five f32 variances @0..20, then flags u16 @20.
+        EKF_STATUS_REPORT_ID => Some(FcMessage::EkfStatusReport {
+            flags: u16_at(payload, 20),
+        }),
+        STATUSTEXT_ID => Some(decode_status_text(payload)),
         COMMAND_ACK_ID => Some(FcMessage::CommandAck {
             command: u16::from(payload.first().copied().unwrap_or(0))
                 | (u16::from(payload.get(1).copied().unwrap_or(0)) << 8),

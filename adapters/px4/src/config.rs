@@ -2,7 +2,7 @@
 
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
-use pilotage_mavlink::{AuthorizationSource, LinkConfig};
+use pilotage_mavlink::{AuthorizationSource, CommandTarget, LinkConfig};
 
 /// PX4 operating profiles supported by this adapter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,7 +83,7 @@ impl Px4Config {
         config.authorization_source = AuthorizationSource::StandardEstimatorStatus;
         config.standard_status_max_lag_ms = 300;
         config.reset_candidate_max_ms = 60_000;
-        config.stream_command_target = Some(self.stream_command_endpoint);
+        config.command_target = CommandTarget::Fixed(self.stream_command_endpoint);
         // GPS_RAW_INT carries the estimate lane's position. Most
         // autopilots stream it by default, and a lane that draws a vehicle
         // should not rest on a default: 5 Hz is the rate a receiver solves

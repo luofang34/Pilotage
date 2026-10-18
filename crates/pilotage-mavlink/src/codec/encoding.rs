@@ -218,6 +218,43 @@ pub fn encode_velocity_setpoint(
     frame
 }
 
+/// MAV_FRAME_BODY_OFFSET_NED: axes aligned with the vehicle heading
+/// (x forward, y right, z down), level regardless of roll and pitch.
+pub const MAV_FRAME_BODY_OFFSET_NED: u8 = 9;
+
+/// Serializes a SET_POSITION_TARGET_LOCAL_NED body-frame velocity and
+/// yaw-rate setpoint in [`MAV_FRAME_BODY_OFFSET_NED`]: position,
+/// acceleration, and absolute yaw are masked out. The FC rotates the
+/// velocity by its own heading, so the caller needs no attitude to fly a
+/// body-frame demand.
+///
+/// Wire order as [`encode_velocity_setpoint`].
+pub fn encode_body_velocity_setpoint(
+    seq: u8,
+    time_boot_ms: u32,
+    vel_frd_mps: [f32; 3],
+    yaw_rate_rps: f32,
+    target_system: u8,
+    target_component: u8,
+) -> [u8; 65] {
+    // Ignore position (1|2|4), acceleration (64|128|256), yaw (1024):
+    // velocity + yaw rate remain.
+    const TYPE_MASK: u16 = 1 | 2 | 4 | 64 | 128 | 256 | 1024;
+    let mut payload = [0u8; 53];
+    payload[0..4].copy_from_slice(&time_boot_ms.to_le_bytes());
+    payload[16..20].copy_from_slice(&vel_frd_mps[0].to_le_bytes());
+    payload[20..24].copy_from_slice(&vel_frd_mps[1].to_le_bytes());
+    payload[24..28].copy_from_slice(&vel_frd_mps[2].to_le_bytes());
+    payload[44..48].copy_from_slice(&yaw_rate_rps.to_le_bytes());
+    payload[48..50].copy_from_slice(&TYPE_MASK.to_le_bytes());
+    payload[50] = target_system;
+    payload[51] = target_component;
+    payload[52] = MAV_FRAME_BODY_OFFSET_NED;
+    let mut frame = [0u8; 65];
+    encode_frame_v2(seq, SET_POSITION_TARGET_ID, &payload, 143, &mut frame);
+    frame
+}
+
 /// Absolute FPV attitude demand and the component selected to receive it.
 ///
 /// Body-rate demand is intentionally absent because the FC attitude loop

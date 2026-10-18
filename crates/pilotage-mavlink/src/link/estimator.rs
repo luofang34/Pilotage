@@ -1,4 +1,6 @@
-//! Aviate estimator-status authorization for cached numeric groups.
+//! Estimator-status authorization for cached numeric groups: Aviate's
+//! private status, the standard ESTIMATOR_STATUS, and ArduPilot's EKF
+//! status report.
 
 use std::time::Instant;
 
@@ -139,7 +141,8 @@ pub(super) fn authorization_at(latest: &LinkState, time_boot_ms: u32) -> Estimat
         // report within a bounded lag. The wrapping distance keeps the
         // comparison correct across a boot-clock wrap: a status AHEAD
         // of the numeric (distance in the upper half) is also current.
-        super::AuthorizationSource::StandardEstimatorStatus => {
+        super::AuthorizationSource::StandardEstimatorStatus
+        | super::AuthorizationSource::ArduPilotEkfStatus => {
             let distance = time_boot_ms.wrapping_sub(status.time_boot_ms);
             if distance <= latest.standard_status_max_lag_ms || distance > u32::MAX / 2 {
                 status.authorization
@@ -183,6 +186,35 @@ pub(super) fn standard_authorization(flags: u16) -> (u8, u8) {
     } else {
         0
     };
+    (valid, quality)
+}
+
+/// Maps ArduPilot EKF_STATUS_REPORT flags onto the wire authorization
+/// vocabulary. The low ten EKF_STATUS_FLAGS bits are the same bits
+/// ESTIMATOR_STATUS defines, so [`standard_authorization`] reads them;
+/// three EKF-only states then narrow the grant:
+///
+/// - `EKF_UNINITIALIZED` (1024): nothing the filter reports is usable.
+/// - `EKF_CONST_POS_MODE` (128): the filter holds a constant position
+///   because it has no position aiding, so position and velocity are not
+///   measurements; attitude alone remains, degraded.
+/// - `EKF_GPS_GLITCHING` (32768): the solution is present but suspect, so
+///   quality is at best degraded.
+pub(super) fn ekf_status_authorization(flags: u16) -> (u8, u8) {
+    const CONST_POS_MODE: u16 = 128;
+    const UNINITIALIZED: u16 = 1024;
+    const GPS_GLITCHING: u16 = 32_768;
+    if flags & UNINITIALIZED != 0 {
+        return (0, 0);
+    }
+    let (mut valid, mut quality) = standard_authorization(flags);
+    if flags & CONST_POS_MODE != 0 {
+        valid &= 0b0011;
+        quality = quality.min(1);
+    }
+    if flags & GPS_GLITCHING != 0 {
+        quality = quality.min(1);
+    }
     (valid, quality)
 }
 

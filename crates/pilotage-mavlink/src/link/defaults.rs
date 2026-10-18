@@ -47,6 +47,7 @@ impl Default for LinkState {
             source_resets: 0,
             suspected_resets: 0,
             wrong_sources: 0,
+            fc_reports: super::FcReports::default(),
         }
     }
 }

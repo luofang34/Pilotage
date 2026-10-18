@@ -35,6 +35,28 @@ fn apply_standard_status(latest: &mut LinkState, time_usec: u64, flags: u16, now
     }
 }
 
+/// Applies ArduPilot's EKF_STATUS_REPORT (msg 193) when it is this
+/// source's authorization. The report has no timestamp, so it is stamped
+/// at the newest FC boot time accepted from any group: the estimate the
+/// FC judged is the one it had then. Before any numeric group has
+/// arrived there is no boot time to stamp, and the report is dropped.
+fn apply_ekf_status(latest: &mut LinkState, flags: u16, now: Instant) {
+    if latest.authorization_source != AuthorizationSource::ArduPilotEkfStatus {
+        return;
+    }
+    let Some(time_boot_ms) = latest.last_source_time_ms else {
+        return;
+    };
+    let (valid_flags, quality) = estimator::ekf_status_authorization(flags);
+    accept_status(
+        latest,
+        u64::from(time_boot_ms).saturating_mul(1_000),
+        valid_flags,
+        quality,
+        now,
+    );
+}
+
 /// MAV_RESULT_ACCEPTED = 0. A refused command must be loud: a denied
 /// disarm or mode change looks exactly like an unresponsive vehicle
 /// otherwise.
@@ -71,6 +93,7 @@ fn apply_command_ack(
         received_at: now,
     };
     latest.last_command_ack = Some(report);
+    latest.fc_reports.command_acks.insert(command, report);
     if command == crate::codec::MAV_CMD_DO_GIMBAL_MANAGER_CONFIGURE {
         latest.gimbal_configure_ack = Some(report);
     }
@@ -270,9 +293,19 @@ fn apply_kinematics(
 fn apply_message(latest: &mut LinkState, message: FcMessage, now: Instant) {
     match message {
         FcMessage::InvalidAviateEstimatorStatus => {}
-        FcMessage::Heartbeat { armed } => {
+        FcMessage::Heartbeat {
+            armed,
+            custom_mode,
+            autopilot,
+        } => {
             latest.last_heartbeat = Some(now);
             latest.heartbeat_armed = Some(armed);
+            latest.fc_reports.custom_mode = Some(custom_mode);
+            latest.fc_reports.autopilot = Some(autopilot);
+        }
+        FcMessage::EkfStatusReport { flags } => apply_ekf_status(latest, flags, now),
+        FcMessage::StatusText { severity, text } => {
+            latest.fc_reports.push_status_text(severity, &text, now);
         }
         FcMessage::CommandAck {
             command,
