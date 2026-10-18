@@ -11,7 +11,9 @@
 //!   bound the MSP port;
 //! - some starts never run the PID loop (MSP reports a zero cycle time and
 //!   no motor command ever follows the first), so a start counts only once
-//!   motor commands flow.
+//!   motor commands flow;
+//! - some starts print the MSP port bind and then hold no listening socket,
+//!   so a start counts only once that port also accepts a connection.
 //!
 //! This module is the decision half, as a pure state machine: events in,
 //! actions out. The binary runs the processes and the model.
@@ -48,6 +50,11 @@ pub enum Event {
     InitComplete,
     /// This many motor packets arrived.
     MotorPackets(u64),
+    /// The MSP port probe finished.
+    MspProbed {
+        /// Whether the port accepted a connection.
+        ok: bool,
+    },
     /// The Betaflight process exited.
     Exited,
     /// Time passed.
@@ -70,6 +77,9 @@ pub enum Action {
         /// Why.
         reason: &'static str,
     },
+    /// Check that Betaflight's MSP port accepts a connection; an
+    /// `MspProbed` event follows.
+    ProbeMsp,
     /// Motor commands flow: Betaflight is flying the model.
     ReportFlying,
     /// Stop supervising and fail.
@@ -86,6 +96,7 @@ enum Phase {
     Starting { since: Instant },
     Settling { since: Instant },
     Streaming { since: Instant, motors: u64 },
+    Probing,
     Flying,
     Stopping,
     GaveUp,
@@ -143,12 +154,19 @@ impl Supervisor {
             (Phase::Streaming { since, motors }, Event::MotorPackets(count)) => {
                 let motors = motors.saturating_add(count);
                 if motors >= MOTOR_PACKETS_TO_FLY {
-                    self.phase = Phase::Flying;
-                    self.launches = 0;
-                    return vec![Action::ReportFlying];
+                    self.phase = Phase::Probing;
+                    return vec![Action::ProbeMsp];
                 }
                 self.phase = Phase::Streaming { since, motors };
                 Vec::new()
+            }
+            (Phase::Probing, Event::MspProbed { ok: true }) => {
+                self.phase = Phase::Flying;
+                self.launches = 0;
+                vec![Action::ReportFlying]
+            }
+            (Phase::Probing, Event::MspProbed { ok: false }) => {
+                self.stop("Betaflight's MSP port does not accept connections")
             }
             (Phase::Streaming { since, .. }, Event::Tick) if now - since >= MOTOR_TIMEOUT => {
                 self.stop("Betaflight sent no motor commands: its PID loop is not running")
@@ -157,6 +175,7 @@ impl Supervisor {
                 Phase::Starting { .. }
                 | Phase::Settling { .. }
                 | Phase::Streaming { .. }
+                | Phase::Probing
                 | Phase::Flying
                 | Phase::Stopping,
                 Event::Exited,

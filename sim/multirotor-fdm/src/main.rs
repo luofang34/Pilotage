@@ -195,6 +195,9 @@ fn supervise(
                     tracing::warn!(reason, "restarting Betaflight SITL");
                     sitl.kill();
                 }
+                Action::ProbeMsp => events.push(Event::MspProbed {
+                    ok: sitl.msp_listening_blocking(),
+                }),
                 Action::ReportFlying => tracing::info!("Betaflight is flying the model"),
                 Action::GiveUp { reason } => return Err(FdmError::GaveUp { reason }),
             }
