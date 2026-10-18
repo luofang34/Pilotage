@@ -17,7 +17,7 @@ pub use modes::{BoxIds, MAX_STEP, ModeFlags, ModeRange, encode_set_mode_range, p
 pub use multiple::{decode_multiple, encode_multiple_request};
 pub use rc::{MAX_CHANNELS, encode_set_raw_rc};
 pub use status::Status;
-pub use telemetry::{Altitude, Attitude, BatteryState, RawGps, RawImu};
+pub use telemetry::{Altitude, Attitude, BatteryState, GYRO_DPS_PER_COUNT, RawGps, RawImu};
 
 /// Why a payload did not decode.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
