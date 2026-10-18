@@ -47,55 +47,17 @@ const BACKEND_NAME: &str = "px4-gz";
 /// The gz world PX4's x500 model spawns into (PX4 ships `default.sdf`;
 /// its `<world name>` is `default` — also what the reset script targets).
 const WORLD_NAME: &str = "default";
-/// PX4 airframe autostart id for the gz x500 with the CGO3 gimbal
-/// (4019_gz_x500_gimbal): MNT_MODE_IN/OUT = MAVLink Gimbal Protocol v2,
-/// which the PX4 adapter's `vehicle.gimbal` scope drives (GIM-04).
-const SYS_AUTOSTART: &str = "4019";
-/// The matching PX4 model selector for the airframe above.
-const SIM_MODEL: &str = "gz_x500_gimbal";
-/// The highest PX4 instance this backend runs. PX4 shifts its MAVLink
-/// ports by the instance; the host's telemetry port (14550 + instance)
-/// would reach PX4's offboard ports (14580 + instance) past this.
-const MAX_INSTANCE: u16 = 29;
+mod ports;
+pub(crate) mod vehicle;
 
-/// The loopback ports one PX4 SITL instance and its host use.
-///
-/// PX4 derives its own from the instance (`px4-rc.mavlink`): the GCS
-/// link binds 18570 + N and the offboard link 14580 + N. The host's
-/// telemetry port is this launcher's choice. PX4's GCS link sends to
-/// 14550 until a peer speaks to it, then to that peer — the host's link
-/// speaks first thing from its telemetry socket, so each instance's
-/// stream moves to its own host. The frames that reach 14550 before that
-/// carry system id N + 1, which another session's link drops.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Px4Ports {
-    /// PX4's GCS link (stream-interval requests go here).
-    pub(crate) gcs_local: u16,
-    /// PX4's offboard link (setpoints and commands go here).
-    pub(crate) offboard_local: u16,
-    /// The host's MAVLink receive socket.
-    pub(crate) host_telemetry: u16,
+use ports::{MAX_INSTANCE, Px4Ports, system_id};
+use vehicle::Px4Model;
+
+/// The PX4 + Gazebo SITL backend, for one vehicle model.
+#[derive(Debug, Default)]
+pub struct Px4Gz {
+    model: Px4Model,
 }
-
-impl Px4Ports {
-    /// The ports of PX4 instance `instance`.
-    pub(crate) fn for_instance(instance: u16) -> Self {
-        Self {
-            gcs_local: 18_570 + instance,
-            offboard_local: 14_580 + instance,
-            host_telemetry: 14_550 + instance,
-        }
-    }
-}
-
-/// PX4 instance N boots as MAVLink system N + 1 (`rcS`: `MAV_SYS_ID`).
-fn system_id(instance: u16) -> u16 {
-    instance + 1
-}
-
-/// The PX4 + Gazebo SITL backend.
-#[derive(Debug)]
-pub struct Px4Gz;
 
 impl SimBackend for Px4Gz {
     fn name(&self) -> &'static str {
@@ -112,9 +74,10 @@ impl SimBackend for Px4Gz {
         let mut env = vec![
             ("GZ_IP".to_owned(), "127.0.0.1".to_owned()),
             ("PILOTAGE_PX4_PROFILE".to_owned(), "simulation".to_owned()),
-            // This backend boots the gz_x500_gimbal airframe (4019), so
-            // the adapter advertises the vehicle.gimbal scope.
-            ("PILOTAGE_PX4_GIMBAL".to_owned(), "1".to_owned()),
+            (
+                "PILOTAGE_PX4_AIRFRAME".to_owned(),
+                self.model.airframe().as_env_value().to_owned(),
+            ),
             (
                 "PILOTAGE_PX4_ADDR".to_owned(),
                 loopback(ports.host_telemetry),
@@ -132,8 +95,18 @@ impl SimBackend for Px4Gz {
                 system_id(ctx.instance).to_string(),
             ),
         ];
+        // Only a vehicle that carries a gimbal advertises the
+        // vehicle.gimbal scope; the flag's absence means none.
+        if self.model.has_gimbal() {
+            env.push(("PILOTAGE_PX4_GIMBAL".to_owned(), "1".to_owned()));
+        }
         env.extend(super::gz::partition_env(ctx, self.name()));
         env
+    }
+
+    fn select_model(&mut self, model: &str) -> Result<(), XtaskError> {
+        self.model = Px4Model::parse(model)?;
+        Ok(())
     }
 
     fn claims(&self, ctx: &SessionContext) -> Vec<Claim> {
@@ -177,7 +150,7 @@ impl SimBackend for Px4Gz {
                 ),
             });
         }
-        plan_with_px4_dir(ctx, &px4_dir(&ctx.repo_root))
+        plan_with_px4_dir(ctx, &px4_dir(&ctx.repo_root), self.model)
     }
 
     fn prepare(&self, ctx: &SessionContext) -> Result<(), XtaskError> {
@@ -298,7 +271,11 @@ pub(crate) fn px4_rootfs(px4: &Path, instance: u16) -> PathBuf {
 
 /// The testable core of [`Px4Gz::plan`]: validates every artifact with
 /// an actionable hint, then assembles the gz and PX4 stages.
-fn plan_with_px4_dir(ctx: &SessionContext, px4: &Path) -> Result<Vec<Stage>, XtaskError> {
+fn plan_with_px4_dir(
+    ctx: &SessionContext,
+    px4: &Path,
+    model: Px4Model,
+) -> Result<Vec<Stage>, XtaskError> {
     if !px4.is_dir() {
         return Err(XtaskError::MissingArtifact {
             what: "PX4-Autopilot checkout",
@@ -314,7 +291,7 @@ fn plan_with_px4_dir(ctx: &SessionContext, px4: &Path) -> Result<Vec<Stage>, Xta
             hint: "build it: make px4_sitl in the PX4-Autopilot checkout",
         });
     }
-    let world = ctx.repo_root.join("sim/worlds/px4_flightdeck.sdf");
+    let world = ctx.repo_root.join(model.world());
     if !world.is_file() {
         return Err(XtaskError::MissingArtifact {
             what: "px4 flight-deck world",
@@ -333,7 +310,7 @@ fn plan_with_px4_dir(ctx: &SessionContext, px4: &Path) -> Result<Vec<Stage>, Xta
     let path = super::aviate_gz::search_path();
     Ok(vec![
         gz_stage(ctx, px4, &path, &world, &server_config),
-        px4_stage(ctx, px4, &path, &binary)?,
+        px4_stage(ctx, px4, &path, &binary, model)?,
     ])
 }
 
@@ -406,6 +383,7 @@ fn px4_stage(
     px4: &Path,
     path: &str,
     binary: &Path,
+    model: Px4Model,
 ) -> Result<Stage, XtaskError> {
     let rootfs = px4_rootfs(px4, ctx.instance);
     std::fs::create_dir_all(&rootfs).map_err(|source| XtaskError::Io {
@@ -430,9 +408,15 @@ fn px4_stage(
         // the statically included model (which carries the
         // Pilotage camera rig) instead of spawning its own.
         ("PX4_GZ_STANDALONE".to_owned(), "1".to_owned()),
-        ("PX4_SYS_AUTOSTART".to_owned(), SYS_AUTOSTART.to_owned()),
-        ("PX4_SIM_MODEL".to_owned(), SIM_MODEL.to_owned()),
-        ("PX4_GZ_MODEL_NAME".to_owned(), "x500_0".to_owned()),
+        (
+            "PX4_SYS_AUTOSTART".to_owned(),
+            model.sys_autostart().to_owned(),
+        ),
+        ("PX4_SIM_MODEL".to_owned(), model.sim_model().to_owned()),
+        (
+            "PX4_GZ_MODEL_NAME".to_owned(),
+            model.model_name().to_owned(),
+        ),
         ("PX4_GZ_WORLD".to_owned(), WORLD_NAME.to_owned()),
     ];
     env.extend(super::gz::partition_env(ctx, BACKEND_NAME));

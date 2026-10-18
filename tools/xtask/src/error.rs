@@ -32,6 +32,16 @@ pub enum XtaskError {
         /// The rejected backend name.
         name: String,
     },
+    /// `--fc <backend>:<model>` named a model the backend does not launch.
+    #[error("the {backend} backend has no model {model:?} (models: {})", if known.is_empty() { "none".to_owned() } else { known.join(", ") })]
+    UnknownModel {
+        /// The backend asked for the model.
+        backend: &'static str,
+        /// The rejected model name.
+        model: String,
+        /// Every model the backend does launch.
+        known: Vec<&'static str>,
+    },
     /// `--profile` named an unknown session profile. Mirrors the host's
     /// own fail-closed parsing: a typo must never fail open.
     #[error("unknown --profile {value:?} (expected physical, simulation, or oracle-only)")]

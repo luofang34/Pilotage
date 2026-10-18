@@ -6,6 +6,7 @@
 
 use std::path::PathBuf;
 
+use super::vehicle::Px4Model;
 use super::{Px4Gz, plan_with_px4_dir};
 use crate::backend::{SessionContext, SimBackend};
 use crate::cli::Profile;
@@ -33,7 +34,7 @@ fn scaffold(tag: &str) -> (PathBuf, PathBuf) {
 
 #[test]
 fn plan_refuses_physical_and_oracle_only_profiles() {
-    let backend = Px4Gz;
+    let backend = Px4Gz::default();
     for profile in [Profile::Physical, Profile::OracleOnly] {
         let mut ctx = context(PathBuf::from("unused-for-profile-refusal"));
         ctx.profile = profile;
@@ -47,7 +48,7 @@ fn plan_refuses_physical_and_oracle_only_profiles() {
 
 #[test]
 fn host_environment_declares_the_px4_simulation_profile() {
-    let backend = Px4Gz;
+    let backend = Px4Gz::default();
     let ctx = context(PathBuf::from("unused-for-host-environment"));
     assert!(
         backend
@@ -61,7 +62,7 @@ fn host_environment_declares_the_px4_simulation_profile() {
 fn host_environment_enables_the_gimbal_capability() {
     // The gz_x500_gimbal airframe carries a gimbal; the host must
     // advertise the scope, and no other FC backend sets this flag.
-    let backend = Px4Gz;
+    let backend = Px4Gz::default();
     let ctx = context(PathBuf::from("unused-for-host-environment"));
     assert!(
         backend
@@ -76,7 +77,7 @@ fn missing_artifacts_fail_with_actionable_hints() {
     let (root, px4) = scaffold("missing");
     let ctx = context(root.clone());
 
-    let refusal = plan_with_px4_dir(&ctx, &root.join("absent"));
+    let refusal = plan_with_px4_dir(&ctx, &root.join("absent"), Px4Model::X500Gimbal);
     assert!(matches!(
         refusal,
         Err(XtaskError::MissingArtifact {
@@ -85,7 +86,7 @@ fn missing_artifacts_fail_with_actionable_hints() {
         })
     ));
 
-    let refusal = plan_with_px4_dir(&ctx, &px4);
+    let refusal = plan_with_px4_dir(&ctx, &px4, Px4Model::X500Gimbal);
     assert!(matches!(
         refusal,
         Err(XtaskError::MissingArtifact {
@@ -157,7 +158,7 @@ fn complete_scaffold(tag: &str) -> (PathBuf, PathBuf) {
 fn a_complete_checkout_plans_gz_then_px4_standalone() {
     let (root, px4) = complete_scaffold("complete");
     let ctx = context(root.clone());
-    let stages = plan_with_px4_dir(&ctx, &px4).expect("plan");
+    let stages = plan_with_px4_dir(&ctx, &px4, Px4Model::X500Gimbal).expect("plan");
     assert_eq!(stages.len(), 2);
     assert_eq!(stages[0].spec.name, "gazebo");
     assert_eq!(stages[1].spec.name, "flight-controller");
@@ -230,7 +231,7 @@ fn value<'a>(env: &'a [(String, String)], key: &str) -> Option<&'a str> {
 fn instance_zero_plans_the_single_session_launch() {
     let (root, px4) = complete_scaffold("instance-zero");
     let ctx = context(root.clone());
-    let stages = plan_with_px4_dir(&ctx, &px4).expect("plan");
+    let stages = plan_with_px4_dir(&ctx, &px4, Px4Model::X500Gimbal).expect("plan");
     let fc = &stages[1].spec;
     assert!(!fc.args.contains(&"-i".to_owned()), "{:?}", fc.args);
     assert_eq!(
@@ -240,7 +241,7 @@ fn instance_zero_plans_the_single_session_launch() {
     for env in [&stages[0].spec.env, &fc.env] {
         assert_eq!(value(env, "GZ_PARTITION"), None);
     }
-    let host = Px4Gz.host_env(&ctx);
+    let host = Px4Gz::default().host_env(&ctx);
     assert_eq!(value(&host, "PILOTAGE_PX4_ADDR"), Some("127.0.0.1:14550"));
     assert_eq!(
         value(&host, "PILOTAGE_PX4_GCS_ADDR"),
@@ -265,7 +266,7 @@ fn another_instance_shifts_every_port_and_shares_one_partition() {
     let (root, px4) = complete_scaffold("instance-five");
     let mut ctx = context(root.clone());
     ctx.instance = 5;
-    let stages = plan_with_px4_dir(&ctx, &px4).expect("plan");
+    let stages = plan_with_px4_dir(&ctx, &px4, Px4Model::X500Gimbal).expect("plan");
     let fc = &stages[1].spec;
     let at = fc
         .args
@@ -279,7 +280,7 @@ fn another_instance_shifts_every_port_and_shares_one_partition() {
         "each instance keeps its own parameters and dataman state"
     );
 
-    let host = Px4Gz.host_env(&ctx);
+    let host = Px4Gz::default().host_env(&ctx);
     assert_eq!(value(&host, "PILOTAGE_PX4_ADDR"), Some("127.0.0.1:14555"));
     assert_eq!(
         value(&host, "PILOTAGE_PX4_GCS_ADDR"),
@@ -314,7 +315,7 @@ fn instances_claim_disjoint_ports_and_only_instance_zero_needs_the_default_parti
     let claims = |instance| {
         let mut ctx = context(PathBuf::from("unused"));
         ctx.instance = instance;
-        Px4Gz.claims(&ctx)
+        Px4Gz::default().claims(&ctx)
     };
     let zero = claims(0);
     let five = claims(5);
@@ -338,5 +339,104 @@ fn instances_claim_disjoint_ports_and_only_instance_zero_needs_the_default_parti
 fn an_instance_past_the_port_plan_is_refused() {
     let mut ctx = context(PathBuf::from("unused"));
     ctx.instance = 30;
-    assert!(matches!(Px4Gz.plan(&ctx), Err(XtaskError::Usage { .. })));
+    assert!(matches!(
+        Px4Gz::default().plan(&ctx),
+        Err(XtaskError::Usage { .. })
+    ));
+}
+
+/// Each model's world includes the vehicle under the exact name PX4
+/// attaches to, from the gz model the airframe's `PX4_SIM_MODEL` names,
+/// with the camera rig welded to that vehicle. A world that disagrees
+/// boots cleanly and then flies nothing.
+#[test]
+fn every_model_world_carries_the_vehicle_its_airframe_attaches_to() {
+    let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("repo root");
+    for model in Px4Model::ALL {
+        let world = std::fs::read_to_string(repo_root.join(model.world()))
+            .unwrap_or_else(|error| panic!("{}: {error}", model.world()));
+        let gz_model = model
+            .sim_model()
+            .strip_prefix("gz_")
+            .expect("PX4 gz models are named gz_<model>");
+        assert!(
+            world.contains(&format!("<uri>model://{gz_model}</uri>")),
+            "{}: includes {gz_model}",
+            model.name()
+        );
+        assert!(
+            world.contains(&format!("<name>{}</name>", model.model_name())),
+            "{}: names the vehicle {}",
+            model.name(),
+            model.model_name()
+        );
+        assert!(
+            world.contains(&format!(
+                "<parent>{}::base_link</parent>",
+                model.model_name()
+            )),
+            "{}: the camera rig rides on the vehicle",
+            model.name()
+        );
+        assert!(
+            world.contains("<world name=\"default\">"),
+            "{}",
+            model.name()
+        );
+    }
+}
+
+#[test]
+fn a_model_is_selected_by_name_and_an_unknown_one_is_refused() {
+    use crate::backend::backend_for;
+
+    for spec in ["px4-gz", "px4", "px4-gz:x500_gimbal", "px4-gz:rc_cessna"] {
+        backend_for(spec).unwrap_or_else(|error| panic!("{spec}: {error}"));
+    }
+    for spec in ["px4-gz:x500", "px4-gz:", "aviate-gz:x500"] {
+        assert!(
+            matches!(backend_for(spec), Err(XtaskError::UnknownModel { .. })),
+            "{spec} must be refused"
+        );
+    }
+    assert!(matches!(
+        backend_for("ardupilot-gz:rc_cessna"),
+        Err(XtaskError::UnknownBackend { .. })
+    ));
+}
+
+/// The host learns how the vehicle flies, and only a vehicle with a
+/// gimbal advertises one.
+#[test]
+fn the_host_learns_the_airframe_and_the_gimbal_of_the_selected_model() {
+    let ctx = context(PathBuf::from("unused"));
+    let host = |model: &str| {
+        let mut backend = Px4Gz::default();
+        backend.select_model(model).expect("known model");
+        backend.host_env(&ctx)
+    };
+    let quad = host("x500_gimbal");
+    assert_eq!(value(&quad, "PILOTAGE_PX4_AIRFRAME"), Some("multicopter"));
+    assert_eq!(value(&quad, "PILOTAGE_PX4_GIMBAL"), Some("1"));
+    let plane = host("rc_cessna");
+    assert_eq!(value(&plane, "PILOTAGE_PX4_AIRFRAME"), Some("fixed_wing"));
+    assert_eq!(value(&plane, "PILOTAGE_PX4_GIMBAL"), None);
+}
+
+#[test]
+fn the_cessna_plans_its_own_world_and_airframe() {
+    let (root, px4) = complete_scaffold("cessna");
+    let world = root.join(Px4Model::RcCessna.world());
+    std::fs::write(&world, b"x").expect("world");
+    let ctx = context(root.clone());
+    let stages = plan_with_px4_dir(&ctx, &px4, Px4Model::RcCessna).expect("plan");
+    assert!(stages[0].spec.args.contains(&world.display().to_string()));
+    let fc = &stages[1].spec.env;
+    assert_eq!(value(fc, "PX4_SYS_AUTOSTART"), Some("4003"));
+    assert_eq!(value(fc, "PX4_SIM_MODEL"), Some("gz_rc_cessna"));
+    assert_eq!(value(fc, "PX4_GZ_MODEL_NAME"), Some("rc_cessna_0"));
+    std::fs::remove_dir_all(&root).ok();
 }
