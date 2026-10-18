@@ -157,6 +157,18 @@ fn neutralized_in_flight(armed: bool) -> (Px4Adapter, std::net::UdpSocket) {
         )
         .expect("neutralize");
     assert!(!adapter.uplink.as_ref().expect("uplink").streaming());
+    // While the group latch holds, a direct frame cannot fly around it.
+    assert_eq!(
+        adapter
+            .apply_control(&at_generation(body_rate_frame(DIRECT_SCOPE), 2))
+            .disposition,
+        Disposition::Rejected(RejectReason::LinkLossEngaged)
+    );
+    // The host clears the latch on the new holder's neutral demonstration,
+    // before it applies that frame.
+    adapter
+        .set_link_loss_policy(VehicleId::new(1), &ScopeId::new(FLIGHT_SCOPE), None)
+        .expect("clear");
     (adapter, fc)
 }
 

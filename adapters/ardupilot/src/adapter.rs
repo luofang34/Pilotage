@@ -237,7 +237,7 @@ impl VehicleAdapter for ArduPilotAdapter {
 
     fn apply_control(&mut self, frame: &ScopedControlFrame) -> ApplyOutcome {
         let tick = self.step(StepBudget { ticks: 0 }).now;
-        if self.link_loss_policy.contains_key(&frame.scope) {
+        if pilotage_adapter_api::link_loss_latch_engaged(&self.link_loss_policy, &frame.scope) {
             return ApplyOutcome::new(tick, Disposition::Rejected(RejectReason::LinkLossEngaged));
         }
         self.observe_fc();

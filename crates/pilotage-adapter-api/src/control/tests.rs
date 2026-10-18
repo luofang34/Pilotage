@@ -85,3 +85,27 @@ fn a_deflected_rate_or_off_centre_thrust_is_not_neutral() {
         );
     }
 }
+
+#[test]
+fn the_motion_latch_suppresses_the_direct_scope_but_not_the_gimbal() {
+    use pilotage_protocol::{DIRECT_SCOPE, MOTION_SCOPE, ScopeId};
+    let mut latches = std::collections::BTreeMap::new();
+    latches.insert(ScopeId::new(MOTION_SCOPE), LinkLossPolicy::Neutralize);
+    for (scope, latched) in [
+        (MOTION_SCOPE, true),
+        (DIRECT_SCOPE, true),
+        ("vehicle.gimbal", false),
+    ] {
+        assert_eq!(
+            crate::link_loss_latch_engaged(&latches, &ScopeId::new(scope)),
+            latched,
+            "{scope}"
+        );
+    }
+    latches.clear();
+    latches.insert(ScopeId::new("vehicle.gimbal"), LinkLossPolicy::Neutralize);
+    assert!(!crate::link_loss_latch_engaged(
+        &latches,
+        &ScopeId::new(DIRECT_SCOPE)
+    ));
+}

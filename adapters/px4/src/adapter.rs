@@ -299,10 +299,9 @@ impl VehicleAdapter for Px4Adapter {
     fn apply_control(&mut self, frame: &ScopedControlFrame) -> ApplyOutcome {
         let tick = self.step(StepBudget { ticks: 0 }).now;
         // Per-scope link-loss latch: a frame is suppressed only while ITS scope
-        // has a policy engaged, so a gimbal-scope failsafe never suppresses
-        // motion frames and vice versa. Applied to both the motion and gimbal
-        // routes below.
-        if self.link_loss_policy.contains_key(&frame.scope) {
+        // (for the direct scope, its flight group) has a policy engaged, so a
+        // gimbal-scope failsafe never suppresses motion frames and vice versa.
+        if pilotage_adapter_api::link_loss_latch_engaged(&self.link_loss_policy, &frame.scope) {
             return rejected_control(tick, RejectReason::LinkLossEngaged);
         }
         if frame.scope.as_str() == GIMBAL_SCOPE {

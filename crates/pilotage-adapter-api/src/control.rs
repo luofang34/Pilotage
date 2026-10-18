@@ -206,6 +206,24 @@ pub fn intent_satisfies_neutral_activation(
     }
 }
 
+/// Whether a link-loss latch suppresses frames on `scope`. Both flight
+/// scopes drive one flight controller and form one authority group, and
+/// the host latches that group under [`pilotage_protocol::MOTION_SCOPE`];
+/// so a direct-scope frame is suppressed while the motion latch is engaged,
+/// and the vehicle keeps its failsafe hold until the host clears it. Any
+/// other scope is latched on its own key.
+#[must_use]
+pub fn link_loss_latch_engaged(
+    latches: &std::collections::BTreeMap<pilotage_protocol::ScopeId, LinkLossPolicy>,
+    scope: &pilotage_protocol::ScopeId,
+) -> bool {
+    latches.contains_key(scope)
+        || (scope.as_str() == pilotage_protocol::DIRECT_SCOPE
+            && latches.contains_key(&pilotage_protocol::ScopeId::new(
+                pilotage_protocol::MOTION_SCOPE,
+            )))
+}
+
 /// Extracts the ZYX Euler angles (roll, pitch, yaw; radians, right-handed
 /// NED) from an attitude intent's unit quaternion — the shared conversion
 /// the command gate bounds tilt with and an attitude-consuming adapter
