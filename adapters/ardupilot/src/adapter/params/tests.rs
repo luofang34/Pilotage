@@ -47,7 +47,8 @@ fn direct_flight_waits_for_both_parameters_and_sets_only_bit_three() {
     let set = requests.try_recv().expect("a write");
     assert_eq!(
         set.request,
-        ParamRequest::Set("GUID_OPTIONS", ParamValue::Real32(9.0))
+        ParamRequest::Set("GUID_OPTIONS", ParamValue::Int32(9.0_f32.to_bits() as i32)),
+        "an INT32 write carrying the number 9 in the float field"
     );
     assert!(
         params.ready_hover().is_none(),

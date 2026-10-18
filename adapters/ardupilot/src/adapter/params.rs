@@ -13,7 +13,7 @@
 
 use std::time::{Duration, Instant};
 
-use pilotage_mavlink::codec::ParamValue;
+use pilotage_mavlink::codec::{ParamEncoding, ParamValue};
 use pilotage_mavlink::{LinkState, OutboundParam, ParamRequest};
 use tokio::sync::mpsc;
 use tracing::{info, warn};
@@ -39,13 +39,12 @@ pub(super) struct DirectParams {
     thrust_as_thrust: bool,
 }
 
-/// An ArduPilot parameter's number. ArduPilot sends integers as the
-/// number in the float field, typed INT32.
+/// ArduPilot stores an integer parameter's value, not its bytes, in the
+/// float field.
+const ENCODING: ParamEncoding = ParamEncoding::CCast;
+
 fn number(value: ParamValue) -> f32 {
-    match value {
-        ParamValue::Real32(value) => value,
-        ParamValue::Int32(bits) => f32::from_bits(bits as u32),
-    }
+    ENCODING.number(value) as f32
 }
 
 impl DirectParams {
@@ -92,7 +91,7 @@ impl DirectParams {
                 );
                 self.send(ParamRequest::Set(
                     GUID_OPTIONS,
-                    ParamValue::Real32((options | THRUST_AS_THRUST) as f32),
+                    ENCODING.integer((options | THRUST_AS_THRUST) as i32),
                 ));
                 self.set_requested = true;
             }
