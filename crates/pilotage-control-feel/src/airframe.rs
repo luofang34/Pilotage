@@ -24,6 +24,11 @@ pub struct AirframeLimits {
     ///
     /// `gains.vel_max_roll_pitch` in the airframe preset.
     pub max_tilt_rad: f32,
+    /// Normalized collective that holds the airframe in a hover: the
+    /// direct-flight thrust a centred stick (canonical thrust 0.5) commands.
+    ///
+    /// `hover_thrust_norm` in the airframe's kernel configuration.
+    pub hover_thrust: f32,
 }
 
 impl AirframeLimits {
@@ -31,13 +36,19 @@ impl AirframeLimits {
     pub const X500: Self = Self {
         id: "x500",
         max_tilt_rad: 0.35,
+        // Force-domain trim: weight / maximum thrust, 20.25 N / 34.19 N.
+        hover_thrust: 0.5929,
     };
 
     /// The Alia 250, which may tilt further and so may accelerate harder.
     pub const ALIA250: Self = Self {
         id: "alia250",
         max_tilt_rad: 0.45,
+        hover_thrust: 0.72,
     };
+
+    /// Every airframe a shipped profile is fitted to.
+    pub const ALL: [Self; 2] = [Self::X500, Self::ALIA250];
 
     /// The greatest horizontal acceleration this airframe can produce.
     ///
@@ -141,6 +152,9 @@ impl crate::FlightFeelProfile {
                 axis.dynamics.reversal_jerk *= factor;
             }
         }
+        // A centred thrust stick must hover THIS airframe: direct flight maps
+        // canonical thrust around its own trim, not another airframe's.
+        profile.envelope.direct_hover_thrust = limits.hover_thrust;
         profile.profile_id = format!(
             "{}-shaped-{}-v1",
             limits.id,
