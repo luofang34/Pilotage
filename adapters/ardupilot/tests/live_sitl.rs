@@ -1,25 +1,28 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-//! A real flight against a running ArduCopter SITL, through the public
-//! adapter API only: arm, climb on a climb intent, fly forward, yaw, and
-//! land on a disarm. Ignored by default; it needs a SITL whose serial 0
+//! Real flights against a running ArduCopter SITL, through the public
+//! adapter API only. The velocity flight arms, climbs on a climb intent,
+//! flies forward, yaws, and lands on a disarm. The direct flight switches
+//! a hover into body-rate control and back, and measures the rates the FC
+//! flies. Ignored by default; they need a SITL whose serial 0
 //! sends to the endpoint in `PILOTAGE_ARDUPILOT_SITL`, for example
 //!
 //! ```text
 //! arducopter --model + -I3 --serial0 udpclient:127.0.0.1:14593 ...
 //! PILOTAGE_ARDUPILOT_SITL=127.0.0.1:14593 \
-//!   cargo test -p pilotage-adapter-ardupilot --test live_sitl -- --ignored --nocapture
+//!   cargo test -p pilotage-adapter-ardupilot --test live_sitl -- --ignored --nocapture \
+//!   --test-threads 1
 //! ```
 
 use std::time::Duration;
 
 use pilotage_adapter_api::{TelemetrySample, VehicleAdapter};
 use pilotage_adapter_ardupilot::{
-    ArduPilotAdapter, ArduPilotConfig, ArduPilotProfile, FLIGHT_SCOPE,
+    ArduPilotAdapter, ArduPilotConfig, ArduPilotProfile, DIRECT_SCOPE, FLIGHT_SCOPE,
 };
 use pilotage_protocol::{
-    ControlAction, ControlIntent, ControlPayload, Generation, ReferenceFrame, ScopeId,
-    ScopedControlFrame, SequenceNum, SessionId, VehicleId, VelocityIntent,
+    BodyRateIntent, ControlAction, ControlIntent, ControlPayload, Generation, ReferenceFrame,
+    ScopeId, ScopedControlFrame, SequenceNum, SessionId, VehicleId, VelocityIntent,
 };
 use tracing::info;
 
@@ -38,6 +41,10 @@ struct Observed {
     /// The receiver fix, latitude and longitude in degrees.
     fix: Option<(f64, f64)>,
     battery: Option<f32>,
+    /// Body rates (roll, pitch, yaw), rad/s.
+    rates: [f32; 3],
+    /// Vertical speed, m/s, + = up.
+    climb: f64,
 }
 
 fn observe(sample: Option<&TelemetrySample>) -> Option<Observed> {
@@ -55,6 +62,8 @@ fn observe(sample: Option<&TelemetrySample>) -> Option<Observed> {
             .geodetic
             .map(|fix| (fix.position.latitude_deg, fix.position.longitude_deg)),
         battery: sample.battery.and_then(|battery| battery.voltage_v),
+        rates: sample.avionics?.attitude?.rates_rps,
+        climb: -f64::from(sample.avionics?.kinematics?.vel_ned_mps[2]),
     })
 }
 
@@ -68,22 +77,26 @@ struct Pilot {
 impl Pilot {
     fn frame(
         &mut self,
-        intent: Option<VelocityIntent>,
+        intent: Option<ControlIntent>,
         actions: Vec<ControlAction>,
     ) -> ScopedControlFrame {
         self.sequence = self.sequence.wrapping_add(1);
+        let scope = match intent {
+            None | Some(ControlIntent::Velocity(_)) => FLIGHT_SCOPE,
+            Some(_) => DIRECT_SCOPE,
+        };
         ScopedControlFrame {
             action_ids: (1..=actions.len() as u32).collect(),
             session: SessionId::new(1),
             vehicle: VehicleId::new(1),
-            scope: ScopeId::new(FLIGHT_SCOPE),
+            scope: ScopeId::new(scope),
             generation: Generation::new(1),
             sequence: SequenceNum::new(self.sequence),
             sampled_at: pilotage_timing::MonoTimestamp::from_nanos(0),
             profile_revision: 1,
             activation_revision: 0,
             payload: ControlPayload::default(),
-            intent: intent.map(ControlIntent::Velocity),
+            intent,
             actions,
         }
     }
@@ -91,7 +104,7 @@ impl Pilot {
     /// One control tick: optionally a frame, then a telemetry sample.
     async fn tick(
         &mut self,
-        intent: Option<VelocityIntent>,
+        intent: Option<ControlIntent>,
         actions: Vec<ControlAction>,
     ) -> Option<Observed> {
         self.ticker.tick().await;
@@ -131,7 +144,7 @@ impl Pilot {
         &mut self,
         what: &str,
         limit: Duration,
-        intent: Option<VelocityIntent>,
+        intent: Option<ControlIntent>,
         done: impl Fn(Observed) -> bool,
     ) -> Observed {
         let deadline = tokio::time::Instant::now() + limit;
@@ -151,14 +164,23 @@ impl Pilot {
     }
 }
 
-fn velocity(vx: f32, vz: f32, yaw_rate: f32) -> Option<VelocityIntent> {
-    Some(VelocityIntent {
+fn velocity(vx: f32, vz: f32, yaw_rate: f32) -> Option<ControlIntent> {
+    Some(ControlIntent::Velocity(VelocityIntent {
         frame: ReferenceFrame::BodyFrd,
         vx,
         vy: 0.0,
         vz,
         yaw_rate,
-    })
+    }))
+}
+
+fn body_rates(rates: [f32; 3], thrust: f32) -> Option<ControlIntent> {
+    Some(ControlIntent::BodyRate(BodyRateIntent {
+        roll_rate: rates[0],
+        pitch_rate: rates[1],
+        yaw_rate: rates[2],
+        thrust,
+    }))
 }
 
 fn wrapped_delta(from: f64, to: f64) -> f64 {
@@ -166,18 +188,22 @@ fn wrapped_delta(from: f64, to: f64) -> f64 {
     ((to - from + std::f64::consts::PI).rem_euclid(tau)) - std::f64::consts::PI
 }
 
-async fn flight(endpoint: std::net::SocketAddr) {
+async fn start_pilot(endpoint: std::net::SocketAddr) -> Pilot {
     let mut config = ArduPilotConfig::new(ArduPilotProfile::Simulation);
     config.endpoint = endpoint;
     let adapter = ArduPilotAdapter::start(VehicleId::new(1), config)
         .await
         .expect("the adapter starts");
-    let mut pilot = Pilot {
+    Pilot {
         adapter,
         ticker: tokio::time::interval(TICK),
         sequence: 0,
         latest: None,
-    };
+    }
+}
+
+async fn flight(endpoint: std::net::SocketAddr) {
+    let mut pilot = start_pilot(endpoint).await;
 
     let ground = pilot
         .fly_until("estimate ready", Duration::from_secs(120), None, |o| {
@@ -236,15 +262,17 @@ async fn flight(endpoint: std::net::SocketAddr) {
     );
 }
 
-#[test]
-#[ignore = "flies a running ArduCopter SITL; set PILOTAGE_ARDUPILOT_SITL"]
-fn arm_climb_forward_yaw_and_land_against_sitl() {
+/// Runs `flight` against the SITL in `PILOTAGE_ARDUPILOT_SITL`.
+fn against_sitl<F: std::future::Future<Output = ()>>(
+    flight: impl FnOnce(std::net::SocketAddr) -> F,
+) {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
-        .init();
+        .try_init()
+        .ok();
     let endpoint = std::env::var(ENDPOINT_ENV)
         .unwrap_or_else(|_| panic!("set {ENDPOINT_ENV} to the SITL's udpclient address"))
         .parse()
@@ -255,3 +283,18 @@ fn arm_climb_forward_yaw_and_land_against_sitl() {
         .expect("a runtime");
     runtime.block_on(flight(endpoint));
 }
+
+#[test]
+#[ignore = "flies a running ArduCopter SITL; set PILOTAGE_ARDUPILOT_SITL"]
+fn arm_climb_forward_yaw_and_land_against_sitl() {
+    against_sitl(flight);
+}
+
+#[test]
+#[ignore = "flies a running ArduCopter SITL; set PILOTAGE_ARDUPILOT_SITL"]
+fn direct_body_rates_and_family_switches_against_sitl() {
+    against_sitl(direct::flight);
+}
+
+#[path = "live_sitl/direct.rs"]
+mod direct;

@@ -5,7 +5,7 @@
 use pilotage_adapter_api::{LinkLossEnactError, LinkLossPolicy};
 use pilotage_protocol::{ScopeId, VehicleId};
 
-use super::{ArduPilotAdapter, FLIGHT_SCOPE};
+use super::{ArduPilotAdapter, DIRECT_SCOPE, FLIGHT_SCOPE};
 
 impl ArduPilotAdapter {
     /// Sets or clears one scope's link-loss policy. An engage records the
@@ -25,7 +25,7 @@ impl ArduPilotAdapter {
             return Ok(());
         };
         self.link_loss_policy.insert(scope.clone(), policy);
-        if scope.as_str() != FLIGHT_SCOPE {
+        if scope.as_str() != FLIGHT_SCOPE && scope.as_str() != DIRECT_SCOPE {
             return Ok(());
         }
         let Some(uplink) = self.uplink.as_mut() else {

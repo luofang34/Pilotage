@@ -29,11 +29,16 @@ use crate::uplink::ArduPilotUplink;
 mod advertisement;
 mod control;
 mod link_loss;
+mod params;
 #[cfg(test)]
 mod tests;
 
 /// The control scope: four canonical flight axes as velocity demands.
 pub const FLIGHT_SCOPE: &str = "vehicle.motion";
+/// The direct-flight scope: body rates or attitude with collective
+/// thrust, under its own lease in the same authority group as
+/// [`FLIGHT_SCOPE`], so only one of the two is held at a time.
+pub const DIRECT_SCOPE: &str = "vehicle.motion.direct";
 /// Canonical `roll` axis (0): lateral velocity, + = right.
 pub const ROLL_AXIS: u16 = 0;
 /// Canonical `pitch` axis (1): forward velocity, + = forward.
@@ -57,6 +62,7 @@ pub struct ArduPilotAdapter {
     state: Arc<Mutex<LinkState>>,
     _link: Option<MavlinkLink>,
     uplink: Option<ArduPilotUplink>,
+    direct: Option<params::DirectParams>,
     arm: ArmTracker,
     incarnation: SourceIncarnation,
     started_at: Instant,
@@ -90,8 +96,19 @@ impl ArduPilotAdapter {
                 link_config.component_id,
             )
         });
+        let direct = params::DirectParams::new(
+            link.param_sender(),
+            link_config.system_id,
+            link_config.component_id,
+        );
         info!(endpoint = %config.endpoint, "ArduPilot adapter started");
-        Ok(Self::assemble(vehicle, link.state(), Some(link), uplink))
+        Ok(Self::assemble(
+            vehicle,
+            link.state(),
+            Some(link),
+            uplink,
+            direct,
+        ))
     }
 
     fn assemble(
@@ -99,11 +116,13 @@ impl ArduPilotAdapter {
         state: Arc<Mutex<LinkState>>,
         link: Option<MavlinkLink>,
         uplink: Option<ArduPilotUplink>,
+        direct: params::DirectParams,
     ) -> Self {
         Self {
             vehicle,
             state,
             _link: link,
+            direct: uplink.is_some().then_some(direct),
             uplink,
             arm: ArmTracker::default(),
             incarnation: SourceIncarnation::new(rand_incarnation()),
@@ -121,8 +140,10 @@ impl ArduPilotAdapter {
         vehicle: VehicleId,
         state: Arc<Mutex<LinkState>>,
         uplink: ArduPilotUplink,
+        params: tokio::sync::mpsc::Sender<pilotage_mavlink::OutboundParam>,
     ) -> Self {
-        Self::assemble(vehicle, state, None, Some(uplink))
+        let direct = params::DirectParams::new(params, 1, 1);
+        Self::assemble(vehicle, state, None, Some(uplink), direct)
     }
 
     fn current_pose(&self) -> Option<OperationalPose> {
@@ -140,6 +161,9 @@ impl ArduPilotAdapter {
             return;
         };
         self.arm.observe(&latest);
+        if let Some(direct) = self.direct.as_mut() {
+            direct.maintain(&latest, Instant::now());
+        }
         let mode = latest
             .fc_reports
             .custom_mode

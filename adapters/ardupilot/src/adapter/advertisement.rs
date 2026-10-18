@@ -1,6 +1,7 @@
 //! The capability advertisement: the flight envelope the uplink enforces,
 //! the typed actions the flight scope consumes, and the legacy translation
-//! map the session host's compatibility boundary uses (CTRL-01). No
+//! map the session host's compatibility boundary uses (CTRL-01), for the
+//! velocity scope and the direct scope that shares its authority. No
 //! simulator lifecycle scope: this adapter has no reset path.
 
 use pilotage_adapter_api::{
@@ -10,10 +11,12 @@ use pilotage_adapter_api::{
 use pilotage_protocol::{ActionKind, IntentFamily, LogicalAxisId, ReferenceFrame, ScopeId};
 
 use super::{
-    ARM_BUTTON, ArduPilotAdapter, DISARM_BUTTON, FLIGHT_SCOPE, PITCH_AXIS, ROLL_AXIS,
+    ARM_BUTTON, ArduPilotAdapter, DIRECT_SCOPE, DISARM_BUTTON, FLIGHT_SCOPE, PITCH_AXIS, ROLL_AXIS,
     THROTTLE_AXIS, YAW_AXIS,
 };
-use crate::uplink::{MAX_HORIZONTAL_MPS, MAX_VERTICAL_MPS, MAX_YAW_RATE_RPS};
+use crate::uplink::{
+    MAX_BODY_RATE_RPS, MAX_DIRECT_TILT_RAD, MAX_HORIZONTAL_MPS, MAX_VERTICAL_MPS, MAX_YAW_RATE_RPS,
+};
 
 impl ArduPilotAdapter {
     /// The capability report `VehicleAdapter::capabilities` returns.
@@ -27,7 +30,7 @@ impl ArduPilotAdapter {
             vehicles: vec![VehicleDescriptor {
                 id: self.vehicle,
                 scopes: if flying {
-                    vec![flight_scope_descriptor()]
+                    vec![flight_scope_descriptor(), direct_scope_descriptor()]
                 } else {
                     vec![]
                 },
@@ -51,9 +54,41 @@ fn action(action: ActionKind) -> ActionCapability {
     }
 }
 
+/// The direct-flight scope: typed-only (no legacy map), in the velocity
+/// scope's authority group so one FC loop has one holder. BodyRate bounds
+/// every axis by `max_angular`; AttitudeThrust bounds tilt by it and the
+/// client slews its heading at the velocity scope's yaw rate.
+fn direct_scope_descriptor() -> ScopeDescriptor {
+    ScopeDescriptor {
+        authority_group: Some(FLIGHT_SCOPE.to_owned()),
+        scope: ScopeId::new(DIRECT_SCOPE),
+        axes: vec![],
+        intents: vec![
+            IntentCapability {
+                family: IntentFamily::BodyRate,
+                frames: vec![],
+                max_linear: 0.0,
+                max_vertical: 0.0,
+                max_angular: MAX_BODY_RATE_RPS,
+                max_yaw_rate: 0.0,
+            },
+            IntentCapability {
+                family: IntentFamily::AttitudeThrust,
+                frames: vec![ReferenceFrame::LocalNed],
+                max_linear: 0.0,
+                max_vertical: 0.0,
+                max_angular: MAX_DIRECT_TILT_RAD,
+                max_yaw_rate: MAX_YAW_RATE_RPS,
+            },
+        ],
+        actions: vec![action(ActionKind::Arm), action(ActionKind::Disarm)],
+        legacy: None,
+    }
+}
+
 fn flight_scope_descriptor() -> ScopeDescriptor {
     ScopeDescriptor {
-        authority_group: None,
+        authority_group: Some(FLIGHT_SCOPE.to_owned()),
         scope: ScopeId::new(FLIGHT_SCOPE),
         axes: [ROLL_AXIS, PITCH_AXIS, THROTTLE_AXIS, YAW_AXIS]
             .map(LogicalAxisId::new)
