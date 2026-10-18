@@ -83,6 +83,8 @@ fn the_advertisement_is_one_velocity_scope_with_arm_and_disarm() {
     let h = harness(None);
     let capabilities = h.adapter.capabilities();
     let vehicle = &capabilities.vehicles[0];
+    assert_eq!(vehicle.class, pilotage_protocol::VehicleClass::Multicopter);
+    assert_eq!(vehicle.display_name, "Betaflight quad");
     assert_eq!(vehicle.scopes.len(), 1);
     let scope = &vehicle.scopes[0];
     assert_eq!(scope.scope.as_str(), FLIGHT_SCOPE);

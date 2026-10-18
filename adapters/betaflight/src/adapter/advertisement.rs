@@ -5,13 +5,18 @@ use pilotage_adapter_api::{
     ActionCapability, AdapterCapabilities, ExecutionMode, IntentCapability, LegacyAxisRoute,
     LegacyCommandMap, LinkLossPolicy, ScopeDescriptor, VehicleDescriptor,
 };
-use pilotage_protocol::{ActionKind, IntentFamily, LogicalAxisId, ReferenceFrame, ScopeId};
+use pilotage_protocol::{
+    ActionKind, IntentFamily, LogicalAxisId, ReferenceFrame, ScopeId, VehicleClass,
+};
 
 use super::{
     ARM_BUTTON, BetaflightAdapter, DISARM_BUTTON, FLIGHT_SCOPE, PITCH_AXIS, ROLL_AXIS,
     THROTTLE_AXIS, YAW_AXIS,
 };
 use crate::config::{MAX_HORIZONTAL_MPS, MAX_VERTICAL_MPS, MAX_YAW_RATE_RPS};
+
+/// The operator's name for the vehicle.
+const DISPLAY_NAME: &str = "Betaflight quad";
 
 impl BetaflightAdapter {
     /// The capability report `VehicleAdapter::capabilities` returns.
@@ -23,6 +28,8 @@ impl BetaflightAdapter {
             },
             vehicles: vec![VehicleDescriptor {
                 id: self.vehicle,
+                class: VehicleClass::Multicopter,
+                display_name: DISPLAY_NAME.to_owned(),
                 scopes: vec![flight_scope_descriptor()],
                 link_loss_actions: vec![LinkLossPolicy::Neutralize],
             }],

@@ -2,10 +2,9 @@
 
 use std::time::{Duration, Instant};
 
-use super::{
-    ARM_TIMEOUT, ArmSwitch, RESULT_ACCEPTED, RESULT_FAILED, RESULT_TEMPORARILY_REJECTED, Requests,
-};
+use super::{ARM_TIMEOUT, ArmSwitch, Requests};
 use pilotage_adapter_api::FcCommandAck;
+use pilotage_protocol::CommandOutcome;
 
 fn req(arm: u32, disarm: u32) -> Requests {
     Requests {
@@ -24,8 +23,8 @@ fn a_refusal_is_reported_without_moving_the_switch() {
     };
     assert!(!switch.update(refused, false, Instant::now()));
     assert_eq!(
-        switch.last_command().map(|ack| ack.result),
-        Some(RESULT_TEMPORARILY_REJECTED)
+        switch.last_command().map(|ack| ack.outcome),
+        Some(CommandOutcome::TemporarilyRejected)
     );
 }
 
@@ -41,7 +40,7 @@ fn a_request_raises_the_switch_until_the_fc_arms() {
         switch.last_command(),
         Some(FcCommandAck {
             arm: true,
-            result: RESULT_ACCEPTED
+            outcome: CommandOutcome::Accepted
         })
     );
 }
@@ -53,8 +52,8 @@ fn an_unanswered_request_drops_the_switch_and_reports_failure() {
     assert!(switch.update(req(1, 0), false, t0));
     assert!(!switch.update(req(1, 0), false, t0 + ARM_TIMEOUT));
     assert_eq!(
-        switch.last_command().map(|ack| ack.result),
-        Some(RESULT_FAILED)
+        switch.last_command().map(|ack| ack.outcome),
+        Some(CommandOutcome::Failed)
     );
     // A later blocker clearing does not arm: the request is spent.
     assert!(!switch.update(req(1, 0), false, t0 + ARM_TIMEOUT * 2));
@@ -73,7 +72,7 @@ fn disarm_drops_the_switch_at_once_and_is_acknowledged_when_disarmed() {
         switch.last_command(),
         Some(FcCommandAck {
             arm: false,
-            result: RESULT_ACCEPTED
+            outcome: CommandOutcome::Accepted
         })
     );
 }

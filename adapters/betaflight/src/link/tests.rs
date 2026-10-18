@@ -6,8 +6,10 @@
 
 use std::time::Duration;
 
+use pilotage_adapter_api::FcCommandAck;
 use pilotage_msp::message::feature;
 use pilotage_msp::{Decoder, Direction, Frame, ModeRange, Version, command};
+use pilotage_protocol::CommandOutcome;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, watch};
@@ -196,15 +198,17 @@ fn rc_streams_at_the_poll_rate_and_the_arm_request_raises_aux1() {
         .await
         .expect("armed in time")
         .expect("link alive");
-        let ack = tokio::time::timeout(
+        let accepted = Some(FcCommandAck {
+            arm: true,
+            outcome: CommandOutcome::Accepted,
+        });
+        tokio::time::timeout(
             Duration::from_secs(2),
-            reports.wait_for(|report| report.last_command.is_some()),
+            reports.wait_for(|report| report.last_command == accepted),
         )
         .await
-        .expect("verdict in time")
-        .expect("link alive")
-        .last_command;
-        assert_eq!(ack.map(|ack| (ack.arm, ack.result)), Some((true, 0)));
+        .expect("the arm verdict arrives in time")
+        .expect("link alive");
     });
 }
 

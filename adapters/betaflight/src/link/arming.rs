@@ -9,15 +9,10 @@
 use std::time::{Duration, Instant};
 
 use pilotage_adapter_api::FcCommandAck;
+use pilotage_protocol::CommandOutcome;
 
 /// How long a raised switch waits for Betaflight to arm.
 pub(crate) const ARM_TIMEOUT: Duration = Duration::from_secs(2);
-/// MAV_RESULT_ACCEPTED: the FC did what was asked.
-pub(crate) const RESULT_ACCEPTED: u32 = 0;
-/// MAV_RESULT_TEMPORARILY_REJECTED: arming is blocked right now.
-pub(crate) const RESULT_TEMPORARILY_REJECTED: u32 = 1;
-/// MAV_RESULT_FAILED: the switch was raised and the FC did not arm.
-pub(crate) const RESULT_FAILED: u32 = 4;
 
 /// Where the switch stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,7 +61,7 @@ impl ArmSwitch {
     /// AUX1 should be high.
     pub(crate) fn update(&mut self, requests: Requests, armed: bool, now: Instant) -> bool {
         if requests.refused != self.seen.refused {
-            self.record(true, RESULT_TEMPORARILY_REJECTED);
+            self.record(true, CommandOutcome::TemporarilyRejected);
         }
         let seen = std::mem::replace(&mut self.seen, requests);
         if requests.disarm != seen.disarm {
@@ -76,14 +71,15 @@ impl ArmSwitch {
             self.switch = Switch::Arming {
                 deadline: now + ARM_TIMEOUT,
             };
+            self.record(true, CommandOutcome::InProgress);
         }
         self.switch = match self.switch {
             Switch::Arming { .. } if armed => {
-                self.record(true, RESULT_ACCEPTED);
+                self.record(true, CommandOutcome::Accepted);
                 Switch::On
             }
             Switch::Arming { deadline } if now >= deadline => {
-                self.record(true, RESULT_FAILED);
+                self.record(true, CommandOutcome::Failed);
                 Switch::Off
             }
             // Betaflight disarmed on its own (failsafe, crash detection):
@@ -93,7 +89,7 @@ impl ArmSwitch {
         };
         if self.disarm_pending && !armed {
             self.disarm_pending = false;
-            self.record(false, RESULT_ACCEPTED);
+            self.record(false, CommandOutcome::Accepted);
         }
         self.switch != Switch::Off
     }
@@ -103,8 +99,8 @@ impl ArmSwitch {
         self.last_command
     }
 
-    fn record(&mut self, arm: bool, result: u32) {
-        self.last_command = Some(FcCommandAck { arm, result });
+    fn record(&mut self, arm: bool, outcome: CommandOutcome) {
+        self.last_command = Some(FcCommandAck { arm, outcome });
     }
 }
 
