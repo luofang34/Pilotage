@@ -35,8 +35,10 @@ set deadband = 0
 set yaw_deadband = 0
 set angle_limit = 30
 
-# Receiver loss (the adapter stopped sending RC): hold for the guard
-# time, then land under altitude control and disarm on the ground.
+# Receiver loss (the adapter stopped sending RC): hold the last throttle
+# through the guard time, so a late frame on a loaded host is not a
+# drop, then land under altitude control and disarm on the ground.
+rxfail 2 h
 set failsafe_procedure = AUTO-LAND
 
 set blackbox_device = NONE
