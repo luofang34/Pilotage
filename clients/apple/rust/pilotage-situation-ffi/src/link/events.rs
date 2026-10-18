@@ -138,6 +138,8 @@ impl Link {
         let now_ms = self.now_ms();
         if let Some(fc) = sample.fc_state.as_ref() {
             self.telegraph.on_fc_arm_state(fc.arm_state);
+            self.telegraph
+                .on_fc_command_verdict(fc.last_command_kind, fc.last_command_result);
             self.publish_telegraph();
         }
         if let Some(feed) = self.feed.as_mut() {
