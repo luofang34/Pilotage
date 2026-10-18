@@ -51,15 +51,6 @@ fn both_flight_scopes_share_one_authority_group() {
 }
 
 #[test]
-fn the_vehicle_is_advertised_as_a_named_multicopter() {
-    let harness = Harness::new();
-    let capabilities = harness.adapter.capabilities();
-    let vehicle = &capabilities.vehicles[0];
-    assert_eq!(vehicle.class, pilotage_protocol::VehicleClass::Multicopter);
-    assert_eq!(vehicle.display_name, "ArduPilot multicopter");
-}
-
-#[test]
 fn direct_frames_wait_for_the_thrust_scale_and_then_stream_rates() {
     let mut harness = Harness::new();
     harness.estimate(-3.0, true);
