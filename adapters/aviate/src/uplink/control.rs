@@ -3,7 +3,7 @@
 use std::time::Instant;
 
 use pilotage_mavlink::codec::{
-    AttitudeTarget, encode_attitude_setpoint, encode_position_setpoint, encode_velocity_setpoint,
+    AttitudeTargetKind, encode_attitude_target, encode_position_setpoint, encode_velocity_setpoint,
 };
 
 use super::feel::UplinkMode;
@@ -120,17 +120,13 @@ impl FlightUplink {
         } else {
             self.limit_direct_heading(yaw_rad, dt_s)
         };
-        let frame = encode_attitude_setpoint(
+        let frame = encode_attitude_target(
             self.seq,
             self.time_boot_ms(),
-            AttitudeTarget {
-                roll_rad: demand.roll_rad,
-                pitch_rad: demand.pitch_rad,
-                yaw_rad: self.heading_sp_rad,
-                thrust: demand.thrust,
-                system_id: self.expected_system_id,
-                component_id: self.expected_component_id,
-            },
+            AttitudeTargetKind::from_euler(demand.roll_rad, demand.pitch_rad, self.heading_sp_rad),
+            demand.thrust,
+            self.expected_system_id,
+            self.expected_component_id,
         );
         self.send(&frame);
         demand.constrained

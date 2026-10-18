@@ -22,8 +22,7 @@ impl Px4Adapter {
             frames: None,
             _camera_bridge: None,
             _frame_forwarder: None,
-            arm: None,
-            last_seen_heartbeat: None,
+            arm: pilotage_mavlink::sampling::ArmTracker::default(),
             arm_incarnation: pilotage_adapter_api::SourceIncarnation::new([0; 16]),
             gimbal_stamp: sampling::GimbalStamp::new(pilotage_adapter_api::SourceIncarnation::new(
                 [0x60; 16],

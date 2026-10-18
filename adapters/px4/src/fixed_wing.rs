@@ -392,7 +392,9 @@ impl FixedWingUplink {
 
     fn apply_fc_reply(&mut self, message: FcMessage) {
         match message {
-            FcMessage::Heartbeat { armed, custom_mode } => {
+            FcMessage::Heartbeat {
+                armed, custom_mode, ..
+            } => {
                 if self.fc_custom_mode != Some(custom_mode) {
                     info!(
                         main_mode = (custom_mode >> 16) & 0xff,

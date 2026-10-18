@@ -17,7 +17,8 @@ use crate::codec::{
     COMMAND_LONG_ID, GIMBAL_MANAGER_SET_ATTITUDE_ID, MAV_CMD_DO_GIMBAL_MANAGER_CONFIGURE,
 };
 
-use super::{GimbalRateDemand, LinkConfig, LinkState, OutboundCommand, run_link};
+use super::outbound::OutboundLanes;
+use super::{CommandTarget, GimbalRateDemand, LinkConfig, LinkState, OutboundCommand, run_link};
 
 /// Receives one datagram and returns its MAVLink v2 message id, failing
 /// the test if nothing arrives promptly or the frame is not v2.
@@ -57,7 +58,7 @@ async fn configure_reaches_the_wire_before_the_first_rate_frame() {
     // router_mode = false and no stream-interval requests, so the heartbeat
     // tick emits nothing: the only datagrams are the two under test.
     let config = LinkConfig {
-        stream_command_target: Some(fc_addr),
+        command_target: CommandTarget::Fixed(fc_addr),
         ..LinkConfig::default()
     };
     let state = Arc::new(Mutex::new(LinkState::default()));
@@ -84,14 +85,14 @@ async fn configure_reaches_the_wire_before_the_first_rate_frame() {
         }))
         .expect("the rate publishes");
 
-    let link = tokio::spawn(run_link(
-        link_socket,
-        config,
-        false,
-        state,
-        command_rx,
-        rate_rx,
-    ));
+    let (_velocity_tx, velocity_rx) = tokio::sync::watch::channel(None);
+    let lanes = OutboundLanes {
+        commands: command_rx,
+        gimbal_rates: rate_rx,
+        setpoints: velocity_rx,
+        params: tokio::sync::mpsc::channel(1).1,
+    };
+    let link = tokio::spawn(run_link(link_socket, config, false, state, lanes));
 
     let (first, first_len) = recv_frame(&fc).await;
     let (second, second_len) = recv_frame(&fc).await;

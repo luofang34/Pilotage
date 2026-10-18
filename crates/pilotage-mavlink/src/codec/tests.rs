@@ -325,16 +325,10 @@ fn garbage_prefix_resyncs_to_the_next_frame() {
     let mut out: Vec<(FrameSource, FcMessage)> = Vec::new();
     let stats = parse_datagram(&datagram, &mut out);
     assert_eq!(stats.garbage_bytes, 3);
-    assert_eq!(
-        out,
-        vec![(
-            SOURCE,
-            FcMessage::Heartbeat {
-                armed: false,
-                custom_mode: 0
-            }
-        )]
-    );
+    assert!(matches!(
+        out.as_slice(),
+        [(SOURCE, FcMessage::Heartbeat { armed: false, .. })]
+    ));
 }
 
 #[test]
@@ -353,7 +347,8 @@ fn gcs_heartbeat_parses_back_as_heartbeat() {
             },
             FcMessage::Heartbeat {
                 armed: false,
-                custom_mode: 0
+                custom_mode: 0,
+                autopilot: 8, // MAV_AUTOPILOT_INVALID: a GCS has no autopilot.
             }
         )]
     );
@@ -455,6 +450,8 @@ mod sim_truth;
 /// BATTERY_STATUS against frames from an independent encoder.
 mod battery;
 
+/// ArduPilot frames against frames from an independent encoder.
+mod ardupilot;
 /// The joystick and parameter-protocol subset against an independent encoder.
 mod stick_and_parameter;
 

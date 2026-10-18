@@ -122,6 +122,7 @@ fn heartbeat_carries_the_custom_flight_mode() {
             FcMessage::Heartbeat {
                 armed: true,
                 custom_mode: 3 << 16,
+                autopilot: 12,
             }
         )]
     );
@@ -158,6 +159,7 @@ fn fc_side_param_value_and_heartbeat_parse_back() {
             FcMessage::Heartbeat {
                 armed: true,
                 custom_mode: 3 << 16,
+                autopilot: 12,
             },
         ]
     );

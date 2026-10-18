@@ -54,7 +54,7 @@ impl Px4Adapter {
             uplink.maintain();
         }
         if self.fixed_wing.is_some() {
-            let down_m = self.current_pose().map(|(_, pos, _)| pos[2]);
+            let down_m = self.current_pose().map(|pose| pose.pos_ned_m[2]);
             if let Some(fixed_wing) = self.fixed_wing.as_mut() {
                 fixed_wing.maintain(down_m);
             }
@@ -69,7 +69,7 @@ impl Px4Adapter {
         frame: &ScopedControlFrame,
         tick: SimTick,
     ) -> ApplyOutcome {
-        let Some((_yaw, pos, _vel)) = self.current_pose() else {
+        let Some(pos) = self.current_pose().map(|pose| pose.pos_ned_m) else {
             return rejected_control(tick, RejectReason::MeasurementUnavailable);
         };
         let Some(uplink) = self.fixed_wing.as_mut() else {

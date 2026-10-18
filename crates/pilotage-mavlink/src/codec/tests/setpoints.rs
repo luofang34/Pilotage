@@ -5,7 +5,7 @@
 #![allow(clippy::panic)]
 
 use super::super::{
-    BodyRateTarget, FcMessage, MAGIC_V2, encode_body_rate_setpoint, parse_datagram,
+    AttitudeTargetKind, FcMessage, MAGIC_V2, encode_attitude_target, parse_datagram,
 };
 
 /// Body rates 0.5 / -0.25 / 1.0 rad/s, thrust 0.62, attitude ignored
@@ -27,33 +27,29 @@ const ATTITUDE_TARGET: [u8; 49] = [
 
 #[test]
 fn body_rate_setpoint_matches_the_c_library_frame() {
-    let target = BodyRateTarget {
-        roll_rps: 0.5,
-        pitch_rps: -0.25,
-        yaw_rps: 1.0,
-        thrust: 0.62,
-        system_id: 7,
-        component_id: 1,
-    };
+    let rates = AttitudeTargetKind::BodyRates([0.5, -0.25, 1.0]);
     assert_eq!(
-        encode_body_rate_setpoint(9, 1234, target),
+        encode_attitude_target(9, 1234, rates, 0.62, 7, 1),
         SET_ATTITUDE_TARGET_RATES
     );
 }
 
 #[test]
 fn body_rate_thrust_is_clamped_to_the_normalized_range() {
-    let target = BodyRateTarget {
-        roll_rps: 0.0,
-        pitch_rps: 0.0,
-        yaw_rps: 0.0,
-        thrust: 1.7,
-        system_id: 1,
-        component_id: 1,
-    };
-    let frame = encode_body_rate_setpoint(0, 0, target);
+    let rates = AttitudeTargetKind::BodyRates([0.0; 3]);
+    let frame = encode_attitude_target(0, 0, rates, 1.7, 1, 1);
     let thrust = f32::from_le_bytes(frame[42..46].try_into().expect("four bytes"));
     assert_eq!(thrust, 1.0);
+}
+
+#[test]
+fn euler_attitude_target_ignores_the_body_rates() {
+    let level = AttitudeTargetKind::from_euler(0.0, 0.0, 0.0);
+    assert_eq!(level, AttitudeTargetKind::Attitude([1.0, 0.0, 0.0, 0.0]));
+    let frame = encode_attitude_target(0, 0, level, f32::NAN, 1, 1);
+    let thrust = f32::from_le_bytes(frame[42..46].try_into().expect("four bytes"));
+    assert_eq!(thrust, 0.0, "NaN thrust is sent as zero");
+    assert_eq!(frame[48], 0b0000_0111, "body-rate ignore bits");
 }
 
 #[test]

@@ -1,30 +1,19 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+//! The battery lane through the adapter: it reaches telemetry with or
+//! without an estimate, and only the primary battery is kept.
 
-use pilotage_adapter_api::{SourceRole, VehicleAdapter};
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
+
+use pilotage_adapter_api::VehicleAdapter;
+use pilotage_mavlink::LinkState;
 use pilotage_mavlink::codec::FcMessage;
 use pilotage_mavlink::link::apply_messages_at;
-use pilotage_mavlink::{BatteryReport, LinkState};
 use pilotage_protocol::VehicleId;
 
-use super::*;
+use super::{SOURCE, live_state};
 use crate::adapter::Px4Adapter;
-use crate::adapter::tests::{SOURCE, live_state};
-
-fn report(received_at: Instant) -> BatteryReport {
-    BatteryReport {
-        instance: 0,
-        remaining_percent: Some(73),
-        voltage_mv: Some(16_200),
-        current_ca: Some(1_250),
-        energy_consumed_hj: Some(4_321),
-        time_remaining_s: Some(900),
-        sequence: 4,
-        received_at,
-    }
-}
 
 fn battery_message(remaining_percent: Option<u8>) -> FcMessage {
     FcMessage::BatteryStatus {
@@ -35,53 +24,6 @@ fn battery_message(remaining_percent: Option<u8>) -> FcMessage {
         energy_consumed_hj: None,
         time_remaining_s: None,
     }
-}
-
-#[test]
-fn a_report_becomes_an_si_sample_under_the_fc_state_role() {
-    let started = Instant::now();
-    let sample = battery_sample(
-        Some(report(Instant::now())),
-        SourceIncarnation::new([7; 16]),
-        started,
-    )
-    .expect("fresh report");
-    assert_eq!(sample.remaining_fraction, Some(0.73));
-    assert_eq!(sample.voltage_v, Some(16.2));
-    assert_eq!(sample.current_a, Some(12.5));
-    assert_eq!(sample.consumed_energy_j, Some(432_100.0));
-    assert_eq!(sample.time_remaining_s, Some(900));
-    assert_eq!(sample.stamp.role, SourceRole::FcState);
-    assert_eq!(sample.stamp.sequence, 4);
-    let fc_state = crate::adapter::sampling::fc_state_sample(
-        Some(crate::adapter::ArmReport {
-            armed: false,
-            sequence: 0,
-            acquired_at: started,
-        }),
-        None,
-        SourceIncarnation::new([7; 16]),
-        started,
-    )
-    .expect("fc state");
-    assert_ne!(
-        sample.stamp.source_id, fc_state.stamp.source_id,
-        "battery and FC state are separate lanes of one source"
-    );
-    assert_eq!(sample.stamp.clock, MeasurementClock::HostMonotonic);
-}
-
-#[test]
-fn a_stale_report_is_withheld() {
-    let now = Instant::now();
-    let Some(old) = now.checked_sub(WITHHOLD_AFTER + Duration::from_millis(1)) else {
-        return;
-    };
-    let sample = battery_sample(Some(report(old)), SourceIncarnation::new([0; 16]), old);
-    assert!(
-        sample.is_none(),
-        "a battery value past its freshness is not shown"
-    );
 }
 
 #[test]

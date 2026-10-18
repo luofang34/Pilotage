@@ -125,6 +125,36 @@ pub enum HostError {
     /// Starting the PX4 MAVLink link failed.
     #[error("failed to start the PX4 adapter: {0}")]
     Px4Adapter(#[source] pilotage_adapter_px4::Px4AdapterError),
+    /// The ArduPilot adapter requires an explicit simulation profile.
+    #[error("PILOTAGE_ARDUPILOT_PROFILE is required and must be set to simulation")]
+    ArduPilotProfileMissing,
+    /// A present ArduPilot profile did not name the only supported policy.
+    #[error("invalid PILOTAGE_ARDUPILOT_PROFILE value {value:?} (expected simulation)")]
+    ArduPilotProfile {
+        /// The rejected value.
+        value: String,
+    },
+    /// The ArduPilot endpoint was not a socket address.
+    #[error("invalid PILOTAGE_ARDUPILOT_ADDR value {value:?}: {source}")]
+    ArduPilotEndpoint {
+        /// The rejected value.
+        value: String,
+        /// The socket-address parse failure.
+        #[source]
+        source: std::net::AddrParseError,
+    },
+    /// An ArduPilot variable could not be decoded as UTF-8.
+    #[error("{variable} is not valid UTF-8: {source}")]
+    ArduPilotEnvEncoding {
+        /// The environment variable being parsed.
+        variable: &'static str,
+        /// The environment decoding failure.
+        #[source]
+        source: std::env::VarError,
+    },
+    /// Starting the ArduPilot MAVLink link failed.
+    #[error("failed to start the ArduPilot adapter: {0}")]
+    ArduPilotAdapter(#[source] pilotage_adapter_ardupilot::ArduPilotAdapterError),
     /// A `PILOTAGE_MISSION_*` variable could not be decoded as UTF-8.
     #[error("{variable} is not valid UTF-8: {source}")]
     MissionVarEncoding {

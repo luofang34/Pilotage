@@ -12,9 +12,7 @@
 //! only once their demand reaches that value. So a family switch never
 //! steps the thrust, the way an RC throttle takeover works.
 
-use pilotage_mavlink::codec::{
-    AttitudeTarget, BodyRateTarget, encode_attitude_setpoint, encode_body_rate_setpoint,
-};
+use pilotage_mavlink::codec::{AttitudeTargetKind, encode_attitude_target};
 
 use super::Px4Uplink;
 
@@ -157,32 +155,21 @@ impl Px4Uplink {
         self.last_frame = Some(self.clock.now());
         let time_boot_ms = self.time_boot_ms();
         let (system_id, component_id) = (self.expected_system_id, self.expected_component_id);
-        match demand {
-            DirectDemand::BodyRate([roll_rps, pitch_rps, yaw_rps]) => {
-                let target = BodyRateTarget {
-                    roll_rps,
-                    pitch_rps,
-                    yaw_rps,
-                    thrust,
-                    system_id,
-                    component_id,
-                };
-                let frame = encode_body_rate_setpoint(self.seq, time_boot_ms, target);
-                self.send(&frame);
-            }
+        let kind = match demand {
+            DirectDemand::BodyRate(rates) => AttitudeTargetKind::BodyRates(rates),
             DirectDemand::Attitude([roll_rad, pitch_rad, yaw_rad]) => {
-                let target = AttitudeTarget {
-                    roll_rad,
-                    pitch_rad,
-                    yaw_rad,
-                    thrust,
-                    system_id,
-                    component_id,
-                };
-                let frame = encode_attitude_setpoint(self.seq, time_boot_ms, target);
-                self.send(&frame);
+                AttitudeTargetKind::from_euler(roll_rad, pitch_rad, yaw_rad)
             }
-        }
+        };
+        let frame = encode_attitude_target(
+            self.seq,
+            time_boot_ms,
+            kind,
+            thrust,
+            system_id,
+            component_id,
+        );
+        self.send(&frame);
     }
 
     /// The thrust the stream sends now, for tests.

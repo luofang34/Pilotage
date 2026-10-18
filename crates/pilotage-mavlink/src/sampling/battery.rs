@@ -1,24 +1,25 @@
 //! The battery report as a telemetry sample: wire units to SI units, under
 //! the FC-state role, withheld once stale.
 
+use crate::BatteryReport;
 use pilotage_adapter_api::{
     BatterySample, MeasurementClock, MeasurementStamp, SourceIncarnation, SourceIntegrity,
     SourceRole,
 };
-use pilotage_mavlink::BatteryReport;
 
 use super::WITHHOLD_AFTER;
 
 /// Source id of the battery lane. Each lane from this flight controller has
 /// its own id (FC state 1, gimbal device 2), so no consumer that tracks
 /// sequences by role and source can read two lanes as one stream.
-pub(super) const BATTERY_SOURCE_ID: u64 = 3;
+pub const BATTERY_SOURCE_ID: u64 = 3;
 
 /// The latest battery report as a sample, or `None` when no report is
 /// fresh. The flight controller is the only author, so the sample has the
 /// FC-state role. BATTERY_STATUS has no time of its own, so the
 /// receive time is the acquisition time.
-pub(super) fn battery_sample(
+#[must_use]
+pub fn battery_sample(
     report: Option<BatteryReport>,
     incarnation: SourceIncarnation,
     started_at: std::time::Instant,

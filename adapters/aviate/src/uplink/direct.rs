@@ -16,7 +16,7 @@
 use std::net::SocketAddr;
 
 use pilotage_control_feel::DemandEnvelope;
-use pilotage_mavlink::codec::{AttitudeTarget, encode_attitude_setpoint};
+use pilotage_mavlink::codec::{AttitudeTargetKind, encode_attitude_target};
 use thiserror::Error;
 
 use crate::adapter::AviateProfile;
@@ -218,17 +218,13 @@ impl FlightUplink {
         }
         let sequence = self.seq;
         let time_boot_ms = self.time_boot_ms();
-        let frame = encode_attitude_setpoint(
+        let frame = encode_attitude_target(
             sequence,
             time_boot_ms,
-            AttitudeTarget {
-                roll_rad: setpoint.roll_rad,
-                pitch_rad: setpoint.pitch_rad,
-                yaw_rad: setpoint.yaw_rad,
-                thrust: setpoint.collective_force,
-                system_id: self.expected_system_id,
-                component_id: self.expected_component_id,
-            },
+            AttitudeTargetKind::from_euler(setpoint.roll_rad, setpoint.pitch_rad, setpoint.yaw_rad),
+            setpoint.collective_force,
+            self.expected_system_id,
+            self.expected_component_id,
         );
         let failures_before = self.send_failures;
         self.send(&frame);

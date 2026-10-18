@@ -261,9 +261,10 @@ impl Px4Adapter {
         frame: &ScopedControlFrame,
         tick: SimTick,
     ) -> ApplyOutcome {
-        let Some((current_yaw, _pos, current_vel)) = self.current_pose() else {
+        let Some(pose) = self.current_pose() else {
             return rejected_control(tick, RejectReason::MeasurementUnavailable);
         };
+        let (current_yaw, current_vel) = (pose.yaw_rad, pose.vel_ned_mps);
         let Some(uplink) = self.uplink.as_mut() else {
             return rejected_control(tick, RejectReason::UnknownScope);
         };

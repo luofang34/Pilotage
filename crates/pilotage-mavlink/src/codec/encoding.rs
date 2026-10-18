@@ -224,50 +224,40 @@ pub fn encode_velocity_setpoint(
     frame
 }
 
-/// Absolute FPV attitude demand and the component selected to receive it.
-///
-/// Body-rate demand is intentionally absent because the FC attitude loop
-/// derives rate commands from this target.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct AttitudeTarget {
-    /// Roll demand in radians.
-    pub roll_rad: f32,
-    /// Pitch demand in radians.
-    pub pitch_rad: f32,
-    /// Yaw demand in radians.
-    pub yaw_rad: f32,
-    /// Normalized collective thrust.
-    pub thrust: f32,
-    /// Selected MAVLink system id.
-    pub system_id: u8,
-    /// Selected MAVLink component id.
-    pub component_id: u8,
-}
+/// MAV_FRAME_BODY_OFFSET_NED: axes aligned with the vehicle heading
+/// (x forward, y right, z down), level regardless of roll and pitch.
+pub const MAV_FRAME_BODY_OFFSET_NED: u8 = 9;
 
-/// Encodes one absolute attitude target for the selected component.
-pub fn encode_attitude_setpoint(seq: u8, time_boot_ms: u32, target: AttitudeTarget) -> [u8; 51] {
-    const SET_ATTITUDE_TARGET_ID: u32 = 82;
-    let (sr, cr) = (target.roll_rad * 0.5).sin_cos();
-    let (sp, cp) = (target.pitch_rad * 0.5).sin_cos();
-    let (sy, cy) = (target.yaw_rad * 0.5).sin_cos();
-    let q = [
-        cr * cp * cy + sr * sp * sy,
-        sr * cp * cy - cr * sp * sy,
-        cr * sp * cy + sr * cp * sy,
-        cr * cp * sy - sr * sp * cy,
-    ];
-    let mut payload = [0u8; 39];
+/// Serializes a SET_POSITION_TARGET_LOCAL_NED body-frame velocity and
+/// yaw-rate setpoint in [`MAV_FRAME_BODY_OFFSET_NED`]: position,
+/// acceleration, and absolute yaw are masked out. The FC rotates the
+/// velocity by its own heading, so the caller needs no attitude to fly a
+/// body-frame demand.
+///
+/// Wire order as [`encode_velocity_setpoint`].
+pub fn encode_body_velocity_setpoint(
+    seq: u8,
+    time_boot_ms: u32,
+    vel_frd_mps: [f32; 3],
+    yaw_rate_rps: f32,
+    target_system: u8,
+    target_component: u8,
+) -> [u8; 65] {
+    // Ignore position (1|2|4), acceleration (64|128|256), yaw (1024):
+    // velocity + yaw rate remain.
+    const TYPE_MASK: u16 = 1 | 2 | 4 | 64 | 128 | 256 | 1024;
+    let mut payload = [0u8; 53];
     payload[0..4].copy_from_slice(&time_boot_ms.to_le_bytes());
-    for (i, w) in q.iter().enumerate() {
-        payload[4 + i * 4..8 + i * 4].copy_from_slice(&w.to_le_bytes());
-    }
-    // body rates [20..32) stay zero (masked); thrust at [32..36).
-    payload[32..36].copy_from_slice(&target.thrust.clamp(0.0, 1.0).to_le_bytes());
-    payload[36] = target.system_id;
-    payload[37] = target.component_id;
-    payload[38] = 0b0000_0111; // ignore body roll/pitch/yaw rate
-    let mut frame = [0u8; 51];
-    encode_frame_v2(seq, SET_ATTITUDE_TARGET_ID, &payload, 49, &mut frame);
+    payload[16..20].copy_from_slice(&vel_frd_mps[0].to_le_bytes());
+    payload[20..24].copy_from_slice(&vel_frd_mps[1].to_le_bytes());
+    payload[24..28].copy_from_slice(&vel_frd_mps[2].to_le_bytes());
+    payload[44..48].copy_from_slice(&yaw_rate_rps.to_le_bytes());
+    payload[48..50].copy_from_slice(&TYPE_MASK.to_le_bytes());
+    payload[50] = target_system;
+    payload[51] = target_component;
+    payload[52] = MAV_FRAME_BODY_OFFSET_NED;
+    let mut frame = [0u8; 65];
+    encode_frame_v2(seq, SET_POSITION_TARGET_ID, &payload, 143, &mut frame);
     frame
 }
 
