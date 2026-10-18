@@ -90,6 +90,19 @@ pub enum HostError {
         #[source]
         source: std::net::AddrParseError,
     },
+    /// A present PX4 system id was not a vehicle id (1-255).
+    #[error("invalid PILOTAGE_PX4_SYSTEM_ID value {value:?} (expected 1-255)")]
+    Px4SystemId {
+        /// The rejected value.
+        value: String,
+    },
+    /// The PX4 system id could not be decoded as UTF-8.
+    #[error("PILOTAGE_PX4_SYSTEM_ID is not valid UTF-8: {source}")]
+    Px4SystemIdEncoding {
+        /// The environment decoding failure.
+        #[source]
+        source: std::env::VarError,
+    },
     /// A PX4 endpoint could not be decoded as UTF-8.
     #[error("{variable} is not valid UTF-8: {source}")]
     Px4EndpointEncoding {

@@ -21,6 +21,11 @@ pub struct Px4Config {
     pub stream_command_endpoint: SocketAddr,
     /// PX4 onboard endpoint receiving offboard commands.
     pub command_endpoint: SocketAddr,
+    /// MAVLink system id the vehicle speaks as. Frames from any other
+    /// system are dropped, and commands are addressed to this one. PX4
+    /// SITL instance `N` boots as system `N + 1`, so a launcher that runs
+    /// several instances names each host's vehicle here.
+    pub system_id: u8,
     /// Whether this vehicle carries a MAVLink Gimbal Protocol v2 gimbal.
     /// Off by default: a bare airframe has no gimbal, and advertising
     /// the `vehicle.gimbal` scope on one would let a client lease a
@@ -45,6 +50,7 @@ impl Px4Config {
             telemetry_endpoint: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 14_550)),
             stream_command_endpoint: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 18_570)),
             command_endpoint: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 14_580)),
+            system_id: 1,
             gimbal: false,
             drop_gimbal_link_loss_stop: false,
         }
@@ -80,6 +86,7 @@ impl Px4Config {
             Px4Profile::Simulation => LinkConfig::simulator(),
         };
         config.endpoint = self.telemetry_endpoint;
+        config.system_id = self.system_id;
         config.authorization_source = AuthorizationSource::StandardEstimatorStatus;
         config.standard_status_max_lag_ms = 300;
         config.reset_candidate_max_ms = 60_000;
@@ -111,6 +118,18 @@ mod tests {
     fn the_battery_report_is_requested_at_one_hertz() {
         let config = Px4Config::new(Px4Profile::Simulation).link_config();
         assert!(config.stream_interval_requests.contains(&(147, 1_000_000)));
+    }
+
+    #[test]
+    fn the_link_listens_for_the_configured_system_only() {
+        let mut config = Px4Config::new(Px4Profile::Simulation);
+        assert_eq!(
+            config.link_config().system_id,
+            1,
+            "PX4 instance 0 is system 1"
+        );
+        config.system_id = 6;
+        assert_eq!(config.link_config().system_id, 6);
     }
 
     #[test]

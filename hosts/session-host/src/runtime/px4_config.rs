@@ -12,20 +12,39 @@ const TELEMETRY_ENDPOINT: &str = "PILOTAGE_PX4_ADDR";
 const STREAM_COMMAND_ENDPOINT: &str = "PILOTAGE_PX4_GCS_ADDR";
 const COMMAND_ENDPOINT: &str = "PILOTAGE_PX4_FC_ADDR";
 const GIMBAL: &str = "PILOTAGE_PX4_GIMBAL";
+const SYSTEM_ID: &str = "PILOTAGE_PX4_SYSTEM_ID";
 /// Acceptance fault injection: drop the gimbal link-loss stop so the vehicle's
 /// own failsafe is the sole mechanism under test. Honoured only under the
 /// simulation profile (enforced by [`Px4Config::with_gimbal_stop_dropped`]).
 const DROP_GIMBAL_STOP: &str = "PILOTAGE_PX4_DROP_GIMBAL_STOP";
 
 pub(crate) fn from_env() -> Result<Px4Config, HostError> {
-    config_from_values(
+    let mut config = config_from_values(
         std::env::var(PROFILE),
         std::env::var(TELEMETRY_ENDPOINT),
         std::env::var(STREAM_COMMAND_ENDPOINT),
         std::env::var(COMMAND_ENDPOINT),
         std::env::var(GIMBAL),
         std::env::var(DROP_GIMBAL_STOP),
-    )
+    )?;
+    config.system_id = parse_system_id(std::env::var(SYSTEM_ID), config.system_id)?;
+    Ok(config)
+}
+
+/// The vehicle's MAVLink system id, fail-closed.
+///
+/// A wrong id does not fail loudly on its own: the link drops every frame
+/// from any other system, so the session would show a vehicle that never
+/// reports. Zero is the broadcast id and names no vehicle at all.
+fn parse_system_id(value: Result<String, VarError>, default: u8) -> Result<u8, HostError> {
+    match value {
+        Ok(value) => match value.parse::<u8>() {
+            Ok(id) if id != 0 => Ok(id),
+            _ => Err(HostError::Px4SystemId { value }),
+        },
+        Err(VarError::NotPresent) => Ok(default),
+        Err(source @ VarError::NotUnicode(_)) => Err(HostError::Px4SystemIdEncoding { source }),
+    }
 }
 
 fn config_from_values(
@@ -95,7 +114,7 @@ mod tests {
     use std::ffi::OsString;
     use std::net::SocketAddr;
 
-    use super::config_from_values;
+    use super::{config_from_values, parse_system_id};
     use crate::error::HostError;
 
     fn absent() -> Result<String, VarError> {
@@ -185,6 +204,25 @@ mod tests {
             assert!(
                 matches!(refusal, Err(HostError::Px4Endpoint { variable: rejected, .. }) if rejected == variable),
                 "{variable} must fail closed, got {refusal:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_system_id_defaults_to_instance_zero_and_refuses_what_names_no_vehicle() {
+        assert_eq!(
+            parse_system_id(absent(), 1).expect("absent keeps default"),
+            1
+        );
+        assert_eq!(
+            parse_system_id(Ok("6".to_owned()), 1).expect("explicit id"),
+            6
+        );
+        for value in ["0", "256", "-1", "six", ""] {
+            let refusal = parse_system_id(Ok(value.to_owned()), 1);
+            assert!(
+                matches!(refusal, Err(HostError::Px4SystemId { value: ref rejected }) if rejected == value),
+                "{value:?} must be refused, got {refusal:?}"
             );
         }
     }
