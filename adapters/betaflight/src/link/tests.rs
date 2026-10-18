@@ -21,6 +21,9 @@ use crate::rc::{ARM_HIGH_US, required_mode_ranges};
 struct FakeFc {
     features: u32,
     armed_after_arm_switch: bool,
+    /// Never answer a telemetry poll: a flight controller whose serial
+    /// task is too slow to reply in time.
+    withhold_polls: bool,
 }
 
 fn status(armed: bool) -> Vec<u8> {
@@ -65,6 +68,12 @@ async fn serve(listener: TcpListener, fc: FakeFc, seen: mpsc::UnboundedSender<Fr
             if frame.command == command::MSP_SET_RAW_RC {
                 let aux1 = u16::from_le_bytes([frame.payload[8], frame.payload[9]]);
                 armed = fc.armed_after_arm_switch && aux1 >= 1_700;
+            }
+            if fc.withhold_polls && frame.command == command::MSP_MULTIPLE_MSP {
+                if seen.send(frame).is_err() {
+                    return;
+                }
+                continue;
             }
             let payload = match frame.command {
                 command::MSP_API_VERSION => vec![0, 1, 49],
@@ -137,6 +146,7 @@ fn runtime() -> tokio::runtime::Runtime {
 const GOOD: FakeFc = FakeFc {
     features: feature::RX_MSP | feature::GPS,
     armed_after_arm_switch: true,
+    withhold_polls: false,
 };
 
 #[test]
@@ -159,17 +169,28 @@ fn first_connect_writes_the_missing_aux_ranges_and_saves_them() {
 }
 
 #[test]
-fn rc_streams_at_the_poll_rate_and_the_arm_request_raises_aux1() {
+fn rc_keeps_flowing_while_a_telemetry_reply_is_outstanding() {
+    runtime().block_on(async {
+        let mut rig = rig(FakeFc {
+            withhold_polls: true,
+            ..GOOD
+        })
+        .await;
+        next(&mut rig, command::MSP_MULTIPLE_MSP).await;
+        // The poll is never answered; the RC frames still come, until the
+        // link gives the reply up and drops the connection.
+        for _ in 0..3 {
+            let rc = next(&mut rig, command::MSP_SET_RAW_RC).await;
+            assert_eq!(rc.payload.len(), 16, "eight channels");
+        }
+    });
+}
+
+#[test]
+fn the_arm_request_raises_aux1_with_the_throttle_cut() {
     runtime().block_on(async {
         let mut rig = rig(GOOD).await;
-        let first = next(&mut rig, command::MSP_SET_RAW_RC).await;
-        assert_eq!(first.payload.len(), 16, "eight channels");
-        let started = tokio::time::Instant::now();
-        for _ in 0..25 {
-            next(&mut rig, command::MSP_SET_RAW_RC).await;
-        }
-        let period = started.elapsed() / 25;
-        assert!(period <= Duration::from_millis(40), "RC every {period:?}");
+        next(&mut rig, command::MSP_SET_RAW_RC).await;
         rig.commands.send_modify(|command| {
             command.requests = Requests {
                 arm: 1,
@@ -214,6 +235,7 @@ fn a_udp_receiver_is_a_typed_issue_that_keeps_the_switch_down() {
         let mut rig = rig(FakeFc {
             features: feature::RX_UDP | feature::RX_MSP,
             armed_after_arm_switch: true,
+            withhold_polls: false,
         })
         .await;
         let mut reports = rig.reports.clone();
