@@ -17,6 +17,7 @@ use preflight::{build_host, prepare_web_assets};
 pub(crate) use stages::{host_stage, viewer_stage};
 use supervise::supervise;
 
+pub(crate) mod fleet;
 pub(crate) mod preflight;
 mod stages;
 

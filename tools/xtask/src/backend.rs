@@ -62,6 +62,17 @@ impl SessionContext {
     }
 }
 
+/// Where a fleet puts one vehicle: a point on the WGS84 ellipsoid. The
+/// height is the backend's own ground, so each vehicle starts on the
+/// field its world models.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SpawnPoint {
+    /// Latitude, degrees north.
+    pub latitude_deg: f64,
+    /// Longitude, degrees east.
+    pub longitude_deg: f64,
+}
+
 /// One plannable launch step: a process and the signal proving it is up.
 #[derive(Debug)]
 pub struct Stage {
@@ -140,6 +151,28 @@ pub trait SimBackend {
     fn prepare(&self, ctx: &SessionContext) -> Result<(), XtaskError> {
         let _ = ctx;
         Ok(())
+    }
+    /// Puts this backend's vehicle at `point` by editing its planned
+    /// stages: a world whose origin moves, a home argument, a sidecar
+    /// option — whatever the simulator takes.
+    ///
+    /// A fleet calls this for every vehicle before it starts anything, so
+    /// a backend that cannot place its vehicle is refused up front rather
+    /// than stacked on top of another vehicle at the same point.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`XtaskError::SpawnUnsupported`] by default, or the
+    /// backend's own failure to place the vehicle.
+    fn spawn(
+        &self,
+        _ctx: &SessionContext,
+        _point: &SpawnPoint,
+        _stages: &mut [Stage],
+    ) -> Result<(), XtaskError> {
+        Err(XtaskError::SpawnUnsupported {
+            backend: self.name(),
+        })
     }
     /// Selects the vehicle model named after the backend (`--fc
     /// <backend>:<model>`). A backend with one vehicle has no models.

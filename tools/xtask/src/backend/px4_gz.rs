@@ -104,6 +104,15 @@ impl SimBackend for Px4Gz {
         env
     }
 
+    fn spawn(
+        &self,
+        ctx: &SessionContext,
+        point: &super::SpawnPoint,
+        stages: &mut [Stage],
+    ) -> Result<(), XtaskError> {
+        super::gz::spawn_in_world(ctx, point, stages)
+    }
+
     fn select_model(&mut self, model: &str) -> Result<(), XtaskError> {
         self.model = Px4Model::parse(model)?;
         Ok(())
