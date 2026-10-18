@@ -1,6 +1,6 @@
 //! Minimal argument parsing for the session-host binary: `--port <PORT>` and
-//! `--adapter reference|gazebo|aviate|px4|ardupilot`, defaulting to port `0`
-//! (ephemeral, loopback-only bind) and the reference adapter.
+//! `--adapter reference|gazebo|aviate|px4|ardupilot|betaflight`, defaulting to
+//! port `0` (ephemeral, loopback-only bind) and the reference adapter.
 
 /// Which vehicle adapter the host embeds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -19,6 +19,9 @@ pub enum AdapterKind {
     /// The ArduCopter adapter over MAVLink: telemetry plus GUIDED body
     /// velocity control (ADR-0018).
     ArduPilot,
+    /// The Betaflight adapter over MSP: telemetry plus a host-side velocity
+    /// loop flying ANGLE mode.
+    Betaflight,
 }
 
 /// Parsed command-line configuration.
@@ -50,7 +53,7 @@ pub enum CliError {
     MissingAdapterValue,
     /// `--adapter` was given a value outside the known adapter set.
     #[error(
-        "invalid --adapter value {0:?} (expected reference, gazebo, aviate, px4, or ardupilot)"
+        "invalid --adapter value {0:?} (expected reference, gazebo, aviate, px4, ardupilot, or betaflight)"
     )]
     InvalidAdapter(String),
     /// An argument was not recognized.
@@ -84,6 +87,7 @@ pub fn parse_args(args: &[String]) -> Result<CliArgs, CliError> {
                     "aviate" => AdapterKind::Aviate,
                     "px4" => AdapterKind::Px4,
                     "ardupilot" => AdapterKind::ArduPilot,
+                    "betaflight" => AdapterKind::Betaflight,
                     other => return Err(CliError::InvalidAdapter(other.to_owned())),
                 };
             }
@@ -145,6 +149,13 @@ mod tests {
         let args = vec!["--adapter".to_owned(), "ardupilot".to_owned()];
         let parsed = parse_args(&args).expect("ArduPilot adapter parses");
         assert_eq!(parsed.adapter, AdapterKind::ArduPilot);
+    }
+
+    #[test]
+    fn betaflight_adapter_parses() {
+        let args = vec!["--adapter".to_owned(), "betaflight".to_owned()];
+        let parsed = parse_args(&args).expect("Betaflight adapter parses");
+        assert_eq!(parsed.adapter, AdapterKind::Betaflight);
     }
 
     #[test]

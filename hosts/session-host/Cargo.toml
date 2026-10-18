@@ -24,6 +24,7 @@ pilotage-sim-video = { workspace = true, optional = true }
 pilotage-adapter-aviate = { workspace = true }
 pilotage-adapter-px4 = { workspace = true }
 pilotage-adapter-ardupilot = { workspace = true }
+pilotage-adapter-betaflight = { workspace = true }
 pilotage-mission = { workspace = true }
 pilotage-timing = { workspace = true }
 navigate-contract = { workspace = true }

@@ -8,6 +8,7 @@ mod adapter_launch;
 mod ardupilot_config;
 mod automation;
 mod aviate_profile;
+mod betaflight_config;
 mod connection;
 mod engine_actor;
 #[cfg(feature = "sim")]

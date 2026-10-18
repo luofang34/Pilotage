@@ -1,0 +1,50 @@
+# Betaflight SITL configuration for a Pilotage-flown quad.
+# Load it with `betaflight_SITL.elf --config sitl.cli`: the SITL applies
+# every line, writes eeprom.bin in its working directory, and exits.
+# `defaults nosave` first makes the result the same from any prior state.
+defaults nosave
+
+# The receiver is the MSP client (MSP_SET_RAW_RC), not the UDP RC link.
+feature -RX_UDP
+feature RX_MSP
+feature GPS
+# Without airmode a disarmed-on-the-ground quad keeps its motors at idle.
+feature -AIRMODE
+
+# The virtual magnetometer is exact; any nonzero offset marks it calibrated.
+set mag_calibration = 1,0,0
+
+# One MSP command is served per serial-task tick: 1 kHz carries the
+# 50 Hz RC stream and the batched telemetry poll with margin.
+set serial_update_rate_hz = 1000
+
+# Stick to setpoint is linear, so the adapter's demands map exactly:
+# in ANGLE, roll and pitch stick x angle_limit is the tilt; in ACRO on
+# every axis, and on yaw in ANGLE, stick x 670 deg/s is the rate.
+set rates_type = ACTUAL
+set roll_rc_rate = 67
+set roll_srate = 67
+set pitch_rc_rate = 67
+set pitch_srate = 67
+set yaw_rc_rate = 67
+set yaw_srate = 67
+set roll_expo = 0
+set pitch_expo = 0
+set yaw_expo = 0
+set deadband = 0
+set yaw_deadband = 0
+set angle_limit = 30
+
+# Receiver loss (the adapter stopped sending RC): hold the last throttle
+# through the guard time, so a late frame on a loaded host is not a
+# drop, then land under altitude control and disarm on the ground.
+rxfail 2 h
+set failsafe_procedure = AUTO-LAND
+
+set blackbox_device = NONE
+
+# AUX1 (RC channel 5) high arms; AUX2 high is ANGLE, AUX2 low is ACRO.
+aux 0 0 0 1700 2100 0 0
+aux 1 1 1 1700 2100 0 0
+
+save

@@ -1,0 +1,23 @@
+[package]
+name = "pilotage-adapter-betaflight"
+description = "VehicleAdapter for Betaflight over MSP: telemetry, a host-side velocity loop flying ANGLE mode, and switch arming"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+pilotage-adapter-api = { workspace = true }
+pilotage-geo = { workspace = true }
+pilotage-msp = { workspace = true }
+pilotage-protocol = { workspace = true }
+pilotage-timing = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["net", "rt", "sync", "time", "io-util", "macros"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["net", "rt", "sync", "time", "io-util", "macros", "rt-multi-thread"] }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }

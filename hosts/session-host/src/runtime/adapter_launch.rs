@@ -10,8 +10,8 @@ use crate::error::HostError;
 
 use super::engine_actor::ToEngine;
 use super::{
-    HOST_VEHICLE, RuntimeOptions, ardupilot_config, aviate_profile, build_engine, media,
-    px4_config, run_until_shutdown, run_with_media_until_shutdown,
+    HOST_VEHICLE, RuntimeOptions, ardupilot_config, aviate_profile, betaflight_config,
+    build_engine, media, px4_config, run_until_shutdown, run_with_media_until_shutdown,
 };
 #[cfg(feature = "sim")]
 use super::{MAX_CONTROL_AGE, build_reference, gazebo_launch};
@@ -29,19 +29,13 @@ pub(super) async fn spawn_adapter_runtime(
 ) -> Result<tokio::task::JoinHandle<()>, HostError> {
     match adapter {
         #[cfg(feature = "sim")]
-        AdapterKind::Reference => {
-            let (engine, adapter) = build_reference(options);
-            Ok(tokio::spawn(run_until_shutdown(
-                endpoint,
-                engine,
-                adapter,
-                None,
-                engine_tx,
-                engine_rx,
-                shutdown_rx,
-                start,
-            )))
-        }
+        AdapterKind::Reference => Ok(spawn_reference_runtime(
+            options,
+            endpoint,
+            (engine_tx, engine_rx),
+            shutdown_rx,
+            start,
+        )),
         #[cfg(feature = "sim")]
         AdapterKind::Gazebo => {
             let (engine, adapter, frames) =
@@ -77,19 +71,78 @@ pub(super) async fn spawn_adapter_runtime(
             let adapter = pilotage_adapter_ardupilot::ArduPilotAdapter::start(HOST_VEHICLE, config)
                 .await
                 .map_err(HostError::ArduPilotAdapter)?;
-            let engine = build_engine(&adapter, options);
-            Ok(tokio::spawn(run_until_shutdown(
-                endpoint,
-                engine,
+            Ok(spawn_without_media(
                 adapter,
-                None,
-                engine_tx,
-                engine_rx,
+                options,
+                endpoint,
+                (engine_tx, engine_rx),
                 shutdown_rx,
                 start,
-            )))
+            ))
+        }
+        AdapterKind::Betaflight => {
+            // The adapter's link task connects and reconnects on its own, so
+            // the host comes up before (or without) the flight controller.
+            let config = betaflight_config::from_env()?;
+            let adapter =
+                pilotage_adapter_betaflight::BetaflightAdapter::start(HOST_VEHICLE, config);
+            Ok(spawn_without_media(
+                adapter,
+                options,
+                endpoint,
+                (engine_tx, engine_rx),
+                shutdown_rx,
+                start,
+            ))
         }
     }
+}
+
+/// Spawns the deterministic reference adapter's runtime.
+#[cfg(feature = "sim")]
+fn spawn_reference_runtime(
+    options: RuntimeOptions,
+    endpoint: Endpoint<wtransport::endpoint::endpoint_side::Server>,
+    (engine_tx, engine_rx): (mpsc::Sender<ToEngine>, mpsc::Receiver<ToEngine>),
+    shutdown_rx: oneshot::Receiver<()>,
+    start: tokio::time::Instant,
+) -> tokio::task::JoinHandle<()> {
+    let (engine, adapter) = build_reference(options);
+    tokio::spawn(run_until_shutdown(
+        endpoint,
+        engine,
+        adapter,
+        None,
+        engine_tx,
+        engine_rx,
+        shutdown_rx,
+        start,
+    ))
+}
+
+/// Spawns the runtime of an adapter with no video producer.
+fn spawn_without_media<A>(
+    adapter: A,
+    options: RuntimeOptions,
+    endpoint: Endpoint<wtransport::endpoint::endpoint_side::Server>,
+    (engine_tx, engine_rx): (mpsc::Sender<ToEngine>, mpsc::Receiver<ToEngine>),
+    shutdown_rx: oneshot::Receiver<()>,
+    start: tokio::time::Instant,
+) -> tokio::task::JoinHandle<()>
+where
+    A: pilotage_adapter_api::VehicleAdapter + Send + 'static,
+{
+    let engine = build_engine(&adapter, options);
+    tokio::spawn(run_until_shutdown(
+        endpoint,
+        engine,
+        adapter,
+        None,
+        engine_tx,
+        engine_rx,
+        shutdown_rx,
+        start,
+    ))
 }
 
 /// Builds the PX4 adapter and spawns its runtime, wiring the media task only

@@ -1898,6 +1898,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-adapter-betaflight"
+version = "0.1.0"
+dependencies = [
+ "pilotage-adapter-api",
+ "pilotage-geo",
+ "pilotage-msp",
+ "pilotage-protocol",
+ "pilotage-timing",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "pilotage-adapter-gazebo"
 version = "0.1.0"
 dependencies = [
@@ -2211,6 +2226,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-msp"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
+name = "pilotage-multirotor-fdm"
+version = "0.1.0"
+dependencies = [
+ "pilotage-msp",
+ "thiserror",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "pilotage-navdata-cycle"
 version = "0.1.0"
 dependencies = [
@@ -2283,6 +2315,7 @@ dependencies = [
  "pilotage-adapter-api",
  "pilotage-adapter-ardupilot",
  "pilotage-adapter-aviate",
+ "pilotage-adapter-betaflight",
  "pilotage-adapter-gazebo",
  "pilotage-adapter-px4",
  "pilotage-adapter-reference",
