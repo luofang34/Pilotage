@@ -1,0 +1,22 @@
+[package]
+name = "pilotage-adapter-ardupilot"
+description = "VehicleAdapter for ArduCopter over MAVLink 2.0: telemetry, GUIDED body-velocity control, takeoff, and arming"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+pilotage-adapter-api = { workspace = true }
+pilotage-mavlink = { workspace = true }
+pilotage-protocol = { workspace = true }
+pilotage-timing = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["net", "rt", "sync", "time", "macros"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["net", "rt", "sync", "time", "macros", "rt-multi-thread"] }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }

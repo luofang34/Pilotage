@@ -10,6 +10,7 @@ use crate::error::XtaskError;
 use crate::process::ProcessSpec;
 use crate::readiness::Readiness;
 
+mod ardupilot_sitl;
 pub(crate) mod aviate_gz;
 mod aviate_xplane;
 pub(crate) mod px4_gz;
@@ -227,6 +228,11 @@ const BACKENDS: &[BackendEntry] = &[
         name: "aviate-xplane",
         alias: None,
         make: || Box::new(aviate_xplane::AviateXPlane),
+    },
+    BackendEntry {
+        name: "ardupilot-sitl",
+        alias: Some("ardupilot"),
+        make: || Box::new(ardupilot_sitl::ArduPilotSitl),
     },
 ];
 

@@ -10,8 +10,8 @@ use crate::error::HostError;
 
 use super::engine_actor::ToEngine;
 use super::{
-    HOST_VEHICLE, RuntimeOptions, aviate_profile, build_engine, media, px4_config,
-    run_until_shutdown, run_with_media_until_shutdown,
+    HOST_VEHICLE, RuntimeOptions, ardupilot_config, aviate_profile, build_engine, media,
+    px4_config, run_until_shutdown, run_with_media_until_shutdown,
 };
 #[cfg(feature = "sim")]
 use super::{MAX_CONTROL_AGE, build_reference, gazebo_launch};
@@ -70,6 +70,24 @@ pub(super) async fn spawn_adapter_runtime(
         }
         AdapterKind::Px4 => {
             spawn_px4_runtime(endpoint, options, engine_tx, engine_rx, shutdown_rx, start).await
+        }
+        AdapterKind::ArduPilot => {
+            // No video producer: an ArduPilot SITL has no camera sidecar.
+            let config = ardupilot_config::from_env()?;
+            let adapter = pilotage_adapter_ardupilot::ArduPilotAdapter::start(HOST_VEHICLE, config)
+                .await
+                .map_err(HostError::ArduPilotAdapter)?;
+            let engine = build_engine(&adapter, options);
+            Ok(tokio::spawn(run_until_shutdown(
+                endpoint,
+                engine,
+                adapter,
+                None,
+                engine_tx,
+                engine_rx,
+                shutdown_rx,
+                start,
+            )))
         }
     }
 }
