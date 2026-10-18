@@ -31,11 +31,11 @@ const DEFAULT_NORTH_M: &str = "30";
 /// second simulator listening there would read it), motors out (the
 /// sidecar listens), state in, RC in. `sitl.c` has no option to move them.
 /// Its TCP ports are 5760 + n for the UARTs with a serial function; the
-/// configuration gives MSP to UART1 (5761, the adapter's link) and UART2
-/// (5762, the sidecar's hang watch).
+/// configuration gives MSP to UART1 (5761, the adapter's link) and UART8
+/// (5768, the sidecar's hang watch).
 const SITL_UDP: [u16; 4] = [9_001, 9_002, 9_003, 9_004];
 const SITL_MSP_TCP: u16 = 5_761;
-const SITL_WATCH_TCP: u16 = 5_762;
+const SITL_WATCH_TCP: u16 = 5_768;
 const BUILD_HINT: &str = "build it in the Betaflight checkout (serial make; -j races the \
     submodule hydration): make TARGET=SITL EXTRA_FLAGS=\"-DENABLE_GAZEBO_BRIDGE=0\"";
 

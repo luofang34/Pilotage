@@ -3,8 +3,8 @@
 //! A Betaflight SITL can hang with its process alive and its TCP serial
 //! ports still accepting connections while no MSP command is answered.
 //! The host's adapter then reconnects forever and the vehicle is gone.
-//! The sidecar watches for it on a serial port of its own (UART2, TCP
-//! 5762, configured for MSP in `sim/betaflight/sitl.cli`), so it never
+//! The sidecar watches for it on a serial port of its own (UART8, TCP
+//! 5768, configured for MSP in `sim/betaflight/sitl.cli`), so it never
 //! competes with the adapter's link on UART1: it asks for the API version
 //! every [`REQUEST_PERIOD`] and reports a hang when no reply has come for
 //! [`SILENCE_LIMIT`].
@@ -16,8 +16,8 @@ use std::time::{Duration, Instant};
 #[cfg(test)]
 mod tests;
 
-/// Betaflight's TCP port for UART2.
-pub const WATCH_PORT: u16 = 5_762;
+/// Betaflight's TCP port for UART8.
+pub const WATCH_PORT: u16 = 5_768;
 /// How often the watch asks.
 pub const REQUEST_PERIOD: Duration = Duration::from_millis(500);
 /// How long without a reply counts as a hang.

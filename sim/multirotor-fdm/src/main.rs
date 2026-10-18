@@ -209,7 +209,7 @@ fn supervise(
                 }),
                 Action::ReportFlying => tracing::info!("Betaflight is flying the model"),
                 Action::ReportHang => tracing::error!(
-                    "Betaflight SITL hung (no MSP reply on UART2 for the silence limit); \
+                    "Betaflight SITL hung (no MSP reply on UART8 for the silence limit); \
                      restarting it, and the vehicle restarts on the ground"
                 ),
                 Action::GiveUp { reason } => return Err(FdmError::GaveUp { reason }),

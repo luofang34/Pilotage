@@ -14,10 +14,12 @@ feature -AIRMODE
 # The virtual magnetometer is exact; any nonzero offset marks it calibrated.
 set mag_calibration = 1,0,0
 
-# UART1 (TCP 5761) is the adapter's MSP link, as by default. UART2
-# (TCP 5762) is MSP too: the sidecar asks it for the API version to see
+# UART1 (TCP 5761) is the adapter's MSP link, as by default. UART8
+# (TCP 5768) is MSP too: the sidecar asks it for the API version to see
 # that Betaflight still answers, without touching the adapter's link.
-serial 1 1 115200 57600 0 115200
+# UART8 keeps clear of the serial ports an ArduPilot SITL binds
+# (5762 + 10n and 5763 + 10n for instance n).
+serial 7 1 115200 57600 0 115200
 
 # One MSP command is served per serial-task tick: 1 kHz carries the
 # 50 Hz RC stream and the batched telemetry poll with margin.
