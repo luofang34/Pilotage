@@ -86,7 +86,7 @@ impl super::Px4Adapter {
         Some(GimbalAttitudeSample {
             quat_wxyz: device.quat_wxyz,
             rates_rps: device.rates_rps,
-            flags: u32::from(device.flags),
+            reference: pilotage_mavlink::gimbal_reference(device.flags),
             failure_flags: device.failure_flags,
             stamp: self.gimbal_stamp.stamp_for(device.time_boot_ms),
         })

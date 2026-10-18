@@ -95,6 +95,11 @@ fn telemetry_only_advertisement_keeps_the_control_feel_identity() {
     let capabilities = adapter.capabilities();
 
     assert!(capabilities.vehicles[0].scopes.is_empty());
+    assert_eq!(
+        capabilities.vehicles[0].class,
+        pilotage_protocol::VehicleClass::Multicopter
+    );
+    assert!(!capabilities.vehicles[0].display_name.is_empty());
     assert_eq!(capabilities.adapter_version, env!("CARGO_PKG_VERSION"));
     let identity = capabilities.control_feel.expect("control-feel identity");
     assert_eq!(identity.profile_id, "telemetry-only-feel");

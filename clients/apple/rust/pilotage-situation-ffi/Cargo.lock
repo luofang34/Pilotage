@@ -1261,6 +1261,7 @@ dependencies = [
 name = "pilotage-control"
 version = "0.1.0"
 dependencies = [
+ "pilotage-client-session",
  "pilotage-input",
  "pilotage-protocol",
  "serde",
@@ -1303,6 +1304,7 @@ version = "0.1.0"
 dependencies = [
  "indicate-instrument-feeder",
  "indicate-instrument-state",
+ "pilotage-client-session",
  "pilotage-instrument-runtime",
  "pilotage-protocol",
 ]

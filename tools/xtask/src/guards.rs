@@ -6,13 +6,16 @@
 //! pairs instead of reading a list, so adding a guard never edits CI —
 //! and a guard whose self-test is missing stays a manual step until it
 //! earns the pairing. Every pair runs even after one fails, so a red
-//! run names every failing guard at once.
+//! run names every failing guard at once. Guards written in Rust run
+//! after the pairs, each with its own unit tests.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::error::XtaskError;
 use crate::output::print_line;
+
+mod fc_vocabulary;
 
 #[cfg(test)]
 mod tests;
@@ -39,6 +42,21 @@ pub fn run_guards(repo_root: &Path) -> Result<(), XtaskError> {
                 failed.push(pair.name.clone());
             }
         }
+    }
+    let findings = fc_vocabulary::scan(repo_root)?;
+    if findings.is_empty() {
+        print_line("guard fc-vocabulary: ok");
+    } else {
+        for finding in &findings {
+            print_line(&format!(
+                "FORBIDDEN: flight-controller vocabulary in a client: {}:{}: {}",
+                finding.path.display(),
+                finding.line,
+                finding.text
+            ));
+        }
+        print_line("guard fc-vocabulary: FAILED at the check");
+        failed.push("fc-vocabulary".to_owned());
     }
     if failed.is_empty() {
         print_line(&format!("guards: {} pairs ok", pairs.len()));

@@ -7,9 +7,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use pilotage_adapter_api::{
-    ActionResult, AdapterCapabilities, ApplyOutcome, Disposition, FcCommandAck, LinkLossEnactError,
-    LinkLossPolicy, RejectReason, SourceIncarnation, StepBudget, StepOutcome, TelemetryBatch,
-    VehicleAdapter, VideoSource,
+    ActionResult, AdapterCapabilities, ApplyOutcome, CommandOutcome, Disposition, FcCommandAck,
+    LinkLossEnactError, LinkLossPolicy, RejectReason, SourceIncarnation, StepBudget, StepOutcome,
+    TelemetryBatch, VehicleAdapter, VideoSource,
 };
 use pilotage_mavlink::ardupilot::ArduCopterMode;
 use pilotage_mavlink::codec::MAV_CMD_COMPONENT_ARM_DISARM;
@@ -17,7 +17,7 @@ use pilotage_mavlink::sampling::{
     ArmTracker, OperationalPose, VehicleReports, battery_sample, estimate_batch, fc_state_sample,
     operational_pose, report_only_sample,
 };
-use pilotage_mavlink::{LinkState, MavlinkLink};
+use pilotage_mavlink::{LinkState, MavlinkLink, command_outcome};
 use pilotage_protocol::{ActionKind, ScopeId, ScopedControlFrame, VehicleId};
 use pilotage_timing::SimTick;
 use tracing::{info, warn};
@@ -198,7 +198,8 @@ impl ArduPilotAdapter {
         warn!(?reasons, "ArduCopter refused to arm");
     }
 
-    /// The FC's verdict on the latest arm or disarm this adapter sent.
+    /// The FC's verdict on the latest arm or disarm this adapter sent:
+    /// in progress from the send until the FC acknowledges it.
     fn last_arm_ack(&self) -> Option<FcCommandAck> {
         let (arm, sent_at) = self.uplink.as_ref()?.last_arm_command()?;
         let ack = self
@@ -206,10 +207,13 @@ impl ArduPilotAdapter {
             .lock()
             .ok()?
             .fc_reports
-            .command_ack(MAV_CMD_COMPONENT_ARM_DISARM)?;
-        (ack.received_at >= sent_at).then_some(FcCommandAck {
+            .command_ack(MAV_CMD_COMPONENT_ARM_DISARM)
+            .filter(|ack| ack.received_at >= sent_at);
+        Some(FcCommandAck {
             arm,
-            result: u32::from(ack.result),
+            outcome: ack.map_or(CommandOutcome::InProgress, |ack| {
+                command_outcome(ack.result)
+            }),
         })
     }
 }

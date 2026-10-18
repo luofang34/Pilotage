@@ -14,7 +14,7 @@ use crate::plan::{GIMBAL_SCOPE, MOTION_SCOPE};
 
 /// The motion group's direct-flight member: leased on its own, fenced with
 /// the velocity member as one motion authority.
-pub const DIRECT_SCOPE: &str = "vehicle.motion.direct";
+pub use pilotage_protocol::DIRECT_SCOPE;
 /// The on-demand simulator lifecycle scope.
 pub const LIFECYCLE_SCOPE: &str = "sim.lifecycle";
 

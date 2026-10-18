@@ -26,6 +26,7 @@ mod profile;
 mod quasimode;
 mod runtime;
 mod sample;
+mod scheme;
 mod telegraph;
 mod transition;
 
@@ -46,5 +47,8 @@ pub use profile::{
 };
 pub use runtime::ControlRuntime;
 pub use sample::{ButtonSample, DirectDemand, Mode, RawSample, SessionState};
+pub use scheme::{
+    SchemeChoice, SchemeOffer, SchemeRefusal, SchemeSwitch, offered_schemes, plan_scheme_switch,
+};
 pub use telegraph::{ArmConfirmed, ArmOrder, ArmTelegraph, OrderAction, TelegraphPhase};
 pub use transition::{AuthorityRoute, DIRECT_SCOPE, LIFECYCLE_SCOPE};

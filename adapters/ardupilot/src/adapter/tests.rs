@@ -9,7 +9,9 @@ use std::time::Instant;
 
 use tokio::sync::{mpsc, watch};
 
-use pilotage_adapter_api::{Disposition, LinkLossPolicy, RejectReason, VehicleAdapter};
+use pilotage_adapter_api::{
+    CommandOutcome, Disposition, LinkLossPolicy, RejectReason, VehicleAdapter,
+};
 use pilotage_mavlink::codec::{
     FcMessage, FrameSource, MAV_CMD_COMPONENT_ARM_DISARM, MAV_CMD_DO_SET_MODE, MAV_CMD_NAV_TAKEOFF,
     STATUS_TEXT_LEN,
@@ -199,6 +201,11 @@ fn a_refused_arm_reaches_telemetry_as_the_fc_verdict() {
     harness
         .adapter
         .apply_control(&frame(None, vec![ControlAction::Arm]));
+    let pending = harness.adapter.sample_telemetry().samples[0]
+        .fc_state
+        .and_then(|state| state.last_command)
+        .expect("the arm is answered at once");
+    assert_eq!(pending.outcome, CommandOutcome::InProgress);
     let mut text = [0_u8; STATUS_TEXT_LEN];
     text[..18].copy_from_slice(b"PreArm: GPS 1: Bad");
     harness.feed(&[
@@ -217,7 +224,7 @@ fn a_refused_arm_reaches_telemetry_as_the_fc_verdict() {
         .last_command
         .expect("the verdict");
     assert!(ack.arm);
-    assert_eq!(ack.result, 4, "MAV_RESULT_FAILED");
+    assert_eq!(ack.outcome, CommandOutcome::Failed, "MAV_RESULT_FAILED");
 }
 
 #[test]
@@ -298,4 +305,13 @@ fn link_loss_zeroes_the_setpoint_and_rejects_until_cleared() {
         .adapter
         .apply_control(&frame(velocity(2.0, 0.0, 0.0), vec![]));
     assert_eq!(resumed.disposition, Disposition::Accepted);
+}
+
+#[test]
+fn the_vehicle_advertises_itself_as_a_named_multicopter() {
+    let harness = Harness::new();
+    let capabilities = harness.adapter.capabilities();
+    let vehicle = &capabilities.vehicles[0];
+    assert_eq!(vehicle.class, pilotage_protocol::VehicleClass::Multicopter);
+    assert_eq!(vehicle.display_name, "ArduPilot quad");
 }

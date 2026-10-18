@@ -22,6 +22,8 @@ pub struct Admission {
     /// Present holders at the moment of admission, so ownership renders
     /// without waiting for the next authority event.
     pub scope_holders: Vec<wire::ScopeHolderSnapshot>,
+    /// Whether the host drives a physical vehicle rather than a simulation.
+    pub physically_embodied: bool,
 }
 
 /// One vehicle and the scopes it publishes.
@@ -31,6 +33,9 @@ pub struct VehicleCatalog {
     pub vehicle_id: u64,
     /// The host's display name for the vehicle.
     pub display_name: String,
+    /// The kind of vehicle the adapter declares; `None` when it declared
+    /// no class this build knows.
+    pub vehicle_class: Option<pilotage_protocol::VehicleClass>,
     /// The control scopes this vehicle publishes.
     pub scopes: Vec<ScopeCatalog>,
 }
@@ -62,6 +67,7 @@ impl Admission {
             .map(|descriptor| VehicleCatalog {
                 vehicle_id: descriptor.vehicle.as_ref().map_or(0, |v| v.value),
                 display_name: descriptor.display_name.clone(),
+                vehicle_class: pilotage_protocol::VehicleClass::from_wire(descriptor.vehicle_class),
                 scopes: descriptor
                     .scopes
                     .iter()
@@ -84,6 +90,7 @@ impl Admission {
             vehicles,
             control_feel: capabilities.control_feel,
             scope_holders: welcome.scope_holders.clone(),
+            physically_embodied: capabilities.physically_embodied,
         })
     }
 

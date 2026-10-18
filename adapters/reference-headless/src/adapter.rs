@@ -150,6 +150,8 @@ impl VehicleAdapter for ReferenceAdapter {
             },
             vehicles: vec![VehicleDescriptor {
                 id: self.vehicle,
+                class: pilotage_protocol::VehicleClass::SurfaceVessel,
+                display_name: "Reference skiff".to_owned(),
                 scopes: vec![ScopeDescriptor {
                     authority_group: None,
                     scope: ScopeId::new(MOTION_SCOPE),

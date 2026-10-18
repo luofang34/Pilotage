@@ -79,8 +79,9 @@ fn gimbal(stamp: Option<wire::MeasurementStamp>) -> wire::GimbalAttitude {
         rate_y_rad_s: -0.5,
         rate_z_rad_s: 0.75,
         stamp,
-        flags: 0b101,
         failure_flags: 0b10,
+        yaw_frame: wire::GimbalYawFrame::Earth as i32,
+        ..wire::GimbalAttitude::default()
     }
 }
 
@@ -140,7 +141,7 @@ fn gimbal_needs_a_payload_device_stamp() {
     .expect("payload-device stamp admits the lane");
     assert_eq!(device.quat.y, 0.25);
     assert_eq!(device.rates_rad_s, [0.5, -0.5, 0.75]);
-    assert_eq!(device.flags, 0b101);
+    assert_eq!(device.yaw_frame, wire::GimbalYawFrame::Earth as i32);
     assert_eq!(device.failure_flags, 0b10);
     assert!(gimbal_message(gimbal(None)).is_none());
     // A device report wearing another lane's role is mislabeled: it must

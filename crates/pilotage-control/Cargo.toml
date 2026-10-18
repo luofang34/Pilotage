@@ -9,6 +9,7 @@ publish = false
 workspace = true
 
 [dependencies]
+pilotage-client-session = { workspace = true }
 pilotage-input = { workspace = true }
 pilotage-protocol = { workspace = true }
 serde = { workspace = true }

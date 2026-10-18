@@ -8,7 +8,12 @@ use pilotage_adapter_api::{
     ActionCapability, AdapterCapabilities, ExecutionMode, IntentCapability, LegacyAxisRoute,
     LegacyCommandMap, LinkLossPolicy, ScopeDescriptor, VehicleDescriptor,
 };
-use pilotage_protocol::{ActionKind, IntentFamily, LogicalAxisId, ReferenceFrame, ScopeId};
+use pilotage_protocol::{
+    ActionKind, IntentFamily, LogicalAxisId, ReferenceFrame, ScopeId, VehicleClass,
+};
+
+/// The operator's name for this vehicle.
+const DISPLAY_NAME: &str = "ArduPilot quad";
 
 use super::{
     ARM_BUTTON, ArduPilotAdapter, DIRECT_SCOPE, DISARM_BUTTON, FLIGHT_SCOPE, PITCH_AXIS, ROLL_AXIS,
@@ -29,6 +34,8 @@ impl ArduPilotAdapter {
             },
             vehicles: vec![VehicleDescriptor {
                 id: self.vehicle,
+                class: VehicleClass::Multicopter,
+                display_name: DISPLAY_NAME.to_owned(),
                 scopes: if flying {
                     vec![flight_scope_descriptor(), direct_scope_descriptor()]
                 } else {

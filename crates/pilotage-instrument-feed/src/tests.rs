@@ -173,3 +173,63 @@ fn the_heading_bug_carries_a_declared_reference() {
         "the bug must state which north it is measured from"
     );
 }
+
+#[test]
+fn the_feed_and_the_shared_decoder_agree_on_validity_and_quality() {
+    use pilotage_client_session::telemetry::{EstimateQuality, EstimatorValidity};
+    for valid_flags in [0b0000, 0b0001, 0b0010, 0b0100, 0b1000, 0b0110, 0b1111] {
+        for quality in [0, 1, 2, 9] {
+            let mut feed = InstrumentFeed::new(&FeedParams {
+                vehicle_id: 1,
+                sim_accept_unseen: true,
+            });
+            let mut sample = wire_sample(1, 0.0);
+            if let Some(avionics) = sample.avionics.as_mut() {
+                avionics.valid_flags = valid_flags;
+                avionics.quality = quality;
+            }
+            feed.ingest(&sample, 100.0);
+            let mut buf = vec![0_u8; Runtime::state_capacity()];
+            let len = feed.state_frame(116.0, &mut buf).expect("frame encodes");
+            let state = indicate_instrument_state::abi::v8::decode_state(&buf[..len])
+                .expect("frame decodes")
+                .state;
+
+            let shared = EstimatorValidity::from_flags(state_flags(&state.valid));
+            let expected = EstimatorValidity::from_flags(valid_flags);
+            assert_eq!(
+                shared, expected,
+                "flags {valid_flags:#06b} quality {quality}"
+            );
+            let expected_quality = match EstimateQuality::from_code(quality) {
+                Some(EstimateQuality::Good) => indicate_instrument_state::EstimateQuality::Good,
+                Some(EstimateQuality::Degraded) => {
+                    indicate_instrument_state::EstimateQuality::Degraded
+                }
+                Some(EstimateQuality::Unusable) => {
+                    indicate_instrument_state::EstimateQuality::Unusable
+                }
+                None => indicate_instrument_state::EstimateQuality::Unknown,
+            };
+            // The shared ingress fails an estimate that authorizes no
+            // group closed to unusable, whatever rating it carries.
+            let expected_quality = if valid_flags == 0 {
+                indicate_instrument_state::EstimateQuality::Unusable
+            } else {
+                expected_quality
+            };
+            assert_eq!(
+                state.quality, expected_quality,
+                "flags {valid_flags:#06b} quality {quality}"
+            );
+        }
+    }
+}
+
+/// The frame's validity, packed back into the wire's bit positions.
+fn state_flags(valid: &indicate_instrument_state::ValidFlags) -> u32 {
+    u32::from(valid.attitude)
+        | u32::from(valid.rates) << 1
+        | u32::from(valid.position) << 2
+        | u32::from(valid.velocity_horizontal && valid.velocity_vertical) << 3
+}

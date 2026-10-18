@@ -25,6 +25,8 @@ impl GazeboAdapter {
             },
             vehicles: vec![VehicleDescriptor {
                 id: self.vehicle,
+                class: pilotage_protocol::VehicleClass::GroundRover,
+                display_name: "Gazebo diff-drive rover".to_owned(),
                 scopes: vec![ScopeDescriptor {
                     authority_group: None,
                     scope: ScopeId::new(MOTION_SCOPE),

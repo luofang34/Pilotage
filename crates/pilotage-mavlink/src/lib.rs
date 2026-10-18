@@ -12,10 +12,14 @@
 
 pub mod ardupilot;
 pub mod codec;
+mod command_result;
+mod gimbal_flags;
 pub mod link;
 pub mod sampling;
 
 pub use codec::{FcMessage, FrameSource, ParseStats, parse_datagram};
+pub use command_result::command_outcome;
+pub use gimbal_flags::gimbal_reference;
 pub use link::{
     AttitudeThrustDemand, AttitudeUpdate, AuthorizationSource, BatteryReport, BodyVelocityDemand,
     CommandAckReport, CommandTarget, FcReports, GimbalDeviceAttitude, GimbalRateDemand,

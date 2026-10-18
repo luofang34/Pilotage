@@ -3,6 +3,7 @@
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
 use pilotage_mavlink::{AuthorizationSource, CommandTarget, LinkConfig};
+use pilotage_protocol::VehicleClass;
 
 /// PX4 operating profiles supported by this adapter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,6 +28,9 @@ pub struct Px4Config {
     /// payload the vehicle cannot point. `PILOTAGE_PX4_GIMBAL=1` (via
     /// the launcher) or [`Px4Config::with_gimbal`] enables it.
     pub gimbal: bool,
+    /// The kind of airframe PX4 flies, as the capability advertisement
+    /// declares it. A client chooses its default control scheme from it.
+    pub vehicle_class: VehicleClass,
     /// Acceptance fault injection: drop the gimbal link-loss stop instead of
     /// sending it, so the vehicle's own failsafe is the sole mechanism under
     /// test. Permitted ONLY under [`Px4Profile::Simulation`] — a real vehicle
@@ -46,8 +50,17 @@ impl Px4Config {
             stream_command_endpoint: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 18_570)),
             command_endpoint: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 14_580)),
             gimbal: false,
+            vehicle_class: VehicleClass::Multicopter,
             drop_gimbal_link_loss_stop: false,
         }
+    }
+
+    /// Declares the kind of airframe PX4 flies. The default is
+    /// [`VehicleClass::Multicopter`].
+    #[must_use]
+    pub fn with_vehicle_class(mut self, vehicle_class: VehicleClass) -> Self {
+        self.vehicle_class = vehicle_class;
+        self
     }
 
     /// Declares that this vehicle carries a gimbal, so the adapter
