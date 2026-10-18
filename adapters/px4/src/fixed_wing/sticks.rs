@@ -114,3 +114,6 @@ fn through_deadband(fraction: f32) -> f32 {
 fn wire(stick: f32) -> i16 {
     (stick.clamp(-1.0, 1.0) * STICK_FULL).round() as i16
 }
+
+#[cfg(test)]
+mod tests;

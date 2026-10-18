@@ -7,6 +7,7 @@
 use std::net::{SocketAddr, UdpSocket};
 use std::time::Duration;
 
+use pilotage_adapter_api::{CommandOutcome, FcCommandAck};
 use pilotage_mavlink::codec::{
     ManualControlSticks, ParamValue, encode_autopilot_heartbeat, encode_command_ack,
     encode_command_long, encode_param_value,
@@ -14,7 +15,7 @@ use pilotage_mavlink::codec::{
 use pilotage_protocol::{ReferenceFrame, VelocityIntent};
 
 use super::params::PINNED;
-use super::sticks::{self, MAX_AIRSPEED_CHANGE_MPS, MAX_VERTICAL_MPS, max_turn_rate_rps};
+use super::sticks::{self, max_turn_rate_rps};
 use super::{ArmRefusal, FixedWingUplink, HANDOVER_HEIGHT_M, IntentDisposition};
 
 const SYSTEM: u8 = 7;
@@ -346,70 +347,6 @@ fn an_unconfirmed_position_mode_switch_is_commanded_again() {
 }
 
 #[test]
-fn the_envelope_maps_onto_position_mode_sticks() {
-    let neutral_with = |x: i16, y: i16, z: i16| ManualControlSticks {
-        x,
-        y,
-        z,
-        ..sticks::NEUTRAL
-    };
-    let cases = [
-        (velocity(0.0, 0.0, 0.0, 0.0), sticks::NEUTRAL, false),
-        (
-            velocity(MAX_AIRSPEED_CHANGE_MPS, 0.0, 0.0, 0.0),
-            neutral_with(0, 0, 1000),
-            false,
-        ),
-        (
-            velocity(-MAX_AIRSPEED_CHANGE_MPS, 0.0, 0.0, 0.0),
-            neutral_with(0, 0, 0),
-            false,
-        ),
-        // Full sink is the whole sink range; full climb is 2/3 of the
-        // 3 m/s climb range, placed outside the 0.06 deadband.
-        (
-            velocity(0.0, 0.0, MAX_VERTICAL_MPS, 0.0),
-            neutral_with(1000, 0, 500),
-            false,
-        ),
-        (
-            velocity(0.0, 0.0, -MAX_VERTICAL_MPS, 0.0),
-            neutral_with(-687, 0, 500),
-            false,
-        ),
-        (
-            velocity(0.0, 0.0, 0.0, -max_turn_rate_rps()),
-            neutral_with(0, -1000, 500),
-            false,
-        ),
-        // A lateral demand cannot be flown and is dropped.
-        (velocity(0.0, 1.0, 0.0, 0.0), sticks::NEUTRAL, true),
-        // Beyond the envelope clamps to full stick.
-        (
-            velocity(2.0 * MAX_AIRSPEED_CHANGE_MPS, 0.0, 0.0, 0.0),
-            neutral_with(0, 0, 1000),
-            true,
-        ),
-    ];
-    for (intent, expected, constrained) in cases {
-        assert_eq!(
-            sticks::sticks_from_velocity(&intent),
-            (expected, constrained),
-            "{intent:?}"
-        );
-    }
-}
-
-#[test]
-fn half_the_turn_rate_banks_to_the_coordinated_turn_angle() {
-    let (half, _) =
-        sticks::sticks_from_velocity(&velocity(0.0, 0.0, 0.0, 0.5 * max_turn_rate_rps()));
-    // tan(bank) halves, so the bank is atan(tan(50°) / 2) ≈ 30.8°.
-    let bank_deg = (0.5 * 50.0_f32.to_radians().tan()).atan().to_degrees();
-    assert_eq!(half.y, (bank_deg / 50.0 * 1000.0).round() as i16);
-}
-
-#[test]
 fn neutralize_sends_neutral_once_then_falls_silent() {
     let mut harness = flying();
     harness
@@ -481,5 +418,61 @@ fn a_refused_arm_ends_the_takeoff_sequence() {
     assert_eq!(
         harness.uplink.apply_velocity(&velocity(0.0, 0.0, 0.0, 0.0)),
         IntentDisposition::UplinkIdle
+    );
+}
+
+#[test]
+fn the_arm_answer_is_in_progress_until_px4_answers_and_ignores_the_takeoff() {
+    let mut harness = Harness::new();
+    harness.uplink.maintain(Some(0.0));
+    harness.echo_all_pinned();
+    harness.uplink.begin_arm(0.0).expect("arm");
+    let in_progress = Some(FcCommandAck {
+        arm: true,
+        outcome: CommandOutcome::InProgress,
+    });
+    assert_eq!(harness.uplink.last_arm_ack(), in_progress, "warmup");
+    harness.tick(Duration::from_millis(400), Some(0.0));
+    assert_eq!(harness.uplink.last_arm_ack(), in_progress, "arm sent");
+    let accepted = encode_command_ack(0, 400, 0, SYSTEM, 1);
+    harness.deliver(&[&accepted], Some(0.0));
+    // The answer is final while the takeoff is still on the runway.
+    assert_eq!(
+        harness.uplink.last_arm_ack(),
+        Some(FcCommandAck {
+            arm: true,
+            outcome: CommandOutcome::Accepted,
+        })
+    );
+}
+
+#[test]
+fn a_refused_arm_answers_with_the_typed_refusal() {
+    let mut harness = taking_off();
+    let refused = encode_command_ack(0, 400, 1, SYSTEM, 1);
+    harness.deliver(&[&refused], Some(0.0));
+    assert_eq!(
+        harness.uplink.last_arm_ack(),
+        Some(FcCommandAck {
+            arm: true,
+            outcome: CommandOutcome::TemporarilyRejected,
+        })
+    );
+}
+
+#[test]
+fn an_airborne_re_arm_answers_accepted_without_an_arm_command() {
+    let mut harness = flying();
+    harness.uplink.neutralize();
+    harness
+        .uplink
+        .begin_arm(-(HANDOVER_HEIGHT_M + 10.0))
+        .expect("re-arm");
+    assert_eq!(
+        harness.uplink.last_arm_ack(),
+        Some(FcCommandAck {
+            arm: true,
+            outcome: CommandOutcome::Accepted,
+        })
     );
 }

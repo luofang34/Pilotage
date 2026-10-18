@@ -21,12 +21,13 @@
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
-use pilotage_adapter_api::FcCommandAck;
+use pilotage_adapter_api::{CommandOutcome, FcCommandAck};
 use pilotage_mavlink::codec::{
     FcMessage, FrameSource, GCS_COMPONENT_ID, GCS_SYSTEM_ID, MAV_CMD_COMPONENT_ARM_DISARM,
     MAV_CMD_DO_SET_MODE, ManualControlSticks, encode_arm_command, encode_command_long,
     encode_gcs_heartbeat, encode_manual_control, encode_param_set, parse_datagram,
 };
+use pilotage_mavlink::command_outcome;
 use pilotage_protocol::VelocityIntent;
 use tracing::{info, warn};
 
@@ -259,11 +260,23 @@ impl FixedWingUplink {
         self.sticks = sticks::NEUTRAL;
         let ground = self.ground_down_m.unwrap_or(0.0);
         self.resume_airborne = self.fc_armed == Some(true) && ground - down_m >= HANDOVER_HEIGHT_M;
+        self.last_sent_arm = Some(true);
         if self.resume_airborne {
+            // No arm command goes out: PX4 already reports the plane armed,
+            // which is the answer the operator's ARM asks for.
             info!("fixed-wing already airborne; resuming in Position mode");
+            self.last_arm_ack = Some(FcCommandAck {
+                arm: true,
+                outcome: CommandOutcome::Accepted,
+            });
         } else {
+            // The arm goes out only after the warmup; the order is in work.
             info!("fixed-wing arm sequence: neutral stick stream started");
             self.ground_down_m = Some(down_m);
+            self.last_arm_ack = Some(FcCommandAck {
+                arm: true,
+                outcome: CommandOutcome::InProgress,
+            });
         }
         self.phase = Phase::Warmup;
         self.warmup_since = Some(self.clock.now());
@@ -276,8 +289,13 @@ impl FixedWingUplink {
         let arm = encode_arm_command(self.seq, true, self.system_id, self.component_id);
         self.send(&arm);
         self.phase = Phase::TakingOff;
+        // The arm is in work until PX4 answers it. The takeoff that follows
+        // is a separate phase: the arm answer does not wait for it.
         self.last_sent_arm = Some(true);
-        self.last_arm_ack = None;
+        self.last_arm_ack = Some(FcCommandAck {
+            arm: true,
+            outcome: CommandOutcome::InProgress,
+        });
         info!("fixed-wing arm sequence: Takeoff mode and arm commanded");
     }
 
@@ -416,20 +434,18 @@ impl FixedWingUplink {
         let Some(arm) = self.last_sent_arm else {
             return;
         };
-        if result == 0 {
-            info!(arm, "FC acknowledged the arm/disarm command");
+        let outcome = command_outcome(result);
+        if !outcome.is_refusal() {
+            info!(arm, ?outcome, "FC answered the arm/disarm command");
         } else {
-            warn!(arm, result, "FC REFUSED the arm/disarm command");
+            warn!(arm, ?outcome, "FC REFUSED the arm/disarm command");
             // A refused arm leaves a disarmed plane on the ground: the takeoff
             // sequence ends, so the operator's next ARM starts it afresh.
             if arm {
                 self.stop_stream();
             }
         }
-        self.last_arm_ack = Some(FcCommandAck {
-            arm,
-            result: u32::from(result),
-        });
+        self.last_arm_ack = Some(FcCommandAck { arm, outcome });
     }
 
     /// Switches to the manual clock, for tests.

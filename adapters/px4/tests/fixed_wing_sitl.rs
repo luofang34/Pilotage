@@ -18,7 +18,9 @@
 
 use std::time::{Duration, Instant};
 
-use pilotage_adapter_api::{Disposition, LinkLossPolicy, TelemetryBatch, VehicleAdapter};
+use pilotage_adapter_api::{
+    CommandOutcome, Disposition, LinkLossPolicy, TelemetryBatch, VehicleAdapter,
+};
 use pilotage_adapter_px4::{FLIGHT_SCOPE, Px4Adapter, Px4Airframe, Px4Config, Px4Profile};
 use pilotage_protocol::{
     ControlAction, ControlIntent, ControlPayload, Generation, IntentFamily, ReferenceFrame,
@@ -165,10 +167,12 @@ async fn arm(adapter: &mut Px4Adapter, operator: &mut Operator) -> Duration {
         let batch = adapter.sample_telemetry();
         let fc_state = batch.samples.iter().find_map(|sample| sample.fc_state);
         let armed = fc_state.is_some_and(|state| state.arm_state == 2);
-        let refused = fc_state
+        let answer = fc_state
             .and_then(|state| state.last_command)
-            .is_some_and(|ack| ack.arm && ack.result != 0);
-        if press_accepted && armed && !refused {
+            .filter(|ack| ack.arm)
+            .map(|ack| ack.outcome);
+        let refused = answer.is_some_and(CommandOutcome::is_refusal);
+        if press_accepted && armed && answer == Some(CommandOutcome::Accepted) {
             return started.elapsed();
         }
         let due = last_press.is_none_or(|at| at.elapsed() >= Duration::from_secs(2));
