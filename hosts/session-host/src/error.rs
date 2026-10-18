@@ -63,6 +63,26 @@ pub enum HostError {
         #[source]
         source: pilotage_control_feel::ProfileLoadError,
     },
+    /// A present Aviate telemetry endpoint was not a socket address.
+    #[error("invalid {variable} value {value:?}: {source}")]
+    AviateEndpoint {
+        /// The environment variable being parsed.
+        variable: &'static str,
+        /// The rejected value.
+        value: String,
+        /// The socket-address parse failure.
+        #[source]
+        source: std::net::AddrParseError,
+    },
+    /// An Aviate telemetry endpoint could not be decoded as UTF-8.
+    #[error("{variable} is not valid UTF-8: {source}")]
+    AviateEndpointEncoding {
+        /// The environment variable being parsed.
+        variable: &'static str,
+        /// The environment decoding failure.
+        #[source]
+        source: std::env::VarError,
+    },
     /// The PX4 adapter requires an explicit simulation profile.
     #[error("PILOTAGE_PX4_PROFILE is required and must be set to simulation")]
     Px4ProfileMissing,
