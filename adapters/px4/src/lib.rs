@@ -6,10 +6,13 @@
 //! JSBSim, or FlightGear all look identical from here. Telemetry rides
 //! the shared [`pilotage_mavlink`] receive link (attitude, local
 //! position, and the standard ESTIMATOR_STATUS as the authorization
-//! source); control is the offboard contract — a continuous velocity
-//! setpoint stream that must precede and accompany OFFBOARD mode, with
-//! PX4's own offboard-loss failsafe as the FC-side twin of the host's
-//! link-loss policy.
+//! source). Control depends on the airframe ([`Px4Airframe`]). A multicopter
+//! flies the offboard contract: a continuous velocity setpoint stream that
+//! must precede and accompany OFFBOARD mode, with PX4's own offboard-loss
+//! failsafe as the FC-side twin of the host's link-loss policy. A fixed wing
+//! ([`FixedWingUplink`]) flies Position mode through MANUAL_CONTROL sticks,
+//! takes off automatically on arm, and relies on PX4's manual-control-loss
+//! failsafe instead.
 //!
 //! This crate owns I/O (`adapters/` is exempt from the sans-IO rule,
 //! ADR-0002); all MAVLink byte work lives in `pilotage_mavlink`.
@@ -17,14 +20,16 @@
 mod adapter;
 mod config;
 mod error;
+mod fixed_wing;
 mod gimbal;
 mod uplink;
 
 pub use adapter::{
-    ARM_BUTTON, DISARM_BUTTON, FLIGHT_SCOPE, GIMBAL_NEUTRAL_BUTTON, GIMBAL_SCOPE, PITCH_AXIS,
-    Px4Adapter, ROLL_AXIS, THROTTLE_AXIS, YAW_AXIS,
+    ARM_BUTTON, DIRECT_SCOPE, DISARM_BUTTON, FLIGHT_SCOPE, GIMBAL_NEUTRAL_BUTTON, GIMBAL_SCOPE,
+    PITCH_AXIS, Px4Adapter, ROLL_AXIS, THROTTLE_AXIS, YAW_AXIS,
 };
-pub use config::{Px4Config, Px4Profile};
+pub use config::{Px4Airframe, Px4Config, Px4Profile};
 pub use error::Px4AdapterError;
+pub use fixed_wing::FixedWingUplink;
 pub use gimbal::Px4GimbalControl;
 pub use uplink::Px4Uplink;

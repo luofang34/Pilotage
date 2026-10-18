@@ -90,7 +90,17 @@ pub enum HostError {
         #[source]
         source: std::net::AddrParseError,
     },
-    /// A PX4 endpoint could not be decoded as UTF-8.
+    /// A present PX4 setting was outside the values the adapter accepts.
+    #[error("invalid {variable} value {value:?} (expected {expected})")]
+    Px4Setting {
+        /// The environment variable being parsed.
+        variable: &'static str,
+        /// The rejected value.
+        value: String,
+        /// What the variable accepts.
+        expected: &'static str,
+    },
+    /// A PX4 endpoint or setting could not be decoded as UTF-8.
     #[error("{variable} is not valid UTF-8: {source}")]
     Px4EndpointEncoding {
         /// The environment variable being parsed.

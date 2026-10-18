@@ -8,7 +8,7 @@
 use pilotage_adapter_api::{LinkLossEnactError, LinkLossPolicy};
 use pilotage_protocol::{ScopeId, VehicleId};
 
-use super::{FLIGHT_SCOPE, GIMBAL_SCOPE, Px4Adapter};
+use super::{DIRECT_SCOPE, FLIGHT_SCOPE, GIMBAL_SCOPE, Px4Adapter};
 
 impl Px4Adapter {
     /// Sets or clears one scope's link-loss policy on the adapter. Latches the
@@ -42,13 +42,19 @@ impl Px4Adapter {
         // and neither reaches the other.
         self.link_loss_policy.insert(scope.clone(), policy);
         match scope.as_str() {
-            FLIGHT_SCOPE => {
-                let Some(uplink) = self.uplink.as_mut() else {
+            FLIGHT_SCOPE | DIRECT_SCOPE => {
+                let refused = if let Some(fixed_wing) = self.fixed_wing.as_mut() {
+                    let failures_before = fixed_wing.send_failures();
+                    fixed_wing.neutralize();
+                    fixed_wing.send_failures() != failures_before
+                } else if let Some(uplink) = self.uplink.as_mut() {
+                    let failures_before = uplink.send_failures();
+                    uplink.neutralize();
+                    uplink.send_failures() != failures_before
+                } else {
                     return Err(LinkLossEnactError::NoActuationChannel);
                 };
-                let failures_before = uplink.send_failures();
-                uplink.neutralize();
-                if uplink.send_failures() != failures_before {
+                if refused {
                     return Err(LinkLossEnactError::ChannelRejected {
                         detail: "the neutral setpoint send was refused".to_owned(),
                     });

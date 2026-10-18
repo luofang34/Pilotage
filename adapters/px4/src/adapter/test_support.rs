@@ -17,6 +17,7 @@ impl Px4Adapter {
             vehicle_class: VehicleClass::Multicopter,
             estimate: Some(EstimateSource { state, _link: None }),
             uplink: None,
+            fixed_wing: None,
             gimbal: None,
             frames: None,
             _camera_bridge: None,
@@ -47,7 +48,7 @@ impl Px4Adapter {
         self
     }
 
-    /// Declares the airframe kind, as `Px4Config::with_vehicle_class` does.
+    /// Declares the advertised vehicle class without an airframe uplink.
     pub(crate) fn with_vehicle_class(mut self, vehicle_class: VehicleClass) -> Self {
         self.vehicle_class = vehicle_class;
         self

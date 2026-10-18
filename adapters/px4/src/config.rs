@@ -12,6 +12,31 @@ pub enum Px4Profile {
     Simulation,
 }
 
+/// The airframe class PX4 flies, which decides how the adapter turns the
+/// unified velocity intent into PX4 commands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Px4Airframe {
+    /// A multirotor: velocity setpoints in offboard mode.
+    #[default]
+    Multicopter,
+    /// A conventional airplane: Position-mode sticks over MANUAL_CONTROL,
+    /// with an automatic takeoff on arm.
+    FixedWing,
+}
+
+impl Px4Airframe {
+    /// The vehicle class the capability advertisement declares for this
+    /// airframe. The airframe is the single source: the class a client
+    /// picks its control scheme from always matches how the adapter flies.
+    #[must_use]
+    pub const fn vehicle_class(self) -> VehicleClass {
+        match self {
+            Self::Multicopter => VehicleClass::Multicopter,
+            Self::FixedWing => VehicleClass::FixedWing,
+        }
+    }
+}
+
 /// All policy and network configuration required to start the PX4 adapter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Px4Config {
@@ -22,15 +47,18 @@ pub struct Px4Config {
     pub stream_command_endpoint: SocketAddr,
     /// PX4 onboard endpoint receiving offboard commands.
     pub command_endpoint: SocketAddr,
+    /// The MAVLink system id of the PX4 instance this adapter flies. PX4
+    /// SITL instance `N` reports system id `N + 1`, so concurrent instances
+    /// are told apart by this id, never by port alone.
+    pub system_id: u8,
+    /// The airframe class behind this PX4 instance.
+    pub airframe: Px4Airframe,
     /// Whether this vehicle carries a MAVLink Gimbal Protocol v2 gimbal.
     /// Off by default: a bare airframe has no gimbal, and advertising
     /// the `vehicle.gimbal` scope on one would let a client lease a
     /// payload the vehicle cannot point. `PILOTAGE_PX4_GIMBAL=1` (via
     /// the launcher) or [`Px4Config::with_gimbal`] enables it.
     pub gimbal: bool,
-    /// The kind of airframe PX4 flies, as the capability advertisement
-    /// declares it. A client chooses its default control scheme from it.
-    pub vehicle_class: VehicleClass,
     /// Acceptance fault injection: drop the gimbal link-loss stop instead of
     /// sending it, so the vehicle's own failsafe is the sole mechanism under
     /// test. Permitted ONLY under [`Px4Profile::Simulation`] — a real vehicle
@@ -49,18 +77,11 @@ impl Px4Config {
             telemetry_endpoint: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 14_550)),
             stream_command_endpoint: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 18_570)),
             command_endpoint: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 14_580)),
+            system_id: 1,
+            airframe: Px4Airframe::Multicopter,
             gimbal: false,
-            vehicle_class: VehicleClass::Multicopter,
             drop_gimbal_link_loss_stop: false,
         }
-    }
-
-    /// Declares the kind of airframe PX4 flies. The default is
-    /// [`VehicleClass::Multicopter`].
-    #[must_use]
-    pub fn with_vehicle_class(mut self, vehicle_class: VehicleClass) -> Self {
-        self.vehicle_class = vehicle_class;
-        self
     }
 
     /// Declares that this vehicle carries a gimbal, so the adapter
@@ -93,6 +114,7 @@ impl Px4Config {
             Px4Profile::Simulation => LinkConfig::simulator(),
         };
         config.endpoint = self.telemetry_endpoint;
+        config.system_id = self.system_id;
         config.authorization_source = AuthorizationSource::StandardEstimatorStatus;
         config.standard_status_max_lag_ms = 300;
         config.reset_candidate_max_ms = 60_000;
@@ -123,7 +145,7 @@ impl Px4Config {
 mod tests {
     use pilotage_mavlink::ResetPolicy;
 
-    use super::{Px4Config, Px4Profile};
+    use super::{Px4Airframe, Px4Config, Px4Profile};
 
     #[test]
     fn the_battery_report_is_requested_at_one_hertz() {
@@ -136,6 +158,31 @@ mod tests {
         let config = Px4Config::new(Px4Profile::Simulation).link_config();
         let gimbal = pilotage_mavlink::codec::GIMBAL_DEVICE_ATTITUDE_STATUS_ID;
         assert!(config.stream_interval_requests.contains(&(gimbal, 20_000)));
+    }
+
+    #[test]
+    fn the_advertised_class_follows_the_airframe() {
+        use pilotage_protocol::VehicleClass;
+        assert_eq!(
+            Px4Airframe::Multicopter.vehicle_class(),
+            VehicleClass::Multicopter
+        );
+        assert_eq!(
+            Px4Airframe::FixedWing.vehicle_class(),
+            VehicleClass::FixedWing
+        );
+        assert_eq!(
+            Px4Config::new(Px4Profile::Simulation).airframe,
+            Px4Airframe::Multicopter
+        );
+    }
+
+    #[test]
+    fn the_link_listens_to_the_configured_system_only() {
+        let mut px4 = Px4Config::new(Px4Profile::Simulation);
+        assert_eq!(px4.link_config().system_id, 1);
+        px4.system_id = 7;
+        assert_eq!(px4.link_config().system_id, 7);
     }
 
     #[test]
