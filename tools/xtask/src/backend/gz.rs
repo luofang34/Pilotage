@@ -19,7 +19,13 @@ const RELOCATED_WORLD: &str = "world.sdf";
 /// The backend name is part of the partition so two backends on the same
 /// instance index never share one.
 pub(crate) fn partition(ctx: &SessionContext, backend: &str) -> Option<String> {
-    (ctx.instance != 0).then(|| format!("pilotage-{backend}-{}", ctx.instance))
+    partition_for(ctx.instance, backend)
+}
+
+/// [`partition`] for a session known only by its instance, as a reset
+/// knows it.
+pub(crate) fn partition_for(instance: u16, backend: &str) -> Option<String> {
+    (instance != 0).then(|| format!("pilotage-{backend}-{instance}"))
 }
 
 /// The `GZ_PARTITION` entry for every process of the session that speaks

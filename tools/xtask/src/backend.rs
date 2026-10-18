@@ -188,6 +188,25 @@ pub trait SimBackend {
             known: Vec::new(),
         })
     }
+    /// Resets the running simulation world and FC of simulator instance
+    /// `instance`. The default resets only instance 0, through
+    /// [`Self::reset`]: a backend that cannot tell its instances apart must
+    /// not reset the wrong one.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`XtaskError::ResetUnsupported`] for any other instance, or
+    /// the backend's own reset failure.
+    fn reset_instance(&self, repo_root: &std::path::Path, instance: u16) -> Result<(), XtaskError> {
+        if instance == 0 {
+            self.reset(repo_root)
+        } else {
+            Err(XtaskError::ResetUnsupported {
+                backend: self.name(),
+                instance,
+            })
+        }
+    }
     /// `pgrep -f` patterns that mark a stale session of this backend.
     fn stale_process_patterns(&self) -> Vec<&'static str>;
     /// What this session holds that another session must not: the ports

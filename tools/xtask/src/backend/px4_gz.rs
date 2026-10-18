@@ -48,6 +48,7 @@ const BACKEND_NAME: &str = "px4-gz";
 /// its `<world name>` is `default` — also what the reset script targets).
 const WORLD_NAME: &str = "default";
 pub(crate) mod ports;
+mod reset;
 pub(crate) mod vehicle;
 
 use ports::{MAX_INSTANCE, Px4Ports, system_id};
@@ -94,6 +95,9 @@ impl SimBackend for Px4Gz {
                 "PILOTAGE_PX4_SYSTEM_ID".to_owned(),
                 system_id(ctx.instance).to_string(),
             ),
+            // The viewer's reset runs scripts/reset-px4-sim.sh from the
+            // host; this names the instance it resets.
+            ("PILOTAGE_PX4_INSTANCE".to_owned(), ctx.instance.to_string()),
         ];
         // Only a vehicle that carries a gimbal advertises the
         // vehicle.gimbal scope; the flag's absence means none.
@@ -175,25 +179,11 @@ impl SimBackend for Px4Gz {
     }
 
     fn reset(&self, repo_root: &Path) -> Result<(), XtaskError> {
-        let script = repo_root.join("scripts/reset-px4-sim.sh");
-        let status = std::process::Command::new("bash")
-            .arg(&script)
-            .arg(WORLD_NAME)
-            .env("PATH", super::aviate_gz::search_path())
-            .env("PX4_DIR", px4_dir(repo_root))
-            .status()
-            .map_err(|source| XtaskError::Io {
-                context: "running the PX4 reset script",
-                source,
-            })?;
-        if status.success() {
-            Ok(())
-        } else {
-            Err(XtaskError::CommandFailed {
-                context: "PX4 reset script",
-                status: status.to_string(),
-            })
-        }
+        self.reset_instance(repo_root, 0)
+    }
+
+    fn reset_instance(&self, repo_root: &Path, instance: u16) -> Result<(), XtaskError> {
+        reset::reset_instance(repo_root, &px4_dir(repo_root), WORLD_NAME, instance)
     }
 }
 

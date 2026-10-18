@@ -67,6 +67,23 @@ pub enum XtaskError {
         /// The tag found zero or several times.
         tag: &'static str,
     },
+    /// A reset named an instance no live xtask supervisor runs: the reset
+    /// would stop an FC that nothing starts again.
+    #[error(
+        "no xtask supervisor runs simulator instance {instance} of this checkout; nothing would restart its FC"
+    )]
+    Unsupervised {
+        /// The instance asked for.
+        instance: u16,
+    },
+    /// A backend that resets only instance 0 was asked for another.
+    #[error("the {backend} backend resets only instance 0 (asked for {instance})")]
+    ResetUnsupported {
+        /// The backend.
+        backend: &'static str,
+        /// The instance asked for.
+        instance: u16,
+    },
     /// `--profile` named an unknown session profile. Mirrors the host's
     /// own fail-closed parsing: a typo must never fail open.
     #[error("unknown --profile {value:?} (expected physical, simulation, or oracle-only)")]

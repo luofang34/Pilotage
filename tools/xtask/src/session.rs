@@ -83,7 +83,7 @@ pub async fn run_sim(args: &SimArgs) -> Result<(), XtaskError> {
     // the flight controller, the script must not respawn its own.
     // Every failure past this point owns the already-running children:
     // returning without teardown would orphan the whole simulator stack.
-    let pid_file = ctx.log_dir.join("supervisor.pid");
+    let pid_file = supervisor_marker(&ctx.repo_root, ctx.instance);
     claim_supervisor(&pid_file, &mut children)?;
 
     // Held for the session's lifetime: dropping it (any exit path from
@@ -240,9 +240,24 @@ async fn start_stages(
 /// # Errors
 ///
 /// Returns the backend's typed reset failure.
-pub fn run_reset(fc: &str) -> Result<(), XtaskError> {
+pub fn run_reset(fc: &str, instance: u16) -> Result<(), XtaskError> {
     let backend = backend_for(fc)?;
-    backend.reset(&repo_root()?)
+    backend.reset_instance(&repo_root()?, instance)
+}
+
+/// The supervisor marker's file name inside a session's run directory.
+const SUPERVISOR_MARKER: &str = "supervisor.pid";
+
+/// Where the supervisor of simulator instance `instance` records its pid.
+///
+/// One place per instance, whichever command supervises it, so a reset
+/// finds a fleet vehicle's supervisor the same way as a `sim` session's.
+/// Instance 0's is `target/xtask-sim/supervisor.pid`, which the reset
+/// scripts read.
+pub(crate) fn supervisor_marker(repo_root: &Path, instance: u16) -> PathBuf {
+    repo_root
+        .join(sim_run_dir(instance))
+        .join(SUPERVISOR_MARKER)
 }
 
 /// The session working directory, relative to the repository root.

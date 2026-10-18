@@ -90,7 +90,12 @@ pub enum Command {
     /// Launch one session per vehicle and supervise them all.
     Fleet(FleetArgs),
     /// Reset the running simulation world and FC of the named backend.
-    Reset(String),
+    Reset {
+        /// The backend.
+        fc: String,
+        /// The simulator instance to reset.
+        instance: u16,
+    },
     /// Produce the Alia X-Plane runtime handshake into a directory.
     Handshake(std::path::PathBuf),
     /// Run every guard pair the repository declares.
@@ -118,7 +123,10 @@ pub fn parse_args(args: &[String]) -> Result<Command, XtaskError> {
     match command.as_str() {
         "sim" => Ok(Command::Sim(parse_sim(rest)?)),
         "fleet" => Ok(Command::Fleet(parse_fleet(rest)?)),
-        "reset" => Ok(Command::Reset(parse_reset(rest)?)),
+        "reset" => {
+            let (fc, instance) = parse_reset(rest)?;
+            Ok(Command::Reset { fc, instance })
+        }
         "handshake" => Ok(Command::Handshake(parse_handshake(rest)?)),
         "guards" => {
             if let Some(extra) = rest.first() {
@@ -189,11 +197,13 @@ fn parse_affected(args: &[String]) -> Result<String, XtaskError> {
     })
 }
 
-fn parse_reset(args: &[String]) -> Result<String, XtaskError> {
+fn parse_reset(args: &[String]) -> Result<(String, u16), XtaskError> {
     let mut fc = "aviate".to_owned();
+    let mut instance: u16 = 0;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
+            "--instance" => instance = required_number(&mut iter, "--instance")?,
             "--fc" => {
                 fc = iter
                     .next()
@@ -204,12 +214,14 @@ fn parse_reset(args: &[String]) -> Result<String, XtaskError> {
             }
             other => {
                 return Err(XtaskError::Usage {
-                    message: format!("unknown reset argument {other:?} (expected --fc <name>)"),
+                    message: format!(
+                        "unknown reset argument {other:?} (expected --fc <name> or --instance <n>)"
+                    ),
                 });
             }
         }
     }
-    Ok(fc)
+    Ok((fc, instance))
 }
 
 fn parse_sim(args: &[String]) -> Result<SimArgs, XtaskError> {
@@ -387,6 +399,9 @@ commands:
       Reset the running simulation world and restart its FC.
 
       --fc <name>          FC backend (default: aviate)
+      --instance <n>       simulator instance (default: 0); px4-gz
+                           resets only that instance, and only while an
+                           xtask supervisor runs it
 
   handshake [options]
       Produce the Alia X-Plane runtime handshake document and print its
