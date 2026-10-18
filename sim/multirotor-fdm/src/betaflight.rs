@@ -40,29 +40,20 @@ pub const SERVO_PACKET_LEN: usize = 4 * 4;
 /// initial 1 and Betaflight runs on its own real clock.
 pub const PACKET_TIME_STEP_S: f64 = 0.025;
 
-/// Timestamps for the state packets of a real-time model.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// Timestamps for the state packets of a real-time model, counting from
+/// one step. A restarted model counts from the start again, which a
+/// Betaflight that kept running accepts: `sitl.c` takes a state packet
+/// after a gap of more than 500 ms as a fresh start of packet time.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct PacketClock {
-    next: f64,
+    sent: u64,
 }
 
 impl PacketClock {
-    /// A clock for packets sent at most `rate_hz` times a second, started
-    /// `wall_seconds` after the Unix epoch. Starting from the scaled wall
-    /// clock keeps packet time rising across a restart of the model, which
-    /// Betaflight needs: it drops a packet older than the last it used.
-    #[must_use]
-    pub fn new(wall_seconds: f64, rate_hz: f64) -> Self {
-        Self {
-            next: wall_seconds * rate_hz * PACKET_TIME_STEP_S,
-        }
-    }
-
     /// The timestamp for the next packet.
     pub fn tick(&mut self) -> f64 {
-        let now = self.next;
-        self.next += PACKET_TIME_STEP_S;
-        now
+        self.sent = self.sent.wrapping_add(1);
+        self.sent as f64 * PACKET_TIME_STEP_S
     }
 }
 

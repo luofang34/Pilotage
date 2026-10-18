@@ -54,3 +54,25 @@ fn non_finite_values_and_unknown_flags_are_refused() {
         Err(ArgsError::Unrecognized("--port".to_owned()))
     );
 }
+
+#[test]
+fn the_betaflight_flags_name_the_child_to_supervise() {
+    let args = Args::parse(&argv(&[
+        "--betaflight",
+        "/bf/betaflight_SITL.elf",
+        "--betaflight-dir",
+        "/tmp/bf",
+        "--betaflight-config",
+        "sitl.cli",
+    ]))
+    .expect("parses");
+    let sitl = args.betaflight.expect("a child to supervise");
+    assert_eq!(
+        sitl.executable,
+        std::path::PathBuf::from("/bf/betaflight_SITL.elf")
+    );
+    assert_eq!(sitl.work_dir, std::path::PathBuf::from("/tmp/bf"));
+    assert_eq!(sitl.config, Some(std::path::PathBuf::from("sitl.cli")));
+    assert!(Args::parse(&[]).expect("parses").betaflight.is_none());
+    assert!(Args::parse(&argv(&["--betaflight-config", "sitl.cli"])).is_err());
+}

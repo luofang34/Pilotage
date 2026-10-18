@@ -124,18 +124,15 @@ fn servo_packets_decode_and_other_lengths_do_not() {
 }
 
 #[test]
-fn packet_time_stays_out_of_the_sitl_rate_estimate_and_rises_across_restarts() {
+fn packet_time_stays_out_of_the_sitl_rate_estimate() {
     // sitl.c estimates its clock rate only from packets under 20 ms apart.
-    let mut clock = PacketClock::new(1_792_297_312.25, 1_000.0);
+    let mut clock = PacketClock::default();
     let mut last = clock.tick();
-    for _ in 0..10_000 {
+    assert!(last > 0.0);
+    for _ in 0..100_000 {
         let next = clock.tick();
         assert!(next - last >= 0.02, "spacing {}", next - last);
         last = next;
     }
     assert_eq!(PACKET_TIME_STEP_S, 0.025);
-    // Ten thousand packets at 1 kHz take ten seconds; a restart after them
-    // starts above the last packet the old process sent.
-    let restarted = PacketClock::new(1_792_297_312.25 + 10.5, 1_000.0).tick();
-    assert!(restarted > last);
 }

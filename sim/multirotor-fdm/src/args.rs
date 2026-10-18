@@ -5,6 +5,8 @@ use std::net::SocketAddr;
 
 use pilotage_multirotor_fdm::Origin;
 
+use crate::sitl::SitlConfig;
+
 /// Parsed options.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Args {
@@ -22,6 +24,8 @@ pub(crate) struct Args {
     pub(crate) heading_rad: f64,
     /// Physics and state-packet rate, Hz.
     pub(crate) rate_hz: f64,
+    /// The Betaflight SITL to run as a child, when the sidecar owns it.
+    pub(crate) betaflight: Option<SitlConfig>,
 }
 
 /// A malformed command line.
@@ -53,6 +57,7 @@ impl Default for Args {
             east_m: 0.0,
             heading_rad: 0.0,
             rate_hz: 1_000.0,
+            betaflight: None,
         }
     }
 }
@@ -61,6 +66,7 @@ impl Args {
     /// Parses `argv` (without the program name).
     pub(crate) fn parse(argv: &[String]) -> Result<Self, ArgsError> {
         let mut args = Self::default();
+        let mut sitl = SitlFlags::default();
         let mut iter = argv.iter();
         while let Some(flag) = iter.next() {
             let mut value = || {
@@ -88,10 +94,41 @@ impl Args {
                     }
                     args.rate_hz = rate;
                 }
+                "--betaflight" => sitl.executable = Some(value()?.into()),
+                "--betaflight-dir" => sitl.work_dir = Some(value()?.into()),
+                "--betaflight-config" => sitl.config = Some(value()?.into()),
                 other => return Err(ArgsError::Unrecognized(other.to_owned())),
             }
         }
+        args.betaflight = sitl.into_config()?;
         Ok(args)
+    }
+}
+
+/// The `--betaflight*` flags before they are checked together.
+#[derive(Default)]
+struct SitlFlags {
+    executable: Option<std::path::PathBuf>,
+    work_dir: Option<std::path::PathBuf>,
+    config: Option<std::path::PathBuf>,
+}
+
+impl SitlFlags {
+    fn into_config(self) -> Result<Option<SitlConfig>, ArgsError> {
+        let Some(executable) = self.executable else {
+            if self.work_dir.is_some() || self.config.is_some() {
+                return Err(ArgsError::MissingValue {
+                    flag: "--betaflight (required by --betaflight-dir and --betaflight-config)"
+                        .to_owned(),
+                });
+            }
+            return Ok(None);
+        };
+        Ok(Some(SitlConfig {
+            executable,
+            work_dir: self.work_dir.unwrap_or_else(|| ".".into()),
+            config: self.config,
+        }))
     }
 }
 

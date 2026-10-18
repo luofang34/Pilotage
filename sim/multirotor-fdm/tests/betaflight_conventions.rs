@@ -46,10 +46,7 @@ fn stream(poses: mpsc::Receiver<Pose>, stop: Arc<AtomicBool>) {
     let (mut attitude, mut rates) = (Quat::IDENTITY, Vec3::ZERO);
     let start = Instant::now();
     let dt = 0.002;
-    let wall = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0.0, |since| since.as_secs_f64());
-    let mut clock = PacketClock::new(wall, 1.0 / dt);
+    let mut clock = PacketClock::default();
     let mut steps: u32 = 0;
     while !stop.load(Ordering::Relaxed) {
         if let Ok((q, w)) = poses.try_recv() {

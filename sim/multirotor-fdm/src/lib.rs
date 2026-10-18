@@ -8,6 +8,9 @@
 //! decodes its `servo_packet`; [`geodesy`] and [`atmosphere`] turn the
 //! local position into the virtual GNSS fix and the static pressure.
 //!
+//! [`supervisor`] decides when to (re)start Betaflight itself, which the
+//! binary does when it is given the SITL executable.
+//!
 //! It is simulation-only code (ADR-0040). No host or adapter depends on
 //! it; a session launcher runs its binary beside the SITL process.
 
@@ -16,6 +19,7 @@ pub mod betaflight;
 pub mod geodesy;
 pub mod quad;
 pub mod rotation;
+pub mod supervisor;
 
 pub use betaflight::{
     FDM_PACKET_LEN, FdmPacket, PacketClock, SERVO_PACKET_LEN, decode_servo_packet,
