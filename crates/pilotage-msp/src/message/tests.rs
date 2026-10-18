@@ -274,7 +274,21 @@ fn a_captured_level_raw_imu_reads_one_g_up_and_the_synthetic_field() {
     ))
     .expect("decodes");
     assert_eq!(imu.acc, [0, 0, 256]);
-    assert_eq!(imu.gyro_dps, [0, 0, 0]);
+    assert_eq!(imu.gyro, [0, 0, 0]);
     assert_eq!(imu.mag, [2_046, -72, -3_547]);
     assert!(RawImu::decode(&[0; 17]).is_err());
+}
+
+#[test]
+fn gyro_counts_are_the_2000_dps_range_over_16_bits() {
+    // 16.384 counts per deg/s: a 1 rad/s roll step read as about 939
+    // counts on a live SITL.
+    let mut payload = vec![0u8; 6];
+    for counts in [16_384i16, -939, 0] {
+        payload.extend(counts.to_le_bytes());
+    }
+    payload.extend([0u8; 6]);
+    let dps = RawImu::decode(&payload).expect("decodes").gyro_dps();
+    assert!((dps[0] - 1_000.0).abs() < 1e-9);
+    assert!((dps[1] + 57.312).abs() < 0.01, "{}", dps[1]);
 }

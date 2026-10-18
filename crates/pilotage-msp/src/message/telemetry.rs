@@ -36,11 +36,18 @@ impl Attitude {
 pub struct RawImu {
     /// Accelerometer, sensor counts.
     pub acc: [i16; 3],
-    /// Gyro rates, whole degrees per second: roll, pitch, yaw axes.
-    pub gyro_dps: [i16; 3],
+    /// Gyro, sensor counts on the roll, pitch, and yaw axes. Despite the
+    /// firmware's `gyroRateDps` name these are counts of the gyro's
+    /// full-scale range: see [`RawImu::gyro_dps`].
+    pub gyro: [i16; 3],
     /// Magnetometer, sensor counts.
     pub mag: [i16; 3],
 }
+
+/// Degrees per second in one gyro count. Betaflight runs every gyro it
+/// drives (and its SITL virtual gyro) at the 2000 deg/s range over 16
+/// bits, and `MSP_RAW_IMU` reports the rate in those counts.
+pub const GYRO_DPS_PER_COUNT: f64 = 2_000.0 / 32_768.0;
 
 impl RawImu {
     /// Decodes an `MSP_RAW_IMU` payload.
@@ -55,9 +62,16 @@ impl RawImu {
         };
         Ok(Self {
             acc: triple()?,
-            gyro_dps: triple()?,
+            gyro: triple()?,
             mag: triple()?,
         })
+    }
+
+    /// The gyro rates in degrees per second.
+    #[must_use]
+    pub fn gyro_dps(&self) -> [f64; 3] {
+        self.gyro
+            .map(|counts| f64::from(counts) * GYRO_DPS_PER_COUNT)
     }
 }
 
