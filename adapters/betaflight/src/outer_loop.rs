@@ -50,6 +50,12 @@ const CLIMB_INTEGRAL_GAIN: f64 = 0.05;
 const HOVER_GUESS: f64 = 0.5;
 /// Bounds on the learned hover throttle.
 const HOVER_RANGE: (f64, f64) = (0.2, 0.8);
+/// A hovering quad's climb rate stays inside this, m/s, and its height
+/// inside [`HOVER_SETTLED_ALTITUDE`] of the hold.
+const HOVER_SETTLED_CLIMB: f64 = 0.2;
+const HOVER_SETTLED_ALTITUDE: f64 = 0.3;
+/// How fast the settled-hover estimate follows the level-flight throttle, 1/s.
+const HOVER_LEARN_RATE: f64 = 1.0;
 /// Climb demand that lifts a landed quad off, m/s.
 const TAKEOFF_CLIMB: f64 = 0.15;
 /// Below this altitude a sinking, settled quad counts as landed, m.
@@ -117,6 +123,10 @@ pub(crate) struct OuterLoop {
     hold_altitude: Option<f64>,
     velocity_integral: [f64; 2],
     hover: f64,
+    // The level-flight throttle seen while hovering settled. The climb-rate
+    // integrator above also absorbs drag while climbing, so right after a
+    // climb it reads high; this estimate only learns in a hover.
+    settled_hover: Option<f64>,
 }
 
 impl OuterLoop {
@@ -130,6 +140,7 @@ impl OuterLoop {
             hold_altitude: None,
             velocity_integral: [0.0; 2],
             hover: HOVER_GUESS,
+            settled_hover: None,
         }
     }
 
@@ -138,9 +149,10 @@ impl OuterLoop {
         self.flying
     }
 
-    /// The learned hover throttle.
+    /// The learned hover throttle: what holds the quad level in a settled
+    /// hover, or the climb-rate integrator before the quad has hovered.
     pub(crate) fn hover_throttle(&self) -> f64 {
-        self.hover
+        self.settled_hover.unwrap_or(self.hover)
     }
 
     /// Forgets the flight: the quad was disarmed or the link restarted.
@@ -148,6 +160,7 @@ impl OuterLoop {
     pub(crate) fn reset(&mut self) {
         *self = Self {
             hover: self.hover,
+            settled_hover: self.settled_hover,
             ..Self::new(self.envelope)
         };
     }
@@ -160,6 +173,7 @@ impl OuterLoop {
         *self = Self {
             flying: airborne,
             hover: throttle.clamp(HOVER_RANGE.0, HOVER_RANGE.1),
+            settled_hover: self.settled_hover,
             ..Self::new(self.envelope)
         };
     }
@@ -286,7 +300,21 @@ impl OuterLoop {
         self.hover =
             (self.hover + CLIMB_INTEGRAL_GAIN * error * dt).clamp(HOVER_RANGE.0, HOVER_RANGE.1);
         let tilt = (estimate.roll.cos() * estimate.pitch.cos()).clamp(0.7, 1.0);
-        ((self.hover + CLIMB_GAIN * error) / tilt).clamp(0.0, 1.0)
+        let throttle = ((self.hover + CLIMB_GAIN * error) / tilt).clamp(0.0, 1.0);
+        let settled = neutral
+            && estimate.climb_rate.abs() < HOVER_SETTLED_CLIMB
+            && self
+                .hold_altitude
+                .is_some_and(|hold| (hold - estimate.altitude).abs() < HOVER_SETTLED_ALTITUDE);
+        if settled {
+            let level = throttle * tilt;
+            let learned = match self.settled_hover {
+                Some(hover) => hover + (level - hover) * (HOVER_LEARN_RATE * dt).min(1.0),
+                None => level,
+            };
+            self.settled_hover = Some(learned.clamp(HOVER_RANGE.0, HOVER_RANGE.1));
+        }
+        throttle
     }
 }
 

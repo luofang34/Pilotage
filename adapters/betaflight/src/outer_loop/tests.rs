@@ -16,6 +16,8 @@ const GRAVITY: f64 = 9.806_65;
 /// throttle with hover at `hover`, the ground stops a fall.
 struct Plant {
     hover: f64,
+    /// Vertical drag, (m/s²)/(m/s): a climb then needs more than hover.
+    vertical_drag: f64,
     north: f64,
     east: f64,
     up: f64,
@@ -29,6 +31,7 @@ impl Plant {
     fn landed(hover: f64, heading: f64) -> Self {
         Self {
             hover,
+            vertical_drag: 0.0,
             north: 0.0,
             east: 0.0,
             up: 0.0,
@@ -67,7 +70,9 @@ impl Plant {
         let accel = [
             forward * cos - right * sin - 0.3 * self.velocity[0],
             forward * sin + right * cos - 0.3 * self.velocity[1],
-            thrust * self.roll.cos() * self.pitch.cos() - GRAVITY,
+            thrust * self.roll.cos() * self.pitch.cos()
+                - GRAVITY
+                - self.vertical_drag * self.velocity[2],
         ];
         for (velocity, accel) in self.velocity.iter_mut().zip(accel) {
             *velocity += accel * DT;
@@ -255,4 +260,32 @@ fn resuming_in_flight_keeps_the_throttle_and_holds_altitude() {
     assert!((first.throttle - 0.6).abs() < 0.01, "{first:?}");
     fly(&mut outer, &mut plant, Demand::default(), 5.0);
     assert!((plant.up - 5.0).abs() < 0.3, "altitude {}", plant.up);
+}
+
+#[test]
+fn the_hover_throttle_is_learned_in_a_hover_not_in_a_climb() {
+    let mut outer = OuterLoop::new(ENVELOPE);
+    let mut plant = Plant::landed(0.55, 0.0);
+    plant.vertical_drag = 0.6;
+    // Before any settled hover the integrator stands in.
+    fly(&mut outer, &mut plant, climb(1.5), 2.0);
+    assert_eq!(outer.settled_hover, None);
+    assert_eq!(outer.hover_throttle(), outer.hover);
+    // A settled hover teaches the hover throttle.
+    fly(&mut outer, &mut plant, Demand::default(), 15.0);
+    let hover = outer.hover_throttle();
+    assert!((hover - 0.55).abs() < 0.01, "learned {hover}");
+    // A climb against drag drives the integrator above hover; the hover
+    // throttle stays what the hover taught.
+    fly(&mut outer, &mut plant, climb(1.5), 5.0);
+    assert!(
+        outer.hover > 0.56,
+        "the climb integrator reads {}",
+        outer.hover
+    );
+    assert!(
+        (outer.hover_throttle() - hover).abs() < 1e-9,
+        "{} moved off the hover {hover}",
+        outer.hover_throttle()
+    );
 }
