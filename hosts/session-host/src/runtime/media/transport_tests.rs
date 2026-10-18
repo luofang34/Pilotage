@@ -282,8 +282,22 @@ async fn verify_loss_free_datagrams(server: &Connection, client: &Connection) {
         .expect("telemetry remains loss-free during video shedding");
 }
 
-#[tokio::test]
-async fn three_source_slow_client_converges_without_losing_telemetry() {
+/// The client is slow only relative to the producer, and both rates are
+/// tokio-timed. On the wall clock a loaded machine encodes fewer frames than
+/// the drain period assumes, the client keeps up, and the budget correctly
+/// stays at its ceiling. Paused time charges the encode no time, so the
+/// producer-to-drain ratio holds on any machine.
+#[test]
+fn three_source_slow_client_converges_without_losing_telemetry() {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .start_paused(true)
+        .build()
+        .expect("paused test runtime builds")
+        .block_on(slow_client_converges_without_losing_telemetry());
+}
+
+async fn slow_client_converges_without_losing_telemetry() {
     let (server, client) = connected_pair().await;
     let (frames_tx, frames_rx) = mpsc::channel(4);
     let (media, media_task) = spawn_media_task(frames_rx, Instant::now());
