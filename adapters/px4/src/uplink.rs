@@ -18,6 +18,7 @@ use tracing::{info, warn};
 
 pub(crate) mod clock;
 pub(crate) mod direct;
+pub(crate) mod failsafe;
 mod resume;
 use clock::UplinkClock;
 
@@ -108,6 +109,7 @@ pub struct Px4Uplink {
     neutralized_generation: Option<Generation>,
     // When a resumed stream asks PX4 for OFFBOARD again.
     resume_offboard_at: Option<Instant>,
+    failsafe: crate::pinning::ParamPinning,
 }
 
 impl Px4Uplink {
@@ -142,6 +144,7 @@ impl Px4Uplink {
             last_generation: None,
             neutralized_generation: None,
             resume_offboard_at: None,
+            failsafe: crate::pinning::ParamPinning::new(&failsafe::PINNED),
         })
     }
 
@@ -200,6 +203,7 @@ impl Px4Uplink {
             let frame = encode_gcs_heartbeat(self.seq);
             self.send(&frame);
         }
+        self.pin_failsafe(now);
         if self.arm_phase != ArmPhase::Idle
             && self
                 .last_frame
@@ -316,6 +320,9 @@ impl Px4Uplink {
     /// with correlated acks; the heartbeat-derived arm state remains the
     /// ground truth either way.
     fn apply_fc_reply(&mut self, message: &FcMessage) {
+        if self.observe_failsafe_echo(message) {
+            return;
+        }
         if let FcMessage::AttitudeTarget { thrust, .. } = *message {
             self.direct.observe_thrust(thrust);
             return;
