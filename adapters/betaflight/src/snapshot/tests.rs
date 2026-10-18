@@ -46,7 +46,8 @@ fn boxes() -> BoxIds {
 fn a_poll_decodes_into_frd_ned_and_si_units() {
     let status = status(0b11, ArmingBlocker::Angle.bit());
     let attitude = i16s(&[100, -150, 90]);
-    let imu = i16s(&[0, 0, 256, 10, 20, 30, 0, 0, 0]);
+    // 16.384 gyro counts per deg/s: 1, -2, 3 deg/s.
+    let imu = i16s(&[0, 0, 256, 16, -33, 49, 0, 0, 0]);
     let altitude = altitude(1_234, -56);
     let gps = gps(12, 200, 900);
     let snapshot = FcSnapshot::decode(
@@ -74,6 +75,13 @@ fn a_poll_decodes_into_frd_ned_and_si_units() {
     let fix = snapshot.gnss.expect("12 satellites is a fix");
     assert!(fix.velocity_ne[0].abs() < 1e-9 && (fix.velocity_ne[1] - 2.0).abs() < 1e-9);
     assert_eq!((snapshot.sequence, snapshot.epoch), (7, 2));
+    let rates = snapshot.rates_frd.map(f64::to_degrees);
+    assert!((rates[0] - 0.977).abs() < 0.01, "{rates:?}");
+    assert!(
+        (rates[1] - 2.014).abs() < 0.01,
+        "nose-down -2 deg/s is FRD +2"
+    );
+    assert!((rates[2] + 2.991).abs() < 0.01);
 }
 
 #[test]
@@ -112,7 +120,7 @@ fn betaflight_pitch_and_gyro_axes_turn_into_frd() {
     assert!((roll.to_degrees() + 20.0).abs() < 1e-9);
     assert!((pitch.to_degrees() + 30.0).abs() < 1e-9, "30 deg nose down");
     assert!((heading.to_degrees() - 359.0).abs() < 1e-9);
-    let rates = frd_rates([10, 20, 30]).map(f64::to_degrees);
+    let rates = frd_rates([10.0, 20.0, 30.0]).map(f64::to_degrees);
     assert!((rates[0] - 10.0).abs() < 1e-9);
     assert!(
         (rates[1] + 20.0).abs() < 1e-9,

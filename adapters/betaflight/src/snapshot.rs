@@ -96,7 +96,7 @@ impl FcSnapshot {
             roll,
             pitch,
             heading,
-            rates_frd: frd_rates(imu.gyro_dps),
+            rates_frd: frd_rates(imu.gyro_dps()),
             altitude_m: f64::from(altitude.altitude_cm) / 100.0,
             climb_rate: f64::from(altitude.vario_cm_s) / 100.0,
             gnss: usable_fix(&gps),
@@ -128,8 +128,8 @@ pub(crate) fn frd_attitude(attitude: Attitude) -> (f64, f64, f64) {
 
 /// Betaflight gyro axes (roll, nose-down pitch, counter-clockwise yaw) to
 /// FRD body rates.
-pub(crate) fn frd_rates(gyro_dps: [i16; 3]) -> [f64; 3] {
-    let [x, y, z] = gyro_dps.map(|v| f64::from(v).to_radians());
+pub(crate) fn frd_rates(gyro_dps: [f64; 3]) -> [f64; 3] {
+    let [x, y, z] = gyro_dps.map(f64::to_radians);
     [x, -y, -z]
 }
 
