@@ -25,6 +25,8 @@ fn context(repo_root: PathBuf) -> SessionContext {
         profile: Profile::Simulation,
         log_dir: std::env::temp_dir(),
         lan: false,
+        web_root: std::env::temp_dir(),
+        instance: 0,
     }
 }
 

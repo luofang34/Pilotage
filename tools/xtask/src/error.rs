@@ -49,14 +49,16 @@ pub enum XtaskError {
         /// How to produce it.
         hint: &'static str,
     },
-    /// Session processes from a previous run are still alive. The
-    /// launcher never kills processes it did not start.
+    /// Something the session must hold is already held: a port is bound
+    /// or a singleton process runs. The launcher never stops processes it
+    /// did not start, so it names each one and refuses.
     #[error(
-        "session processes are already running:\n{listing}\nstop them first: pkill -f \"gz sim\"; pkill -f sitl-gazebo-x500; pkill -f pilotage-session-host; pkill -f \"http.server\""
+        "the session conflicts with what is already running:\n{}\nstop that session, or pick other ports (--port, --viewer-port) or another --instance",
+        conflicts.join("\n")
     )]
-    StaleSession {
-        /// `pgrep` listing of the offending processes.
-        listing: String,
+    SessionConflict {
+        /// One line per held claim.
+        conflicts: Vec<String>,
     },
     /// Spawning a managed process failed.
     #[error("spawning {name} failed: {source}")]

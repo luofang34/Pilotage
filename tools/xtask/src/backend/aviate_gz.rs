@@ -5,6 +5,7 @@
 use std::path::Path;
 
 use super::{SessionContext, SimBackend, Stage};
+use crate::conflicts::Claim;
 use crate::error::XtaskError;
 use crate::process::ProcessSpec;
 use crate::readiness::{Readiness, stage_log};
@@ -13,6 +14,12 @@ use crate::readiness::{Readiness, stage_log};
 /// (also what the reset script targets).
 const WORLD: &str = "sim/worlds/x500_flightdeck.sdf";
 const WORLD_NAME: &str = "aviate_sitl";
+/// This backend's `--fc` name; it also names its gz partitions.
+const BACKEND_NAME: &str = "aviate-gz";
+/// Where the Aviate FC streams telemetry and the host's link listens.
+/// Both ends are fixed (the FC's `AviateApp.toml`, the host's link
+/// default), so a second Aviate session cannot take another.
+const TELEMETRY_PORT: u16 = 14_550;
 
 /// The X500's own control-feel law.
 ///
@@ -30,7 +37,7 @@ pub struct AviateGz;
 
 impl SimBackend for AviateGz {
     fn name(&self) -> &'static str {
-        "aviate-gz"
+        BACKEND_NAME
     }
 
     fn host_adapter(&self) -> &'static str {
@@ -41,15 +48,32 @@ impl SimBackend for AviateGz {
         Some(CONTROL_FEEL_PROFILE)
     }
 
-    fn host_env(&self, _ctx: &SessionContext) -> Vec<(String, String)> {
-        vec![
+    fn host_env(&self, ctx: &SessionContext) -> Vec<(String, String)> {
+        let mut env = vec![
             // The camera sidecar discovers gz topics through this.
             ("GZ_IP".to_owned(), "127.0.0.1".to_owned()),
             // A sensor's topic is scoped by the world it is in. The
             // launcher is what chooses the world, so it is what says which
             // one rather than the host guessing a name.
             ("PILOTAGE_GZ_WORLD".to_owned(), WORLD_NAME.to_owned()),
-        ]
+        ];
+        env.extend(super::gz::partition_env(ctx, BACKEND_NAME));
+        env
+    }
+
+    fn claims(&self, ctx: &SessionContext) -> Vec<Claim> {
+        let mut claims = vec![
+            // The FC and the gz plugin meet in shared memory named for
+            // simulator instance 0, whatever the session's instance: a
+            // second FC would attach to the first one's block.
+            Claim::Process("sitl-gazebo-x500"),
+            Claim::Udp {
+                port: TELEMETRY_PORT,
+                holder: "session host Aviate telemetry link".to_owned(),
+            },
+        ];
+        claims.extend(super::gz::partition_claims(ctx, BACKEND_NAME));
+        claims
     }
 
     fn plan(&self, ctx: &SessionContext) -> Result<Vec<Stage>, XtaskError> {
@@ -139,7 +163,7 @@ fn plan_with_aviate_dir(ctx: &SessionContext, aviate: &Path) -> Result<Vec<Stage
 
 fn gz_stage(ctx: &SessionContext, aviate: &Path, path: &str, world: &Path) -> Stage {
     let models = aviate.join("external/PX4-gazebo-models/models");
-    let gz_env = vec![
+    let mut gz_env = vec![
         ("PATH".to_owned(), path.to_owned()),
         ("GZ_IP".to_owned(), "127.0.0.1".to_owned()),
         (
@@ -159,6 +183,7 @@ fn gz_stage(ctx: &SessionContext, aviate: &Path, path: &str, world: &Path) -> St
             ),
         ),
     ];
+    gz_env.extend(super::gz::partition_env(ctx, BACKEND_NAME));
     Stage {
         spec: ProcessSpec {
             name: "gazebo",
@@ -188,16 +213,18 @@ fn gz_stage(ctx: &SessionContext, aviate: &Path, path: &str, world: &Path) -> St
 }
 
 fn fc_stage(ctx: &SessionContext, aviate: &Path, path: &str, fc: &Path) -> Stage {
+    let mut env = vec![
+        ("PATH".to_owned(), path.to_owned()),
+        ("GZ_IP".to_owned(), "127.0.0.1".to_owned()),
+    ];
+    env.extend(super::gz::partition_env(ctx, BACKEND_NAME));
     Stage {
         spec: ProcessSpec {
             name: "flight-controller",
             program: fc.display().to_string(),
             args: vec![],
             cwd: Some(aviate.to_path_buf()),
-            env: vec![
-                ("PATH".to_owned(), path.to_owned()),
-                ("GZ_IP".to_owned(), "127.0.0.1".to_owned()),
-            ],
+            env,
             remove_env: vec![],
             log_path: stage_log(&ctx.log_dir, "flight-controller"),
         },
@@ -227,6 +254,8 @@ mod tests {
             profile: Profile::Simulation,
             log_dir,
             lan: false,
+            web_root: std::env::temp_dir(),
+            instance: 0,
         }
     }
 
