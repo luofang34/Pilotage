@@ -4,7 +4,6 @@
 //! commanded-reset latch).
 
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use pilotage_adapter_api::{
     ActionResult, AdapterCapabilities, ApplyOutcome, Disposition, LinkLossEnactError,
@@ -17,6 +16,9 @@ use std::collections::BTreeMap;
 use pilotage_protocol::{ActionKind, LogicalAxisId, ScopeId, ScopedControlFrame};
 use pilotage_timing::SimTick;
 
+use pilotage_mavlink::sampling::{
+    ArmTracker, VehicleReports, battery_sample, estimate_batch, fc_state_sample, report_only_sample,
+};
 use pilotage_mavlink::{LinkState, MavlinkLink};
 
 use crate::config::Px4Config;
@@ -24,7 +26,6 @@ use crate::error::Px4AdapterError;
 use crate::uplink::{Px4Uplink, StickFrameDisposition};
 
 mod advertisement;
-mod battery;
 #[cfg(feature = "sim")]
 mod camera;
 mod camera_link;
@@ -65,11 +66,6 @@ pub const GIMBAL_SCOPE: &str = "vehicle.gimbal";
 /// Gimbal-scope button whose press recenters the gimbal.
 pub const GIMBAL_NEUTRAL_BUTTON: u16 = 0;
 
-/// Data older than this is withheld from telemetry entirely, so
-/// downstream freshness models see the group's age grow instead of a
-/// frozen value replaying forever.
-const WITHHOLD_AFTER: Duration = Duration::from_secs(3);
-
 /// Telemetry-only-until-armed adapter for PX4 (ADR-0018). Real-time
 /// (ADR-0013): PX4 advances on its own clock; `step` reports the
 /// latest observed source time as the simulation tick.
@@ -92,8 +88,7 @@ pub struct Px4Adapter {
     _frame_forwarder: Option<tokio::task::JoinHandle<()>>,
     // Latest heartbeat-reported arm state; re-acquired per heartbeat so
     // its freshness honestly tracks the FC's liveness.
-    arm: Option<ArmReport>,
-    last_seen_heartbeat: Option<std::time::Instant>,
+    arm: ArmTracker,
     arm_incarnation: pilotage_adapter_api::SourceIncarnation,
     // Payload-device stamp discipline for the gimbal lane: a stable
     // gimbal identity plus a reboot-aware epoch, kept apart from the FC
@@ -122,14 +117,6 @@ pub struct Px4Adapter {
 struct EstimateSource {
     state: Arc<Mutex<LinkState>>,
     _link: Option<MavlinkLink>,
-}
-
-/// The latest FC arm report derived from telemetry heartbeats.
-#[derive(Debug, Clone, Copy)]
-struct ArmReport {
-    armed: bool,
-    sequence: u32,
-    acquired_at: std::time::Instant,
 }
 
 impl Px4Adapter {
@@ -196,8 +183,7 @@ impl Px4Adapter {
             frames,
             _camera_bridge: camera_bridge,
             _frame_forwarder: frame_forwarder,
-            arm: None,
-            last_seen_heartbeat: None,
+            arm: ArmTracker::default(),
             arm_incarnation: pilotage_adapter_api::SourceIncarnation::new(rand_incarnation()),
             gimbal_stamp: sampling::GimbalStamp::new(pilotage_adapter_api::SourceIncarnation::new(
                 rand_incarnation(),
@@ -222,8 +208,7 @@ impl Px4Adapter {
             frames: None,
             _camera_bridge: None,
             _frame_forwarder: None,
-            arm: None,
-            last_seen_heartbeat: None,
+            arm: ArmTracker::default(),
             arm_incarnation: pilotage_adapter_api::SourceIncarnation::new([0; 16]),
             gimbal_stamp: sampling::GimbalStamp::new(pilotage_adapter_api::SourceIncarnation::new(
                 [0x60; 16],
@@ -258,29 +243,21 @@ impl Px4Adapter {
         self
     }
 
-    /// Folds the latest heartbeat arm flag into the arm report. Each
-    /// newly received heartbeat re-acquires the report (fresh stamp,
-    /// advanced sequence), so a silent FC honestly ages into staleness
-    /// instead of replaying the last state forever.
+    /// Folds the latest heartbeat into the arm report.
     fn observe_arm_report(&mut self) {
-        let observed = self
+        if let Some(latest) = self
             .estimate
             .as_ref()
             .and_then(|source| source.state.lock().ok())
-            .and_then(|latest| Some((latest.heartbeat_armed?, latest.last_heartbeat?)));
-        let Some((armed, heartbeat_at)) = observed else {
-            return;
-        };
-        if self.last_seen_heartbeat == Some(heartbeat_at) {
-            return;
+        {
+            self.arm.observe(&latest);
         }
-        self.last_seen_heartbeat = Some(heartbeat_at);
-        let sequence = self.arm.map_or(0, |report| report.sequence.wrapping_add(1));
-        self.arm = Some(ArmReport {
-            armed,
-            sequence,
-            acquired_at: std::time::Instant::now(),
-        });
+    }
+
+    /// The current operational pose from the FC estimate only.
+    fn current_pose(&self) -> Option<pilotage_mavlink::sampling::OperationalPose> {
+        let latest = self.estimate.as_ref()?.state.lock().ok()?;
+        pilotage_mavlink::sampling::operational_pose(&latest)
     }
 
     fn validate_flight_frame(&self, frame: &ScopedControlFrame) -> Result<(), RejectReason> {
@@ -367,7 +344,7 @@ impl VehicleAdapter for Px4Adapter {
         if let Some(outcome) = self.gated_flight_outcome(frame, tick) {
             return outcome;
         }
-        let Some((current_yaw, _pos, _vel)) = self.current_pose() else {
+        let Some(current_yaw) = self.current_pose().map(|pose| pose.yaw_rad) else {
             return rejected_control(tick, RejectReason::MeasurementUnavailable);
         };
         let Some(uplink) = self.uplink.as_mut() else {
@@ -423,8 +400,8 @@ impl VehicleAdapter for Px4Adapter {
 
     fn sample_telemetry(&mut self) -> TelemetryBatch {
         self.observe_arm_report();
-        let fc_state = sampling::fc_state_sample(
-            self.arm,
+        let fc_state = fc_state_sample(
+            self.arm.report(),
             self.uplink.as_ref().and_then(Px4Uplink::last_arm_ack),
             self.arm_incarnation,
             self.started_at,
@@ -434,7 +411,7 @@ impl VehicleAdapter for Px4Adapter {
             .is_some()
             .then(|| self.gimbal_attitude())
             .flatten();
-        let battery = battery::battery_sample(
+        let battery = battery_sample(
             self.estimate
                 .as_ref()
                 .and_then(|source| source.state.lock().ok()?.battery),
@@ -444,9 +421,9 @@ impl VehicleAdapter for Px4Adapter {
         let mut batch = self
             .estimate
             .as_ref()
-            .map(|source| sampling::mavlink_batch(self.vehicle, &source.state))
+            .map(|source| estimate_batch(self.vehicle, &source.state))
             .unwrap_or_default();
-        let reports = sampling::VehicleReports {
+        let reports = VehicleReports {
             fc_state,
             gimbal: gimbal_attitude,
             battery,
@@ -457,9 +434,7 @@ impl VehicleAdapter for Px4Adapter {
         // freshness.
         if batch.samples.is_empty() && reports.any() {
             let tick = self.step(StepBudget { ticks: 0 }).now;
-            batch
-                .samples
-                .push(sampling::report_only_sample(self.vehicle, tick));
+            batch.samples.push(report_only_sample(self.vehicle, tick));
         }
         reports.attach(&mut batch);
         if let Some(uplink) = self.uplink.as_mut() {

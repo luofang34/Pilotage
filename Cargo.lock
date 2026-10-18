@@ -2157,6 +2157,8 @@ version = "0.1.0"
 dependencies = [
  "pilotage-adapter-api",
  "pilotage-geo",
+ "pilotage-protocol",
+ "pilotage-timing",
  "thiserror",
  "tokio",
  "tracing",

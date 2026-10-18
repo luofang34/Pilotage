@@ -13,6 +13,7 @@
 pub mod ardupilot;
 pub mod codec;
 pub mod link;
+pub mod sampling;
 
 pub use codec::{FcMessage, FrameSource, ParseStats, parse_datagram};
 pub use link::{
