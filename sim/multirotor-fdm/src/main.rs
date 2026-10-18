@@ -144,13 +144,13 @@ fn run_blocking(args: &Args) -> Result<(), FdmError> {
             events.push(Event::Tick);
             supervise(sitl, supervisor, &mut events, &mut model, &mut streaming)?;
         }
-        let mut caught_up = 0;
+        let mut caught_up: u32 = 0;
         while steps as f64 * dt <= start.elapsed().as_secs_f64() && caught_up < MAX_CATCH_UP_STEPS {
             if streaming {
                 model.state.step(&model.params, model.commands, dt);
             }
             steps = steps.wrapping_add(1);
-            caught_up += 1;
+            caught_up = caught_up.wrapping_add(1);
         }
         if streaming {
             let packet = FdmPacket::from_state(model.clock.tick(), &model.state, &model.origin);
@@ -207,11 +207,11 @@ fn supervise(
 /// arrived.
 fn drain_motor_packets(socket: &UdpSocket, commands: &mut [f64; 4]) -> u64 {
     let mut buffer = [0u8; 64];
-    let mut received = 0;
+    let mut received: u64 = 0;
     while let Ok((len, _)) = socket.recv_from(&mut buffer) {
         if let Some(decoded) = decode_servo_packet(&buffer[..len]) {
             *commands = decoded;
-            received += 1;
+            received = received.wrapping_add(1);
         }
     }
     received
