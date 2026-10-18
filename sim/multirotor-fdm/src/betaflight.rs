@@ -28,6 +28,44 @@ pub const FDM_PACKET_LEN: usize = 18 * 8;
 /// Bytes in a `servo_packet`: four little-endian `f32`s.
 pub const SERVO_PACKET_LEN: usize = 4 * 4;
 
+/// The packet-time spacing between two consecutive state packets.
+///
+/// `sitl.c` rescales Betaflight's whole clock by packet-time over
+/// arrival-time, from each pair of packets less than 20 ms apart in packet
+/// time. A real-time model gains nothing from that, and on a loaded host
+/// it does harm: packets that queue and arrive in a burst read as time
+/// running many times too fast, which stretches every Betaflight timeout
+/// (RC loss first) and the PID loop's time step. Spacing packet time by
+/// 25 ms keeps every pair out of that estimate, so the factor stays at its
+/// initial 1 and Betaflight runs on its own real clock.
+pub const PACKET_TIME_STEP_S: f64 = 0.025;
+
+/// Timestamps for the state packets of a real-time model.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PacketClock {
+    next: f64,
+}
+
+impl PacketClock {
+    /// A clock for packets sent at most `rate_hz` times a second, started
+    /// `wall_seconds` after the Unix epoch. Starting from the scaled wall
+    /// clock keeps packet time rising across a restart of the model, which
+    /// Betaflight needs: it drops a packet older than the last it used.
+    #[must_use]
+    pub fn new(wall_seconds: f64, rate_hz: f64) -> Self {
+        Self {
+            next: wall_seconds * rate_hz * PACKET_TIME_STEP_S,
+        }
+    }
+
+    /// The timestamp for the next packet.
+    pub fn tick(&mut self) -> f64 {
+        let now = self.next;
+        self.next += PACKET_TIME_STEP_S;
+        now
+    }
+}
+
 /// One `fdm_packet`, field for field.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FdmPacket {

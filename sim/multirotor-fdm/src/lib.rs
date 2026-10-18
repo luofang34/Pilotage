@@ -17,7 +17,9 @@ pub mod geodesy;
 pub mod quad;
 pub mod rotation;
 
-pub use betaflight::{FDM_PACKET_LEN, FdmPacket, SERVO_PACKET_LEN, decode_servo_packet};
+pub use betaflight::{
+    FDM_PACKET_LEN, FdmPacket, PacketClock, SERVO_PACKET_LEN, decode_servo_packet,
+};
 pub use geodesy::Origin;
 pub use quad::{QuadParams, QuadState};
 pub use rotation::{Quat, Vec3};

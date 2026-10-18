@@ -1,8 +1,8 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use super::{
-    FDM_PACKET_LEN, FdmPacket, accelerometer_field, attitude_from_field, decode_servo_packet,
-    gyro_field, orientation_field,
+    FDM_PACKET_LEN, FdmPacket, PACKET_TIME_STEP_S, PacketClock, accelerometer_field,
+    attitude_from_field, decode_servo_packet, gyro_field, orientation_field,
 };
 use crate::geodesy::Origin;
 use crate::quad::{GRAVITY, QuadState};
@@ -121,4 +121,21 @@ fn servo_packets_decode_and_other_lengths_do_not() {
     assert_eq!(decode_servo_packet(&datagram[..12]), None);
     datagram.push(0);
     assert_eq!(decode_servo_packet(&datagram), None);
+}
+
+#[test]
+fn packet_time_stays_out_of_the_sitl_rate_estimate_and_rises_across_restarts() {
+    // sitl.c estimates its clock rate only from packets under 20 ms apart.
+    let mut clock = PacketClock::new(1_792_297_312.25, 1_000.0);
+    let mut last = clock.tick();
+    for _ in 0..10_000 {
+        let next = clock.tick();
+        assert!(next - last >= 0.02, "spacing {}", next - last);
+        last = next;
+    }
+    assert_eq!(PACKET_TIME_STEP_S, 0.025);
+    // Ten thousand packets at 1 kHz take ten seconds; a restart after them
+    // starts above the last packet the old process sent.
+    let restarted = PacketClock::new(1_792_297_312.25 + 10.5, 1_000.0).tick();
+    assert!(restarted > last);
 }

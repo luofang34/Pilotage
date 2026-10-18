@@ -12,7 +12,9 @@ use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
 use pilotage_multirotor_fdm::quad::GRAVITY;
-use pilotage_multirotor_fdm::{FdmPacket, QuadParams, QuadState, Vec3, decode_servo_packet};
+use pilotage_multirotor_fdm::{
+    FdmPacket, PacketClock, QuadParams, QuadState, Vec3, decode_servo_packet,
+};
 
 mod args;
 
@@ -79,7 +81,7 @@ fn run_blocking(args: &Args) -> Result<(), FdmError> {
         "multirotor FDM running"
     );
     let start = Instant::now();
-    let epoch = epoch_seconds();
+    let mut clock = PacketClock::new(epoch_seconds(), args.rate_hz);
     let mut commands = [0.0; 4];
     let mut steps: u64 = 0;
     let mut last_log = start;
@@ -94,7 +96,7 @@ fn run_blocking(args: &Args) -> Result<(), FdmError> {
             steps = steps.wrapping_add(1);
             caught_up += 1;
         }
-        let packet = FdmPacket::from_state(epoch + sim_seconds(steps, dt), &state, &origin);
+        let packet = FdmPacket::from_state(clock.tick(), &state, &origin);
         if let Err(error) = motors.send_to(&packet.to_bytes(), args.state_target) {
             tracing::debug!(%error, "state packet not sent");
         }
@@ -109,10 +111,7 @@ fn run_blocking(args: &Args) -> Result<(), FdmError> {
     }
 }
 
-/// Wall-clock seconds at start, so packet time keeps rising across a
-/// restart of this process. Betaflight drops a packet older than the last
-/// one it used, and a restarted model counting from zero would be ignored
-/// by a Betaflight that kept running.
+/// Wall-clock seconds since the Unix epoch.
 fn epoch_seconds() -> f64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -148,6 +147,7 @@ fn log_truth(state: &QuadState, commands: &[f64; 4], packets_in: u64) {
         pitch_deg = format_args!("{:.1}", pitch.to_degrees()),
         yaw_deg = format_args!("{:.1}", yaw.to_degrees()),
         load_g = format_args!("{:.2}", state.specific_force.norm() / GRAVITY),
+        rates_dps = ?[state.rates.x.to_degrees().round(), state.rates.y.to_degrees().round(), state.rates.z.to_degrees().round()],
         motors = ?commands.map(|c| (c * 1000.0).round() / 1000.0),
         on_ground = state.on_ground,
         packets_in,
