@@ -12,6 +12,7 @@
 mod attitude_target;
 mod decoding;
 mod encoding;
+mod param_encoding;
 mod parameters;
 pub use attitude_target::{AttitudeTargetKind, SET_ATTITUDE_TARGET_ID, encode_attitude_target};
 use decoding::decode_known;
@@ -22,6 +23,7 @@ pub use encoding::{
     encode_command_long, encode_gcs_heartbeat, encode_gimbal_rate_setpoint, encode_manual_control,
     encode_position_setpoint, encode_velocity_setpoint,
 };
+pub use param_encoding::ParamEncoding;
 pub use parameters::{
     PARAM_ID_LEN, ParamValue, encode_param_request_read, encode_param_set, encode_param_value,
     param_id,

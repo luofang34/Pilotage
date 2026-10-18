@@ -149,8 +149,9 @@ fn an_ardupilot_integer_parameter_carries_its_number_in_the_float_field() {
     let FcMessage::ParamValue { value, .. } = decode_one(&GUID_OPTIONS_VALUE) else {
         panic!("a parameter value");
     };
-    let super::super::ParamValue::Int32(bits) = value else {
-        panic!("typed INT32, got {value:?}");
-    };
-    assert_eq!(f32::from_bits(bits as u32), 8.0);
+    assert!(
+        matches!(value, super::super::ParamValue::Int32(_)),
+        "typed INT32"
+    );
+    assert_eq!(super::super::ParamEncoding::CCast.number(value), 8.0);
 }
