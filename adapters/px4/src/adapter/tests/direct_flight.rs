@@ -157,6 +157,18 @@ fn neutralized_in_flight(armed: bool) -> (Px4Adapter, std::net::UdpSocket) {
         )
         .expect("neutralize");
     assert!(!adapter.uplink.as_ref().expect("uplink").streaming());
+    // While the group latch holds, a direct frame cannot fly around it.
+    assert_eq!(
+        adapter
+            .apply_control(&at_generation(body_rate_frame(DIRECT_SCOPE), 2))
+            .disposition,
+        Disposition::Rejected(RejectReason::LinkLossEngaged)
+    );
+    // The host clears the latch on the new holder's neutral demonstration,
+    // before it applies that frame.
+    adapter
+        .set_link_loss_policy(VehicleId::new(1), &ScopeId::new(FLIGHT_SCOPE), None)
+        .expect("clear");
     (adapter, fc)
 }
 
@@ -204,4 +216,50 @@ fn a_disarm_is_never_resumed_by_a_frame() {
     uplink.send_disarm();
     uplink.admit_flight_frame(pilotage_protocol::Generation::new(9), true, 0.0, None);
     assert!(!uplink.streaming());
+}
+
+/// The link-loss enactment leaves the vehicle to PX4's offboard-loss
+/// failsafe, so arming waits until PX4 confirms that failsafe is Hold.
+#[test]
+fn arming_waits_for_the_pinned_offboard_loss_hold() {
+    let (fc, addr) = fake_fc();
+    let mut adapter = Px4Adapter::from_state(VehicleId::new(1), live_state())
+        .with_uplink(crate::uplink::Px4Uplink::new(addr).expect("uplink"));
+    let mut arm = frame(vec![], vec![]);
+    arm.actions = vec![pilotage_protocol::ControlAction::Arm];
+    let refused = adapter.apply_control(&arm);
+    assert!(
+        refused
+            .action_results
+            .first()
+            .is_some_and(|result| !result.accepted),
+        "{refused:?}"
+    );
+    assert!(!streaming(&adapter));
+
+    // The uplink writes COM_OBL_RC_ACT = 5 and arms once PX4 echoes it.
+    adapter.uplink.as_mut().expect("uplink").maintain();
+    let mut buf = [0u8; 280];
+    let mut wrote_hold = false;
+    fc.set_read_timeout(Some(std::time::Duration::from_secs(1)))
+        .expect("timeout");
+    while let Ok(len) = fc.recv(&mut buf) {
+        // MAVLink 2: message id 23 (PARAM_SET) at bytes 7..10.
+        let is_param_set = len > 10 && buf[7..10] == [23, 0, 0];
+        if is_param_set && buf[..len].windows(14).any(|w| w == b"COM_OBL_RC_ACT") {
+            wrote_hold = true;
+            break;
+        }
+    }
+    assert!(wrote_hold, "a PARAM_SET went to PX4");
+    adapter.uplink.as_mut().expect("uplink").confirm_failsafe();
+    let accepted = adapter.apply_control(&arm);
+    assert!(
+        accepted
+            .action_results
+            .first()
+            .is_some_and(|result| result.accepted),
+        "{accepted:?}"
+    );
+    assert!(streaming(&adapter));
 }

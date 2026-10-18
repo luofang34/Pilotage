@@ -156,9 +156,8 @@ impl ApplyOutcome {
 
 /// Whether a typed intent proves neutral activation against its advertised
 /// capability: every velocity or rate component must sit inside the
-/// limit-scaled deadband. Families without a meaningful neutral posture
-/// (attitude, position hold, body rate) never satisfy it — recovery
-/// activation stays fail-closed for them.
+/// limit-scaled deadband. Position hold has no meaningful neutral posture
+/// and never satisfies it — recovery activation stays fail-closed for it.
 #[must_use]
 pub fn intent_satisfies_neutral_activation(
     intent: &ControlIntent,
@@ -191,8 +190,38 @@ pub fn intent_satisfies_neutral_activation(
                 && pitch.abs() <= angular
                 && (a.thrust - 0.5).abs() <= 0.5 * fraction
         }
-        ControlIntent::PositionHold(_) | ControlIntent::BodyRate(_) => false,
+        // Zero body rates at the mid collective is the acro hover posture,
+        // the same thrust neutral as level attitude: every rate inside the
+        // max_angular-scaled deadband and thrust at the 0.5 midpoint. The
+        // adapters hold hover thrust until the operator's demand crosses it,
+        // so a centred thrust stick never drops the vehicle.
+        ControlIntent::BodyRate(b) => {
+            let angular = capability.max_angular * fraction;
+            b.roll_rate.abs() <= angular
+                && b.pitch_rate.abs() <= angular
+                && b.yaw_rate.abs() <= angular
+                && (b.thrust - 0.5).abs() <= 0.5 * fraction
+        }
+        ControlIntent::PositionHold(_) => false,
     }
+}
+
+/// Whether a link-loss latch suppresses frames on `scope`. Both flight
+/// scopes drive one flight controller and form one authority group, and
+/// the host latches that group under [`pilotage_protocol::MOTION_SCOPE`];
+/// so a direct-scope frame is suppressed while the motion latch is engaged,
+/// and the vehicle keeps its failsafe hold until the host clears it. Any
+/// other scope is latched on its own key.
+#[must_use]
+pub fn link_loss_latch_engaged(
+    latches: &std::collections::BTreeMap<pilotage_protocol::ScopeId, LinkLossPolicy>,
+    scope: &pilotage_protocol::ScopeId,
+) -> bool {
+    latches.contains_key(scope)
+        || (scope.as_str() == pilotage_protocol::DIRECT_SCOPE
+            && latches.contains_key(&pilotage_protocol::ScopeId::new(
+                pilotage_protocol::MOTION_SCOPE,
+            )))
 }
 
 /// Extracts the ZYX Euler angles (roll, pitch, yaw; radians, right-handed
@@ -255,31 +284,4 @@ pub enum LinkLossEnactError {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used, clippy::panic)]
-mod tests {
-    use super::{ApplyOutcome, Disposition, LinkLossPolicy, RejectReason};
-    use pilotage_timing::SimTick;
-
-    #[test]
-    fn apply_outcome_holds_tick_and_disposition() {
-        let outcome = ApplyOutcome::new(SimTick::new(7), Disposition::Accepted);
-        assert_eq!(outcome.tick.as_u64(), 7);
-        assert_eq!(outcome.disposition, Disposition::Accepted);
-        assert!(outcome.action_results.is_empty());
-    }
-
-    #[test]
-    fn rejected_carries_reason() {
-        let disposition = Disposition::Rejected(RejectReason::UnknownScope);
-        assert_eq!(
-            disposition,
-            Disposition::Rejected(RejectReason::UnknownScope)
-        );
-    }
-
-    #[test]
-    fn hold_brief_carries_tick_count() {
-        let policy = LinkLossPolicy::HoldBrief { ticks: 5 };
-        assert_eq!(policy, LinkLossPolicy::HoldBrief { ticks: 5 });
-    }
-}
+mod tests;

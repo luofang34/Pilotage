@@ -273,6 +273,12 @@ impl Px4Adapter {
         let mut action_results = Vec::with_capacity(frame.actions.len());
         for action in &frame.actions {
             match action.kind() {
+                ActionKind::Arm if !uplink.failsafe_pinned() => {
+                    action_results.push(ActionResult::rejected(
+                        *action,
+                        "waiting for PX4 to confirm its offboard-loss Hold",
+                    ));
+                }
                 ActionKind::Arm => {
                     uplink.begin_arm(current_yaw);
                     action_results.push(ActionResult::accepted(*action));

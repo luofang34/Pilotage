@@ -22,6 +22,7 @@ mod config;
 mod error;
 mod fixed_wing;
 mod gimbal;
+mod pinning;
 mod uplink;
 
 pub use adapter::{

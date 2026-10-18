@@ -120,3 +120,25 @@ fn direct_link_loss_brakes_to_a_velocity_hold() {
     let hold = body_velocity(*harness.velocity.borrow_and_update()).expect("a velocity hold");
     assert_eq!(hold.vel_frd_mps, [0.0; 3]);
 }
+
+#[test]
+fn the_motion_latch_keeps_direct_frames_out_of_the_hold() {
+    let mut harness = Harness::new();
+    harness.estimate(-3.0, true);
+    confirm_parameters(&mut harness);
+    harness
+        .adapter
+        .set_link_loss_policy(
+            VehicleId::new(1),
+            &ScopeId::new(FLIGHT_SCOPE),
+            Some(LinkLossPolicy::Neutralize),
+        )
+        .expect("engaged");
+    let outcome = harness
+        .adapter
+        .apply_control(&scoped(DIRECT_SCOPE, rates(0.0, 0.5), vec![]));
+    assert_eq!(
+        outcome.disposition,
+        Disposition::Rejected(RejectReason::LinkLossEngaged)
+    );
+}

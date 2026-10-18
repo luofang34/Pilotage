@@ -28,7 +28,7 @@ fn rejected(tick: SimTick, reason: RejectReason) -> ApplyOutcome {
 impl BetaflightAdapter {
     pub(super) fn apply_flight_frame(&mut self, frame: &ScopedControlFrame) -> ApplyOutcome {
         let tick = self.tick_of(Instant::now());
-        if self.link_loss_policy.contains_key(&frame.scope) {
+        if pilotage_adapter_api::link_loss_latch_engaged(&self.link_loss_policy, &frame.scope) {
             return rejected(tick, RejectReason::LinkLossEngaged);
         }
         if let Err(reason) = self.validate(frame) {

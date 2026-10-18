@@ -10,6 +10,7 @@
 mod action_command;
 mod authority_group;
 mod deadline;
+mod direct_recovery;
 mod disconnect;
 mod frame;
 mod handshake;

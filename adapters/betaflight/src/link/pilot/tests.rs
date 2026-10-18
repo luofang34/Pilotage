@@ -80,13 +80,22 @@ fn a_direct_demand_leaves_at_once_in_acro_with_the_throttle_held_until_reached()
         .expect("direct flies");
     assert!(!held.angle && held.roll > 0.0 && held.arm);
     assert_eq!(held.throttle, throttle, "no drop on entering direct flight");
+    // Canonical thrust puts the learned hover at 0.5, so the thrust that
+    // reaches the held (climbing) throttle sits above the midpoint; below
+    // it the throttle scales down to zero.
+    let hover = pilot.outer.hover_throttle();
+    let reaching = 0.5 + (throttle - hover) / (2.0 * (1.0 - hover));
     let taken = pilot
-        .on_demands(&rates(now, throttle), now)
+        .on_demands(&rates(now, reaching), now)
         .expect("direct flies");
     let after = pilot
         .on_demands(&rates(now, 0.2), now)
         .expect("direct flies");
-    assert_eq!((taken.throttle, after.throttle), (throttle, 0.2));
+    assert!(
+        (taken.throttle - throttle).abs() < 1e-9,
+        "{taken:?} vs {throttle}"
+    );
+    assert!((after.throttle - 0.4 * hover).abs() < 1e-9, "{after:?}");
 }
 
 #[test]

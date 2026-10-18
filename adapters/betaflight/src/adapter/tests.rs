@@ -432,3 +432,33 @@ fn a_direct_link_loss_falls_back_to_the_assisted_hold() {
     assert_eq!(demands.family, crate::link::Family::Assisted);
     assert!(demands.direct_at.is_none() && demands.velocity_at.is_some());
 }
+
+/// A scheme transfer latches the flight group under the motion scope; a
+/// direct frame must not fly the quad out of the hold before the host
+/// clears it.
+#[test]
+fn the_motion_latch_keeps_direct_frames_out_of_the_hold() {
+    let mut h = harness(Some(observation(true, 0, true)));
+    h.adapter
+        .set_link_loss_policy(
+            VehicleId::new(1),
+            &ScopeId::new(FLIGHT_SCOPE),
+            Some(LinkLossPolicy::Neutralize),
+        )
+        .expect("engages");
+    let neutral = ControlIntent::BodyRate(pilotage_protocol::BodyRateIntent {
+        roll_rate: 0.0,
+        pitch_rate: 0.0,
+        yaw_rate: 0.0,
+        thrust: 0.5,
+    });
+    assert_eq!(
+        h.adapter.apply_control(&direct_frame(neutral)).disposition,
+        Disposition::Rejected(RejectReason::LinkLossEngaged)
+    );
+    assert_eq!(
+        h.commands.borrow().demands.family,
+        crate::link::Family::Assisted,
+        "the quad stays in the assisted hold"
+    );
+}
