@@ -1,5 +1,5 @@
 {
-  "comment": "Shared control-runtime golden vectors. BOTH harnesses execute this exact file \u2014 clients/web-control/src/golden.rs natively and clients/web/control-runtime.test.mjs through the compiled wasm \u2014 so the vectors cannot drift apart. Every expected value lands on {-1, 0, 1} (or inside a deadzone, so exactly 0) to stay independent of powf last-bit differences across libms. Each group runs on a fresh runtime bootstrapped through the built-in default profile; steps run in order; a step ticks only when it carries a session.",
+  "comment": "Shared control-runtime golden vectors. BOTH harnesses execute this exact file \u2014 crates/pilotage-control/src/golden.rs natively and clients/web/control-runtime.test.mjs through the compiled wasm \u2014 so the vectors cannot drift apart. Every expected value lands on {-1, 0, 1} (or inside a deadzone, so exactly 0) to stay independent of powf last-bit differences across libms. Each group runs on a fresh runtime bootstrapped through the built-in default profile; steps run in order; a step ticks only when it carries a session.",
   "groups": [
     {
       "name": "gimbal capture masks flight and edges fire once",

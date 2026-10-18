@@ -1,6 +1,6 @@
 // Executes the SHARED golden-vector file (clients/web-control/golden-vectors.json)
 // through the REAL compiled wasm artifact. The native suite
-// (clients/web-control/src/golden.rs) executes the SAME file, so the vectors
+// (crates/pilotage-control/src/golden.rs) executes the SAME file, so the vectors
 // cannot drift: a native/wasm divergence reddens exactly one of the two.
 //
 // Build the wasm first: scripts/build-web-instruments.sh
