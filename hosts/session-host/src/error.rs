@@ -72,14 +72,6 @@ pub enum HostError {
         /// The rejected value.
         value: String,
     },
-    /// A present PX4 vehicle class did not name a class PX4 flies.
-    #[error(
-        "invalid PILOTAGE_PX4_VEHICLE_CLASS value {value:?} (expected multicopter, fixed-wing, or vtol)"
-    )]
-    Px4VehicleClass {
-        /// The rejected value.
-        value: String,
-    },
     /// The PX4 profile could not be decoded as UTF-8.
     #[error("PILOTAGE_PX4_PROFILE is not valid UTF-8: {source}")]
     Px4ProfileEncoding {

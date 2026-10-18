@@ -4,7 +4,6 @@ use std::env::VarError;
 use std::net::SocketAddr;
 
 use pilotage_adapter_px4::{Px4Config, Px4Profile};
-use pilotage_protocol::VehicleClass;
 
 use crate::error::HostError;
 
@@ -13,41 +12,20 @@ const TELEMETRY_ENDPOINT: &str = "PILOTAGE_PX4_ADDR";
 const STREAM_COMMAND_ENDPOINT: &str = "PILOTAGE_PX4_GCS_ADDR";
 const COMMAND_ENDPOINT: &str = "PILOTAGE_PX4_FC_ADDR";
 const GIMBAL: &str = "PILOTAGE_PX4_GIMBAL";
-/// The airframe kind the capability advertisement declares; absent means
-/// a multicopter.
-const VEHICLE_CLASS: &str = "PILOTAGE_PX4_VEHICLE_CLASS";
 /// Acceptance fault injection: drop the gimbal link-loss stop so the vehicle's
 /// own failsafe is the sole mechanism under test. Honoured only under the
 /// simulation profile (enforced by [`Px4Config::with_gimbal_stop_dropped`]).
 const DROP_GIMBAL_STOP: &str = "PILOTAGE_PX4_DROP_GIMBAL_STOP";
 
 pub(crate) fn from_env() -> Result<Px4Config, HostError> {
-    let config = config_from_values(
+    config_from_values(
         std::env::var(PROFILE),
         std::env::var(TELEMETRY_ENDPOINT),
         std::env::var(STREAM_COMMAND_ENDPOINT),
         std::env::var(COMMAND_ENDPOINT),
         std::env::var(GIMBAL),
         std::env::var(DROP_GIMBAL_STOP),
-    )?;
-    Ok(config.with_vehicle_class(parse_vehicle_class(std::env::var(VEHICLE_CLASS))?))
-}
-
-/// The declared airframe kind. A present value that names no class PX4
-/// flies fails closed: a wrong class would give the operator the wrong
-/// stick scheme.
-fn parse_vehicle_class(value: Result<String, VarError>) -> Result<VehicleClass, HostError> {
-    match value.as_deref() {
-        Err(VarError::NotPresent) | Ok("multicopter") => Ok(VehicleClass::Multicopter),
-        Ok("fixed-wing") => Ok(VehicleClass::FixedWing),
-        Ok("vtol") => Ok(VehicleClass::Vtol),
-        Ok(other) => Err(HostError::Px4VehicleClass {
-            value: other.to_owned(),
-        }),
-        Err(VarError::NotUnicode(raw)) => Err(HostError::Px4VehicleClass {
-            value: raw.to_string_lossy().into_owned(),
-        }),
-    }
+    )
 }
 
 fn config_from_values(
@@ -117,9 +95,7 @@ mod tests {
     use std::ffi::OsString;
     use std::net::SocketAddr;
 
-    use pilotage_protocol::VehicleClass;
-
-    use super::{config_from_values, parse_vehicle_class};
+    use super::config_from_values;
     use crate::error::HostError;
 
     fn absent() -> Result<String, VarError> {
@@ -209,33 +185,6 @@ mod tests {
             assert!(
                 matches!(refusal, Err(HostError::Px4Endpoint { variable: rejected, .. }) if rejected == variable),
                 "{variable} must fail closed, got {refusal:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn the_vehicle_class_defaults_to_multicopter_and_refuses_unknown_names() {
-        assert_eq!(
-            parse_vehicle_class(absent()).expect("absent"),
-            VehicleClass::Multicopter
-        );
-        for (value, class) in [
-            ("multicopter", VehicleClass::Multicopter),
-            ("fixed-wing", VehicleClass::FixedWing),
-            ("vtol", VehicleClass::Vtol),
-        ] {
-            assert_eq!(
-                parse_vehicle_class(Ok(value.to_owned())).expect(value),
-                class
-            );
-        }
-        for value in ["plane", "Fixed-Wing", ""] {
-            assert!(
-                matches!(
-                    parse_vehicle_class(Ok(value.to_owned())),
-                    Err(HostError::Px4VehicleClass { value: ref rejected }) if rejected == value
-                ),
-                "{value:?} must be refused"
             );
         }
     }
