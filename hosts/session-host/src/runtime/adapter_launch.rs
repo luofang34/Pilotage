@@ -212,7 +212,7 @@ async fn spawn_aviate_runtime(
     let mut adapter = pilotage_adapter_aviate::AviateAdapter::start_with_control_feel(
         HOST_VEHICLE,
         profile,
-        aviate_profile::link_config(profile),
+        aviate_profile::link_config_from_env(profile, std::env::var("PILOTAGE_AVIATE_ADDR"))?,
         control_feel,
     )
     .await

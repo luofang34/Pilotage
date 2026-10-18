@@ -43,6 +43,40 @@ pub(crate) fn link_config(profile: AviateProfile) -> LinkConfig {
     }
 }
 
+/// The variable naming where the FC streams telemetry to this host.
+const TELEMETRY_ENDPOINT: &str = "PILOTAGE_AVIATE_ADDR";
+
+/// The link configuration a profile runs, listening where
+/// `PILOTAGE_AVIATE_ADDR` says when it is set.
+///
+/// The FC's stream endpoint is configurable (`AVIATE_TELEMETRY_ENDPOINT`),
+/// so a session beside another can move both ends off the shared
+/// default. Parsing fails closed: a present value that is not a socket
+/// address stops the host rather than listening where nobody streams.
+pub(crate) fn link_config_from_env(
+    profile: AviateProfile,
+    endpoint: Result<String, VarError>,
+) -> Result<LinkConfig, HostError> {
+    let mut config = link_config(profile);
+    match endpoint {
+        Ok(value) => {
+            config.endpoint = value.parse().map_err(|source| HostError::AviateEndpoint {
+                variable: TELEMETRY_ENDPOINT,
+                value,
+                source,
+            })?;
+        }
+        Err(VarError::NotPresent) => {}
+        Err(source @ VarError::NotUnicode(_)) => {
+            return Err(HostError::AviateEndpointEncoding {
+                variable: TELEMETRY_ENDPOINT,
+                source,
+            });
+        }
+    }
+    Ok(config)
+}
+
 /// Loads the selected Aviate control-feel artifact.
 ///
 /// # Errors
@@ -87,7 +121,9 @@ mod tests {
 
     use pilotage_adapter_aviate::{AviateProfile, ResetPolicy};
 
-    use super::{control_feel_from_env_blocking, link_config, profile_from_env};
+    use super::{
+        control_feel_from_env_blocking, link_config, link_config_from_env, profile_from_env,
+    };
     use crate::error::HostError;
 
     /// Every shipped shaped profile is one this host will actually launch with.
@@ -292,5 +328,36 @@ mod tests {
             Err(HostError::AviateControlFeelInvalid { .. })
         ));
         std::fs::remove_file(path).ok();
+    }
+
+    /// A session beside another listens where its FC streams; absent the
+    /// variable, the host keeps the default every single session uses.
+    #[test]
+    fn the_telemetry_endpoint_moves_only_when_named_and_fails_closed() {
+        let default = link_config_from_env(AviateProfile::Simulation, Err(VarError::NotPresent))
+            .expect("absent keeps the default");
+        assert_eq!(
+            default.endpoint,
+            link_config(AviateProfile::Simulation).endpoint
+        );
+        let moved =
+            link_config_from_env(AviateProfile::Simulation, Ok("127.0.0.1:14705".to_owned()))
+                .expect("an address moves the link");
+        assert_eq!(
+            moved.endpoint,
+            std::net::SocketAddr::from(([127, 0, 0, 1], 14_705))
+        );
+        assert_eq!(
+            moved.reset_policy,
+            link_config(AviateProfile::Simulation).reset_policy,
+            "only the endpoint moves"
+        );
+        for value in ["14705", "localhost:14705", "127.0.0.1:not-a-port", ""] {
+            let refusal = link_config_from_env(AviateProfile::Simulation, Ok(value.to_owned()));
+            assert!(
+                matches!(refusal, Err(HostError::AviateEndpoint { value: ref rejected, .. }) if rejected == value),
+                "{value:?} must be refused, got {refusal:?}"
+            );
+        }
     }
 }
