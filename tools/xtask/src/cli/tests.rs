@@ -54,6 +54,7 @@ fn help_groups_each_command_once_and_matches_parser_defaults() {
     assert!(sim_help.contains("aviate-gz (alias aviate, default)"));
     assert!(sim_help.contains("px4-xplane"));
     assert!(sim_help.contains("ardupilot-sitl"));
+    assert!(sim_help.contains("betaflight-sitl"));
     assert!(sim_help.contains("simulation (default)"));
     assert!(sim_help.contains("default: 4433"));
     assert!(sim_help.contains("default: 8080"));

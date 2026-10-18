@@ -13,6 +13,7 @@ use crate::readiness::Readiness;
 mod ardupilot_sitl;
 pub(crate) mod aviate_gz;
 mod aviate_xplane;
+mod betaflight_sitl;
 pub(crate) mod gz;
 pub(crate) mod px4_gz;
 mod px4_xplane;
@@ -341,6 +342,11 @@ const BACKENDS: &[BackendEntry] = &[
         name: "ardupilot-sitl",
         alias: Some("ardupilot"),
         make: || Box::new(ardupilot_sitl::ArduPilotSitl),
+    },
+    BackendEntry {
+        name: "betaflight-sitl",
+        alias: Some("betaflight"),
+        make: || Box::new(betaflight_sitl::BetaflightSitl),
     },
 ];
 
