@@ -80,6 +80,15 @@ impl SimBackend for AviateGz {
         plan_with_aviate_dir(ctx, &super::aviate_dir(&ctx.repo_root))
     }
 
+    fn spawn(
+        &self,
+        ctx: &SessionContext,
+        point: &super::SpawnPoint,
+        stages: &mut [Stage],
+    ) -> Result<(), XtaskError> {
+        super::gz::spawn_in_world(ctx, point, stages)
+    }
+
     fn stale_process_patterns(&self) -> Vec<&'static str> {
         vec!["gz sim", "sitl-gazebo-x500"]
     }

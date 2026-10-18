@@ -64,48 +64,78 @@ pub(super) async fn supervise(
                 return Ok(());
             }
             () = tokio::time::sleep(SUPERVISE_INTERVAL) => {
-                for index in 0..children.len() {
-                    let Err(death) = children[index].check_running() else {
-                        continue;
-                    };
-                    let stage = &stages[index];
-                    if stage.spec.name != "flight-controller" {
-                        return Err(death);
-                    }
-                    fc_restarts = fc_restarts.wrapping_add(1);
-                    if fc_restarts > MAX_STAGE_RESTARTS {
-                        return Err(death);
-                    }
-                    print_line(&format!(
-                        "flight-controller exited (reset or crash); restarting ({fc_restarts}/{MAX_STAGE_RESTARTS})..."
-                    ));
-                    // The replacement inherits the plan's argv, so anything
-                    // the dead process CONSUMED has to be put back before it
-                    // starts or the restart hands it a path to nothing.
-                    if !restore_for_restart(backend, ctx, stage.spec.name, cancel).await? {
-                        return Ok(());
-                    }
-                    // A replacement that spawns but never reports ready
-                    // must not outlive the error return: it is not in
-                    // `children`, so the caller's teardown would miss it.
-                    let mut replacement = ManagedChild::spawn(&stage.spec)?;
-                    let ready = tokio::select! {
-                        ready = await_ready(&mut replacement, &stage.readiness) => ready,
-                        _ = cancel.changed() => {
-                            print_line("");
-                            print_line("stopping the session...");
-                            replacement.terminate_group();
-                            return Ok(());
-                        }
-                    };
-                    if let Err(error) = ready {
-                        replacement.terminate_group();
-                        return Err(error);
-                    }
-                    print_line("flight-controller ready");
-                    children[index] = replacement;
+                let mut watched = Watched { children, stages, backend, ctx, fc_restarts: &mut fc_restarts };
+                if !check_once(&mut watched, cancel).await? {
+                    return Ok(());
                 }
             }
         }
     }
+}
+
+/// One running session as the supervisor sees it.
+pub(super) struct Watched<'a> {
+    /// The session's running stages, in launch order.
+    pub(super) children: &'a mut [ManagedChild],
+    /// The plan each child was started from.
+    pub(super) stages: &'a [Stage],
+    /// The backend that planned them.
+    pub(super) backend: &'a dyn crate::backend::SimBackend,
+    /// The session's context.
+    pub(super) ctx: &'a SessionContext,
+    /// How often the flight controller has been restarted so far.
+    pub(super) fc_restarts: &'a mut u32,
+}
+
+/// Checks every stage of one session once. A dead flight-controller
+/// stage is restarted in place (bounded); any other death ends the
+/// session. `Ok(false)` means the operator asked to stop while a restart
+/// was in progress.
+pub(super) async fn check_once(
+    session: &mut Watched<'_>,
+    cancel: &mut tokio::sync::watch::Receiver<bool>,
+) -> Result<bool, XtaskError> {
+    for index in 0..session.children.len() {
+        let Err(death) = session.children[index].check_running() else {
+            continue;
+        };
+        let stage = &session.stages[index];
+        if stage.spec.name != "flight-controller" {
+            return Err(death);
+        }
+        *session.fc_restarts = session.fc_restarts.wrapping_add(1);
+        let fc_restarts = *session.fc_restarts;
+        if fc_restarts > MAX_STAGE_RESTARTS {
+            return Err(death);
+        }
+        print_line(&format!(
+            "flight-controller exited (reset or crash); restarting ({fc_restarts}/{MAX_STAGE_RESTARTS})..."
+        ));
+        // The replacement inherits the plan's argv, so anything
+        // the dead process CONSUMED has to be put back before it
+        // starts or the restart hands it a path to nothing.
+        if !restore_for_restart(session.backend, session.ctx, stage.spec.name, cancel).await? {
+            return Ok(false);
+        }
+        // A replacement that spawns but never reports ready
+        // must not outlive the error return: it is not in
+        // `children`, so the caller's teardown would miss it.
+        let mut replacement = ManagedChild::spawn(&stage.spec)?;
+        let ready = tokio::select! {
+            ready = await_ready(&mut replacement, &stage.readiness) => ready,
+            _ = cancel.changed() => {
+                print_line("");
+                print_line("stopping the session...");
+                replacement.terminate_group();
+                return Ok(false);
+            }
+        };
+        if let Err(error) = ready {
+            replacement.terminate_group();
+            return Err(error);
+        }
+        print_line("flight-controller ready");
+        session.children[index] = replacement;
+    }
+    Ok(true)
 }

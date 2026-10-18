@@ -174,3 +174,73 @@ fn port_zero_is_rejected_on_both_port_flags() {
         );
     }
 }
+
+#[test]
+fn fleet_takes_one_vehicle_per_flag_and_documented_defaults() {
+    let Command::Fleet(fleet) = parse_args(&args(&[
+        "fleet",
+        "--vehicle",
+        "px4-gz:x500_gimbal",
+        "--vehicle",
+        "px4-gz:rc_cessna",
+    ]))
+    .expect("parses") else {
+        panic!("expected fleet");
+    };
+    assert_eq!(fleet.vehicles, ["px4-gz:x500_gimbal", "px4-gz:rc_cessna"]);
+    assert_eq!(
+        (fleet.host_port, fleet.viewer_port, fleet.instance_base),
+        (4433, 8080, 0)
+    );
+    assert!(!fleet.open, "a fleet opens no tabs by default");
+    assert!(USAGE.contains("  fleet --vehicle <backend>[:<model>]"));
+
+    let Command::Fleet(fleet) = parse_args(&args(&[
+        "fleet",
+        "--vehicle",
+        "px4-gz",
+        "--port",
+        "4533",
+        "--viewer-port",
+        "8180",
+        "--instance-base",
+        "5",
+        "--open",
+    ]))
+    .expect("parses") else {
+        panic!("expected fleet");
+    };
+    assert_eq!(
+        (
+            fleet.host_port,
+            fleet.viewer_port,
+            fleet.instance_base,
+            fleet.open
+        ),
+        (4533, 8180, 5, true)
+    );
+}
+
+#[test]
+fn fleet_refuses_no_vehicles_unknown_flags_and_ports_that_wrap() {
+    for malformed in [
+        args(&["fleet"]),
+        args(&["fleet", "--vehicle"]),
+        args(&["fleet", "--vehicle", "px4", "--lan"]),
+        args(&[
+            "fleet",
+            "--vehicle",
+            "px4",
+            "--vehicle",
+            "px4",
+            "--port",
+            "65535",
+        ]),
+        args(&["fleet", "--vehicle", "px4", "--port", "0"]),
+    ] {
+        assert!(
+            matches!(parse_args(&malformed), Err(XtaskError::Usage { .. })),
+            "{malformed:?} must be refused"
+        );
+    }
+}

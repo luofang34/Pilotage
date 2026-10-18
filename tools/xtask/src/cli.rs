@@ -61,11 +61,34 @@ pub struct SimArgs {
     pub instance: u16,
 }
 
+/// Options for `cargo xtask fleet`.
+#[derive(Debug, PartialEq, Eq)]
+pub struct FleetArgs {
+    /// One `<backend>[:<model>]` per vehicle, in launch order
+    /// (`--vehicle`, repeated).
+    pub vehicles: Vec<String>,
+    /// Session profile handed to every host (`--profile`).
+    pub profile: Profile,
+    /// The first vehicle's host port; vehicle `k` gets `host_port + k`.
+    pub host_port: u16,
+    /// The first vehicle's viewer port; vehicle `k` gets
+    /// `viewer_port + k`.
+    pub viewer_port: u16,
+    /// The first vehicle's simulator instance; vehicle `k` gets
+    /// `instance_base + k`.
+    pub instance_base: u16,
+    /// Open every vehicle's viewer URL (`--open`; off by default, since a
+    /// fleet opens one tab per vehicle).
+    pub open: bool,
+}
+
 /// A parsed xtask invocation.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Command {
     /// Launch a full SITL session and supervise it.
     Sim(SimArgs),
+    /// Launch one session per vehicle and supervise them all.
+    Fleet(FleetArgs),
     /// Reset the running simulation world and FC of the named backend.
     Reset(String),
     /// Produce the Alia X-Plane runtime handshake into a directory.
@@ -94,6 +117,7 @@ pub fn parse_args(args: &[String]) -> Result<Command, XtaskError> {
     };
     match command.as_str() {
         "sim" => Ok(Command::Sim(parse_sim(rest)?)),
+        "fleet" => Ok(Command::Fleet(parse_fleet(rest)?)),
         "reset" => Ok(Command::Reset(parse_reset(rest)?)),
         "handshake" => Ok(Command::Handshake(parse_handshake(rest)?)),
         "guards" => {
@@ -110,7 +134,7 @@ pub fn parse_args(args: &[String]) -> Result<Command, XtaskError> {
         "help" | "--help" | "-h" => Ok(Command::Help),
         other => Err(XtaskError::Usage {
             message: format!(
-                "unknown command {other:?} (expected sim, reset, handshake, affected, guards, or help)"
+                "unknown command {other:?} (expected sim, fleet, reset, handshake, affected, guards, or help)"
             ),
         }),
     }
@@ -225,6 +249,58 @@ fn parse_sim(args: &[String]) -> Result<SimArgs, XtaskError> {
     })
 }
 
+fn parse_fleet(args: &[String]) -> Result<FleetArgs, XtaskError> {
+    let mut fleet = FleetArgs {
+        vehicles: Vec::new(),
+        profile: Profile::Simulation,
+        host_port: 4433,
+        viewer_port: 8080,
+        instance_base: 0,
+        open: false,
+    };
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--vehicle" => fleet.vehicles.push(required_value(&mut iter, "--vehicle")?),
+            "--profile" => {
+                fleet.profile = Profile::parse(&required_value(&mut iter, "--profile")?)?;
+            }
+            "--port" => fleet.host_port = required_port(&mut iter, "--port")?,
+            "--viewer-port" => fleet.viewer_port = required_port(&mut iter, "--viewer-port")?,
+            "--instance-base" => {
+                fleet.instance_base = required_number(&mut iter, "--instance-base")?;
+            }
+            "--open" => fleet.open = true,
+            "--no-open" => fleet.open = false,
+            other => {
+                return Err(XtaskError::Usage {
+                    message: format!("unknown fleet flag {other:?}"),
+                });
+            }
+        }
+    }
+    if fleet.vehicles.is_empty() {
+        return Err(XtaskError::Usage {
+            message: "fleet needs at least one --vehicle <backend>[:<model>]".to_owned(),
+        });
+    }
+    // Every vehicle's port and instance must exist: a fleet whose last
+    // vehicle wraps past 65535 would collide with its first.
+    let last = u16::try_from(fleet.vehicles.len() - 1).unwrap_or(u16::MAX);
+    for (flag, base) in [
+        ("--port", fleet.host_port),
+        ("--viewer-port", fleet.viewer_port),
+        ("--instance-base", fleet.instance_base),
+    ] {
+        if base.checked_add(last).is_none() {
+            return Err(XtaskError::Usage {
+                message: format!("{flag} {base} leaves no room for {} vehicles", last + 1),
+            });
+        }
+    }
+    Ok(fleet)
+}
+
 fn required_number(
     iter: &mut std::slice::Iter<'_, String>,
     flag: &'static str,
@@ -287,6 +363,25 @@ commands:
       --open               open the ready URL (default)
       --no-open            do not open the ready URL
       --lan                serve the session to the local network
+
+  fleet --vehicle <backend>[:<model>] [--vehicle ...] [options]
+      Launch one session per vehicle, each with its own simulator,
+      host, and viewer, spawned 30 m apart east of 47.397742 N
+      8.545594 E. Writes target/xtask-fleet/fleet.json and serves the
+      first vehicle's clients/web/session.json; supervises every
+      session and tears all of them down on ctrl-c.
+
+      --vehicle <spec>     a backend with an optional model, as for
+                           sim --fc (repeat once per vehicle)
+      --profile <profile>  physical | simulation (default) | oracle-only
+      --port <port>        first host port (default: 4433); vehicle k
+                           gets port + k
+      --viewer-port <port> first viewer port (default: 8080); vehicle k
+                           gets viewer-port + k
+      --instance-base <n>  first simulator instance (default: 0);
+                           vehicle k gets instance-base + k
+      --open               open every vehicle's viewer URL
+      --no-open            open none (default)
 
   reset [options]
       Reset the running simulation world and restart its FC.

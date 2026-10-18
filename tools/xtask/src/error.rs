@@ -42,6 +42,31 @@ pub enum XtaskError {
         /// Every model the backend does launch.
         known: Vec<&'static str>,
     },
+    /// A fleet asked a backend to place its vehicle, and the backend
+    /// cannot. Refused before any session starts.
+    #[error("the {backend} backend cannot place its vehicle at a fleet spawn point")]
+    SpawnUnsupported {
+        /// The backend that has no spawn hook.
+        backend: &'static str,
+    },
+    /// Two fleet vehicles claim the same port or singleton.
+    #[error("fleet vehicles {first} and {second} both need {claim}")]
+    FleetClaimOverlap {
+        /// The earlier vehicle.
+        first: String,
+        /// The later vehicle.
+        second: String,
+        /// What both claim.
+        claim: String,
+    },
+    /// A world file has no single origin to move.
+    #[error("{} has no single <{tag}> to move the world origin with", world.display())]
+    WorldOrigin {
+        /// The world file.
+        world: PathBuf,
+        /// The tag found zero or several times.
+        tag: &'static str,
+    },
     /// `--profile` named an unknown session profile. Mirrors the host's
     /// own fail-closed parsing: a typo must never fail open.
     #[error("unknown --profile {value:?} (expected physical, simulation, or oracle-only)")]
