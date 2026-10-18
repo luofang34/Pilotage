@@ -46,9 +46,9 @@ impl StatusTextReport {
 /// One parameter value the FC reported.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ParamReport {
-    /// The value as the wire typed it. ArduPilot sends integer
-    /// parameters as the number in the float field, typed INT32, so its
-    /// readers take `f32::from_bits` of an `Int32`.
+    /// The value as the wire typed it. An INT32 means a different number
+    /// on each autopilot: read it through the autopilot's
+    /// [`crate::codec::ParamEncoding`].
     pub value: ParamValue,
     /// When the value was received.
     pub received_at: Instant,
