@@ -9,9 +9,11 @@
 //! `aviate-link` implementation, the peer this parser must interoperate
 //! with byte-for-byte).
 
+mod attitude_target;
 mod decoding;
 mod encoding;
 mod parameters;
+pub use attitude_target::{BodyRateTarget, encode_body_rate_setpoint};
 use decoding::decode_known;
 pub use encoding::{
     AttitudeTarget, GCS_COMPONENT_ID, GCS_SYSTEM_ID, GIMBAL_FLAGS_HORIZON_YAW_FOLLOW,
@@ -60,6 +62,9 @@ pub const PARAM_VALUE_ID: u32 = 22;
 pub const PARAM_SET_ID: u32 = 23;
 /// MANUAL_CONTROL message id (uplink: joystick sticks).
 pub const MANUAL_CONTROL_ID: u32 = 69;
+/// ATTITUDE_TARGET message id (downlink: the attitude and thrust the FC
+/// commands).
+pub const ATTITUDE_TARGET_ID: u32 = 83;
 
 /// One parsed frame event from the Aviate subset.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -75,6 +80,13 @@ pub enum FcMessage {
         /// The autopilot-specific flight mode (PX4: main mode in bits
         /// 16..24, sub mode in bits 24..32).
         custom_mode: u32,
+    },
+    /// The attitude and collective thrust the FC commands now.
+    AttitudeTarget {
+        /// Milliseconds since FC boot.
+        time_boot_ms: u32,
+        /// Normalized collective thrust in `[0, 1]`.
+        thrust: f32,
     },
     /// A parameter's current value, sent on request and as the echo of
     /// every parameter write.
@@ -265,6 +277,7 @@ fn crc_extra(msg_id: u32) -> Option<u8> {
         GIMBAL_DEVICE_ATTITUDE_STATUS_ID => Some(137),
         BATTERY_STATUS_ID => Some(154),
         PARAM_VALUE_ID => Some(220),
+        ATTITUDE_TARGET_ID => Some(22),
         _ => None,
     }
 }

@@ -321,7 +321,7 @@ fn apply_message(latest: &mut LinkState, message: FcMessage, now: Instant) {
         FcMessage::GimbalDeviceAttitudeStatus { .. } => apply_gimbal(latest, message, now),
         // Parameter traffic answers the uplink that wrote it; the
         // telemetry cache has no use for it.
-        FcMessage::ParamValue { .. } => {}
+        FcMessage::ParamValue { .. } | FcMessage::AttitudeTarget { .. } => {}
     }
 }
 
