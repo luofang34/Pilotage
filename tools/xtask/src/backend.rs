@@ -12,6 +12,7 @@ use crate::readiness::Readiness;
 
 pub(crate) mod aviate_gz;
 mod aviate_xplane;
+mod betaflight_sitl;
 pub(crate) mod gz;
 pub(crate) mod px4_gz;
 mod px4_xplane;
@@ -316,6 +317,11 @@ const BACKENDS: &[BackendEntry] = &[
         name: "aviate-xplane",
         alias: None,
         make: || Box::new(aviate_xplane::AviateXPlane),
+    },
+    BackendEntry {
+        name: "betaflight-sitl",
+        alias: Some("betaflight"),
+        make: || Box::new(betaflight_sitl::BetaflightSitl),
     },
 ];
 

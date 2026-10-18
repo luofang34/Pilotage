@@ -1,0 +1,124 @@
+#![allow(clippy::expect_used, clippy::panic)]
+
+use super::{BetaflightSitl, READY_LINE, plan_with_betaflight_dir};
+use crate::backend::{SessionContext, SimBackend, SpawnPoint};
+use crate::cli::Profile;
+use crate::conflicts::Claim;
+use crate::error::XtaskError;
+use crate::readiness::Readiness;
+
+fn context(tag: &str, instance: u16) -> SessionContext {
+    let root = std::env::temp_dir().join(format!("betaflight-plan-{tag}-{}", std::process::id()));
+    std::fs::create_dir_all(&root).expect("scaffold");
+    let mut ctx = SessionContext::for_test(root.clone());
+    ctx.log_dir = root.join("logs");
+    ctx.instance = instance;
+    ctx
+}
+
+fn scaffolded(ctx: &SessionContext) -> std::path::PathBuf {
+    let betaflight = ctx.repo_root.join("betaflight");
+    let elf = betaflight.join("obj/main/betaflight_SITL.elf");
+    std::fs::create_dir_all(elf.parent().expect("parent")).expect("dirs");
+    std::fs::write(&elf, b"").expect("file");
+    betaflight
+}
+
+fn value_after<'a>(args: &'a [String], flag: &str) -> &'a str {
+    let at = args.iter().position(|arg| arg == flag).expect(flag);
+    &args[at + 1]
+}
+
+#[test]
+fn a_missing_sitl_names_the_build_command() {
+    let ctx = context("missing", 0);
+    let refusal = plan_with_betaflight_dir(&ctx, &ctx.repo_root.join("betaflight"));
+    let Err(XtaskError::MissingArtifact { hint, .. }) = refusal else {
+        panic!("expected a missing artifact, got {refusal:?}");
+    };
+    assert!(hint.contains("make TARGET=SITL"));
+    assert!(hint.contains("ENABLE_GAZEBO_BRIDGE=0"));
+}
+
+#[test]
+fn the_sidecar_runs_the_sitl_with_the_repository_config_and_waits_for_flight() {
+    let ctx = context("plan", 0);
+    let stages = plan_with_betaflight_dir(&ctx, &scaffolded(&ctx)).expect("plan");
+    let [stage] = stages.as_slice() else {
+        panic!("one stage");
+    };
+    assert!(
+        stage
+            .spec
+            .program
+            .ends_with("target/release/pilotage-multirotor-fdm")
+    );
+    let args = &stage.spec.args;
+    assert!(value_after(args, "--betaflight").ends_with("obj/main/betaflight_SITL.elf"));
+    assert!(value_after(args, "--betaflight-config").ends_with("sim/betaflight/sitl.cli"));
+    assert_eq!(
+        value_after(args, "--north"),
+        "30",
+        "apart from the other demo vehicles"
+    );
+    assert_eq!(value_after(args, "--origin-lat"), "47.3977420");
+    assert!(matches!(
+        stage.readiness,
+        Readiness::LogContains { needle, .. } if needle == READY_LINE
+    ));
+    assert_eq!(BetaflightSitl.host_adapter(), "betaflight");
+    assert!(BetaflightSitl.host_env(&ctx).contains(&(
+        "PILOTAGE_BETAFLIGHT_PROFILE".to_owned(),
+        "simulation".to_owned()
+    )));
+}
+
+#[test]
+fn spawn_moves_the_model_frame_to_the_fleet_point() {
+    let ctx = context("spawn", 0);
+    let mut stages = plan_with_betaflight_dir(&ctx, &scaffolded(&ctx)).expect("plan");
+    let point = SpawnPoint {
+        latitude_deg: 47.398_012,
+        longitude_deg: 8.545_194,
+    };
+    BetaflightSitl
+        .spawn(&ctx, &point, &mut stages)
+        .expect("spawn");
+    let args = &stages[0].spec.args;
+    assert_eq!(value_after(args, "--origin-lat"), "47.3980120");
+    assert_eq!(value_after(args, "--origin-lon"), "8.5451940");
+    assert_eq!(value_after(args, "--north"), "0");
+}
+
+#[test]
+fn only_one_betaflight_runs_per_machine() {
+    let ctx = context("instance", 1);
+    assert!(matches!(
+        plan_with_betaflight_dir(&ctx, &scaffolded(&ctx)),
+        Err(XtaskError::Usage { .. })
+    ));
+    let claims = BetaflightSitl.claims(&context("claims", 0));
+    let ports: Vec<u16> = claims
+        .iter()
+        .filter_map(|claim| match claim {
+            Claim::Udp { port, .. } | Claim::Tcp { port, .. } => Some(*port),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ports, vec![9_002, 9_003, 9_004, 5_761]);
+    assert!(
+        claims
+            .iter()
+            .any(|claim| matches!(claim, Claim::Process("betaflight_SITL.elf")))
+    );
+}
+
+#[test]
+fn plan_refuses_non_simulation_profiles() {
+    let mut ctx = context("profile", 0);
+    ctx.profile = Profile::Physical;
+    assert!(matches!(
+        BetaflightSitl.plan(&ctx),
+        Err(XtaskError::Usage { .. })
+    ));
+}
