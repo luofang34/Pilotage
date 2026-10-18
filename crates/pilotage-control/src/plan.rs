@@ -3,7 +3,7 @@
 //! reliable-stream lease — and holds no control policy of its own.
 
 /// The velocity-control scope: the four flight axes.
-pub const MOTION_SCOPE: &str = "vehicle.motion";
+pub use pilotage_protocol::MOTION_SCOPE;
 /// The gimbal pointing scope, leased and fenced independently of flight.
 pub const GIMBAL_SCOPE: &str = "vehicle.gimbal";
 

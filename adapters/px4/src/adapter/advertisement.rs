@@ -7,7 +7,9 @@ use pilotage_adapter_api::{
     ActionCapability, AdapterCapabilities, ExecutionMode, IntentCapability, LegacyAxisRoute,
     LegacyCommandMap, LinkLossPolicy, ScopeDescriptor, VehicleDescriptor,
 };
-use pilotage_protocol::{ActionKind, IntentFamily, LogicalAxisId, ReferenceFrame, ScopeId};
+use pilotage_protocol::{
+    ActionKind, IntentFamily, LogicalAxisId, ReferenceFrame, ScopeId, VehicleClass,
+};
 
 use super::{
     ARM_BUTTON, DISARM_BUTTON, FLIGHT_SCOPE, GIMBAL_NEUTRAL_BUTTON, GIMBAL_SCOPE, PITCH_AXIS,
@@ -24,6 +26,8 @@ impl Px4Adapter {
             },
             vehicles: vec![VehicleDescriptor {
                 id: self.vehicle,
+                class: self.vehicle_class,
+                display_name: display_name(self.vehicle_class),
                 scopes: {
                     let mut scopes = Vec::new();
                     if self.uplink.is_some() {
@@ -48,6 +52,18 @@ impl Px4Adapter {
             control_feel: None,
         }
     }
+}
+
+/// The operator's name for a PX4 vehicle of this class.
+fn display_name(class: VehicleClass) -> String {
+    match class {
+        VehicleClass::Multicopter => "PX4 multicopter",
+        VehicleClass::FixedWing => "PX4 fixed-wing",
+        VehicleClass::Vtol => "PX4 VTOL",
+        VehicleClass::GroundRover => "PX4 rover",
+        VehicleClass::SurfaceVessel => "PX4 boat",
+    }
+    .to_owned()
 }
 
 fn flight_scope_descriptor() -> ScopeDescriptor {

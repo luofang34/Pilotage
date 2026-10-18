@@ -17,15 +17,16 @@
 //!
 //! An order is never left waiting in silence either: the flight
 //! controller's own refusal answers it, and an order nothing answers
-//! within [`ANSWER_WINDOW_MS`] snaps back to SAFE saying so, and is
-//! still answered if the vehicle carries it out late.
+//! within the protocol's [`COMMAND_ANSWER_WINDOW_MS`] snaps back to SAFE
+//! saying so, and is still answered if the vehicle carries it out late.
+//! A vehicle that reports the order in progress starts the window again.
 
-/// How long an order waits for the vehicle's answer. A PX4 offboard
-/// arm streams setpoints for a moment before it commands the arm.
-pub const ANSWER_WINDOW_MS: f64 = 5000.0;
+use pilotage_protocol::{COMMAND_ANSWER_WINDOW_MS, CommandOutcome};
 
-/// `MAV_RESULT_IN_PROGRESS`: the command is not answered yet.
-const MAV_RESULT_IN_PROGRESS: u32 = 5;
+/// The FC's verdict on the last arm or disarm: the command kind (1 arm,
+/// 2 disarm) and its typed outcome, `None` when the host sent no
+/// outcome it knows.
+type Verdict = (u32, Option<CommandOutcome>);
 
 /// What the operator's lever orders.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -78,11 +79,11 @@ pub struct ArmTelegraph {
     order: ArmOrder,
     confirmed: ArmConfirmed,
     phase: TelegraphPhase,
-    /// The FC's last acknowledgement, as (command kind, `MAV_RESULT`).
-    verdict: Option<(u32, u32)>,
+    /// The FC's last acknowledgement.
+    verdict: Option<Verdict>,
     /// The acknowledgement standing when the last order went out: a
     /// verdict equal to it answers an earlier order, not this one.
-    verdict_at_order: Option<(u32, u32)>,
+    verdict_at_order: Option<Verdict>,
     /// When the clock first saw the order awaiting its answer.
     awaiting_since_ms: Option<f64>,
     /// An order that went unanswered in the window: a late answer from
@@ -182,21 +183,28 @@ impl ArmTelegraph {
 
     /// Feeds the FC's acknowledgement of the last arm or disarm it was
     /// sent (`FcState.last_command_kind`: 0 none, 1 arm, 2 disarm;
-    /// `last_command_result`: the raw `MAV_RESULT`). A refusal of the
-    /// awaited command, newer than the order, answers it: the lever
-    /// snaps back to SAFE with the FC's reason.
-    pub fn on_fc_command_verdict(&mut self, kind: u32, result: u32) {
+    /// `last_command_outcome`, decoded with
+    /// [`CommandOutcome::from_wire`]). A refusal of the awaited command,
+    /// newer than the order, answers it: the lever snaps back to SAFE
+    /// with the FC's reason. A new in-progress report of the awaited
+    /// command starts the answer window again.
+    pub fn on_fc_command_verdict(&mut self, kind: u32, outcome: Option<CommandOutcome>) {
         if kind == 0 {
             return;
         }
-        self.verdict = Some((kind, result));
-        if self.verdict != self.verdict_at_order {
-            self.answer_with_refusal();
+        let previous = self.verdict.replace((kind, outcome));
+        if self.verdict == self.verdict_at_order || self.verdict == previous {
+            return;
         }
+        if outcome == Some(CommandOutcome::InProgress) && kind == self.awaited_kind() {
+            self.awaiting_since_ms = None;
+            return;
+        }
+        self.answer_with_refusal();
     }
 
     /// Advances the telegraph's clock. An order still unanswered after
-    /// [`ANSWER_WINDOW_MS`] is answered by the FC's standing refusal of
+    /// [`COMMAND_ANSWER_WINDOW_MS`] is answered by the FC's standing refusal of
     /// that command when there is one (a repeated refusal reads the same
     /// as the last), and otherwise snaps back to SAFE as unanswered.
     pub fn on_tick(&mut self, now_ms: f64) {
@@ -205,7 +213,7 @@ impl ArmTelegraph {
             return;
         }
         let since = *self.awaiting_since_ms.get_or_insert(now_ms);
-        if now_ms - since < ANSWER_WINDOW_MS {
+        if now_ms - since < f64::from(COMMAND_ANSWER_WINDOW_MS) {
             return;
         }
         if !self.answer_with_refusal() {
@@ -221,19 +229,23 @@ impl ArmTelegraph {
         if !matches!(self.phase, TelegraphPhase::AwaitingAnswer) {
             return false;
         }
-        let awaited = match self.order {
-            ArmOrder::Armed => 1,
-            ArmOrder::Safe => 2,
-        };
-        let Some((kind, result)) = self.verdict else {
+        let Some((kind, Some(outcome))) = self.verdict else {
             return false;
         };
-        if kind != awaited || result == 0 || result == MAV_RESULT_IN_PROGRESS {
+        if kind != self.awaited_kind() || !outcome.is_refusal() {
             return false;
         }
         self.order = ArmOrder::Safe;
-        self.phase = TelegraphPhase::Refused(fc_refusal(result));
+        self.phase = TelegraphPhase::Refused(fc_refusal(outcome).to_owned());
         true
+    }
+
+    /// The command kind the lever's order sends: 1 arm, 2 disarm.
+    fn awaited_kind(&self) -> u32 {
+        match self.order {
+            ArmOrder::Armed => 1,
+            ArmOrder::Safe => 2,
+        }
     }
 
     /// A fresh session voids every order and every report.
@@ -260,17 +272,20 @@ impl ArmTelegraph {
     }
 }
 
-/// The FC's reason for refusing, by `MAV_RESULT`, in the operator's words.
-fn fc_refusal(result: u32) -> String {
-    match result {
-        1 => "the flight controller is not ready (temporarily rejected; \
-              its preflight checks are the usual cause)"
-            .to_owned(),
-        2 => "the flight controller denied it".to_owned(),
-        3 => "the flight controller does not support it".to_owned(),
-        4 => "the flight controller failed to carry it out".to_owned(),
-        6 => "the flight controller cancelled it".to_owned(),
-        other => format!("the flight controller refused it (MAV_RESULT {other})"),
+/// The FC's reason for refusing, in the operator's words.
+fn fc_refusal(outcome: CommandOutcome) -> &'static str {
+    match outcome {
+        CommandOutcome::TemporarilyRejected => {
+            "the flight controller is not ready (temporarily rejected; \
+             its preflight checks are the usual cause)"
+        }
+        CommandOutcome::Denied => "the flight controller denied it",
+        CommandOutcome::Unsupported => "the flight controller does not support it",
+        CommandOutcome::Failed => "the flight controller failed to carry it out",
+        CommandOutcome::Cancelled => "the flight controller cancelled it",
+        CommandOutcome::Accepted | CommandOutcome::InProgress => {
+            "the flight controller did not refuse it"
+        }
     }
 }
 

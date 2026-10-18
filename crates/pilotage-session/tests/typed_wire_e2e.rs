@@ -45,6 +45,8 @@ fn capabilities() -> AdapterCapabilities {
         },
         vehicles: vec![VehicleDescriptor {
             id: VehicleId::new(1),
+            class: pilotage_protocol::VehicleClass::GroundRover,
+            display_name: "test rover".to_owned(),
             scopes: vec![ScopeDescriptor {
                 authority_group: None,
                 scope: ScopeId::new("vehicle.motion"),

@@ -8,7 +8,7 @@ pub const THROTTLE_AXIS: u16 = 2;
 /// Logical axis id for yaw/steering, on scope `vehicle.motion`.
 pub const STEERING_AXIS: u16 = 3;
 /// The only control scope the skiff exposes.
-pub const MOTION_SCOPE: &str = "vehicle.motion";
+pub const MOTION_SCOPE: &str = pilotage_protocol::MOTION_SCOPE;
 /// Full-scale forward (surge) command of the skiff's normalized dynamics
 /// envelope. The typed velocity capability advertises this bound, so a
 /// full-scale typed command maps 1:1 onto the dynamics' full input.

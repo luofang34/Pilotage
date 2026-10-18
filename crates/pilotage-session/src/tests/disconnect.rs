@@ -132,6 +132,8 @@ fn many_scope_capabilities(scopes: usize) -> AdapterCapabilities {
         },
         vehicles: vec![VehicleDescriptor {
             id: VEHICLE,
+            class: pilotage_protocol::VehicleClass::GroundRover,
+            display_name: "test rover".to_owned(),
             scopes: scope_descriptors,
             link_loss_actions: vec![LinkLossPolicy::Neutralize],
         }],

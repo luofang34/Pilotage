@@ -189,9 +189,11 @@ fn envelope_roundtrips_for_host_capabilities_arm() {
                 actions: vec![],
             }],
             supported_modes: vec![wire::ExecutionMode::Realtime as i32],
+            vehicle_class: wire::VehicleClass::GroundRover as i32,
         }],
         supported_modes: vec![wire::ExecutionMode::Realtime as i32],
         control_feel: None,
+        physically_embodied: true,
     };
     let envelope = wire::Envelope {
         schema_version: SCHEMA_VERSION,

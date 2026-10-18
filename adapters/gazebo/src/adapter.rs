@@ -26,7 +26,7 @@ use tokio::task::JoinHandle;
 use crate::error::GazeboAdapterError;
 
 /// The control scope this adapter exposes for the diff-drive vehicle.
-pub const MOTION_SCOPE: &str = "vehicle.motion";
+pub const MOTION_SCOPE: &str = pilotage_protocol::MOTION_SCOPE;
 /// Canonical logical axis carrying throttle (`linear.x`) commands.
 pub const THROTTLE_AXIS: u16 = 2;
 /// Canonical logical axis carrying yaw (`angular.z`) commands.

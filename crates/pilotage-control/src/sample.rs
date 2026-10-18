@@ -3,6 +3,8 @@
 //! DOM and the clock. Neither is owned by the
 //! runtime; both are handed in each tick.
 
+use pilotage_protocol::VehicleClass;
+
 /// One physical button as the Standard Gamepad reports it: a pressed flag
 /// and an analog value (triggers report `[0, 1]`, digital buttons `0`/`1`).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -85,18 +87,25 @@ impl RawSample {
     }
 }
 
-/// The operator's flight-control scheme this tick, chosen from the DOM.
-/// Rover releases the gimbal lease; the others hold it.
+/// The operator's flight-control scheme this tick: the operator's choice
+/// among the schemes the vehicle offers ([`crate::offered_schemes`]).
+/// Rover and plane release the gimbal lease; the others hold it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     /// RC Mode 2 (camera-drone default): left = climb/yaw, right = translate.
     QuadPilot,
     /// Game-native: left = translate, right X = yaw, triggers = climb/descend.
     QuadCruise,
-    /// Attitude mode; same stick geometry as pilot.
+    /// Angle mode on the direct scope; same stick geometry as pilot.
     Fpv,
     /// Throttle/yaw only; no gimbal.
     Rover,
+    /// Fixed wing: right X = turn (yaw rate), right Y = forward speed,
+    /// left Y = climb; no sideslip and no gimbal.
+    Plane,
+    /// Acro (rate) mode on the direct scope, RC Mode 2: left Y = thrust,
+    /// left X = yaw rate, right X/Y = roll/pitch rate.
+    Acro,
 }
 
 impl Mode {
@@ -108,7 +117,36 @@ impl Mode {
             "quad-cruise" => Self::QuadCruise,
             "fpv" => Self::Fpv,
             "rover" => Self::Rover,
+            "plane" => Self::Plane,
+            "acro" => Self::Acro,
             _ => Self::QuadPilot,
+        }
+    }
+
+    /// The default scheme for the vehicle class the host advertises, so
+    /// the client follows the vehicle rather than an operator setting.
+    ///
+    /// A VTOL takes off and lands as a multicopter, so it starts on the
+    /// multicopter scheme. A surface vessel steers like a rover. A host
+    /// that declares no class gets the camera-drone default.
+    #[must_use]
+    pub const fn for_vehicle_class(class: Option<VehicleClass>) -> Self {
+        match class {
+            Some(VehicleClass::FixedWing) => Self::Plane,
+            Some(VehicleClass::GroundRover | VehicleClass::SurfaceVessel) => Self::Rover,
+            Some(VehicleClass::Multicopter | VehicleClass::Vtol) | None => Self::QuadPilot,
+        }
+    }
+
+    /// The motion-group member this scheme flies on: the direct scope for
+    /// angle and acro flight, the velocity scope for every other scheme.
+    #[must_use]
+    pub const fn scope(self) -> &'static str {
+        match self {
+            Self::Fpv | Self::Acro => pilotage_protocol::DIRECT_SCOPE,
+            Self::QuadPilot | Self::QuadCruise | Self::Rover | Self::Plane => {
+                pilotage_protocol::MOTION_SCOPE
+            }
         }
     }
 
@@ -116,13 +154,15 @@ impl Mode {
     /// flies. Attitude mode and the rover read the four demands differently.
     #[must_use]
     pub const fn carries_direct_demand(self) -> bool {
-        matches!(self, Self::QuadPilot | Self::QuadCruise)
+        matches!(self, Self::QuadPilot | Self::QuadCruise | Self::Plane)
     }
 
-    /// Whether this mode operates a gimbal (everything but rover).
+    /// Whether this mode operates a gimbal. Not the rover, and not the
+    /// plane: the gimbal quasimode takes the right stick, and on a plane
+    /// that stick holds the forward speed and the turn.
     #[must_use]
     pub const fn carries_gimbal(self) -> bool {
-        !matches!(self, Self::Rover)
+        !matches!(self, Self::Rover | Self::Plane)
     }
 }
 

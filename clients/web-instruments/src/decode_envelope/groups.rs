@@ -171,7 +171,8 @@ pub(super) struct FcState {
 pub(super) struct Gimbal {
     quat: Quat,
     rates_rad_s: [f32; 3],
-    flags: u32,
+    /// `pilotage.v1.GimbalYawFrame`: 0 unspecified, 1 vehicle, 2 earth.
+    yaw_frame: i32,
     failure_flags: u32,
     stamp: Stamp,
 }
@@ -255,7 +256,7 @@ pub(super) fn gimbal_message(state: wire::GimbalAttitude) -> Option<Gimbal> {
             z: state.quat_z,
         },
         rates_rad_s: [state.rate_x_rad_s, state.rate_y_rad_s, state.rate_z_rad_s],
-        flags: state.flags,
+        yaw_frame: state.yaw_frame,
         failure_flags: state.failure_flags,
         stamp: stamp_message(stamp),
     })

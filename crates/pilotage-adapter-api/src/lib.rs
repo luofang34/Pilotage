@@ -34,6 +34,10 @@ pub use pilotage_camera_calibration::{
     radians_per_pixel, recover_intrinsics, sim_fpv_calibration, to_canonical, validate, verify,
     verify_camera, verify_sim_recovery,
 };
+// The typed vocabulary an adapter reports, shared with clients.
+pub use pilotage_protocol::{
+    CommandOutcome, GimbalAxisLocks, GimbalReference, GimbalYawFrame, VehicleClass,
+};
 pub use step::{StepBudget, StepOutcome};
 pub use telemetry::{
     AvionicsAttitudeSample, AvionicsBaroSample, AvionicsKinematicsSample, AvionicsSample,
