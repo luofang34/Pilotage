@@ -3,6 +3,7 @@
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
 use pilotage_mavlink::{AuthorizationSource, LinkConfig};
+use pilotage_protocol::VehicleClass;
 
 /// PX4 operating profiles supported by this adapter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,6 +22,19 @@ pub enum Px4Airframe {
     /// A conventional airplane: Position-mode sticks over MANUAL_CONTROL,
     /// with an automatic takeoff on arm.
     FixedWing,
+}
+
+impl Px4Airframe {
+    /// The vehicle class the capability advertisement declares for this
+    /// airframe. The airframe is the single source: the class a client
+    /// picks its control scheme from always matches how the adapter flies.
+    #[must_use]
+    pub const fn vehicle_class(self) -> VehicleClass {
+        match self {
+            Self::Multicopter => VehicleClass::Multicopter,
+            Self::FixedWing => VehicleClass::FixedWing,
+        }
+    }
 }
 
 /// All policy and network configuration required to start the PX4 adapter.
@@ -131,7 +145,7 @@ impl Px4Config {
 mod tests {
     use pilotage_mavlink::ResetPolicy;
 
-    use super::{Px4Config, Px4Profile};
+    use super::{Px4Airframe, Px4Config, Px4Profile};
 
     #[test]
     fn the_battery_report_is_requested_at_one_hertz() {
@@ -144,6 +158,23 @@ mod tests {
         let config = Px4Config::new(Px4Profile::Simulation).link_config();
         let gimbal = pilotage_mavlink::codec::GIMBAL_DEVICE_ATTITUDE_STATUS_ID;
         assert!(config.stream_interval_requests.contains(&(gimbal, 20_000)));
+    }
+
+    #[test]
+    fn the_advertised_class_follows_the_airframe() {
+        use pilotage_protocol::VehicleClass;
+        assert_eq!(
+            Px4Airframe::Multicopter.vehicle_class(),
+            VehicleClass::Multicopter
+        );
+        assert_eq!(
+            Px4Airframe::FixedWing.vehicle_class(),
+            VehicleClass::FixedWing
+        );
+        assert_eq!(
+            Px4Config::new(Px4Profile::Simulation).airframe,
+            Px4Airframe::Multicopter
+        );
     }
 
     #[test]

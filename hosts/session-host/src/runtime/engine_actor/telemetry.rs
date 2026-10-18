@@ -64,8 +64,14 @@ fn gimbal_to_wire(sample: GimbalAttitudeSample) -> wire::GimbalAttitude {
         rate_y_rad_s: sample.rates_rps[1],
         rate_z_rad_s: sample.rates_rps[2],
         stamp: Some(measurement_stamp_to_wire(sample.stamp)),
-        flags: sample.flags,
         failure_flags: sample.failure_flags,
+        yaw_frame: sample.reference.yaw_frame.to_wire() as i32,
+        roll_locked: sample.reference.locks.roll,
+        pitch_locked: sample.reference.locks.pitch,
+        yaw_locked: sample.reference.locks.yaw,
+        // The device's own mode bits stay unwritten: the typed reference
+        // is the only one a client reads.
+        ..wire::GimbalAttitude::default()
     }
 }
 

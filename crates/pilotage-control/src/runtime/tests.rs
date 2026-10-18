@@ -11,6 +11,7 @@ use crate::sample::{ButtonSample, Mode, RawSample, SessionState};
 // file past the module size limit, so they live in a sibling submodule.
 mod input_loss;
 mod motion;
+mod plane;
 
 /// A second profile with DIFFERENT bindings: the modifier and reset move to
 /// buttons 4/5 and the gimbal reads the LEFT stick (axes 0/1). Activating it

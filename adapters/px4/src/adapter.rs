@@ -10,7 +10,7 @@ use pilotage_adapter_api::{
     AdapterCapabilities, ApplyOutcome, LinkLossEnactError, LinkLossPolicy, RejectReason,
     StepBudget, StepOutcome, TelemetryBatch, VehicleAdapter, VideoSource,
 };
-use pilotage_protocol::VehicleId;
+use pilotage_protocol::{VehicleClass, VehicleId};
 use std::collections::BTreeMap;
 
 use pilotage_protocol::{LogicalAxisId, ScopeId, ScopedControlFrame};
@@ -40,6 +40,8 @@ mod gimbal_tests;
 mod link_loss;
 mod pointing;
 mod sampling;
+#[cfg(test)]
+mod test_support;
 #[cfg(test)]
 mod tests;
 
@@ -80,6 +82,7 @@ const WITHHOLD_AFTER: Duration = Duration::from_secs(3);
 #[derive(Debug)]
 pub struct Px4Adapter {
     vehicle: VehicleId,
+    vehicle_class: VehicleClass,
     // The shared receive-link cache. PX4's standard ESTIMATOR_STATUS
     // is the authorization source (LINK-04: the estimate is the only
     // basis for state-dependent control; there is no truth oracle).
@@ -185,6 +188,7 @@ impl Px4Adapter {
         let (frames, camera_bridge, frame_forwarder) = no_camera();
         Ok(Self {
             vehicle,
+            vehicle_class: config.airframe.vehicle_class(),
             estimate: Some(EstimateSource {
                 state,
                 _link: Some(link),
@@ -210,52 +214,12 @@ impl Px4Adapter {
         })
     }
 
-    /// Wires an adapter around a caller-supplied state cache, for tests.
-    #[cfg(test)]
-    pub(crate) fn from_state(vehicle: VehicleId, state: Arc<Mutex<LinkState>>) -> Self {
-        Self {
-            vehicle,
-            estimate: Some(EstimateSource { state, _link: None }),
-            uplink: None,
-            fixed_wing: None,
-            gimbal: None,
-            frames: None,
-            _camera_bridge: None,
-            _frame_forwarder: None,
-            arm: None,
-            last_seen_heartbeat: None,
-            arm_incarnation: pilotage_adapter_api::SourceIncarnation::new([0; 16]),
-            gimbal_stamp: sampling::GimbalStamp::new(pilotage_adapter_api::SourceIncarnation::new(
-                [0x60; 16],
-            )),
-            started_at: std::time::Instant::now(),
-            last_reset: None,
-            reset_latch: None,
-            reset_spawns: 0,
-            link_loss_policy: BTreeMap::new(),
-        }
-    }
-
     /// Takes the raw-frame receiver for the host media task, if cameras
     /// are up and it has not been taken.
     pub fn subscribe_frames(
         &mut self,
     ) -> Option<tokio::sync::mpsc::Receiver<pilotage_adapter_api::RawVideoFrame>> {
         self.frames.take()
-    }
-
-    /// Installs a test uplink, for tests.
-    #[cfg(test)]
-    pub(crate) fn with_uplink(mut self, uplink: Px4Uplink) -> Self {
-        self.uplink = Some(uplink);
-        self
-    }
-
-    /// Installs a test gimbal control path, for tests.
-    #[cfg(test)]
-    pub(crate) fn with_gimbal(mut self, gimbal: crate::gimbal::Px4GimbalControl) -> Self {
-        self.gimbal = Some(gimbal);
-        self
     }
 
     /// Folds the latest heartbeat arm flag into the arm report. Each

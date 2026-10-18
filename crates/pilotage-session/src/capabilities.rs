@@ -26,6 +26,7 @@ pub(crate) fn host_capabilities(
         vehicles: caps.vehicles.iter().map(vehicle_descriptor).collect(),
         supported_modes: execution_modes(caps),
         control_feel: caps.control_feel.as_ref().map(control_feel_identity),
+        physically_embodied: caps.execution.physically_embodied,
     }
 }
 
@@ -77,13 +78,14 @@ fn vehicle_descriptor(vehicle: &AdapterVehicle) -> wire::VehicleDescriptor {
         vehicle: Some(wire::VehicleId {
             value: vehicle.id.as_u64(),
         }),
-        display_name: String::new(),
+        display_name: vehicle.display_name.clone(),
         scopes: vehicle
             .scopes
             .iter()
             .map(|scope| scope_descriptor(scope, link_loss))
             .collect(),
         supported_modes: Vec::new(),
+        vehicle_class: vehicle.class.to_wire() as i32,
     }
 }
 
@@ -218,3 +220,6 @@ fn link_loss_action(policy: LinkLossPolicy) -> wire::LinkLossAction {
         LinkLossPolicy::EngageAutomation => wire::LinkLossAction::RevokeScope,
     }
 }
+
+#[cfg(test)]
+mod tests;

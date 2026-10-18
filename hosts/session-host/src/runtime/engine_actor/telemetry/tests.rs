@@ -383,3 +383,40 @@ fn a_battery_sample_survives_the_wire_with_unknown_values_as_nan() {
     assert_eq!(wire_stamp.sequence, 12);
     assert!(decoded.fc_state.is_none(), "battery is its own lane");
 }
+
+#[test]
+fn the_gimbal_lane_carries_the_typed_reference_and_not_the_device_bits() {
+    use pilotage_adapter_api::{
+        GimbalAttitudeSample, GimbalAxisLocks, GimbalReference, GimbalYawFrame,
+    };
+    let gimbal = super::gimbal_to_wire(GimbalAttitudeSample {
+        quat_wxyz: [1.0, 0.0, 0.0, 0.0],
+        rates_rps: [0.0; 3],
+        reference: GimbalReference {
+            yaw_frame: GimbalYawFrame::Earth,
+            locks: GimbalAxisLocks {
+                roll: true,
+                pitch: false,
+                yaw: true,
+            },
+        },
+        failure_flags: 0,
+        stamp: MeasurementStamp {
+            role: SourceRole::PayloadDevice,
+            integrity: SourceIntegrity::ChecksummedOnly,
+            source_id: 1,
+            source_incarnation: SourceIncarnation::new([0x33; 16]),
+            source_epoch: 1,
+            sequence: 1,
+            acquired_at_ns: 5,
+            clock: MeasurementClock::VehicleBoot,
+        },
+    });
+    assert_eq!(gimbal.yaw_frame, wire::GimbalYawFrame::Earth as i32);
+    assert!(gimbal.roll_locked);
+    assert!(!gimbal.pitch_locked);
+    assert!(gimbal.yaw_locked);
+    #[allow(deprecated)]
+    let legacy = gimbal.flags;
+    assert_eq!(legacy, 0, "the device's own mode bits are not written");
+}

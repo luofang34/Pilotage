@@ -386,6 +386,11 @@ async fn capabilities_report_motion_scope_and_camera_source() {
     assert!(caps.execution.real_time);
     assert!(caps.execution.render_capable);
     assert_eq!(caps.vehicles.len(), 1);
+    assert_eq!(
+        caps.vehicles[0].class,
+        pilotage_protocol::VehicleClass::GroundRover
+    );
+    assert!(!caps.vehicles[0].display_name.is_empty());
     assert_eq!(caps.vehicles[0].scopes[0].scope.as_str(), MOTION_SCOPE);
     let sources = adapter.video_sources();
     assert_eq!(sources.len(), 2, "FPV and chase are both advertised");
