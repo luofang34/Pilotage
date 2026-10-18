@@ -82,7 +82,7 @@ impl ArduPilotAdapter {
         let link_config = config.link_config();
         let mut link =
             MavlinkLink::start(link_config, SourceIncarnation::new(rand_incarnation())).await?;
-        let uplink = link.take_body_velocity_sender().map(|velocity| {
+        let uplink = link.take_setpoint_sender().map(|velocity| {
             ArduPilotUplink::new(
                 link.command_sender(),
                 velocity,

@@ -16,7 +16,13 @@ use crate::codec::{
 };
 
 use super::outbound::OutboundLanes;
-use super::{BodyVelocityDemand, CommandTarget, LinkConfig, LinkState, OutboundCommand, run_link};
+
+/// PARAM_REQUEST_READ message id.
+const PARAM_REQUEST_READ_ID: u32 = 20;
+use super::{
+    BodyVelocityDemand, CommandTarget, LinkConfig, LinkState, OffboardSetpoint, OutboundCommand,
+    run_link,
+};
 
 fn runtime() -> tokio::runtime::Runtime {
     tokio::runtime::Builder::new_current_thread()
@@ -49,7 +55,8 @@ async fn receive_until(socket: &UdpSocket, wanted: &[u32]) -> Vec<u32> {
 struct Harness {
     link_addr: SocketAddr,
     commands: tokio::sync::mpsc::Sender<OutboundCommand>,
-    velocity: tokio::sync::watch::Sender<Option<BodyVelocityDemand>>,
+    params: tokio::sync::mpsc::Sender<super::OutboundParam>,
+    velocity: tokio::sync::watch::Sender<Option<OffboardSetpoint>>,
     _rates: tokio::sync::watch::Sender<Option<super::GimbalRateDemand>>,
     task: tokio::task::JoinHandle<()>,
 }
@@ -65,16 +72,19 @@ async fn start_link() -> Harness {
     let (commands, command_rx) = tokio::sync::mpsc::channel(8);
     let (rates, rate_rx) = tokio::sync::watch::channel(None);
     let (velocity, velocity_rx) = tokio::sync::watch::channel(None);
+    let (params, param_rx) = tokio::sync::mpsc::channel(8);
     let lanes = OutboundLanes {
         commands: command_rx,
         gimbal_rates: rate_rx,
-        body_velocity: velocity_rx,
+        setpoints: velocity_rx,
+        params: param_rx,
     };
     let state = Arc::new(Mutex::new(LinkState::default()));
     let task = tokio::spawn(run_link(socket, config, false, state, lanes));
     Harness {
         link_addr,
         commands,
+        params,
         velocity,
         _rates: rates,
         task,
@@ -107,15 +117,33 @@ fn the_link_answers_the_address_the_fc_spoke_from() {
             .expect("the command queues");
         harness
             .velocity
-            .send(Some(BodyVelocityDemand {
+            .send(Some(OffboardSetpoint::BodyVelocity(BodyVelocityDemand {
                 vel_frd_mps: [1.0, 0.0, 0.0],
                 yaw_rate_rps: 0.0,
                 target_system: 1,
                 target_component: 1,
-            }))
+            })))
             .expect("the setpoint publishes");
 
-        receive_until(&fc, &[COMMAND_LONG_ID, SET_POSITION_TARGET_ID]).await;
+        harness
+            .params
+            .send(super::OutboundParam {
+                request: super::ParamRequest::Read("MOT_THST_HOVER"),
+                target_system: 1,
+                target_component: 1,
+            })
+            .await
+            .expect("the read queues");
+
+        receive_until(
+            &fc,
+            &[
+                COMMAND_LONG_ID,
+                SET_POSITION_TARGET_ID,
+                PARAM_REQUEST_READ_ID,
+            ],
+        )
+        .await;
         harness.task.abort();
     });
 }

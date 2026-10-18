@@ -14,6 +14,8 @@ use std::net::SocketAddr;
 use tokio::net::UdpSocket;
 use tracing::warn;
 
+use crate::codec::{AttitudeTargetKind, ParamValue};
+
 /// One reliably-ordered COMMAND_LONG for the FC's GCS instance.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct OutboundCommand {
@@ -58,12 +60,58 @@ pub struct BodyVelocityDemand {
     pub target_component: u8,
 }
 
+/// The latest-value attitude-loop demand for direct flight: one
+/// SET_ATTITUDE_TARGET per publication.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AttitudeThrustDemand {
+    /// Body rates or an absolute attitude.
+    pub kind: AttitudeTargetKind,
+    /// Collective thrust in the FC's own `[0, 1]` scale.
+    pub thrust: f32,
+    /// Target MAVLink system.
+    pub target_system: u8,
+    /// Target MAVLink component.
+    pub target_component: u8,
+}
+
+/// One offboard setpoint. Velocity and direct flight share one lane
+/// because one FC control loop follows exactly one of them at a time: the
+/// newest publication of either kind is the one the FC should follow.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum OffboardSetpoint {
+    /// A body-frame velocity and yaw rate.
+    BodyVelocity(BodyVelocityDemand),
+    /// Body rates or attitude, with thrust.
+    AttitudeThrust(AttitudeThrustDemand),
+}
+
+/// One parameter-protocol request, sent in order on its own lane.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ParamRequest {
+    /// PARAM_REQUEST_READ by name.
+    Read(&'static str),
+    /// PARAM_SET by name.
+    Set(&'static str, ParamValue),
+}
+
+/// A parameter request addressed to one FC component.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OutboundParam {
+    /// What to read or write.
+    pub request: ParamRequest,
+    /// Target MAVLink system.
+    pub target_system: u8,
+    /// Target MAVLink component.
+    pub target_component: u8,
+}
+
 /// The receive ends of the outbound lanes the link task arbitrates.
 #[derive(Debug)]
 pub(super) struct OutboundLanes {
     pub(super) commands: tokio::sync::mpsc::Receiver<OutboundCommand>,
     pub(super) gimbal_rates: tokio::sync::watch::Receiver<Option<GimbalRateDemand>>,
-    pub(super) body_velocity: tokio::sync::watch::Receiver<Option<BodyVelocityDemand>>,
+    pub(super) setpoints: tokio::sync::watch::Receiver<Option<OffboardSetpoint>>,
+    pub(super) params: tokio::sync::mpsc::Receiver<OutboundParam>,
 }
 
 /// Sends one encoded frame, logging a refused send with its context.
@@ -126,25 +174,83 @@ pub(super) async fn send_gimbal_rate(
     }
 }
 
-/// Encodes and sends one body velocity setpoint, advancing the shared
+/// Encodes and sends one offboard setpoint, advancing the shared
 /// sequence. `None` demand sends nothing.
-pub(super) async fn send_body_velocity(
+pub(super) async fn send_setpoint(
     socket: &UdpSocket,
     seq: &mut u8,
     target: Option<SocketAddr>,
     time_boot_ms: u32,
-    demand: Option<BodyVelocityDemand>,
+    setpoint: Option<OffboardSetpoint>,
 ) {
-    if let (Some(demand), Some(target)) = (demand, target) {
-        let frame = crate::codec::encode_body_velocity_setpoint(
-            *seq,
-            time_boot_ms,
-            demand.vel_frd_mps,
-            demand.yaw_rate_rps,
-            demand.target_system,
-            demand.target_component,
-        );
-        *seq = seq.wrapping_add(1);
-        send_frame(socket, &frame, target, "body velocity setpoint").await;
+    let (Some(setpoint), Some(target)) = (setpoint, target) else {
+        return;
+    };
+    match setpoint {
+        OffboardSetpoint::BodyVelocity(demand) => {
+            let frame = crate::codec::encode_body_velocity_setpoint(
+                *seq,
+                time_boot_ms,
+                demand.vel_frd_mps,
+                demand.yaw_rate_rps,
+                demand.target_system,
+                demand.target_component,
+            );
+            send_frame(socket, &frame, target, "body velocity setpoint").await;
+        }
+        OffboardSetpoint::AttitudeThrust(demand) => {
+            let frame = crate::codec::encode_attitude_target(
+                *seq,
+                time_boot_ms,
+                demand.kind,
+                demand.thrust,
+                demand.target_system,
+                demand.target_component,
+            );
+            send_frame(socket, &frame, target, "attitude target").await;
+        }
     }
+    *seq = seq.wrapping_add(1);
+}
+
+/// Encodes and sends one parameter request, advancing the shared
+/// sequence. A missing target drops it with a warning.
+pub(super) async fn send_param(
+    socket: &UdpSocket,
+    seq: &mut u8,
+    target: Option<SocketAddr>,
+    param: Option<OutboundParam>,
+) {
+    let Some(param) = param else {
+        return;
+    };
+    let Some(target) = target else {
+        warn!(
+            ?param,
+            "parameter request dropped: link has no command target yet"
+        );
+        return;
+    };
+    match param.request {
+        ParamRequest::Read(name) => {
+            let frame = crate::codec::encode_param_request_read(
+                *seq,
+                name,
+                param.target_system,
+                param.target_component,
+            );
+            send_frame(socket, &frame, target, "parameter read").await;
+        }
+        ParamRequest::Set(name, value) => {
+            let frame = crate::codec::encode_param_set(
+                *seq,
+                name,
+                value,
+                param.target_system,
+                param.target_component,
+            );
+            send_frame(socket, &frame, target, "parameter set").await;
+        }
+    }
+    *seq = seq.wrapping_add(1);
 }

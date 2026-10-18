@@ -9,7 +9,9 @@ use tokio::net::UdpSocket;
 use tracing::{error, warn};
 
 use super::apply::apply_messages;
-use super::outbound::{OutboundLanes, send_body_velocity, send_gimbal_rate, send_outbound_command};
+use super::outbound::{
+    OutboundLanes, send_gimbal_rate, send_outbound_command, send_param, send_setpoint,
+};
 use super::{CommandTarget, LinkConfig, LinkState};
 use crate::codec::{
     FcMessage, FrameSource, MAV_CMD_SET_MESSAGE_INTERVAL, encode_gcs_heartbeat, parse_datagram,
@@ -38,7 +40,7 @@ pub(super) async fn run_link(
     let mut heartbeat = tokio::time::interval(Duration::from_secs(1));
     let mut seq: u8 = 0;
     let mut rates_open = true;
-    let mut velocity_open = true;
+    let mut setpoints_open = true;
     let mut fc_sender: Option<SocketAddr> = None;
     loop {
         let target = resolve_target(config.command_target, fc_sender);
@@ -62,14 +64,17 @@ pub(super) async fn run_link(
                     send_gimbal_rate(&socket, &mut seq, target, demand).await;
                 }
             }
-            changed = lanes.body_velocity.changed(), if velocity_open => {
+            param = lanes.params.recv() => {
+                send_param(&socket, &mut seq, target, param).await;
+            }
+            changed = lanes.setpoints.changed(), if setpoints_open => {
                 if changed.is_err() {
-                    velocity_open = false;
+                    setpoints_open = false;
                 } else {
-                    let demand = *lanes.body_velocity.borrow_and_update();
+                    let setpoint = *lanes.setpoints.borrow_and_update();
                     let time_boot_ms =
                         u32::try_from(started.elapsed().as_millis()).unwrap_or(u32::MAX);
-                    send_body_velocity(&socket, &mut seq, target, time_boot_ms, demand).await;
+                    send_setpoint(&socket, &mut seq, target, time_boot_ms, setpoint).await;
                 }
             }
             _ = heartbeat.tick() => {

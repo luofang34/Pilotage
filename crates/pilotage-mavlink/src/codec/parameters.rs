@@ -8,6 +8,9 @@
 use super::encoding::{encode_frame_v2, encode_frame_v2_from};
 use super::{FcMessage, PARAM_SET_ID, PARAM_VALUE_ID};
 
+/// PARAM_REQUEST_READ message id.
+const PARAM_REQUEST_READ_ID: u32 = 20;
+
 /// MAV_PARAM_TYPE_INT32.
 const PARAM_TYPE_INT32: u8 = 6;
 /// MAV_PARAM_TYPE_REAL32.
@@ -73,6 +76,28 @@ pub fn encode_param_set(
     payload[22] = param_type;
     let mut frame = [0u8; 35];
     encode_frame_v2(seq, PARAM_SET_ID, &payload, 168, &mut frame);
+    frame
+}
+
+/// Serializes a PARAM_REQUEST_READ of one parameter by name (index -1).
+/// The FC answers with a PARAM_VALUE.
+///
+/// Wire order (20 bytes): param_index i16 @0, target_system @2,
+/// target_component @3, param_id\[16\] @4.
+#[must_use]
+pub fn encode_param_request_read(
+    seq: u8,
+    name: &str,
+    target_system: u8,
+    target_component: u8,
+) -> [u8; 32] {
+    let mut payload = [0u8; 20];
+    payload[0..2].copy_from_slice(&(-1_i16).to_le_bytes());
+    payload[2] = target_system;
+    payload[3] = target_component;
+    payload[4..20].copy_from_slice(&param_id(name));
+    let mut frame = [0u8; 32];
+    encode_frame_v2(seq, PARAM_REQUEST_READ_ID, &payload, 214, &mut frame);
     frame
 }
 

@@ -89,7 +89,8 @@ async fn configure_reaches_the_wire_before_the_first_rate_frame() {
     let lanes = OutboundLanes {
         commands: command_rx,
         gimbal_rates: rate_rx,
-        body_velocity: velocity_rx,
+        setpoints: velocity_rx,
+        params: tokio::sync::mpsc::channel(1).1,
     };
     let link = tokio::spawn(run_link(link_socket, config, false, state, lanes));
 

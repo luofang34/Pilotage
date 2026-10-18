@@ -1,6 +1,7 @@
 //! Frame serialization for the uplink subset: GCS presence, commands,
 //! offboard setpoints, and gimbal-manager demands.
 
+use super::attitude_target::SET_ATTITUDE_TARGET_ID;
 use super::{
     COMMAND_ACK_ID, COMMAND_LONG_ID, GIMBAL_MANAGER_SET_ATTITUDE_ID, HEARTBEAT_ID, MAGIC_V2,
     MANUAL_CONTROL_ID, SET_POSITION_TARGET_ID, compute_crc,
@@ -283,7 +284,6 @@ pub struct AttitudeTarget {
 
 /// Encodes one absolute attitude target for the selected component.
 pub fn encode_attitude_setpoint(seq: u8, time_boot_ms: u32, target: AttitudeTarget) -> [u8; 51] {
-    const SET_ATTITUDE_TARGET_ID: u32 = 82;
     let (sr, cr) = (target.roll_rad * 0.5).sin_cos();
     let (sp, cp) = (target.pitch_rad * 0.5).sin_cos();
     let (sy, cy) = (target.yaw_rad * 0.5).sin_cos();

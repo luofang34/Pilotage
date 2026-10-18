@@ -9,9 +9,11 @@
 //! `aviate-link` implementation, the peer this parser must interoperate
 //! with byte-for-byte).
 
+mod attitude_target;
 mod decoding;
 mod encoding;
 mod parameters;
+pub use attitude_target::{AttitudeTargetKind, SET_ATTITUDE_TARGET_ID, encode_attitude_target};
 use decoding::decode_known;
 pub use encoding::{
     AttitudeTarget, GCS_COMPONENT_ID, GCS_SYSTEM_ID, GIMBAL_FLAGS_HORIZON_YAW_FOLLOW,
@@ -20,7 +22,10 @@ pub use encoding::{
     encode_command_long, encode_gcs_heartbeat, encode_gimbal_rate_setpoint, encode_manual_control,
     encode_position_setpoint, encode_velocity_setpoint,
 };
-pub use parameters::{PARAM_ID_LEN, ParamValue, encode_param_set, encode_param_value, param_id};
+pub use parameters::{
+    PARAM_ID_LEN, ParamValue, encode_param_request_read, encode_param_set, encode_param_value,
+    param_id,
+};
 
 /// MAVLink 2.0 start-of-frame marker.
 pub const MAGIC_V2: u8 = 0xFD;

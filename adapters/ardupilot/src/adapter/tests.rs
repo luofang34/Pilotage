@@ -15,7 +15,9 @@ use pilotage_mavlink::codec::{
     STATUS_TEXT_LEN,
 };
 use pilotage_mavlink::link::apply_messages_at;
-use pilotage_mavlink::{AuthorizationSource, BodyVelocityDemand, LinkState, OutboundCommand};
+use pilotage_mavlink::{
+    AuthorizationSource, BodyVelocityDemand, LinkState, OffboardSetpoint, OutboundCommand,
+};
 use pilotage_protocol::{
     ControlAction, ControlIntent, ControlPayload, Generation, ReferenceFrame, ScopeId,
     ScopedControlFrame, SequenceNum, SessionId, VehicleId, VelocityIntent,
@@ -23,6 +25,14 @@ use pilotage_protocol::{
 
 use super::{ArduPilotAdapter, FLIGHT_SCOPE};
 use crate::uplink::ArduPilotUplink;
+
+/// The body velocity a setpoint lane holds, if it holds one.
+fn body_velocity(setpoint: Option<OffboardSetpoint>) -> Option<BodyVelocityDemand> {
+    match setpoint? {
+        OffboardSetpoint::BodyVelocity(demand) => Some(demand),
+        OffboardSetpoint::AttitudeThrust(_) => None,
+    }
+}
 
 const SOURCE: FrameSource = FrameSource {
     system_id: 1,
@@ -35,7 +45,7 @@ struct Harness {
     adapter: ArduPilotAdapter,
     state: Arc<Mutex<LinkState>>,
     commands: mpsc::Receiver<OutboundCommand>,
-    velocity: watch::Receiver<Option<BodyVelocityDemand>>,
+    velocity: watch::Receiver<Option<OffboardSetpoint>>,
     time_boot_ms: u32,
 }
 
@@ -219,7 +229,7 @@ fn climb_takes_off_then_velocity_streams_body_frame_and_disarm_lands() {
         .adapter
         .apply_control(&frame(velocity(9.0, 0.0, 0.5), vec![]));
     assert_eq!(flying.disposition, Disposition::Transformed, "9 m/s clamps");
-    let demand = harness.velocity.borrow_and_update().expect("a setpoint");
+    let demand = body_velocity(*harness.velocity.borrow_and_update()).expect("a setpoint");
     assert_eq!(demand.vel_frd_mps, [3.0, 0.0, 0.0]);
     assert_eq!(demand.yaw_rate_rps, 0.5);
 
@@ -251,7 +261,7 @@ fn link_loss_zeroes_the_setpoint_and_rejects_until_cleared() {
         .adapter
         .set_link_loss_policy(VehicleId::new(1), &scope, Some(LinkLossPolicy::Neutralize))
         .expect("engaged");
-    let demand = harness.velocity.borrow_and_update().expect("a setpoint");
+    let demand = body_velocity(*harness.velocity.borrow_and_update()).expect("a setpoint");
     assert_eq!(demand.vel_frd_mps, [0.0; 3]);
     let suppressed = harness
         .adapter

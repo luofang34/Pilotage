@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::time::Instant;
 
 use super::CommandAckReport;
-use crate::codec::STATUS_TEXT_LEN;
+use crate::codec::{PARAM_ID_LEN, ParamValue, STATUS_TEXT_LEN};
 
 /// How many status texts the link keeps. An FC that refuses an arm sends
 /// its reasons in a burst next to the refusal, so a short history holds
@@ -43,6 +43,17 @@ impl StatusTextReport {
     }
 }
 
+/// One parameter value the FC reported.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ParamReport {
+    /// The value as the wire typed it. ArduPilot sends integer
+    /// parameters as the number in the float field, typed INT32, so its
+    /// readers take `f32::from_bits` of an `Int32`.
+    pub value: ParamValue,
+    /// When the value was received.
+    pub received_at: Instant,
+}
+
 /// FC-owned reports from the selected source.
 #[derive(Debug, Default)]
 pub struct FcReports {
@@ -58,6 +69,8 @@ pub struct FcReports {
     /// The most recent status texts, oldest first, at most
     /// [`STATUS_TEXT_HISTORY`].
     pub status_texts: VecDeque<StatusTextReport>,
+    /// The latest reported value of each parameter, by name.
+    pub params: BTreeMap<String, ParamReport>,
 }
 
 impl FcReports {
@@ -65,6 +78,29 @@ impl FcReports {
     #[must_use]
     pub fn command_ack(&self, command: u16) -> Option<CommandAckReport> {
         self.command_acks.get(&command).copied()
+    }
+
+    /// The latest reported value of parameter `name`.
+    #[must_use]
+    pub fn param(&self, name: &str) -> Option<ParamReport> {
+        self.params.get(name).copied()
+    }
+
+    pub(super) fn record_param(
+        &mut self,
+        raw: &[u8; PARAM_ID_LEN],
+        value: ParamValue,
+        now: Instant,
+    ) {
+        let end = raw.iter().position(|byte| *byte == 0).unwrap_or(raw.len());
+        let name = String::from_utf8_lossy(raw.get(..end).unwrap_or(&[])).into_owned();
+        self.params.insert(
+            name,
+            ParamReport {
+                value,
+                received_at: now,
+            },
+        );
     }
 
     pub(super) fn push_status_text(

@@ -93,3 +93,19 @@ fn heartbeat_records_the_mode_and_autopilot() {
     assert_eq!(latest.fc_reports.autopilot, Some(3));
     assert_eq!(latest.heartbeat_armed, Some(true));
 }
+
+#[test]
+fn parameter_values_are_kept_by_name() {
+    let state = Arc::new(Mutex::new(LinkState::default()));
+    apply(
+        &state,
+        FcMessage::ParamValue {
+            param_id: crate::codec::param_id("MOT_THST_HOVER"),
+            value: crate::codec::ParamValue::Real32(0.39),
+        },
+    );
+    let latest = state.lock().expect("lock");
+    let report = latest.fc_reports.param("MOT_THST_HOVER").expect("kept");
+    assert_eq!(report.value, crate::codec::ParamValue::Real32(0.39));
+    assert!(latest.fc_reports.param("MOT_THST").is_none());
+}

@@ -25,9 +25,12 @@ pub use config::{AuthorizationSource, CommandTarget, LinkConfig, ResetPolicy};
 pub use error::LinkError;
 pub use estimate_fix::estimate_geodetic_fix;
 use estimator::EstimatorStatusUpdate;
-pub use fc_reports::{FcReports, STATUS_TEXT_HISTORY, StatusTextReport};
+pub use fc_reports::{FcReports, ParamReport, STATUS_TEXT_HISTORY, StatusTextReport};
 use outbound::OutboundLanes;
-pub use outbound::{BodyVelocityDemand, GimbalRateDemand, OutboundCommand};
+pub use outbound::{
+    AttitudeThrustDemand, BodyVelocityDemand, GimbalRateDemand, OffboardSetpoint, OutboundCommand,
+    OutboundParam, ParamRequest,
+};
 use task::run_link;
 pub use updates::{
     AttitudeUpdate, BaroUpdate, BatteryReport, CommandAckReport, GimbalDeviceAttitude,
@@ -162,7 +165,8 @@ pub struct MavlinkLink {
     task: JoinHandle<()>,
     commands: tokio::sync::mpsc::Sender<OutboundCommand>,
     gimbal_rates: Option<tokio::sync::watch::Sender<Option<GimbalRateDemand>>>,
-    body_velocity: Option<tokio::sync::watch::Sender<Option<BodyVelocityDemand>>>,
+    setpoints: Option<tokio::sync::watch::Sender<Option<OffboardSetpoint>>>,
+    params: tokio::sync::mpsc::Sender<OutboundParam>,
 }
 
 impl MavlinkLink {
@@ -205,10 +209,12 @@ impl MavlinkLink {
         let (commands, command_rx) = tokio::sync::mpsc::channel(16);
         let (rate_tx, rate_rx) = tokio::sync::watch::channel(None);
         let (velocity_tx, velocity_rx) = tokio::sync::watch::channel(None);
+        let (params, param_rx) = tokio::sync::mpsc::channel(16);
         let lanes = OutboundLanes {
             commands: command_rx,
             gimbal_rates: rate_rx,
-            body_velocity: velocity_rx,
+            setpoints: velocity_rx,
+            params: param_rx,
         };
         let task = tokio::spawn(run_link(socket, config, router_mode, state.clone(), lanes));
         Ok(Self {
@@ -216,7 +222,8 @@ impl MavlinkLink {
             task,
             commands,
             gimbal_rates: Some(rate_tx),
-            body_velocity: Some(velocity_tx),
+            setpoints: Some(velocity_tx),
+            params,
         })
     }
 
@@ -244,12 +251,19 @@ impl MavlinkLink {
         self.gimbal_rates.take()
     }
 
-    /// Takes the latest-value body velocity lane (single producer), with
-    /// the same coalescing as the gimbal rate lane.
-    pub fn take_body_velocity_sender(
+    /// Takes the latest-value offboard setpoint lane (single producer),
+    /// with the same coalescing as the gimbal rate lane. Every publication
+    /// is sent, so a producer streams at the rate it publishes.
+    pub fn take_setpoint_sender(
         &mut self,
-    ) -> Option<tokio::sync::watch::Sender<Option<BodyVelocityDemand>>> {
-        self.body_velocity.take()
+    ) -> Option<tokio::sync::watch::Sender<Option<OffboardSetpoint>>> {
+        self.setpoints.take()
+    }
+
+    /// The ordered parameter-protocol lane. Reads are answered with a
+    /// PARAM_VALUE that the cache keeps in [`FcReports::params`].
+    pub fn param_sender(&self) -> tokio::sync::mpsc::Sender<OutboundParam> {
+        self.params.clone()
     }
 }
 

@@ -19,7 +19,7 @@ use pilotage_mavlink::ardupilot::ArduCopterMode;
 use pilotage_mavlink::codec::{
     MAV_CMD_COMPONENT_ARM_DISARM, MAV_CMD_DO_SET_MODE, MAV_CMD_NAV_TAKEOFF,
 };
-use pilotage_mavlink::{BodyVelocityDemand, OutboundCommand};
+use pilotage_mavlink::{BodyVelocityDemand, OffboardSetpoint, OutboundCommand};
 
 /// Full-envelope horizontal velocity demand, the same as the PX4 and
 /// Aviate adapters advertise so every quad feels alike to the operator.
@@ -93,7 +93,7 @@ pub(crate) enum DisarmOutcome {
 #[derive(Debug)]
 pub struct ArduPilotUplink {
     commands: mpsc::Sender<OutboundCommand>,
-    velocity: watch::Sender<Option<BodyVelocityDemand>>,
+    velocity: watch::Sender<Option<OffboardSetpoint>>,
     system_id: u8,
     component_id: u8,
     phase: FlightPhase,
@@ -106,7 +106,7 @@ pub struct ArduPilotUplink {
 impl ArduPilotUplink {
     pub(crate) fn new(
         commands: mpsc::Sender<OutboundCommand>,
-        velocity: watch::Sender<Option<BodyVelocityDemand>>,
+        velocity: watch::Sender<Option<OffboardSetpoint>>,
         system_id: u8,
         component_id: u8,
     ) -> Self {
@@ -257,12 +257,14 @@ impl ArduPilotUplink {
     }
 
     fn stream(&mut self, demand: [f32; 4], constrained: bool) -> VelocityOutcome {
-        let published = self.velocity.send(Some(BodyVelocityDemand {
-            vel_frd_mps: [demand[0], demand[1], demand[2]],
-            yaw_rate_rps: demand[3],
-            target_system: self.system_id,
-            target_component: self.component_id,
-        }));
+        let published =
+            self.velocity
+                .send(Some(OffboardSetpoint::BodyVelocity(BodyVelocityDemand {
+                    vel_frd_mps: [demand[0], demand[1], demand[2]],
+                    yaw_rate_rps: demand[3],
+                    target_system: self.system_id,
+                    target_component: self.component_id,
+                })));
         if published.is_err() {
             self.send_failures = self.send_failures.wrapping_add(1);
             return VelocityOutcome::LaneClosed;

@@ -17,7 +17,8 @@ pub mod sampling;
 
 pub use codec::{FcMessage, FrameSource, ParseStats, parse_datagram};
 pub use link::{
-    AttitudeUpdate, AuthorizationSource, BatteryReport, BodyVelocityDemand, CommandAckReport,
-    CommandTarget, FcReports, GimbalDeviceAttitude, GimbalRateDemand, KinematicsUpdate, LinkConfig,
-    LinkError, LinkState, MavlinkLink, OutboundCommand, ResetPolicy, StatusTextReport,
+    AttitudeThrustDemand, AttitudeUpdate, AuthorizationSource, BatteryReport, BodyVelocityDemand,
+    CommandAckReport, CommandTarget, FcReports, GimbalDeviceAttitude, GimbalRateDemand,
+    KinematicsUpdate, LinkConfig, LinkError, LinkState, MavlinkLink, OffboardSetpoint,
+    OutboundCommand, OutboundParam, ParamRequest, ResetPolicy, StatusTextReport,
 };

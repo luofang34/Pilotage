@@ -7,13 +7,21 @@ use tokio::sync::{mpsc, watch};
 use pilotage_mavlink::codec::{
     MAV_CMD_COMPONENT_ARM_DISARM, MAV_CMD_DO_SET_MODE, MAV_CMD_NAV_TAKEOFF,
 };
-use pilotage_mavlink::{BodyVelocityDemand, OutboundCommand};
+use pilotage_mavlink::{BodyVelocityDemand, OffboardSetpoint, OutboundCommand};
 
 use super::{ArduPilotUplink, DisarmOutcome, TAKEOFF_ALTITUDE_M, VelocityOutcome};
 
+/// The body velocity a setpoint lane holds, if it holds one.
+fn body_velocity(setpoint: Option<OffboardSetpoint>) -> Option<BodyVelocityDemand> {
+    match setpoint? {
+        OffboardSetpoint::BodyVelocity(demand) => Some(demand),
+        OffboardSetpoint::AttitudeThrust(_) => None,
+    }
+}
+
 struct Lanes {
     commands: mpsc::Receiver<OutboundCommand>,
-    velocity: watch::Receiver<Option<BodyVelocityDemand>>,
+    velocity: watch::Receiver<Option<OffboardSetpoint>>,
 }
 
 fn uplink() -> (ArduPilotUplink, Lanes) {
@@ -116,7 +124,7 @@ fn a_climb_intent_on_the_ground_takes_off_and_setpoints_wait_for_it() {
         uplink.apply_velocity(FORWARD, false, true, -2.1, now),
         VelocityOutcome::Streamed { constrained: false }
     );
-    let demand = lanes.velocity.borrow_and_update().expect("a setpoint");
+    let demand = body_velocity(*lanes.velocity.borrow_and_update()).expect("a setpoint");
     assert_eq!(demand.vel_frd_mps, [2.0, 0.0, 0.0]);
 }
 
@@ -181,7 +189,7 @@ fn neutralize_sends_one_zero_setpoint_only_when_flying() {
     airborne(&mut uplink, &mut lanes, now);
     lanes.velocity.borrow_and_update();
     uplink.neutralize();
-    let demand = lanes.velocity.borrow_and_update().expect("a setpoint");
+    let demand = body_velocity(*lanes.velocity.borrow_and_update()).expect("a setpoint");
     assert_eq!(demand.vel_frd_mps, [0.0; 3]);
     assert_eq!(demand.yaw_rate_rps, 0.0);
 }
