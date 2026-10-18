@@ -63,7 +63,8 @@ fn an_attitude_flies_angle_and_holds_the_heading_by_rate() {
 #[test]
 fn entering_direct_holds_the_throttle_until_the_operator_reaches_it() {
     let mut direct = DirectLoop::default();
-    direct.begin(0.57);
+    // Hover at the midpoint: canonical thrust is the throttle itself.
+    direct.begin(0.57, 0.5);
     assert_eq!(direct.sticks(rates(0.0, 0.0, 0.0, 0.0), 0.0).throttle, 0.57);
     assert_eq!(direct.sticks(rates(0.0, 0.0, 0.0, 0.3), 0.0).throttle, 0.57);
     assert_eq!(
@@ -75,4 +76,33 @@ fn entering_direct_holds_the_throttle_until_the_operator_reaches_it() {
         0.2,
         "the operator has it now"
     );
+}
+
+#[test]
+fn centre_thrust_is_the_learned_hover_throttle() {
+    let mut direct = DirectLoop::default();
+    // Assisted flight hovered at 0.32; the operator's centred stick (0.5)
+    // takes over at once and stays at hover.
+    direct.begin(0.32, 0.32);
+    let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
+    assert!(close(
+        direct.sticks(rates(0.0, 0.0, 0.0, 0.5), 0.0).throttle,
+        0.32
+    ));
+    assert!(close(
+        direct.sticks(rates(0.0, 0.0, 0.0, 0.25), 0.0).throttle,
+        0.16
+    ));
+    assert!(close(
+        direct.sticks(rates(0.0, 0.0, 0.0, 0.0), 0.0).throttle,
+        0.0
+    ));
+    assert!(close(
+        direct.sticks(rates(0.0, 0.0, 0.0, 0.75), 0.0).throttle,
+        0.66
+    ));
+    assert!(close(
+        direct.sticks(rates(0.0, 0.0, 0.0, 1.0), 0.0).throttle,
+        1.0
+    ));
 }

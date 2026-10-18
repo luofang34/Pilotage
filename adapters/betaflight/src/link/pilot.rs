@@ -155,7 +155,7 @@ impl Pilot {
         }
         let throttle = self.last.throttle;
         match family {
-            Family::Direct => self.direct.begin(throttle),
+            Family::Direct => self.direct.begin(throttle, self.outer.hover_throttle()),
             Family::Assisted => self.outer.resume(throttle, throttle > AIRBORNE_THROTTLE),
         }
         tracing::info!(?family, throttle, "Betaflight control family changed");
