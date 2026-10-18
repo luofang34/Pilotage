@@ -155,7 +155,20 @@ impl Pilot {
         }
         let throttle = self.last.throttle;
         match family {
-            Family::Direct => self.direct.begin(throttle, self.outer.hover_throttle()),
+            // Airborne, direct flight starts at the learned hover rather than
+            // at the assisted loop's last output: that output also carries
+            // the climb-rate correction of the moment (pulling down after a
+            // climb's overshoot, say), and a direct loop holding it would
+            // keep sinking or climbing. On the ground it holds what was sent.
+            Family::Direct => {
+                let hover = self.outer.hover_throttle();
+                let held = if self.outer.is_flying() {
+                    hover
+                } else {
+                    throttle
+                };
+                self.direct.begin(held, hover);
+            }
             Family::Assisted => self.outer.resume(throttle, throttle > AIRBORNE_THROTTLE),
         }
         tracing::info!(?family, throttle, "Betaflight control family changed");

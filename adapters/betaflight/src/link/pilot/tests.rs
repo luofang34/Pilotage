@@ -71,7 +71,7 @@ fn disarmed_sticks_are_idle_with_the_switch_as_asked() {
 }
 
 #[test]
-fn a_direct_demand_leaves_at_once_in_acro_with_the_throttle_held_until_reached() {
+fn a_direct_demand_leaves_at_once_in_acro_holding_the_learned_hover() {
     let now = Instant::now();
     let (mut pilot, throttle) = airborne(now);
     assert!(throttle > 0.3);
@@ -79,23 +79,42 @@ fn a_direct_demand_leaves_at_once_in_acro_with_the_throttle_held_until_reached()
         .on_demands(&rates(now, 0.0), now)
         .expect("direct flies");
     assert!(!held.angle && held.roll > 0.0 && held.arm);
-    assert_eq!(held.throttle, throttle, "no drop on entering direct flight");
-    // Canonical thrust puts the learned hover at 0.5, so the thrust that
-    // reaches the held (climbing) throttle sits above the midpoint; below
-    // it the throttle scales down to zero.
+    // Entered in the air, direct flight holds the learned hover, not the
+    // climbing throttle of the moment.
     let hover = pilot.outer.hover_throttle();
-    let reaching = 0.5 + (throttle - hover) / (2.0 * (1.0 - hover));
+    assert!((held.throttle - hover).abs() < 1e-9, "{held:?} vs {hover}");
+    assert!(throttle > hover, "the climb ran above hover");
+    // Canonical thrust puts that hover at 0.5: a centred stick takes over
+    // at once, and below it the throttle scales down to zero.
     let taken = pilot
-        .on_demands(&rates(now, reaching), now)
+        .on_demands(&rates(now, 0.5), now)
         .expect("direct flies");
     let after = pilot
         .on_demands(&rates(now, 0.2), now)
         .expect("direct flies");
     assert!(
-        (taken.throttle - throttle).abs() < 1e-9,
-        "{taken:?} vs {throttle}"
+        (taken.throttle - hover).abs() < 1e-9,
+        "{taken:?} vs {hover}"
     );
     assert!((after.throttle - 0.4 * hover).abs() < 1e-9, "{after:?}");
+}
+
+#[test]
+fn a_landed_quad_enters_direct_flight_at_the_throttle_it_was_sent() {
+    let now = Instant::now();
+    let mut pilot = Pilot::new(ENVELOPE);
+    let landed = Estimate {
+        altitude: 0.0,
+        ..hovering()
+    };
+    let idle = pilot
+        .on_poll(&Demands::default(), &landed, true, true, now, DT)
+        .throttle;
+    assert!(!pilot.outer.is_flying());
+    let held = pilot
+        .on_demands(&rates(now, 0.0), now)
+        .expect("direct flies");
+    assert_eq!(held.throttle, idle, "no jump to hover on the ground");
 }
 
 #[test]
