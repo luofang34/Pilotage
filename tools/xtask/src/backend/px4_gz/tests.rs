@@ -19,6 +19,8 @@ fn context(repo_root: PathBuf) -> SessionContext {
         profile: Profile::Simulation,
         log_dir: std::env::temp_dir(),
         lan: false,
+        web_root: std::env::temp_dir(),
+        instance: 0,
     }
 }
 
@@ -134,9 +136,9 @@ fn both_flight_deck_worlds_share_the_same_look() {
     assert!(!aviate.contains("<scene>") && !px4.contains("<scene>"));
 }
 
-#[test]
-fn a_complete_checkout_plans_gz_then_px4_standalone() {
-    let (root, px4) = scaffold("complete");
+/// A scaffold whose every artifact exists, so planning succeeds.
+fn complete_scaffold(tag: &str) -> (PathBuf, PathBuf) {
+    let (root, px4) = scaffold(tag);
     for file in [
         "build/px4_sitl_default/bin/px4",
         "Tools/simulation/gz/server.config",
@@ -148,6 +150,12 @@ fn a_complete_checkout_plans_gz_then_px4_standalone() {
     let world = root.join("sim/worlds/px4_flightdeck.sdf");
     std::fs::create_dir_all(world.parent().expect("parent")).expect("dirs");
     std::fs::write(&world, b"x").expect("world");
+    (root, px4)
+}
+
+#[test]
+fn a_complete_checkout_plans_gz_then_px4_standalone() {
+    let (root, px4) = complete_scaffold("complete");
     let ctx = context(root.clone());
     let stages = plan_with_px4_dir(&ctx, &px4).expect("plan");
     assert_eq!(stages.len(), 2);
@@ -207,4 +215,128 @@ fn the_px4_world_carries_the_gimbal_model_the_airframe_expects() {
         world.contains("<name>x500_0</name>"),
         "the included vehicle must keep the name PX4_GZ_MODEL_NAME attaches to"
     );
+}
+
+fn value<'a>(env: &'a [(String, String)], key: &str) -> Option<&'a str> {
+    env.iter()
+        .find(|(k, _)| k == key)
+        .map(|(_, value)| value.as_str())
+}
+
+/// Instance 0 is the single-session launch exactly as it always was: no
+/// `-i`, the build tree's own rootfs, the default gz partition, and the
+/// host on PX4's stock ports as system 1.
+#[test]
+fn instance_zero_plans_the_single_session_launch() {
+    let (root, px4) = complete_scaffold("instance-zero");
+    let ctx = context(root.clone());
+    let stages = plan_with_px4_dir(&ctx, &px4).expect("plan");
+    let fc = &stages[1].spec;
+    assert!(!fc.args.contains(&"-i".to_owned()), "{:?}", fc.args);
+    assert_eq!(
+        fc.cwd.as_deref(),
+        Some(px4.join("build/px4_sitl_default/rootfs").as_path())
+    );
+    for env in [&stages[0].spec.env, &fc.env] {
+        assert_eq!(value(env, "GZ_PARTITION"), None);
+    }
+    let host = Px4Gz.host_env(&ctx);
+    assert_eq!(value(&host, "PILOTAGE_PX4_ADDR"), Some("127.0.0.1:14550"));
+    assert_eq!(
+        value(&host, "PILOTAGE_PX4_GCS_ADDR"),
+        Some("127.0.0.1:18570")
+    );
+    assert_eq!(
+        value(&host, "PILOTAGE_PX4_FC_ADDR"),
+        Some("127.0.0.1:14580")
+    );
+    assert_eq!(value(&host, "PILOTAGE_PX4_SYSTEM_ID"), Some("1"));
+    assert_eq!(value(&host, "GZ_PARTITION"), None);
+    std::fs::remove_dir_all(&root).ok();
+}
+
+/// Another instance moves EVERY process to its own copy: PX4 shifts its
+/// ports with `-i`, the host follows those ports and system id, and gz,
+/// its readiness probe, PX4's bridge, and the host's camera sidecar all
+/// join one partition. A process left on the default partition would
+/// talk to another session's world.
+#[test]
+fn another_instance_shifts_every_port_and_shares_one_partition() {
+    let (root, px4) = complete_scaffold("instance-five");
+    let mut ctx = context(root.clone());
+    ctx.instance = 5;
+    let stages = plan_with_px4_dir(&ctx, &px4).expect("plan");
+    let fc = &stages[1].spec;
+    let at = fc
+        .args
+        .iter()
+        .position(|arg| arg == "-i")
+        .expect("-i passed");
+    assert_eq!(fc.args.get(at + 1).map(String::as_str), Some("5"));
+    assert_eq!(
+        fc.cwd.as_deref(),
+        Some(px4.join("build/px4_sitl_default/rootfs/5").as_path()),
+        "each instance keeps its own parameters and dataman state"
+    );
+
+    let host = Px4Gz.host_env(&ctx);
+    assert_eq!(value(&host, "PILOTAGE_PX4_ADDR"), Some("127.0.0.1:14555"));
+    assert_eq!(
+        value(&host, "PILOTAGE_PX4_GCS_ADDR"),
+        Some("127.0.0.1:18575")
+    );
+    assert_eq!(
+        value(&host, "PILOTAGE_PX4_FC_ADDR"),
+        Some("127.0.0.1:14585")
+    );
+    assert_eq!(value(&host, "PILOTAGE_PX4_SYSTEM_ID"), Some("6"));
+
+    let partition = value(&host, "GZ_PARTITION").expect("the host's sidecar is partitioned");
+    let crate::readiness::Readiness::CommandOutput { env: probe, .. } = &stages[0].readiness else {
+        panic!("gz readiness is a probe command");
+    };
+    for (who, env) in [
+        ("gz", &stages[0].spec.env),
+        ("probe", probe),
+        ("px4", &fc.env),
+    ] {
+        assert_eq!(value(env, "GZ_PARTITION"), Some(partition), "{who}");
+    }
+    std::fs::remove_dir_all(&root).ok();
+}
+
+/// The guard refuses only a true conflict: two instances claim nothing in
+/// common, and the same instance claims exactly the same ports.
+#[test]
+fn instances_claim_disjoint_ports_and_only_instance_zero_needs_the_default_partition() {
+    use crate::conflicts::Claim;
+
+    let claims = |instance| {
+        let mut ctx = context(PathBuf::from("unused"));
+        ctx.instance = instance;
+        Px4Gz.claims(&ctx)
+    };
+    let zero = claims(0);
+    let five = claims(5);
+    assert!(zero.contains(&Claim::DefaultGzPartition));
+    assert!(!five.contains(&Claim::DefaultGzPartition));
+    let ports = |claims: &[Claim]| -> Vec<u16> {
+        claims
+            .iter()
+            .filter_map(|claim| match claim {
+                Claim::Udp { port, .. } => Some(*port),
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(ports(&zero), vec![18_570, 14_580, 14_550]);
+    assert_eq!(ports(&five), vec![18_575, 14_585, 14_555]);
+    assert_eq!(claims(5), five, "the same instance claims the same ports");
+}
+
+#[test]
+fn an_instance_past_the_port_plan_is_refused() {
+    let mut ctx = context(PathBuf::from("unused"));
+    ctx.instance = 30;
+    assert!(matches!(Px4Gz.plan(&ctx), Err(XtaskError::Usage { .. })));
 }

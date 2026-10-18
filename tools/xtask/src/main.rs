@@ -7,6 +7,7 @@ use std::process::ExitCode;
 mod affected;
 mod backend;
 mod cli;
+mod conflicts;
 mod error;
 mod guards;
 mod log_archive;

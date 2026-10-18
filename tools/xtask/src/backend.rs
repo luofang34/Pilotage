@@ -12,6 +12,7 @@ use crate::readiness::Readiness;
 
 pub(crate) mod aviate_gz;
 mod aviate_xplane;
+pub(crate) mod gz;
 pub(crate) mod px4_gz;
 mod px4_xplane;
 mod xplane_handshake;
@@ -28,10 +29,37 @@ pub struct SessionContext {
     pub viewer_port: u16,
     /// Session profile handed to the host.
     pub profile: Profile,
-    /// Directory stage logs are written under.
+    /// Directory stage logs are written under. Each session has its own,
+    /// so concurrent sessions never write one another's logs.
     pub log_dir: PathBuf,
+    /// Directory the viewer serves: the session's connect manifest
+    /// (`session.json`) is written here, so each viewer hands a stale tab
+    /// its own session and never another one's.
+    pub web_root: PathBuf,
     /// Serve the session to the local network rather than loopback only.
     pub lan: bool,
+    /// Simulator instance index. Instance 0 is the single-session default;
+    /// a backend that can run several copies at once shifts its ports and
+    /// isolates its simulator by this index.
+    pub instance: u16,
+}
+
+#[cfg(test)]
+impl SessionContext {
+    /// The single-session defaults (instance 0, ports 4433/8080, logs and
+    /// web root under `repo_root`), for tests to adjust field by field.
+    pub(crate) fn for_test(repo_root: PathBuf) -> Self {
+        Self {
+            log_dir: repo_root.join("target/xtask-sim"),
+            web_root: repo_root.join("clients/web"),
+            repo_root,
+            host_port: 4433,
+            viewer_port: 8080,
+            profile: Profile::Simulation,
+            lan: false,
+            instance: 0,
+        }
+    }
 }
 
 /// One plannable launch step: a process and the signal proving it is up.
@@ -115,6 +143,20 @@ pub trait SimBackend {
     }
     /// `pgrep -f` patterns that mark a stale session of this backend.
     fn stale_process_patterns(&self) -> Vec<&'static str>;
+    /// What this session holds that another session must not: the ports
+    /// its simulator and FC bind, and any machine-wide singleton.
+    ///
+    /// The launcher refuses to start only when one of these is in use, so
+    /// sessions that claim different things run side by side. The default
+    /// treats every process that matches [`Self::stale_process_patterns`]
+    /// as a conflict: a backend that does not say what it holds runs one
+    /// session per machine, never two that fight over a resource.
+    fn claims(&self, _ctx: &SessionContext) -> Vec<crate::conflicts::Claim> {
+        self.stale_process_patterns()
+            .into_iter()
+            .map(crate::conflicts::Claim::Process)
+            .collect()
+    }
     /// Resets the running simulation world and FC.
     ///
     /// # Errors
