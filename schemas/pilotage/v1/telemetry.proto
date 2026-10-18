@@ -287,8 +287,8 @@ enum CommandOutcome {
 // own provenance stamp: payload-device state, never a vehicle estimate and
 // never an input to control validation.
 message GimbalAttitude {
-  // Orientation quaternion (w, x, y, z); vehicle-frame yaw unless the
-  // device declares an earth-frame yaw mode.
+  // Orientation quaternion (w, x, y, z). Roll and pitch are relative to
+  // the horizon. Yaw is relative to the frame that yaw_frame names.
   float quat_w = 1;
   float quat_x = 2;
   float quat_y = 3;
@@ -300,10 +300,29 @@ message GimbalAttitude {
   // Identity and acquisition of the device report. Absence makes the
   // sample unconsumable.
   MeasurementStamp stamp = 8;
-  // GIMBAL_DEVICE_FLAGS in effect (mode/lock bits).
-  uint32 flags = 9;
+  // Flight-controller-specific device mode bits. Hosts do not write
+  // them. Read yaw_frame and the lock fields.
+  uint32 flags = 9 [deprecated = true];
   // Non-zero reports a device failure condition.
   uint32 failure_flags = 10;
+  // The frame that the quaternion's yaw is relative to. UNSPECIFIED
+  // means that the yaw has no known frame: a client must not show it as
+  // a heading or as a vehicle-relative angle.
+  GimbalYawFrame yaw_frame = 11;
+  // True when the device holds that axis fixed relative to the Earth.
+  // False when that axis follows the vehicle.
+  bool roll_locked = 12;
+  bool pitch_locked = 13;
+  bool yaw_locked = 14;
+}
+
+// The frame that a gimbal yaw angle is relative to.
+enum GimbalYawFrame {
+  GIMBAL_YAW_FRAME_UNSPECIFIED = 0;
+  // Yaw is relative to the vehicle's forward axis.
+  GIMBAL_YAW_FRAME_VEHICLE = 1;
+  // Yaw is relative to true north.
+  GIMBAL_YAW_FRAME_EARTH = 2;
 }
 
 // Battery state as the flight controller reports it, under the FC-state

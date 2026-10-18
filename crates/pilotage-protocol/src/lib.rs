@@ -7,6 +7,7 @@
 mod command_outcome;
 mod control;
 mod convert;
+mod gimbal_reference;
 pub mod h264;
 mod ids;
 mod intent;
@@ -22,6 +23,7 @@ pub use convert::{
     decode_control_frame_envelope, decode_envelope_length_delimited, encode_control_frame_envelope,
     encode_envelope_length_delimited,
 };
+pub use gimbal_reference::{GimbalAxisLocks, GimbalReference, GimbalYawFrame};
 pub use ids::{Generation, PrincipalId, ScopeId, SequenceNum, SessionId, VehicleId};
 pub use intent::{
     ActionKind, AttitudeThrustIntent, BodyRateIntent, ControlAction, ControlIntent, FeelTarget,

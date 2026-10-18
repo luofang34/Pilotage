@@ -18,6 +18,9 @@ pub(crate) const CLIENT_TREES: &[&str] = &[
     "crates/pilotage-protocol/src",
     "crates/pilotage-instrument-feed/src",
     "clients/web-instrument-shell/src",
+    "clients/web-instruments/src",
+    "clients/web-control/src",
+    "clients/web-agent/src",
     "clients/apple/rust/pilotage-situation-ffi/src",
 ];
 

@@ -179,13 +179,14 @@ pub struct FcStateSample {
 /// validation.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GimbalAttitudeSample {
-    /// Orientation quaternion (w, x, y, z); vehicle-frame yaw unless
-    /// the device declares an earth-frame yaw mode.
+    /// Orientation quaternion (w, x, y, z): roll and pitch relative to
+    /// the horizon, yaw relative to [`Self::reference`]'s yaw frame.
     pub quat_wxyz: [f32; 4],
     /// Device angular velocity (rad/s); NaN encodes device-unknown.
     pub rates_rps: [f32; 3],
-    /// GIMBAL_DEVICE_FLAGS in effect (mode/lock bits).
-    pub flags: u32,
+    /// How to read the orientation, translated by the adapter from the
+    /// device's own mode bits.
+    pub reference: pilotage_protocol::GimbalReference,
     /// Non-zero reports a device failure condition; carried so a
     /// consumer can surface a degraded payload without re-deriving it.
     pub failure_flags: u32,

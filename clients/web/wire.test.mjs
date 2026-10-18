@@ -535,7 +535,7 @@ check(
 
 // ---- LINK-04 payload-device lane: gimbal (9) --------------------------------
 // Gimbal attitude travels as its own payload-device-stamped message: it
-// surfaces orientation, rates, flags, and failure flags, and is unconsumable
+// surfaces orientation, rates, yaw frame, and failure flags, and is unconsumable
 // (null) without a payload-device-role stamp, so a mislabeled lane can never
 // drive the camera view or be mistaken for FC state.
 {
@@ -545,8 +545,10 @@ check(
   f32Field(gimbal, 6, -0.5); // rate_y
   f32Field(gimbal, 7, 0.75); // rate_z
   bytesField(gimbal, 8, measurementStamp(9, 2, 5000, 5_000_000, 4, 0x33, 5)); // payload-device role
-  varint(gimbal, (9 << 3) | 0); // flags
+  varint(gimbal, (9 << 3) | 0); // deprecated flags: ignored by the decoder
   varint(gimbal, 0b101);
+  varint(gimbal, (11 << 3) | 0); // yaw_frame
+  varint(gimbal, 2); // GIMBAL_YAW_FRAME_EARTH
   varint(gimbal, (10 << 3) | 0); // failure_flags
   varint(gimbal, 0b10);
 
@@ -561,8 +563,9 @@ check(
 
   check("gimbal lane decodes orientation and rates",
     message.gimbal?.quat?.w === 1.0 && message.gimbal?.ratesRadS?.[1] === -0.5);
-  check("gimbal lane surfaces device flags and failure flags",
-    message.gimbal?.flags === 0b101 && message.gimbal?.failureFlags === 0b10);
+  check("gimbal lane surfaces the yaw frame and failure flags, not device bits",
+    message.gimbal?.yawFrame === 2 && message.gimbal?.failureFlags === 0b10
+    && message.gimbal?.flags === undefined);
   check("gimbal stamp carries the payload-device role and vehicle-boot clock",
     message.gimbal?.stamp?.role === 5 && message.gimbal?.stamp?.clock === 4);
 

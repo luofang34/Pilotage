@@ -1157,7 +1157,7 @@ function decodeFcState(bytes) {
 }
 
 // telemetry.proto GimbalAttitude: quat_w..z=1..4, rate_x/y/z_rad_s=5..7,
-// stamp=8, flags=9, failure_flags=10. Payload-device orientation under its
+// stamp=8, failure_flags=10, yaw_frame=11. Payload-device orientation under its
 // own provenance; unconsumable (null) without a payload-device stamp, so a
 // mislabeled lane can never point the camera view or be read as FC state.
 function decodeGimbalAttitude(bytes) {
@@ -1178,7 +1178,7 @@ function decodeGimbalAttitude(bytes) {
       decodeFloat32(firstBytes(f, 6)),
       decodeFloat32(firstBytes(f, 7)),
     ],
-    flags: firstVarint(f, 9) ?? 0,
+    yawFrame: firstVarint(f, 11) ?? 0,
     failureFlags: firstVarint(f, 10) ?? 0,
     stamp,
   };

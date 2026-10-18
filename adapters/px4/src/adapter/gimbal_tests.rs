@@ -343,7 +343,18 @@ fn gimbal_attitude_is_stamped_as_a_payload_device_on_the_device_clock() {
     );
     // The device's own boot-relative time (ms) carried as ns, not host time.
     assert_eq!(gimbal.stamp.acquired_at_ns, 5_000 * 1_000_000);
-    assert_eq!(gimbal.flags, 12);
+    // Roll and pitch lock (flags 12) with yaw following the vehicle.
+    assert_eq!(
+        gimbal.reference,
+        pilotage_adapter_api::GimbalReference {
+            yaw_frame: pilotage_adapter_api::GimbalYawFrame::Vehicle,
+            locks: pilotage_adapter_api::GimbalAxisLocks {
+                roll: true,
+                pitch: true,
+                yaw: false,
+            },
+        }
+    );
     assert_eq!(gimbal.failure_flags, 0);
 }
 
