@@ -3,8 +3,8 @@
 use super::{
     ATTITUDE_QUATERNION_ID, AVIATE_ESTIMATOR_STATUS_ID, BATTERY_STATUS_ID, COMMAND_ACK_ID,
     EKF_STATUS_REPORT_ID, ESTIMATOR_STATUS_ID, FcMessage, GIMBAL_DEVICE_ATTITUDE_STATUS_ID,
-    GNSS_RAW_ID, HEARTBEAT_ID, HIL_STATE_QUATERNION_ID, LOCAL_POSITION_NED_ID, SCALED_PRESSURE_ID,
-    STATUS_TEXT_LEN, STATUSTEXT_ID,
+    GNSS_RAW_ID, HEARTBEAT_ID, HIL_STATE_QUATERNION_ID, LOCAL_POSITION_NED_ID, PARAM_VALUE_ID,
+    SCALED_PRESSURE_ID, STATUS_TEXT_LEN, STATUSTEXT_ID,
 };
 
 fn f32_at(payload: &[u8], off: usize) -> f32 {
@@ -183,6 +183,7 @@ pub(super) fn decode_known(msg_id: u32, payload: &[u8]) -> Option<FcMessage> {
             flags: u16_at(payload, 20),
         }),
         STATUSTEXT_ID => Some(decode_status_text(payload)),
+        PARAM_VALUE_ID => super::parameters::decode_param_value(payload),
         COMMAND_ACK_ID => Some(FcMessage::CommandAck {
             command: u16::from(payload.first().copied().unwrap_or(0))
                 | (u16::from(payload.get(1).copied().unwrap_or(0)) << 8),

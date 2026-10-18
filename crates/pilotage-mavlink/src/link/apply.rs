@@ -352,6 +352,9 @@ fn apply_message(latest: &mut LinkState, message: FcMessage, now: Instant) {
         } => apply_sim_truth(latest, time_usec, quat_wxyz, vel_ned_mps, lat_lon_alt, now),
         FcMessage::BatteryStatus { .. } => apply_battery(latest, message, now),
         FcMessage::GimbalDeviceAttitudeStatus { .. } => apply_gimbal(latest, message, now),
+        // Parameter traffic answers the uplink that wrote it; the
+        // telemetry cache has no use for it.
+        FcMessage::ParamValue { .. } => {}
     }
 }
 

@@ -90,12 +90,17 @@ impl Px4Config {
         // at, and asking costs one message at startup.
         // BATTERY_STATUS at 1 Hz: the battery changes slowly, and the
         // sample is withheld after three missed reports.
+        // GIMBAL_DEVICE_ATTITUDE_STATUS at 50 Hz: PX4 streams it at 5 Hz by
+        // default, and a camera view steered by the stick follows the gimbal
+        // only as often as it hears where it points. PX4 sends no faster than
+        // its gimbal reports, so the request asks only for what it measures.
         config.stream_interval_requests = &[
             (24, 200_000),
             (31, 33_333),
             (32, 33_333),
             (147, 1_000_000),
             (230, 100_000),
+            (285, 20_000),
         ];
         config
     }
@@ -111,6 +116,13 @@ mod tests {
     fn the_battery_report_is_requested_at_one_hertz() {
         let config = Px4Config::new(Px4Profile::Simulation).link_config();
         assert!(config.stream_interval_requests.contains(&(147, 1_000_000)));
+    }
+
+    #[test]
+    fn the_gimbal_attitude_is_requested_at_fifty_hertz() {
+        let config = Px4Config::new(Px4Profile::Simulation).link_config();
+        let gimbal = pilotage_mavlink::codec::GIMBAL_DEVICE_ATTITUDE_STATUS_ID;
+        assert!(config.stream_interval_requests.contains(&(gimbal, 20_000)));
     }
 
     #[test]
