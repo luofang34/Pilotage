@@ -1134,7 +1134,7 @@ function decodeSimTruthState(bytes) {
 }
 
 // telemetry.proto FcState: arm_state=1 (varint), stamp=2,
-// last_command_kind=3, last_command_result=4. FC-owned arm state under
+// last_command_kind=3, last_command_outcome=5. FC-owned arm state under
 // its own provenance; unconsumable (null) without the stamp.
 function decodeFcState(bytes) {
   if (!bytes) return null;
@@ -1142,15 +1142,15 @@ function decodeFcState(bytes) {
   const stamp = decodeMeasurementStamp(firstBytes(f, 2));
   // Exact-role gate: FC state must carry the FC-state role.
   if (stamp === null || stamp.role !== 3) return null;
-  // The FC's COMMAND_ACK verdict for the most recent commanded arm or
-  // disarm (kind 1 arm, 2 disarm; result is the raw MAV_RESULT) — the
+  // The FC's verdict for the most recent commanded arm or disarm (kind 1
+  // arm, 2 disarm; result is the pilotage.v1.CommandOutcome code) — the
   // enactment truth that distinguishes "command taken" from "FC did it".
   const kind = firstVarint(f, 3) ?? 0;
   return {
     armState: firstVarint(f, 1) ?? 0,
     lastCommand:
       kind === 1 || kind === 2
-        ? { arm: kind === 1, result: firstVarint(f, 4) ?? 0 }
+        ? { arm: kind === 1, result: firstVarint(f, 5) ?? 0 }
         : null,
     stamp,
   };

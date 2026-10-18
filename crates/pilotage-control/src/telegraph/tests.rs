@@ -4,7 +4,19 @@
 
 #![allow(clippy::expect_used, clippy::panic)]
 
+use pilotage_protocol::CommandOutcome;
+
 use super::{ArmConfirmed, ArmOrder, ArmTelegraph, TelegraphPhase};
+
+const WINDOW_MS: f64 = 5000.0;
+
+#[test]
+fn the_window_is_the_protocol_answer_window() {
+    assert_eq!(
+        WINDOW_MS,
+        f64::from(pilotage_protocol::COMMAND_ANSWER_WINDOW_MS)
+    );
+}
 
 #[test]
 fn an_order_sends_once_and_settles_on_the_fc_report() {
@@ -76,7 +88,7 @@ fn the_fcs_own_refusal_answers_the_order_with_its_reason() {
     telegraph.set_order(ArmOrder::Armed);
     // The host passes the arm on; the FC refuses it (preflight).
     telegraph.on_action_result(1, true, "");
-    telegraph.on_fc_command_verdict(1, 1);
+    telegraph.on_fc_command_verdict(1, Some(CommandOutcome::TemporarilyRejected));
     assert_eq!(telegraph.order(), ArmOrder::Safe);
     assert!(
         matches!(telegraph.phase(), TelegraphPhase::Refused(why) if why.contains("not ready")),
@@ -89,14 +101,14 @@ fn the_fcs_own_refusal_answers_the_order_with_its_reason() {
 fn a_verdict_standing_before_the_order_does_not_answer_it_at_once() {
     let mut telegraph = ArmTelegraph::default();
     telegraph.on_fc_arm_state(1);
-    telegraph.on_fc_command_verdict(1, 1);
+    telegraph.on_fc_command_verdict(1, Some(CommandOutcome::TemporarilyRejected));
     telegraph.set_order(ArmOrder::Armed);
     // Every telemetry sample repeats the standing verdict.
-    telegraph.on_fc_command_verdict(1, 1);
+    telegraph.on_fc_command_verdict(1, Some(CommandOutcome::TemporarilyRejected));
     assert_eq!(*telegraph.phase(), TelegraphPhase::AwaitingAnswer);
     // Unchanged past the window, the repeated refusal is the answer.
     telegraph.on_tick(0.0);
-    telegraph.on_tick(super::ANSWER_WINDOW_MS);
+    telegraph.on_tick(WINDOW_MS);
     assert!(matches!(telegraph.phase(), TelegraphPhase::Refused(why) if why.contains("not ready")));
 }
 
@@ -106,9 +118,9 @@ fn an_order_nothing_answers_snaps_back_and_says_so() {
     telegraph.on_fc_arm_state(1);
     telegraph.set_order(ArmOrder::Armed);
     telegraph.on_tick(100.0);
-    telegraph.on_tick(100.0 + super::ANSWER_WINDOW_MS - 1.0);
+    telegraph.on_tick(100.0 + WINDOW_MS - 1.0);
     assert_eq!(*telegraph.phase(), TelegraphPhase::AwaitingAnswer);
-    telegraph.on_tick(100.0 + super::ANSWER_WINDOW_MS);
+    telegraph.on_tick(100.0 + WINDOW_MS);
     assert_eq!(telegraph.order(), ArmOrder::Safe);
     assert_eq!(
         *telegraph.phase(),
@@ -121,8 +133,8 @@ fn an_accepted_or_in_progress_verdict_leaves_the_answer_to_the_lamp() {
     let mut telegraph = ArmTelegraph::default();
     telegraph.on_fc_arm_state(1);
     telegraph.set_order(ArmOrder::Armed);
-    telegraph.on_fc_command_verdict(1, 5);
-    telegraph.on_fc_command_verdict(1, 0);
+    telegraph.on_fc_command_verdict(1, Some(CommandOutcome::InProgress));
+    telegraph.on_fc_command_verdict(1, Some(CommandOutcome::Accepted));
     assert_eq!(*telegraph.phase(), TelegraphPhase::AwaitingAnswer);
     telegraph.on_fc_arm_state(2);
     assert_eq!(*telegraph.phase(), TelegraphPhase::InSync);
@@ -134,7 +146,7 @@ fn an_arm_carried_out_after_the_window_still_answers_its_order() {
     telegraph.on_fc_arm_state(1);
     telegraph.set_order(ArmOrder::Armed);
     telegraph.on_tick(0.0);
-    telegraph.on_tick(super::ANSWER_WINDOW_MS);
+    telegraph.on_tick(WINDOW_MS);
     assert_eq!(telegraph.order(), ArmOrder::Safe);
     // A starved link delivers the arm late: the lever must not read SAFE
     // over a live vehicle, and nothing is re-sent.
@@ -150,7 +162,7 @@ fn a_late_answer_is_forgotten_once_a_new_order_is_given() {
     telegraph.on_fc_arm_state(1);
     telegraph.set_order(ArmOrder::Armed);
     telegraph.on_tick(0.0);
-    telegraph.on_tick(super::ANSWER_WINDOW_MS);
+    telegraph.on_tick(WINDOW_MS);
     assert!(telegraph.set_order(ArmOrder::Safe).is_none());
     telegraph.on_fc_arm_state(2);
     assert_eq!(telegraph.order(), ArmOrder::Safe);
@@ -172,4 +184,62 @@ fn arming_a_vehicle_left_armed_takes_it_back_under_command() {
     telegraph.on_fc_arm_state(2);
     assert_eq!(*telegraph.phase(), TelegraphPhase::InSync);
     assert!(telegraph.set_order(ArmOrder::Armed).is_none());
+}
+
+#[test]
+fn a_new_in_progress_report_starts_the_window_again() {
+    let mut telegraph = ArmTelegraph::default();
+    telegraph.on_fc_arm_state(1);
+    telegraph.set_order(ArmOrder::Armed);
+    telegraph.on_tick(0.0);
+    telegraph.on_tick(WINDOW_MS - 10.0);
+    telegraph.on_fc_command_verdict(1, Some(CommandOutcome::InProgress));
+    // Every sample repeats the standing report: only the change counts.
+    telegraph.on_tick(WINDOW_MS);
+    telegraph.on_fc_command_verdict(1, Some(CommandOutcome::InProgress));
+    telegraph.on_tick(2.0 * WINDOW_MS - 1.0);
+    assert_eq!(*telegraph.phase(), TelegraphPhase::AwaitingAnswer);
+    telegraph.on_tick(2.0 * WINDOW_MS);
+    assert_eq!(
+        *telegraph.phase(),
+        TelegraphPhase::Refused("no answer from the vehicle".to_owned())
+    );
+}
+
+#[test]
+fn an_unknown_outcome_is_neither_a_refusal_nor_an_answer() {
+    let mut telegraph = ArmTelegraph::default();
+    telegraph.on_fc_arm_state(1);
+    telegraph.set_order(ArmOrder::Armed);
+    telegraph.on_fc_command_verdict(1, None);
+    assert_eq!(*telegraph.phase(), TelegraphPhase::AwaitingAnswer);
+    telegraph.on_tick(0.0);
+    telegraph.on_tick(WINDOW_MS);
+    assert_eq!(
+        *telegraph.phase(),
+        TelegraphPhase::Refused("no answer from the vehicle".to_owned())
+    );
+}
+
+#[test]
+fn every_refusal_outcome_snaps_back_with_its_own_reason() {
+    let cases = [
+        (CommandOutcome::TemporarilyRejected, "not ready"),
+        (CommandOutcome::Denied, "denied"),
+        (CommandOutcome::Unsupported, "does not support"),
+        (CommandOutcome::Failed, "failed"),
+        (CommandOutcome::Cancelled, "cancelled"),
+    ];
+    for (outcome, reason) in cases {
+        let mut telegraph = ArmTelegraph::default();
+        telegraph.on_fc_arm_state(1);
+        telegraph.set_order(ArmOrder::Armed);
+        telegraph.on_fc_command_verdict(1, Some(outcome));
+        assert_eq!(telegraph.order(), ArmOrder::Safe, "{outcome:?}");
+        assert!(
+            matches!(telegraph.phase(), TelegraphPhase::Refused(why) if why.contains(reason)),
+            "{outcome:?}: {:?}",
+            telegraph.phase()
+        );
+    }
 }

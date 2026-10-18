@@ -4,6 +4,7 @@
 //! hand-written identifier and control types below, per ADR-0002 and
 //! ADR-0014. The crate-private `convert` module bridges the two.
 
+mod command_outcome;
 mod control;
 mod convert;
 pub mod h264;
@@ -14,6 +15,7 @@ mod session_convert;
 pub mod video_frame;
 pub mod wire;
 
+pub use command_outcome::{COMMAND_ANSWER_WINDOW_MS, CommandOutcome};
 pub use control::{ButtonEdge, ControlPayload, LogicalAxisId, LogicalButtonId, ScopedControlFrame};
 pub use convert::{
     ConvertError, DecodeError, SCHEMA_VERSION, decode_action_command_envelope,

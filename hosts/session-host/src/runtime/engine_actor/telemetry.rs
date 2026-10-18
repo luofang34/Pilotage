@@ -254,13 +254,20 @@ fn sim_truth_to_wire(sample: SimTruthSample) -> wire::SimTruthState {
 fn fc_state_to_wire(sample: FcStateSample) -> wire::FcState {
     wire::FcState {
         arm_state: sample.arm_state,
-        // 0 none observed, 1 arm, 2 disarm — the FC's COMMAND_ACK verdict
-        // for the most recent commanded arm/disarm (enactment truth).
+        // 0 none observed, 1 arm, 2 disarm — the FC's verdict for the most
+        // recent commanded arm/disarm (enactment truth).
         last_command_kind: sample
             .last_command
             .map_or(0, |ack| if ack.arm { 1 } else { 2 }),
-        last_command_result: sample.last_command.map_or(0, |ack| ack.result),
+        last_command_outcome: sample
+            .last_command
+            .map_or(wire::CommandOutcome::Unspecified, |ack| {
+                ack.outcome.to_wire()
+            }) as i32,
         stamp: Some(measurement_stamp_to_wire(sample.stamp)),
+        // The FC-specific result code stays unwritten: the typed outcome
+        // is the only answer a client reads.
+        ..wire::FcState::default()
     }
 }
 

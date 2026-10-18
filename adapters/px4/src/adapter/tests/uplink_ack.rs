@@ -7,7 +7,7 @@
 use std::net::UdpSocket;
 use std::time::Duration;
 
-use pilotage_adapter_api::FcCommandAck;
+use pilotage_adapter_api::{CommandOutcome, FcCommandAck};
 use pilotage_mavlink::codec::encode_command_ack;
 
 use super::{fake_fc, uplink_to};
@@ -46,29 +46,38 @@ fn an_fc_command_ack_pairs_with_the_latest_arm_or_disarm() {
     let (fc, addr) = fake_fc();
     let mut uplink = uplink_to(addr);
     uplink.use_manual_clock();
+    let in_progress = Some(FcCommandAck {
+        arm: true,
+        outcome: CommandOutcome::InProgress,
+    });
     uplink.begin_arm(0.0);
+    assert_eq!(
+        uplink.last_arm_ack(),
+        in_progress,
+        "the warmup reports the arm in work"
+    );
     uplink.advance_clock(Duration::from_millis(400));
     uplink.maintain();
     let uplink_addr = recv_until_arm_command(&fc);
     assert_eq!(
         uplink.last_arm_ack(),
-        None,
-        "no verdict before the FC answers"
+        in_progress,
+        "the arm stays in work until the FC answers"
     );
 
-    // The FC refuses the arm (MAV_RESULT 4, TEMPORARILY_REJECTED): the
-    // refusal must surface, not vanish into a fire-and-forget socket.
+    // The FC refuses the arm (MAV_RESULT 4, FAILED): the refusal must
+    // surface, not vanish into a fire-and-forget socket.
     let refused = encode_command_ack(0, 400, 4, 1, 1);
     fc.send_to(&refused, uplink_addr).expect("ack send");
     assert!(
-        drain_until(&mut uplink, |u| u.last_arm_ack().is_some()),
+        drain_until(&mut uplink, |u| u.last_arm_ack() != in_progress),
         "the refusal reaches the uplink"
     );
     assert_eq!(
         uplink.last_arm_ack(),
         Some(FcCommandAck {
             arm: true,
-            result: 4
+            outcome: CommandOutcome::Failed,
         })
     );
 
@@ -89,7 +98,7 @@ fn an_fc_command_ack_pairs_with_the_latest_arm_or_disarm() {
         uplink.last_arm_ack(),
         Some(FcCommandAck {
             arm: false,
-            result: 0
+            outcome: CommandOutcome::Accepted,
         })
     );
 }
