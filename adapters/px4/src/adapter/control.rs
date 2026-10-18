@@ -11,6 +11,7 @@ use pilotage_timing::SimTick;
 
 use super::Px4Adapter;
 use super::advertisement::FlightEnvelope;
+use crate::uplink::direct::{DirectDemand, DirectDisposition, euler_of};
 use crate::uplink::{
     MAX_HORIZONTAL_MPS, MAX_VERTICAL_MPS, MAX_YAW_RATE_RPS, StickFrameDisposition,
 };
@@ -260,7 +261,7 @@ impl Px4Adapter {
         frame: &ScopedControlFrame,
         tick: SimTick,
     ) -> ApplyOutcome {
-        let Some((current_yaw, _pos, _vel)) = self.current_pose() else {
+        let Some((current_yaw, _pos, current_vel)) = self.current_pose() else {
             return rejected_control(tick, RejectReason::MeasurementUnavailable);
         };
         let Some(uplink) = self.uplink.as_mut() else {
@@ -284,33 +285,66 @@ impl Px4Adapter {
                 }
             }
         }
-        let Some(ControlIntent::Velocity(velocity)) = frame.intent else {
-            // An actions-only frame (arm) carries no motion demand; the
-            // setpoint stream continues from the next frame.
-            return ApplyOutcome {
-                tick,
-                disposition: Disposition::Accepted,
-                action_results,
-            };
-        };
-        let (sticks, constrained) = sticks_from_velocity(&velocity);
-        if uplink.send_stick_frame(sticks[0], sticks[1], sticks[2], sticks[3])
-            == StickFrameDisposition::UplinkIdle
-        {
-            return ApplyOutcome {
-                tick,
-                disposition: Disposition::Rejected(RejectReason::UplinkIdle),
-                action_results,
-            };
-        }
+        // An actions-only frame (arm) carries no motion demand; the setpoint
+        // stream continues from the next frame.
+        let disposition = frame.intent.map_or(Disposition::Accepted, |intent| {
+            multicopter_intent(uplink, frame, intent, current_yaw, current_vel)
+        });
         ApplyOutcome {
             tick,
-            disposition: if constrained {
-                Disposition::Constrained
-            } else {
-                Disposition::Accepted
-            },
+            disposition,
             action_results,
+        }
+    }
+}
+
+/// Enacts one multicopter intent on the uplink. Velocity rides the flight
+/// scope and the direct families ride the direct scope; any other pairing
+/// is refused rather than reinterpreted. Leaving direct flight seeds the
+/// velocity stream from the measured state.
+fn multicopter_intent(
+    uplink: &mut crate::uplink::Px4Uplink,
+    frame: &ScopedControlFrame,
+    intent: ControlIntent,
+    yaw_rad: f32,
+    vel_ned_mps: Option<[f32; 3]>,
+) -> Disposition {
+    let scope = frame.scope.as_str();
+    let demand = match intent {
+        ControlIntent::Velocity(velocity) if scope == super::FLIGHT_SCOPE => {
+            uplink.enter_velocity(yaw_rad, vel_ned_mps);
+            let (sticks, constrained) = sticks_from_velocity(&velocity);
+            return match uplink.send_stick_frame(sticks[0], sticks[1], sticks[2], sticks[3]) {
+                StickFrameDisposition::UplinkIdle => {
+                    Disposition::Rejected(RejectReason::UplinkIdle)
+                }
+                StickFrameDisposition::Queued if constrained => Disposition::Constrained,
+                StickFrameDisposition::Queued => Disposition::Accepted,
+            };
+        }
+        ControlIntent::BodyRate(rates) if scope == super::DIRECT_SCOPE => (
+            DirectDemand::BodyRate([rates.roll_rate, rates.pitch_rate, rates.yaw_rate]),
+            rates.thrust,
+        ),
+        ControlIntent::AttitudeThrust(attitude)
+            if scope == super::DIRECT_SCOPE
+                && attitude.frame == pilotage_protocol::ReferenceFrame::LocalNed =>
+        {
+            let q = [attitude.qw, attitude.qx, attitude.qy, attitude.qz];
+            (DirectDemand::Attitude(euler_of(q)), attitude.thrust)
+        }
+        _ => {
+            return Disposition::Rejected(RejectReason::Other(
+                "intent family or frame not advertised on this scope".to_owned(),
+            ));
+        }
+    };
+    match uplink.send_direct(demand.0, demand.1) {
+        DirectDisposition::Flown => Disposition::Accepted,
+        DirectDisposition::Constrained => Disposition::Constrained,
+        DirectDisposition::UplinkIdle => Disposition::Rejected(RejectReason::UplinkIdle),
+        DirectDisposition::ThrustUnknown => {
+            Disposition::Rejected(RejectReason::MeasurementUnavailable)
         }
     }
 }

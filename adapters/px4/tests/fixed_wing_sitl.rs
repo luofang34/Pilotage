@@ -16,100 +16,16 @@
 //! cargo test -p pilotage-adapter-px4 --test fixed_wing_sitl -- --ignored --nocapture
 //! ```
 
+#[path = "sitl/support.rs"]
+mod support;
+
 use std::time::{Duration, Instant};
 
-use pilotage_adapter_api::{
-    CommandOutcome, Disposition, LinkLossPolicy, TelemetryBatch, VehicleAdapter,
-};
-use pilotage_adapter_px4::{FLIGHT_SCOPE, Px4Adapter, Px4Airframe, Px4Config, Px4Profile};
-use pilotage_protocol::{
-    ControlAction, ControlIntent, ControlPayload, Generation, IntentFamily, ReferenceFrame,
-    ScopeId, ScopedControlFrame, SequenceNum, SessionId, VehicleId, VelocityIntent,
-};
-use pilotage_timing::MonoTimestamp;
+use pilotage_adapter_api::{Disposition, LinkLossPolicy, VehicleAdapter};
+use pilotage_adapter_px4::{FLIGHT_SCOPE, Px4Adapter, Px4Airframe};
+use pilotage_protocol::{IntentFamily, ScopeId};
+use support::{Observed, Operator, VEHICLE, arm, fly_until, live_config, observe, velocity};
 use tracing::info;
-
-const VEHICLE: VehicleId = VehicleId::new(1);
-/// The operator control cadence.
-const FRAME_PERIOD: Duration = Duration::from_millis(50);
-
-/// The flight state the test reads off each telemetry batch.
-#[derive(Debug, Clone, Copy)]
-struct Observed {
-    down_m: f32,
-    heading_rad: f64,
-}
-
-fn observe(batch: &TelemetryBatch) -> Option<Observed> {
-    batch.samples.iter().find_map(|sample| {
-        let kinematics = sample.avionics.as_ref()?.kinematics.as_ref()?;
-        Some(Observed {
-            down_m: kinematics.pos_ned_m[2],
-            heading_rad: sample.pose?.heading,
-        })
-    })
-}
-
-fn env_or(name: &str, default: &str) -> String {
-    std::env::var(name).unwrap_or_else(|_| default.to_owned())
-}
-
-fn live_config() -> Px4Config {
-    let mut config = Px4Config::new(Px4Profile::Simulation);
-    config.airframe = Px4Airframe::FixedWing;
-    config.telemetry_endpoint = env_or("PILOTAGE_PX4_ADDR", "127.0.0.1:14550")
-        .parse()
-        .expect("PILOTAGE_PX4_ADDR");
-    config.stream_command_endpoint = env_or("PILOTAGE_PX4_GCS_ADDR", "127.0.0.1:18570")
-        .parse()
-        .expect("PILOTAGE_PX4_GCS_ADDR");
-    config.command_endpoint = env_or("PILOTAGE_PX4_FC_ADDR", "127.0.0.1:14580")
-        .parse()
-        .expect("PILOTAGE_PX4_FC_ADDR");
-    config.system_id = env_or("PILOTAGE_PX4_SYSTEM_ID", "1")
-        .parse()
-        .expect("PILOTAGE_PX4_SYSTEM_ID");
-    config
-}
-
-/// One operator frame: a typed velocity intent and optional actions.
-struct Operator {
-    sequence: u32,
-}
-
-impl Operator {
-    fn frame(
-        &mut self,
-        velocity: VelocityIntent,
-        actions: Vec<ControlAction>,
-    ) -> ScopedControlFrame {
-        self.sequence = self.sequence.wrapping_add(1);
-        ScopedControlFrame {
-            session: SessionId::new(1),
-            vehicle: VEHICLE,
-            scope: ScopeId::new(FLIGHT_SCOPE),
-            generation: Generation::new(1),
-            sequence: SequenceNum::new(self.sequence),
-            sampled_at: MonoTimestamp::from_nanos(0),
-            profile_revision: 1,
-            activation_revision: 0,
-            payload: ControlPayload::default(),
-            intent: Some(ControlIntent::Velocity(velocity)),
-            actions,
-            action_ids: vec![],
-        }
-    }
-}
-
-fn velocity(vx: f32, vz: f32, yaw_rate: f32) -> VelocityIntent {
-    VelocityIntent {
-        frame: ReferenceFrame::BodyFrd,
-        vx,
-        vy: 0.0,
-        vz,
-        yaw_rate,
-    }
-}
 
 /// The advertised flight envelope: (max_vertical, max_angular).
 fn advertised_envelope(adapter: &Px4Adapter) -> (f32, f32) {
@@ -123,72 +39,6 @@ fn advertised_envelope(adapter: &Px4Adapter) -> (f32, f32) {
         .find(|intent| intent.family == IntentFamily::Velocity)
         .expect("the flight scope advertises a velocity intent");
     (intent.effective_vertical(), intent.max_angular)
-}
-
-/// Runs the operator loop until `done` holds for the latest observation or
-/// `budget` lapses; returns the last observation and the last disposition.
-async fn fly_until(
-    adapter: &mut Px4Adapter,
-    operator: &mut Operator,
-    demand: VelocityIntent,
-    budget: Duration,
-    mut done: impl FnMut(Observed, &Disposition) -> bool,
-) -> (Option<Observed>, Disposition) {
-    let mut ticker = tokio::time::interval(FRAME_PERIOD);
-    let deadline = Instant::now() + budget;
-    let mut last = None;
-    let mut disposition = Disposition::Accepted;
-    while Instant::now() < deadline {
-        ticker.tick().await;
-        disposition = adapter
-            .apply_control(&operator.frame(demand, vec![]))
-            .disposition;
-        if let Some(observed) = observe(&adapter.sample_telemetry()) {
-            last = Some(observed);
-            if done(observed, &disposition) {
-                break;
-            }
-        }
-    }
-    (last, disposition)
-}
-
-/// Presses ARM, as an operator would, until PX4 reports itself armed with
-/// an accepted arm command. The adapter refuses the press until PX4 echoes
-/// every pinned parameter, and PX4 refuses the arm while its own preflight
-/// checks still fail.
-async fn arm(adapter: &mut Px4Adapter, operator: &mut Operator) -> Duration {
-    let started = Instant::now();
-    let mut ticker = tokio::time::interval(FRAME_PERIOD);
-    let mut last_press: Option<Instant> = None;
-    let mut press_accepted = false;
-    while started.elapsed() < Duration::from_secs(90) {
-        ticker.tick().await;
-        let batch = adapter.sample_telemetry();
-        let fc_state = batch.samples.iter().find_map(|sample| sample.fc_state);
-        let armed = fc_state.is_some_and(|state| state.arm_state == 2);
-        let answer = fc_state
-            .and_then(|state| state.last_command)
-            .filter(|ack| ack.arm)
-            .map(|ack| ack.outcome);
-        let refused = answer.is_some_and(CommandOutcome::is_refusal);
-        if press_accepted && armed && answer == Some(CommandOutcome::Accepted) {
-            return started.elapsed();
-        }
-        let due = last_press.is_none_or(|at| at.elapsed() >= Duration::from_secs(2));
-        let actions = if due && (!press_accepted || refused) {
-            last_press = Some(Instant::now());
-            vec![ControlAction::Arm]
-        } else {
-            vec![]
-        };
-        let outcome = adapter.apply_control(&operator.frame(velocity(0.0, 0.0, 0.0), actions));
-        if let Some(result) = outcome.action_results.first() {
-            press_accepted = result.accepted;
-            info!(accepted = result.accepted, detail = %result.detail, "ARM pressed");
-        }
-    }
-    panic!("PX4 never armed");
 }
 
 fn unwrap_angle(delta: f64) -> f64 {
@@ -321,10 +171,10 @@ async fn climb(
 }
 
 async fn flight() {
-    let mut adapter = Px4Adapter::start(VEHICLE, live_config())
+    let mut adapter = Px4Adapter::start(VEHICLE, live_config(Px4Airframe::FixedWing))
         .await
         .expect("adapter");
-    let mut operator = Operator { sequence: 0 };
+    let mut operator = Operator::default();
     let (max_vertical, max_turn_rate) = advertised_envelope(&adapter);
     info!(
         max_vertical,
@@ -351,7 +201,7 @@ async fn link_loss_then_resume(
     adapter
         .set_link_loss_policy(VEHICLE, &scope, Some(LinkLossPolicy::Neutralize))
         .expect("neutralize");
-    let mut ticker = tokio::time::interval(FRAME_PERIOD);
+    let mut ticker = tokio::time::interval(support::FRAME_PERIOD);
     let hold = Instant::now();
     let (mut lowest, mut highest) = (f32::MAX, f32::MIN);
     let mut armed = true;
@@ -401,10 +251,5 @@ fn a_px4_plane_takes_off_turns_and_climbs_on_the_unified_intent() {
     if std::env::var("PILOTAGE_PX4_LIVE_FW").as_deref() != Ok("1") {
         panic!("set PILOTAGE_PX4_LIVE_FW=1 and the PX4 endpoints to run this flight");
     }
-    tracing_subscriber::fmt().with_test_writer().init();
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .expect("runtime");
-    runtime.block_on(flight());
+    support::run(flight());
 }

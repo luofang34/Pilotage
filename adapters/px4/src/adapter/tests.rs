@@ -4,6 +4,7 @@
 //! the wire, sampling authorization from the standard status, and the
 //! same gate discipline the Aviate adapter carries.
 
+mod direct_flight;
 mod fixed_wing_advertisement;
 mod uplink_ack;
 

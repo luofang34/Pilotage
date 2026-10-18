@@ -16,6 +16,7 @@ use pilotage_adapter_api::{CommandOutcome, FcCommandAck};
 use tracing::{info, warn};
 
 pub(crate) mod clock;
+pub(crate) mod direct;
 use clock::UplinkClock;
 
 use pilotage_mavlink::codec::{
@@ -98,6 +99,7 @@ pub struct Px4Uplink {
     send_failures: u64,
     expected_system_id: u8,
     expected_component_id: u8,
+    direct: direct::DirectState,
 }
 
 impl Px4Uplink {
@@ -128,6 +130,7 @@ impl Px4Uplink {
             send_failures: 0,
             expected_system_id: 1,
             expected_component_id: 1,
+            direct: direct::DirectState::default(),
         })
     }
 
@@ -191,8 +194,7 @@ impl Px4Uplink {
                 .last_frame
                 .is_none_or(|at| now.duration_since(at) >= STREAM_KEEPALIVE)
         {
-            let velocity = self.last_vel_ned;
-            self.send_velocity(velocity);
+            self.send_keepalive();
         }
         if self.arm_phase == ArmPhase::Warmup
             && self
@@ -207,6 +209,7 @@ impl Px4Uplink {
     /// measured yaw and begin the zero-velocity stream; OFFBOARD mode
     /// and the arm command follow after the warmup.
     pub fn begin_arm(&mut self, current_yaw_rad: f32) {
+        self.leave_direct();
         self.heading_sp_rad = current_yaw_rad;
         self.last_vel_ned = [0.0; 3];
         self.arm_phase = ArmPhase::Warmup;
@@ -296,6 +299,10 @@ impl Px4Uplink {
     /// with correlated acks; the heartbeat-derived arm state remains the
     /// ground truth either way.
     fn apply_fc_reply(&mut self, message: &FcMessage) {
+        if let FcMessage::AttitudeTarget { thrust, .. } = *message {
+            self.direct.observe_thrust(thrust);
+            return;
+        }
         let FcMessage::CommandAck {
             command,
             result,
@@ -333,6 +340,7 @@ impl Px4Uplink {
 
     /// Disarms and stops the setpoint stream.
     pub fn send_disarm(&mut self) {
+        self.leave_direct();
         let frame = encode_arm_command(
             self.seq,
             false,
@@ -412,6 +420,7 @@ impl Px4Uplink {
     /// streaming neutral forever — is the honest enactment: a silent
     /// pilot must look silent to the FC too.
     pub fn neutralize(&mut self) {
+        self.leave_direct();
         self.send_velocity([0.0; 3]);
         self.arm_phase = ArmPhase::Idle;
         self.warmup_since = None;

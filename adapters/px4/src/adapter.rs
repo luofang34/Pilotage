@@ -47,6 +47,10 @@ use control::rejected_control;
 
 /// The control scope: four canonical flight axes as velocity demands.
 pub const FLIGHT_SCOPE: &str = "vehicle.motion";
+/// The direct-flight scope: body-rate or attitude demands with collective
+/// thrust. It shares the flight scope's authority group, so only one of the
+/// two is held at a time. Multicopter only.
+pub const DIRECT_SCOPE: &str = "vehicle.motion.direct";
 /// Canonical `roll` axis (0): lateral velocity, + = right.
 pub const ROLL_AXIS: u16 = 0;
 /// Canonical `pitch` axis (1): forward velocity, + = forward.
@@ -283,7 +287,9 @@ impl Px4Adapter {
         if frame.vehicle != self.vehicle {
             return Err(RejectReason::UnknownVehicle);
         }
-        if frame.scope.as_str() != FLIGHT_SCOPE {
+        // A fixed wing advertises no direct scope (see `advertisement.rs`).
+        let direct = frame.scope.as_str() == DIRECT_SCOPE && self.uplink.is_some();
+        if frame.scope.as_str() != FLIGHT_SCOPE && !direct {
             return Err(RejectReason::UnknownScope);
         }
         let known = [

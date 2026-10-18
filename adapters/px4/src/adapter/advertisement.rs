@@ -10,8 +10,8 @@ use pilotage_adapter_api::{
 use pilotage_protocol::{ActionKind, IntentFamily, LogicalAxisId, ReferenceFrame, ScopeId};
 
 use super::{
-    ARM_BUTTON, DISARM_BUTTON, FLIGHT_SCOPE, GIMBAL_NEUTRAL_BUTTON, GIMBAL_SCOPE, PITCH_AXIS,
-    Px4Adapter, ROLL_AXIS, THROTTLE_AXIS, YAW_AXIS,
+    ARM_BUTTON, DIRECT_SCOPE, DISARM_BUTTON, FLIGHT_SCOPE, GIMBAL_NEUTRAL_BUTTON, GIMBAL_SCOPE,
+    PITCH_AXIS, Px4Adapter, ROLL_AXIS, THROTTLE_AXIS, YAW_AXIS,
 };
 
 /// The velocity envelope the flight scope advertises and enforces.
@@ -67,6 +67,14 @@ impl Px4Adapter {
                             self.flight_envelope(),
                             self.fixed_wing.is_none(),
                         ));
+                        // Direct flight is multicopter only: a fixed wing would
+                        // have to leave Position mode for ACRO or STABILIZED,
+                        // where PX4 passes the throttle stick straight through
+                        // with no TECS airspeed floor, so the adapter could not
+                        // bound a stall, and neutral sticks would no longer hold.
+                        if self.uplink.is_some() {
+                            scopes.push(direct_scope_descriptor());
+                        }
                         // This adapter implements only the SIMULATION
                         // profile today; a physical-vehicle profile must
                         // NOT advertise the lifecycle scope (SIM-01).
@@ -93,7 +101,9 @@ impl Px4Adapter {
 /// routes no axis there.
 fn flight_scope_descriptor(envelope: FlightEnvelope, lateral: bool) -> ScopeDescriptor {
     ScopeDescriptor {
-        authority_group: None,
+        // One FC, one authority: velocity and direct flight are never held
+        // at once. A fixed wing has no direct scope; the group is harmless.
+        authority_group: Some(FLIGHT_SCOPE.to_owned()),
         scope: ScopeId::new(FLIGHT_SCOPE),
         axes: vec![
             LogicalAxisId::new(ROLL_AXIS),
@@ -112,18 +122,7 @@ fn flight_scope_descriptor(envelope: FlightEnvelope, lateral: bool) -> ScopeDesc
         }],
         // No sim reset here: a lifecycle action under the separately
         // leased `sim.lifecycle` scope, never flight authority.
-        actions: vec![
-            ActionCapability {
-                action: ActionKind::Arm,
-                mode_targets: vec![],
-                feel_targets: vec![],
-            },
-            ActionCapability {
-                action: ActionKind::Disarm,
-                mode_targets: vec![],
-                feel_targets: vec![],
-            },
-        ],
+        actions: flight_actions(),
         legacy: Some(LegacyCommandMap::Velocity {
             vx: Some(LegacyAxisRoute {
                 axis: PITCH_AXIS,
@@ -177,5 +176,53 @@ fn gimbal_scope_descriptor() -> ScopeDescriptor {
             }),
             recenter_button: Some(GIMBAL_NEUTRAL_BUTTON),
         }),
+    }
+}
+
+/// Both flight scopes take the same discrete actions; no sim reset (that
+/// lives on the separately leased `sim.lifecycle` scope).
+fn flight_actions() -> Vec<ActionCapability> {
+    [ActionKind::Arm, ActionKind::Disarm]
+        .into_iter()
+        .map(|action| ActionCapability {
+            action,
+            mode_targets: vec![],
+            feel_targets: vec![],
+        })
+        .collect()
+}
+
+/// The multicopter direct-flight scope, typed only (no legacy map admits
+/// numeric payloads here): body rates or an attitude, each with collective
+/// thrust. The thrust is held at PX4's own commanded thrust when direct
+/// flight starts and passes to the operator once their thrust reaches it
+/// (`uplink/direct.rs`). `max_yaw_rate` is the heading slew a client
+/// integrates its yaw stick with for attitude flight, the velocity scope's
+/// yaw envelope.
+fn direct_scope_descriptor() -> ScopeDescriptor {
+    ScopeDescriptor {
+        authority_group: Some(FLIGHT_SCOPE.to_owned()),
+        scope: ScopeId::new(DIRECT_SCOPE),
+        axes: vec![],
+        intents: vec![
+            IntentCapability {
+                family: IntentFamily::BodyRate,
+                frames: vec![],
+                max_linear: 0.0,
+                max_vertical: 0.0,
+                max_angular: crate::uplink::direct::MAX_BODY_RATE_RPS,
+                max_yaw_rate: 0.0,
+            },
+            IntentCapability {
+                family: IntentFamily::AttitudeThrust,
+                frames: vec![ReferenceFrame::LocalNed],
+                max_linear: 0.0,
+                max_vertical: 0.0,
+                max_angular: crate::uplink::direct::MAX_TILT_RAD,
+                max_yaw_rate: crate::uplink::MAX_YAW_RATE_RPS,
+            },
+        ],
+        actions: flight_actions(),
+        legacy: None,
     }
 }

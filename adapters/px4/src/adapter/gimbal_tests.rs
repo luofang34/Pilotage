@@ -94,6 +94,7 @@ fn capabilities_advertise_the_gimbal_scope_alongside_flight() {
         scopes,
         vec![
             super::FLIGHT_SCOPE.to_owned(),
+            super::DIRECT_SCOPE.to_owned(),
             pilotage_adapter_api::SIM_LIFECYCLE_SCOPE.to_owned(),
             super::GIMBAL_SCOPE.to_owned(),
         ]
@@ -115,6 +116,7 @@ fn a_vehicle_without_a_gimbal_advertises_no_gimbal_scope() {
         scopes,
         vec![
             super::FLIGHT_SCOPE.to_owned(),
+            super::DIRECT_SCOPE.to_owned(),
             pilotage_adapter_api::SIM_LIFECYCLE_SCOPE.to_owned(),
         ],
         "no gimbal, no gimbal scope — the sim lifecycle scope remains"
