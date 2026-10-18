@@ -269,9 +269,7 @@ impl Px4Adapter {
         let Some(uplink) = self.uplink.as_mut() else {
             return rejected_control(tick, RejectReason::UnknownScope);
         };
-        if frame.intent.is_some() {
-            uplink.resume_after_neutralize(armed, current_yaw, current_vel);
-        }
+        uplink.admit_flight_frame(frame.generation, armed, current_yaw, current_vel);
         let mut action_results = Vec::with_capacity(frame.actions.len());
         for action in &frame.actions {
             match action.kind() {
