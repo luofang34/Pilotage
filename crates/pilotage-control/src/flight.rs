@@ -78,6 +78,15 @@ pub(crate) fn flight_axes(
             yaw: left_x,
             label: "FPV: R=tilt angle L=thrust/yaw",
         },
+        // Acro keeps the Mode 2 geometry; the direct scope's body-rate
+        // builder reads roll/pitch/yaw as rates and throttle as thrust.
+        Mode::Acro => FlightAxes {
+            roll: right_x,
+            pitch: -right_y,
+            throttle: -left_y,
+            yaw: left_x,
+            label: "ACRO: R=roll/pitch rate L=thrust/yaw rate",
+        },
         Mode::QuadCruise => FlightAxes {
             roll: left_x,
             pitch: -left_y,

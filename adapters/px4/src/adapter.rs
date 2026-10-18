@@ -48,7 +48,7 @@ mod tests;
 use control::rejected_control;
 
 /// The control scope: four canonical flight axes as velocity demands.
-pub const FLIGHT_SCOPE: &str = "vehicle.motion";
+pub const FLIGHT_SCOPE: &str = pilotage_protocol::MOTION_SCOPE;
 /// Canonical `roll` axis (0): lateral velocity, + = right.
 pub const ROLL_AXIS: u16 = 0;
 /// Canonical `pitch` axis (1): forward velocity, + = forward.

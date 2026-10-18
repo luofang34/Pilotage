@@ -2021,6 +2021,7 @@ dependencies = [
 name = "pilotage-control"
 version = "0.1.0"
 dependencies = [
+ "pilotage-client-session",
  "pilotage-input",
  "pilotage-protocol",
  "serde",

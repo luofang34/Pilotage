@@ -11,6 +11,7 @@ mod gimbal_reference;
 pub mod h264;
 mod ids;
 mod intent;
+mod scopes;
 mod session;
 mod session_convert;
 mod vehicle_class;
@@ -31,6 +32,7 @@ pub use intent::{
     GimbalRateIntent, IntentFamily, ModeTarget, PositionHoldIntent, ReferenceFrame, VelocityIntent,
     actions_conflict,
 };
+pub use scopes::{DIRECT_SCOPE, MOTION_SCOPE};
 pub use session::{
     ClientHello, ControlActionCommand, ControlActionResult, FrameRejected, FrameRejectionReason,
     LeaseDenialReason, LeaseRelease, LeaseReleased, LeaseRequest, LeaseResponse, LinkLossCleared,

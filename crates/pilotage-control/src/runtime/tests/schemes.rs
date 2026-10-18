@@ -1,8 +1,9 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-//! The plane scheme flies the same BODY_FRD velocity intent as every other
-//! vehicle: right stick Y is forward speed, right stick X the turn, left
-//! stick Y the climb, and nothing commands sideslip.
+//! The plane and acro schemes through the real runtime. The plane flies
+//! the BODY_FRD velocity intent (right Y forward speed, right X turn,
+//! left Y climb, no sideslip); acro keeps the Mode 2 geometry that the
+//! direct scope's body-rate builder reads as rates and thrust.
 
 use pilotage_protocol::VehicleClass;
 
@@ -43,6 +44,23 @@ fn the_plane_releases_the_gimbal_lease() {
         &session(Mode::Plane, true),
     );
     assert_eq!(plan.lease, Some(LeaseAction::Release));
+}
+
+#[test]
+fn the_acro_sticks_map_mode_two_rates_and_thrust() {
+    let mut runtime = with_default();
+    let plan = runtime.evaluate(
+        &sample(&[0.5, -1.0, 1.0, -1.0], &[]),
+        &session(Mode::Acro, true),
+    );
+    assert_eq!(axis(&plan, AXIS_THROTTLE), 1.0, "left Y up is thrust");
+    assert_eq!(axis(&plan, AXIS_YAW), 0.5, "left X is yaw rate");
+    assert_eq!(axis(&plan, AXIS_ROLL), 1.0, "right X is roll rate");
+    assert_eq!(
+        axis(&plan, AXIS_PITCH),
+        1.0,
+        "right Y up is the forward demand"
+    );
 }
 
 #[test]
