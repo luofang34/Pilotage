@@ -52,7 +52,7 @@ require_caller refreshOrientation \
     "a turned tablet must reach the heading orientation, or heading up reads ninety degrees off"
 
 if ! grep -A 2 'func requestPositionIfNeeded()' "$app/OwnshipPosition.swift" \
-    | grep -Eq '^\s+start\(\)'; then
+    | grep -E '^\s+start\(\)' >/dev/null; then
     echo "FORBIDDEN: asking for a position must start every sensor a heading needs, not the receiver alone" >&2
     status=1
 fi
@@ -77,7 +77,7 @@ require_pattern 'GlassEffectContainer\(spacing: Metrics\.controlSpacing\)' "$app
 # A view inserted alongside its parent is covered by the parent's transition and never
 # runs its own. Only a change made in a later cycle is an insertion the label can animate,
 # so the wait is load bearing and reads like a decoration.
-if ! grep -A 6 'levelLabelShown = false' "$app/MapControlsView.swift" | grep -q 'Task.sleep'; then
+if ! grep -A 6 'levelLabelShown = false' "$app/MapControlsView.swift" | grep 'Task.sleep' >/dev/null; then
     echo "FORBIDDEN: the label must change state in a later cycle than the control it sits in, or its own transition never runs" >&2
     status=1
 fi
@@ -102,7 +102,7 @@ require_pattern 'projectionTask\?\.cancel\(\)' "$app/SituationClientModel.swift"
 # The beat must ask the engine again. Republishing the batch already held advances
 # nothing, and it looks identical from every angle except the map.
 if ! grep -A 20 'func projectionLoop()' "$app/SituationClientModel.swift" \
-    | grep -q 'session\.currentDisplay'; then
+    | grep 'session\.currentDisplay' >/dev/null; then
     echo "FORBIDDEN: the beat must ask the engine where the traffic is now, not republish the last batch" >&2
     status=1
 fi

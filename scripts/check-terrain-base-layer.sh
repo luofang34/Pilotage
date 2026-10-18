@@ -136,7 +136,7 @@ if [ -f "$coastline_archive" ]; then
     # An unreadable archive answers with nothing, and an empty string in an
     # arithmetic comparison is an error that the enclosing `if` would read
     # as "not less than" — a silent pass on the one input that proves least.
-    if ! printf '%s' "$tiles_at_deepest" | grep -Eq '^[0-9]+$'; then
+    if ! printf '%s' "$tiles_at_deepest" | grep -E '^[0-9]+$' >/dev/null; then
         echo "FORBIDDEN: the coastline archive did not answer for its deepest zoom" >&2
         status=1
     # A band that covers the world holds a large fraction of its zoom's

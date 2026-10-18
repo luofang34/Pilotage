@@ -108,7 +108,7 @@ RESYNC
         echo "the terrain guard accepted $expected" >&2
         exit 1
     fi
-    if ! printf '%s' "$output" | grep -Fq "$expected"; then
+    if ! printf '%s' "$output" | grep -F "$expected" >/dev/null; then
         echo "the terrain guard refused $expected for another reason:" >&2
         printf '%s\n' "$output" >&2
         exit 1
@@ -492,7 +492,7 @@ SYNC
             exit 1
         fi
         if ! printf '%s' "$output" |
-            grep -Fq "the coastline archive does not cover the world at its deepest zoom"; then
+            grep -F "the coastline archive does not cover the world at its deepest zoom" >/dev/null; then
             echo "the terrain guard refused the sparse archive for another reason:" >&2
             printf '%s\n' "$output" >&2
             exit 1
