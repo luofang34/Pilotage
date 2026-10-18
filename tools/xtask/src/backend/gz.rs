@@ -105,6 +105,19 @@ pub(crate) fn relocate_world(world: &str, point: &SpawnPoint) -> Result<String, 
     replace_single(&world, "longitude_deg", point.longitude_deg)
 }
 
+/// The elevation, metres above mean sea level, of `world`'s single
+/// spherical-coordinates origin.
+pub(crate) fn world_elevation(world: &str) -> Result<f64, &'static str> {
+    const TAG: &str = "elevation";
+    let (open, close) = ("<elevation>", "</elevation>");
+    if world.matches(open).count() != 1 {
+        return Err(TAG);
+    }
+    let start = world.find(open).ok_or(TAG)? + open.len();
+    let end = start + world[start..].find(close).ok_or(TAG)?;
+    world[start..end].trim().parse().map_err(|_| TAG)
+}
+
 fn replace_single(text: &str, tag: &'static str, value: f64) -> Result<String, &'static str> {
     let open = format!("<{tag}>");
     let close = format!("</{tag}>");

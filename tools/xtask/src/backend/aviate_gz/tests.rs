@@ -198,3 +198,40 @@ fn both_telemetry_ends_move_together_and_clear_of_px4() {
         std::fs::remove_dir_all(repo.parent().expect("base")).ok();
     }
 }
+
+/// A fleet-placed Aviate reports GNSS at its spawn point: the FC is told
+/// the relocated origin at the world's own elevation.
+#[test]
+fn a_placed_vehicle_states_its_gnss_origin_to_the_fc() {
+    use crate::backend::{SimBackend, SpawnPoint};
+
+    let (repo, aviate) = scaffold("origin");
+    std::fs::write(
+        aviate.join("aviate-hal/xil/backends/gz/plugin/build/libAviateGzPlugin.dylib"),
+        b"",
+    )
+    .expect("plugin");
+    std::fs::write(aviate.join("target/debug/sitl-gazebo-x500"), b"").expect("fc");
+    let shipped = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../sim/worlds/x500_flightdeck.sdf");
+    std::fs::copy(&shipped, repo.join("sim/worlds/x500_flightdeck.sdf")).expect("world");
+    let ctx = context(repo.clone());
+    std::fs::create_dir_all(&ctx.log_dir).expect("log dir");
+    let mut stages = plan_with_aviate_dir(&ctx, &aviate).expect("plans");
+    let point = SpawnPoint {
+        latitude_deg: 47.397742,
+        longitude_deg: 8.546_390_3,
+    };
+    super::AviateGz
+        .spawn(&ctx, &point, &mut stages)
+        .expect("spawns");
+    let origin = stages[1]
+        .spec
+        .env
+        .iter()
+        .find(|(key, _)| key == "AVIATE_GNSS_ORIGIN")
+        .map(|(_, value)| value.clone())
+        .expect("the FC is told its origin");
+    assert_eq!(origin, "47.3977420,8.5463903,488");
+    std::fs::remove_dir_all(repo.parent().expect("base")).ok();
+}
