@@ -5,7 +5,7 @@
   (ADR-0004 local-demo shortcut, ADR-0005).
 
   Serve statically, no build step:
-    python3 -m http.server 8000
+    cargo xtask serve-viewer --dir . --port 8000
   then open http://localhost:8000/clients/web/index.html
 
   The session host prints `LISTENING <port> <cert-hash-hex>` on startup; paste

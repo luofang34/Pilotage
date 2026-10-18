@@ -62,7 +62,7 @@ use crate::backend::{SessionContext, Stage};
 use crate::cli::Profile;
 use crate::error::XtaskError;
 use crate::process::{ManagedChild, ProcessSpec};
-use crate::readiness::{Readiness, await_ready};
+use crate::readiness::Readiness;
 
 const EVENT_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -141,34 +141,6 @@ fn expect_event(rx: &mpsc::Receiver<&'static str>, expected: &str, what: &str) {
         .recv_timeout(EVENT_TIMEOUT)
         .unwrap_or_else(|_| panic!("timed out: {what}"));
     assert_eq!(event, expected, "{what}");
-}
-
-/// Reserves an ephemeral port by binding then releasing it, so the
-/// spawned server can claim it. The reserve→claim window is tiny and
-/// loopback-local; a collision only reruns the test.
-fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .expect("an ephemeral port binds")
-        .local_addr()
-        .expect("the bound address is readable")
-        .port()
-}
-
-/// Minimal HTTP/1.0 GET returning the raw response. HTTP/1.0 makes the
-/// server close the connection at end-of-body, so the read completes on
-/// EOF without content-length parsing.
-fn http_get(port: u16, path: &str) -> String {
-    use std::io::Write;
-    let mut stream = std::net::TcpStream::connect(("127.0.0.1", port))
-        .expect("the viewer server accepts the request connection");
-    stream
-        .write_all(format!("GET {path} HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n").as_bytes())
-        .expect("the request is written");
-    let mut response = String::new();
-    stream
-        .read_to_string(&mut response)
-        .expect("the response is read to EOF");
-    response
 }
 
 /// A backend whose restart work WAITS, the way re-issuing a handshake waits

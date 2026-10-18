@@ -53,10 +53,10 @@ pub(crate) fn host_stage(ctx: &SessionContext, backend: &dyn SimBackend) -> Stag
     }
 }
 
-/// The static viewer. The host learning `--serve-web` retires this
-/// stage; until then python3 serves the session's web root exactly like
-/// the recorded runbook.
-pub(crate) fn viewer_stage(ctx: &SessionContext) -> Result<Stage, XtaskError> {
+/// The static viewer: this xtask binary's `serve-viewer` subcommand
+/// serving the session's web root with caching disabled, so the browser
+/// always runs the working-tree client.
+pub(crate) fn viewer_stage(ctx: &SessionContext, xtask: &Path) -> Result<Stage, XtaskError> {
     let entry = ctx.repo_root.join(VIEWER_DIR).join("index.html");
     if !entry.is_file() {
         return Err(XtaskError::MissingArtifact {
@@ -65,28 +65,22 @@ pub(crate) fn viewer_stage(ctx: &SessionContext) -> Result<Stage, XtaskError> {
             hint: "run from the Pilotage repository root",
         });
     }
-    // Cache-Control: no-store on every response: the served client must
-    // always equal the working-tree source. The viewer is served straight
-    // from the tree, so any heuristic caching of main.js would let the
-    // browser run a client that has diverged from the source on disk;
-    // no-store holds the served client and the on-disk source identical.
-    let server = format!(
-        "import http.server\n\
-         class H(http.server.SimpleHTTPRequestHandler):\n\
-         \tdef end_headers(self):\n\
-         \t\tself.send_header('Cache-Control', 'no-store')\n\
-         \t\tsuper().end_headers()\n\
-         http.server.test(HandlerClass=H, port={port}, bind='{bind}')\n",
-        port = ctx.viewer_port,
-        // Loopback by default: serving the working tree to the network is
-        // an explicit request, never a side effect of running a sim.
-        bind = if ctx.lan { "0.0.0.0" } else { "127.0.0.1" }
-    );
+    // Loopback by default: serving the working tree to the network is
+    // an explicit request, never a side effect of running a sim.
+    let bind = if ctx.lan { "0.0.0.0" } else { "127.0.0.1" };
     Ok(Stage {
         spec: ProcessSpec {
             name: "viewer",
-            program: "python3".to_owned(),
-            args: vec!["-c".to_owned(), server],
+            program: xtask.display().to_string(),
+            args: vec![
+                "serve-viewer".to_owned(),
+                "--dir".to_owned(),
+                ctx.web_root.display().to_string(),
+                "--port".to_owned(),
+                ctx.viewer_port.to_string(),
+                "--bind".to_owned(),
+                bind.to_owned(),
+            ],
             cwd: Some(ctx.web_root.clone()),
             env: vec![],
             remove_env: vec![],

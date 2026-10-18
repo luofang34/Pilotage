@@ -98,50 +98,57 @@ fn listening_port_must_match_the_requested_port() {
     ));
 }
 
-/// Every viewer response must carry `Cache-Control: no-store` so the
-/// browser can never present a cached client that has diverged from the
-/// working-tree source. Spawns the real `viewer_stage` process on an
-/// ephemeral port and reads the header off the wire.
-#[tokio::test]
-async fn viewer_server_sets_cache_control_no_store() {
+/// The viewer stage runs this binary's own static server, never an
+/// interpreter, and binds loopback unless the session serves the LAN.
+/// The server's responses are covered over real sockets in
+/// `viewer_server::tests` and through the built binary in
+/// `tests/serve_viewer.rs`.
+#[test]
+fn viewer_stage_runs_the_xtask_static_server() {
     let repo_root = std::env::temp_dir().join(format!("plt_xt_viewer_{}", std::process::id()));
     let web = repo_root.join("clients/web");
     std::fs::create_dir_all(&web).expect("temp clients/web is created");
     std::fs::write(web.join("index.html"), "<title>viewer</title>")
         .expect("the viewer entrypoint is written");
-
-    let ctx = SessionContext {
+    let xtask = Path::new("/built/target/debug/xtask");
+    let mut ctx = SessionContext {
         repo_root: repo_root.clone(),
         host_port: 0,
-        viewer_port: free_port(),
+        viewer_port: 18080,
         profile: Profile::Simulation,
         log_dir: repo_root.clone(),
         lan: false,
         web_root: web.clone(),
         instance: 0,
     };
-    let stage = viewer_stage(&ctx).expect("the viewer stage plans");
-    let mut child = ManagedChild::spawn(&stage.spec).expect("the viewer server spawns");
-    let ready = await_ready(&mut child, &stage.readiness).await;
 
-    // Read the header off the wire only once the server accepts, but
-    // always tear the process group down before asserting.
-    let response = ready.is_ok().then(|| http_get(ctx.viewer_port, "/"));
-    child.terminate_group();
+    let loopback = viewer_stage(&ctx, xtask).expect("the viewer stage plans");
+    ctx.lan = true;
+    let lan = viewer_stage(&ctx, xtask).expect("the LAN viewer stage plans");
     std::fs::remove_dir_all(&repo_root).ok();
 
-    ready.expect("the viewer server accepts connections");
-    let headers = response
-        .unwrap_or_default()
-        .split("\r\n\r\n")
-        .next()
-        .unwrap_or_default()
-        .to_owned();
+    assert_eq!(loopback.spec.program, xtask.display().to_string());
+    let expected = |bind: &str| {
+        [
+            "serve-viewer",
+            "--dir",
+            &web.display().to_string(),
+            "--port",
+            "18080",
+            "--bind",
+            bind,
+        ]
+        .map(str::to_owned)
+        .to_vec()
+    };
+    assert_eq!(loopback.spec.args, expected("127.0.0.1"));
+    assert_eq!(lan.spec.args, expected("0.0.0.0"));
     assert!(
-        headers
-            .to_ascii_lowercase()
-            .contains("cache-control: no-store"),
-        "every viewer response must carry Cache-Control: no-store; got headers:\n{headers}"
+        matches!(
+            loopback.readiness,
+            Readiness::TcpAccepts { port: 18080, .. }
+        ),
+        "readiness is the viewer port accepting"
     );
 }
 

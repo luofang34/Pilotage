@@ -1,5 +1,5 @@
 //! Argument parsing for the xtask entry point: `sim`, `reset`,
-//! `handshake`, `help`.
+//! `handshake`, `affected`, `guards`, `serve-viewer`, `help`.
 
 use crate::error::XtaskError;
 
@@ -105,6 +105,8 @@ pub enum Command {
         /// The base git reference the diff is taken against.
         base: String,
     },
+    /// Serve a directory to the browser viewer.
+    ServeViewer(crate::viewer_server::ServeViewerArgs),
     /// Print usage.
     Help,
 }
@@ -139,10 +141,13 @@ pub fn parse_args(args: &[String]) -> Result<Command, XtaskError> {
         "affected" => Ok(Command::Affected {
             base: parse_affected(rest)?,
         }),
+        "serve-viewer" => Ok(Command::ServeViewer(crate::viewer_server::parse_args(
+            rest,
+        )?)),
         "help" | "--help" | "-h" => Ok(Command::Help),
         other => Err(XtaskError::Usage {
             message: format!(
-                "unknown command {other:?} (expected sim, fleet, reset, handshake, affected, guards, or help)"
+                "unknown command {other:?} (expected sim, fleet, reset, handshake, affected, guards, serve-viewer, or help)"
             ),
         }),
     }
@@ -423,6 +428,11 @@ commands:
       Discover every scripts/check-<name>.sh with its
       scripts/test-check-<name>.sh self-test, run each pair, and name
       every failing guard.
+
+  serve-viewer --dir <dir> --port <port> [--bind <addr>]
+      Serve <dir> statically to the browser viewer with caching disabled,
+      on 127.0.0.1 unless --bind says otherwise; port 0 picks a free port
+      and prints it.
 
   help
       Print this help text.";

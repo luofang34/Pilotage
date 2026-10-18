@@ -6,7 +6,7 @@
   Build the wasm first:
     scripts/build-web-instruments.sh
   then serve statically, no build step:
-    python3 -m http.server 8000
+    cargo xtask serve-viewer --dir . --port 8000
   and open http://localhost:8000/clients/web/instruments.html
 -->
 <title>Pilotage instrument harness</title>

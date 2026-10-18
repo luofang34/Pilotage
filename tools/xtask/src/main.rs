@@ -15,6 +15,7 @@ mod output;
 mod process;
 mod readiness;
 mod session;
+mod viewer_server;
 
 use cli::Command;
 use output::print_line;
@@ -44,6 +45,7 @@ fn run(args: &[String]) -> Result<(), error::XtaskError> {
         Command::Handshake(out_dir) => session::run_handshake(&out_dir),
         Command::Guards => guards::run_guards(&session::repo_root()?),
         Command::Affected { base } => affected::run_affected(&base),
+        Command::ServeViewer(serve) => viewer_server::run_serve_viewer(&serve),
         Command::Sim(sim) => run_supervised(session::run_sim(&sim)),
         Command::Fleet(fleet) => run_supervised(session::fleet::run_fleet(&fleet)),
     }

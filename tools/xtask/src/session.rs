@@ -57,7 +57,11 @@ pub async fn run_sim(args: &SimArgs) -> Result<(), XtaskError> {
 
     let mut stages = backend.plan(&ctx)?;
     stages.push(host_stage(&ctx, backend.as_ref()));
-    stages.push(viewer_stage(&ctx)?);
+    let xtask = std::env::current_exe().map_err(|source| XtaskError::Io {
+        context: "locating the xtask executable for the viewer stage",
+        source,
+    })?;
+    stages.push(viewer_stage(&ctx, &xtask)?);
 
     // The cancellation source must exist before the first child spawns:
     // each child lives in its own process group, so a terminal ctrl-c

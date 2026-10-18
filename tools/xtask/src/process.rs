@@ -145,6 +145,18 @@ impl ManagedChild {
     }
 }
 
+impl Drop for ManagedChild {
+    /// A stage still running when its handle goes away (a panic unwinding
+    /// past teardown, an early return) takes its process group with it:
+    /// the group is detached from the launcher's, so nothing else would
+    /// ever stop it. A reaped child is left alone; its pid may be reused.
+    fn drop(&mut self) {
+        if matches!(self.child.try_wait(), Ok(None)) {
+            self.terminate_group();
+        }
+    }
+}
+
 /// Signals a process group via the `kill` utility (no unsafe `killpg`).
 fn signal_group(pid: u32, signal: &str) {
     Command::new("kill")
@@ -157,78 +169,5 @@ fn signal_group(pid: u32, signal: &str) {
         .ok();
 }
 
-/// Whether any member of `pid`'s process group is still alive (signal 0
-/// probes without delivering).
 #[cfg(test)]
-#[allow(clippy::expect_used, clippy::panic)]
-mod tests {
-    use std::io::Read;
-    use std::sync::mpsc;
-    use std::time::Duration;
-
-    use super::{ManagedChild, ProcessSpec};
-
-    const EVENT_TIMEOUT: Duration = Duration::from_secs(10);
-
-    /// The leader exiting must not spare its descendants: a grandchild
-    /// that ignores TERM still dies from the unconditional group KILL.
-    /// The fifo synchronizes on process events, not polling: its open is
-    /// the grandchild-started event, and EOF fires only when every
-    /// process holding the write end — the whole group — is gone.
-    #[test]
-    fn group_kill_reaches_term_ignoring_descendants_after_the_leader_exits() {
-        let tag = format!("plt_grp_{}", std::process::id());
-        let fifo = std::env::temp_dir().join(format!("{tag}.fifo"));
-        let log = std::env::temp_dir().join(format!("{tag}.log"));
-        std::fs::remove_file(&fifo).ok();
-        let status = std::process::Command::new("mkfifo")
-            .arg(&fifo)
-            .status()
-            .expect("mkfifo runs");
-        assert!(status.success(), "mkfifo creates the fifo");
-
-        let (tx, rx) = mpsc::channel();
-        let reader_path = fifo.clone();
-        std::thread::spawn(move || {
-            let mut file =
-                std::fs::File::open(&reader_path).expect("fifo opens once the grandchild starts");
-            tx.send("open").ok();
-            let mut sink = Vec::new();
-            file.read_to_end(&mut sink).ok();
-            tx.send("eof").ok();
-            std::fs::remove_file(&reader_path).ok();
-        });
-
-        // The grandchild ignores TERM and holds the fifo; the leader
-        // exits immediately.
-        let mut child = ManagedChild::spawn(&ProcessSpec {
-            name: "group-test",
-            program: "sh".to_owned(),
-            args: vec![
-                "-c".to_owned(),
-                format!(
-                    "sh -c 'trap \"\" TERM; exec 9>{}; sleep 30' & exit 0",
-                    fifo.display()
-                ),
-            ],
-            cwd: None,
-            env: Vec::new(),
-            remove_env: Vec::new(),
-            log_path: log.clone(),
-        })
-        .expect("test stage spawns");
-
-        let event = rx.recv_timeout(EVENT_TIMEOUT).expect("grandchild starts");
-        assert_eq!(event, "open", "the grandchild is holding the group");
-        // The leader exits on its own; reaped or not, the group must die.
-        child.child.wait().ok();
-
-        child.terminate_group();
-
-        let event = rx
-            .recv_timeout(EVENT_TIMEOUT)
-            .expect("the group KILL reaches the grandchild");
-        assert_eq!(event, "eof", "every group member is gone");
-        std::fs::remove_file(&log).ok();
-    }
-}
+mod tests;

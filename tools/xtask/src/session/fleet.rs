@@ -222,7 +222,11 @@ fn plan_slot(slot: &mut Slot, index: usize) -> Result<(), XtaskError> {
     slot.backend
         .spawn(&slot.ctx, &spawn_point(index), &mut planned)?;
     planned.push(stages::host_stage(&slot.ctx, slot.backend.as_ref()));
-    planned.push(stages::viewer_stage(&slot.ctx)?);
+    let xtask = std::env::current_exe().map_err(|source| XtaskError::Io {
+        context: "locating the xtask executable for the viewer stage",
+        source,
+    })?;
+    planned.push(stages::viewer_stage(&slot.ctx, &xtask)?);
     slot.stages = planned;
     Ok(())
 }
