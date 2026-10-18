@@ -10,6 +10,9 @@
 //!     -- --ignored --nocapture
 //! ```
 //!
+//! With `PILOTAGE_LIVE_HOST_PORT=<port>` it flies the vehicle of a session
+//! host already listening on that loopback port instead.
+//!
 //! The client is the portable client-session core, as every Pilotage
 //! client is: it is admitted, takes the motion lease, arms through the
 //! reliable action path, and sends typed velocity intents scaled by the
@@ -260,17 +263,33 @@ fn a_client_flies_a_betaflight_quad_through_the_host() {
 }
 
 async fn flight() {
-    let host = runtime::start_with_options(
-        0,
-        AdapterKind::Betaflight,
-        runtime::RuntimeOptions {
-            legacy_compatibility: false,
-            mission: None,
-        },
-    )
-    .await
-    .expect("host starts (PILOTAGE_BETAFLIGHT_PROFILE=simulation)");
-    let mut client = Client::connect(host.local_addr).await;
+    // PILOTAGE_LIVE_HOST_PORT flies the vehicle of a host already running
+    // (a `cargo xtask sim --fc betaflight-sitl` session) instead of one
+    // this test starts.
+    let external = std::env::var("PILOTAGE_LIVE_HOST_PORT").ok().map(|port| {
+        port.parse::<u16>()
+            .expect("PILOTAGE_LIVE_HOST_PORT is a port")
+    });
+    let host = match external {
+        Some(_) => None,
+        None => Some(
+            runtime::start_with_options(
+                0,
+                AdapterKind::Betaflight,
+                runtime::RuntimeOptions {
+                    legacy_compatibility: false,
+                    mission: None,
+                },
+            )
+            .await
+            .expect("host starts (PILOTAGE_BETAFLIGHT_PROFILE=simulation)"),
+        ),
+    };
+    let addr = host.as_ref().map_or_else(
+        || std::net::SocketAddr::from(([127, 0, 0, 1], external.unwrap_or_default())),
+        |host| host.local_addr,
+    );
+    let mut client = Client::connect(addr).await;
     client.admit_and_lease().await;
     let first = client
         .fly([0.0; 4], Duration::from_secs(30), |_| true)
@@ -282,7 +301,9 @@ async fn flight() {
     forward(&mut client).await;
     yaw(&mut client).await;
     land_and_disarm(&mut client).await;
-    host.shutdown().await;
+    if let Some(host) = host {
+        host.shutdown().await;
+    }
 }
 
 /// Arms, retrying while Betaflight names a blocker (it reports RXLOSS and
