@@ -11,7 +11,7 @@
 //! yaw), and throttle is a climb-rate demand.
 
 use std::net::{SocketAddr, UdpSocket};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use tracing::{info, warn};
 
@@ -37,7 +37,7 @@ pub(crate) const MAX_DT_S: f32 = 0.1;
 /// FC stages inbound commands in a single slot, so a setpoint arriving
 /// in the same poll batch would overwrite the arm before the control
 /// loop consumes it.
-const ARM_QUIET: std::time::Duration = std::time::Duration::from_millis(150);
+const ARM_QUIET: Duration = Duration::from_millis(150);
 
 /// The uplink's time source. Production reads the system monotonic clock;
 /// tests substitute a manually advanced instant so timing behavior (the
@@ -60,6 +60,10 @@ impl UplinkClock {
     }
 }
 
+/// How often a latched hold is repeated: well inside the FC's 500 ms
+/// command timeout.
+const HOLD_KEEPALIVE: Duration = Duration::from_millis(100);
+
 /// The UDP MAVLink command uplink to the FC.
 #[derive(Debug)]
 pub struct FlightUplink {
@@ -79,6 +83,8 @@ pub struct FlightUplink {
     // Brake-then-hold state: the captured hold point while every stick
     // is centered.
     hold_pos_ned: Option<[f32; 3]>,
+    // When the link-loss hold last reached the FC.
+    last_hold: Option<Instant>,
     feel: feel::UplinkFeel,
     started: Instant,
     clock: UplinkClock,
@@ -149,6 +155,7 @@ impl FlightUplink {
             heading_sp_rad: 0.0,
             heading_valid: false,
             last_frame: None,
+            last_hold: None,
             quiet_until: None,
             airborne: false,
             hold_pos_ned: None,
@@ -239,6 +246,7 @@ impl FlightUplink {
     /// link-loss neutralize action (the FC's velocity mode brakes to a
     /// hover on zero demand).
     pub fn send_neutral(&mut self) {
+        self.last_hold = Some(self.clock.now());
         let time_boot_ms = self
             .clock
             .now()
@@ -253,6 +261,24 @@ impl FlightUplink {
             self.expected_component_id,
         );
         self.send(&frame);
+    }
+
+    /// Repeats the link-loss hold while a latch holds the vehicle. The FC
+    /// treats a command older than its 500 ms timeout as a lost uplink and
+    /// descends, so one zero-velocity setpoint is not a hover: the hold has
+    /// to keep arriving until the host clears the latch. Nothing is sent
+    /// to a vehicle that has not taken off.
+    pub(crate) fn keep_holding(&mut self) {
+        if !self.airborne {
+            return;
+        }
+        let now = self.clock.now();
+        if self
+            .last_hold
+            .is_none_or(|at| now.saturating_duration_since(at) >= HOLD_KEEPALIVE)
+        {
+            self.send_neutral();
+        }
     }
 
     /// The socket's local address, for tests.
