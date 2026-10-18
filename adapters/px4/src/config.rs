@@ -11,6 +11,18 @@ pub enum Px4Profile {
     Simulation,
 }
 
+/// The airframe class PX4 flies, which decides how the adapter turns the
+/// unified velocity intent into PX4 commands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Px4Airframe {
+    /// A multirotor: velocity setpoints in offboard mode.
+    #[default]
+    Multicopter,
+    /// A conventional airplane: Position-mode sticks over MANUAL_CONTROL,
+    /// with an automatic takeoff on arm.
+    FixedWing,
+}
+
 /// All policy and network configuration required to start the PX4 adapter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Px4Config {
@@ -25,6 +37,8 @@ pub struct Px4Config {
     /// SITL instance `N` reports system id `N + 1`, so concurrent instances
     /// are told apart by this id, never by port alone.
     pub system_id: u8,
+    /// The airframe class behind this PX4 instance.
+    pub airframe: Px4Airframe,
     /// Whether this vehicle carries a MAVLink Gimbal Protocol v2 gimbal.
     /// Off by default: a bare airframe has no gimbal, and advertising
     /// the `vehicle.gimbal` scope on one would let a client lease a
@@ -50,6 +64,7 @@ impl Px4Config {
             stream_command_endpoint: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 18_570)),
             command_endpoint: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 14_580)),
             system_id: 1,
+            airframe: Px4Airframe::Multicopter,
             gimbal: false,
             drop_gimbal_link_loss_stop: false,
         }

@@ -14,7 +14,43 @@ use super::{
     Px4Adapter, ROLL_AXIS, THROTTLE_AXIS, YAW_AXIS,
 };
 
+/// The velocity envelope the flight scope advertises and enforces.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct FlightEnvelope {
+    /// Horizontal bound, m/s.
+    pub(super) max_linear: f32,
+    /// Vertical bound, m/s.
+    pub(super) max_vertical: f32,
+    /// Yaw-rate bound, rad/s.
+    pub(super) max_angular: f32,
+}
+
 impl Px4Adapter {
+    /// The REAL envelope of the airframe's uplink. A multicopter flies the
+    /// offboard velocity envelope. A fixed wing reads `max_linear` as the
+    /// airspeed change from trim (the same bound below and above trim),
+    /// `max_vertical` as the climb or sink rate, and `max_angular` as the
+    /// coordinated-turn rate at trim airspeed; it flies no lateral `vy`.
+    pub(super) fn flight_envelope(&self) -> FlightEnvelope {
+        if self.fixed_wing.is_some() {
+            FlightEnvelope {
+                max_linear: crate::fixed_wing::sticks::MAX_AIRSPEED_CHANGE_MPS,
+                max_vertical: crate::fixed_wing::sticks::MAX_VERTICAL_MPS,
+                max_angular: crate::fixed_wing::sticks::max_turn_rate_rps(),
+            }
+        } else {
+            FlightEnvelope {
+                max_linear: crate::uplink::MAX_HORIZONTAL_MPS,
+                max_vertical: crate::uplink::MAX_VERTICAL_MPS,
+                max_angular: crate::uplink::MAX_YAW_RATE_RPS,
+            }
+        }
+    }
+
+    fn has_flight_uplink(&self) -> bool {
+        self.uplink.is_some() || self.fixed_wing.is_some()
+    }
+
     /// The capability report `VehicleAdapter::capabilities` returns.
     pub(super) fn advertised_capabilities(&self) -> AdapterCapabilities {
         AdapterCapabilities {
@@ -26,8 +62,11 @@ impl Px4Adapter {
                 id: self.vehicle,
                 scopes: {
                     let mut scopes = Vec::new();
-                    if self.uplink.is_some() {
-                        scopes.push(flight_scope_descriptor());
+                    if self.has_flight_uplink() {
+                        scopes.push(flight_scope_descriptor(
+                            self.flight_envelope(),
+                            self.fixed_wing.is_none(),
+                        ));
                         // This adapter implements only the SIMULATION
                         // profile today; a physical-vehicle profile must
                         // NOT advertise the lifecycle scope (SIM-01).
@@ -38,7 +77,7 @@ impl Px4Adapter {
                     }
                     scopes
                 },
-                link_loss_actions: if self.uplink.is_some() {
+                link_loss_actions: if self.has_flight_uplink() {
                     vec![LinkLossPolicy::Neutralize]
                 } else {
                     vec![]
@@ -50,7 +89,9 @@ impl Px4Adapter {
     }
 }
 
-fn flight_scope_descriptor() -> ScopeDescriptor {
+/// `lateral` is false for an airframe that cannot fly `vy`: its legacy map
+/// routes no axis there.
+fn flight_scope_descriptor(envelope: FlightEnvelope, lateral: bool) -> ScopeDescriptor {
     ScopeDescriptor {
         authority_group: None,
         scope: ScopeId::new(FLIGHT_SCOPE),
@@ -65,9 +106,9 @@ fn flight_scope_descriptor() -> ScopeDescriptor {
             max_yaw_rate: 0.0,
             family: IntentFamily::Velocity,
             frames: vec![ReferenceFrame::BodyFrd],
-            max_linear: crate::uplink::MAX_HORIZONTAL_MPS,
-            max_vertical: crate::uplink::MAX_VERTICAL_MPS,
-            max_angular: crate::uplink::MAX_YAW_RATE_RPS,
+            max_linear: envelope.max_linear,
+            max_vertical: envelope.max_vertical,
+            max_angular: envelope.max_angular,
         }],
         // No sim reset here: a lifecycle action under the separately
         // leased `sim.lifecycle` scope, never flight authority.
@@ -88,7 +129,7 @@ fn flight_scope_descriptor() -> ScopeDescriptor {
                 axis: PITCH_AXIS,
                 sign: 1.0,
             }),
-            vy: Some(LegacyAxisRoute {
+            vy: lateral.then_some(LegacyAxisRoute {
                 axis: ROLL_AXIS,
                 sign: 1.0,
             }),

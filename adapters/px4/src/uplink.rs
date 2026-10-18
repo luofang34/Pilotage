@@ -15,6 +15,9 @@ use std::time::{Duration, Instant};
 use pilotage_adapter_api::FcCommandAck;
 use tracing::{info, warn};
 
+pub(crate) mod clock;
+use clock::UplinkClock;
+
 use pilotage_mavlink::codec::{
     FcMessage, FrameSource, GCS_COMPONENT_ID, GCS_SYSTEM_ID, MAV_CMD_COMPONENT_ARM_DISARM,
     MAV_CMD_DO_SET_MODE, encode_arm_command, encode_command_long, encode_gcs_heartbeat,
@@ -51,25 +54,6 @@ const STREAM_KEEPALIVE: Duration = Duration::from_millis(50);
 const BASE_MODE_CUSTOM: f32 = 1.0;
 /// PX4 custom main mode OFFBOARD.
 const PX4_MAIN_MODE_OFFBOARD: f32 = 6.0;
-
-/// The uplink's time source; tests substitute a manually advanced
-/// instant so sequencing is exercised without real-time sleeps.
-#[derive(Debug)]
-enum UplinkClock {
-    System,
-    #[cfg(test)]
-    Manual(Instant),
-}
-
-impl UplinkClock {
-    fn now(&self) -> Instant {
-        match self {
-            Self::System => Instant::now(),
-            #[cfg(test)]
-            Self::Manual(at) => *at,
-        }
-    }
-}
 
 /// Where the offboard arm sequence stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

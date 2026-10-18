@@ -7,21 +7,20 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use pilotage_adapter_api::{
-    ActionResult, AdapterCapabilities, ApplyOutcome, Disposition, LinkLossEnactError,
-    LinkLossPolicy, RejectReason, StepBudget, StepOutcome, TelemetryBatch, VehicleAdapter,
-    VideoSource,
+    AdapterCapabilities, ApplyOutcome, LinkLossEnactError, LinkLossPolicy, RejectReason,
+    StepBudget, StepOutcome, TelemetryBatch, VehicleAdapter, VideoSource,
 };
 use pilotage_protocol::VehicleId;
 use std::collections::BTreeMap;
 
-use pilotage_protocol::{ActionKind, LogicalAxisId, ScopeId, ScopedControlFrame};
+use pilotage_protocol::{LogicalAxisId, ScopeId, ScopedControlFrame};
 use pilotage_timing::SimTick;
 
 use pilotage_mavlink::{LinkState, MavlinkLink};
 
 use crate::config::Px4Config;
 use crate::error::Px4AdapterError;
-use crate::uplink::{Px4Uplink, StickFrameDisposition};
+use crate::uplink::Px4Uplink;
 
 mod advertisement;
 mod battery;
@@ -33,6 +32,7 @@ use camera_link::CameraBridge;
 use camera_link::no_camera;
 
 mod control;
+mod flight;
 #[cfg(test)]
 mod gimbal_link_loss_tests;
 #[cfg(test)]
@@ -81,6 +81,9 @@ pub struct Px4Adapter {
     // basis for state-dependent control; there is no truth oracle).
     estimate: Option<EstimateSource>,
     uplink: Option<Px4Uplink>,
+    // The fixed-wing uplink, in place of `uplink` when the airframe is a
+    // fixed wing; at most one of the two is present.
+    fixed_wing: Option<crate::fixed_wing::FixedWingUplink>,
     // Gimbal-manager command path; rides the receive link's socket
     // because the FC's GCS instance retargets its telemetry stream to
     // the last peer that spoke.
@@ -170,16 +173,7 @@ impl Px4Adapter {
             }
             _ => None,
         };
-        let uplink = match Px4Uplink::new(config.command_endpoint) {
-            Ok(mut uplink) => {
-                uplink.set_expected_source(link_config.system_id, link_config.component_id);
-                Some(uplink)
-            }
-            Err(error) => {
-                tracing::warn!(%error, "PX4 uplink unavailable; telemetry-only");
-                None
-            }
-        };
+        let (uplink, fixed_wing) = flight::flight_uplinks(&config, &link_config);
         #[cfg(feature = "sim")]
         let (frames, camera_bridge, frame_forwarder) =
             camera::spawn_camera_bridge(config.gimbal).await;
@@ -192,6 +186,7 @@ impl Px4Adapter {
                 _link: Some(link),
             }),
             uplink,
+            fixed_wing,
             gimbal,
             frames,
             _camera_bridge: camera_bridge,
@@ -218,6 +213,7 @@ impl Px4Adapter {
             vehicle,
             estimate: Some(EstimateSource { state, _link: None }),
             uplink: None,
+            fixed_wing: None,
             gimbal: None,
             frames: None,
             _camera_bridge: None,
@@ -367,65 +363,17 @@ impl VehicleAdapter for Px4Adapter {
         if let Some(outcome) = self.gated_flight_outcome(frame, tick) {
             return outcome;
         }
-        let Some((current_yaw, _pos, _vel)) = self.current_pose() else {
-            return rejected_control(tick, RejectReason::MeasurementUnavailable);
-        };
-        let Some(uplink) = self.uplink.as_mut() else {
-            return rejected_control(tick, RejectReason::UnknownScope);
-        };
-        let mut action_results = Vec::with_capacity(frame.actions.len());
-        for action in &frame.actions {
-            match action.kind() {
-                ActionKind::Arm => {
-                    uplink.begin_arm(current_yaw);
-                    action_results.push(ActionResult::accepted(*action));
-                }
-                // Nothing else is advertised for this scope (sim reset
-                // lives on the lifecycle scope), so the session rejects it
-                // before delivery — defensive, not a reachable path.
-                _ => {
-                    action_results.push(ActionResult::rejected(
-                        *action,
-                        "not supported on the flight scope",
-                    ));
-                }
-            }
+        if self.fixed_wing.is_some() {
+            return self.apply_fixed_wing_flight(frame, tick);
         }
-        let Some(pilotage_protocol::ControlIntent::Velocity(velocity)) = frame.intent else {
-            // An actions-only frame (arm) carries no motion demand; the
-            // setpoint stream continues from the next frame.
-            return ApplyOutcome {
-                tick,
-                disposition: Disposition::Accepted,
-                action_results,
-            };
-        };
-        let (sticks, constrained) = control::sticks_from_velocity(&velocity);
-        if uplink.send_stick_frame(sticks[0], sticks[1], sticks[2], sticks[3])
-            == StickFrameDisposition::UplinkIdle
-        {
-            return ApplyOutcome {
-                tick,
-                disposition: Disposition::Rejected(RejectReason::UplinkIdle),
-                action_results,
-            };
-        }
-        ApplyOutcome {
-            tick,
-            disposition: if constrained {
-                Disposition::Constrained
-            } else {
-                Disposition::Accepted
-            },
-            action_results,
-        }
+        self.apply_multicopter_flight(frame, tick)
     }
 
     fn sample_telemetry(&mut self) -> TelemetryBatch {
         self.observe_arm_report();
         let fc_state = sampling::fc_state_sample(
             self.arm,
-            self.uplink.as_ref().and_then(Px4Uplink::last_arm_ack),
+            self.flight_arm_ack(),
             self.arm_incarnation,
             self.started_at,
         );
@@ -462,9 +410,7 @@ impl VehicleAdapter for Px4Adapter {
                 .push(sampling::report_only_sample(self.vehicle, tick));
         }
         reports.attach(&mut batch);
-        if let Some(uplink) = self.uplink.as_mut() {
-            uplink.maintain();
-        }
+        self.maintain_flight_uplink();
         if let Some(gimbal) = self.gimbal.as_mut() {
             gimbal.maintain();
         }

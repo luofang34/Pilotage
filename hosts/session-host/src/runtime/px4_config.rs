@@ -3,7 +3,7 @@
 use std::env::VarError;
 use std::net::SocketAddr;
 
-use pilotage_adapter_px4::{Px4Config, Px4Profile};
+use pilotage_adapter_px4::{Px4Airframe, Px4Config, Px4Profile};
 
 use crate::error::HostError;
 
@@ -13,6 +13,8 @@ const STREAM_COMMAND_ENDPOINT: &str = "PILOTAGE_PX4_GCS_ADDR";
 const COMMAND_ENDPOINT: &str = "PILOTAGE_PX4_FC_ADDR";
 /// The MAVLink system id of the PX4 instance (SITL instance `N` is `N + 1`).
 const SYSTEM_ID: &str = "PILOTAGE_PX4_SYSTEM_ID";
+/// The airframe class: `multicopter` (the default) or `fixed_wing`.
+const AIRFRAME: &str = "PILOTAGE_PX4_AIRFRAME";
 const GIMBAL: &str = "PILOTAGE_PX4_GIMBAL";
 /// Acceptance fault injection: drop the gimbal link-loss stop so the vehicle's
 /// own failsafe is the sole mechanism under test. Honoured only under the
@@ -28,6 +30,7 @@ struct Px4Env {
     stream_command_endpoint: Result<String, VarError>,
     command_endpoint: Result<String, VarError>,
     system_id: Result<String, VarError>,
+    airframe: Result<String, VarError>,
     gimbal: Result<String, VarError>,
     drop_gimbal_stop: Result<String, VarError>,
 }
@@ -40,6 +43,7 @@ impl Px4Env {
             stream_command_endpoint: std::env::var(STREAM_COMMAND_ENDPOINT),
             command_endpoint: std::env::var(COMMAND_ENDPOINT),
             system_id: std::env::var(SYSTEM_ID),
+            airframe: std::env::var(AIRFRAME),
             gimbal: std::env::var(GIMBAL),
             drop_gimbal_stop: std::env::var(DROP_GIMBAL_STOP),
         }
@@ -71,6 +75,7 @@ fn config_from_env(env: Px4Env) -> Result<Px4Config, HostError> {
         config.command_endpoint,
     )?;
     config.system_id = parse_system_id(env.system_id, config.system_id)?;
+    config.airframe = parse_airframe(env.airframe)?;
     Ok(config)
 }
 
@@ -121,6 +126,27 @@ fn parse_system_id(value: Result<String, VarError>, default: u8) -> Result<u8, H
         Err(VarError::NotPresent) => Ok(default),
         Err(source @ VarError::NotUnicode(_)) => Err(HostError::Px4EndpointEncoding {
             variable: SYSTEM_ID,
+            source,
+        }),
+    }
+}
+
+/// An unknown airframe fails closed: flying a plane through the multicopter
+/// path, or the reverse, would command setpoints the FC cannot follow.
+fn parse_airframe(value: Result<String, VarError>) -> Result<Px4Airframe, HostError> {
+    match value {
+        Ok(value) => match value.as_str() {
+            "multicopter" => Ok(Px4Airframe::Multicopter),
+            "fixed_wing" => Ok(Px4Airframe::FixedWing),
+            _ => Err(HostError::Px4Setting {
+                variable: AIRFRAME,
+                value,
+                expected: "multicopter or fixed_wing",
+            }),
+        },
+        Err(VarError::NotPresent) => Ok(Px4Airframe::Multicopter),
+        Err(source @ VarError::NotUnicode(_)) => Err(HostError::Px4EndpointEncoding {
+            variable: AIRFRAME,
             source,
         }),
     }

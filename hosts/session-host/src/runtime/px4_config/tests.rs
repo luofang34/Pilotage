@@ -4,6 +4,8 @@ use std::env::VarError;
 use std::ffi::OsString;
 use std::net::SocketAddr;
 
+use pilotage_adapter_px4::Px4Airframe;
+
 use super::{Px4Env, config_from_env};
 use crate::error::HostError;
 
@@ -23,6 +25,7 @@ fn simulation() -> Px4Env {
         stream_command_endpoint: absent(),
         command_endpoint: absent(),
         system_id: absent(),
+        airframe: absent(),
         gimbal: absent(),
         drop_gimbal_stop: absent(),
     }
@@ -127,6 +130,49 @@ fn a_broadcast_or_unparsable_system_id_fails_closed() {
                 refusal,
                 Err(HostError::Px4Setting {
                     variable: "PILOTAGE_PX4_SYSTEM_ID",
+                    ..
+                })
+            ),
+            "{value:?} must be refused, got {refusal:?}"
+        );
+    }
+}
+
+#[test]
+fn the_airframe_defaults_to_multicopter_and_selects_fixed_wing() {
+    let airframe = |value| {
+        config_from_env(Px4Env {
+            airframe: value,
+            ..simulation()
+        })
+        .map(|config| config.airframe)
+    };
+    assert_eq!(
+        airframe(absent()).expect("default"),
+        Px4Airframe::Multicopter
+    );
+    assert_eq!(
+        airframe(set("multicopter")).expect("multicopter"),
+        Px4Airframe::Multicopter
+    );
+    assert_eq!(
+        airframe(set("fixed_wing")).expect("fixed wing"),
+        Px4Airframe::FixedWing
+    );
+}
+
+#[test]
+fn an_unknown_airframe_fails_closed() {
+    for value in ["plane", "FixedWing", "fixed-wing", "vtol", ""] {
+        let refusal = config_from_env(Px4Env {
+            airframe: set(value),
+            ..simulation()
+        });
+        assert!(
+            matches!(
+                refusal,
+                Err(HostError::Px4Setting {
+                    variable: "PILOTAGE_PX4_AIRFRAME",
                     ..
                 })
             ),
