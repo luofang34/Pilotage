@@ -2192,6 +2192,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-msp"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
 name = "pilotage-navdata-cycle"
 version = "0.1.0"
 dependencies = [
