@@ -12,7 +12,7 @@ if [ "$actual_bindgen" != "$required_bindgen" ]; then
   exit 1
 fi
 
-rustup target list --installed | grep -q '^wasm32-unknown-unknown$' ||
+rustup target list --installed | grep '^wasm32-unknown-unknown$' >/dev/null ||
   rustup target add wasm32-unknown-unknown
 
 cargo build -p pilotage-instruments-web --target wasm32-unknown-unknown --release

@@ -59,7 +59,7 @@ if ! grep -q 'Button(role: .close, action: close)' "$panel"; then
     echo "FORBIDDEN: the panel must be closed by the platform's own close button" >&2
     status=1
 fi
-if ! grep -A 6 'Button(role: .close, action: close)' "$panel" | grep -qF 'buttonStyle(.glass)'; then
+if ! grep -A 6 'Button(role: .close, action: close)' "$panel" | grep -F 'buttonStyle(.glass)' >/dev/null; then
     echo "FORBIDDEN: the close button needs the glass style, or the role draws a bare cross on nothing" >&2
     status=1
 fi
@@ -67,11 +67,11 @@ fi
 # naming the symbol or asking for icons only keeps it off the panel; neither leaves it
 # free to appear.
 if ! grep -A 6 'Button(role: .close, action: close)' "$panel" \
-    | grep -Eq 'labelStyle\(.iconOnly\)|systemName: "xmark"'; then
+    | grep -E 'labelStyle\(.iconOnly\)|systemName: "xmark"' >/dev/null; then
     echo "FORBIDDEN: the close button must name its symbol or ask for icons only, or it shows the word Close" >&2
     status=1
 fi
-if grep -A 8 'Button(role: .close' "$panel" | grep -Eq 'secondarySystemFill|background\(.*in: .circle\)'; then
+if grep -A 8 'Button(role: .close' "$panel" | grep -E 'secondarySystemFill|background\(.*in: .circle\)' >/dev/null; then
     echo "FORBIDDEN: the close button must not be redrawn by hand over the platform's own" >&2
     status=1
 fi

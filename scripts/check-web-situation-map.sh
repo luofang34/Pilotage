@@ -36,7 +36,7 @@ fi
 
 # The style is authored once, in the Apple resource tree. A committed copy
 # under clients/web would fork it.
-if git -C "$root" ls-files -- 'clients/web' | grep -qi 'SituationStyle'; then
+if git -C "$root" ls-files -- 'clients/web' | grep -i 'SituationStyle' >/dev/null; then
     echo "FORBIDDEN: clients/web must not commit a situation style fork" >&2
     status=1
 fi
@@ -55,7 +55,7 @@ if ! grep -Eq '^clients/web/vendor/$' "$root/.gitignore" \
     status=1
 fi
 if git -C "$root" ls-files -- 'clients/web/vendor' 'clients/web/situation-assets' \
-    'clients/web/situation-assets.new' | grep -q .; then
+    'clients/web/situation-assets.new' | grep . >/dev/null; then
     echo "FORBIDDEN: a vendored or exported file is committed" >&2
     status=1
 fi
@@ -294,14 +294,14 @@ for step in 'clients/web/situation-style.test.mjs' \
         # obligation is that CI runs the runner, not that it names the
         # script.
         scripts/check-*.sh|scripts/test-check-*.sh)
-            if ! grep -E '^[[:space:]]*run:' "$ci" | grep -Fq -- '-- guards' \
-                && ! grep -E '^[[:space:]]*run:' "$ci" | grep -Fq "$step"; then
+            if ! grep -E '^[[:space:]]*run:' "$ci" | grep -F -- '-- guards' >/dev/null \
+                && ! grep -E '^[[:space:]]*run:' "$ci" | grep -F "$step" >/dev/null; then
                 echo "FORBIDDEN: CI must run $step" >&2
                 status=1
             fi
             ;;
         *)
-            if ! grep -E '^[[:space:]]*run:' "$ci" | grep -Fq "$step"; then
+            if ! grep -E '^[[:space:]]*run:' "$ci" | grep -F "$step" >/dev/null; then
                 echo "FORBIDDEN: CI must run $step" >&2
                 status=1
             fi

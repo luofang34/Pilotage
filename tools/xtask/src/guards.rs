@@ -7,6 +7,11 @@
 //! and a guard whose self-test is missing stays a manual step until it
 //! earns the pairing. Every pair runs even after one fails, so a red
 //! run names every failing guard at once.
+//!
+//! A guard written in Rust is a function in a submodule here, proven
+//! by its unit tests. Each runs after the pairs.
+
+mod pipefail_pipelines;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -17,7 +22,8 @@ use crate::output::print_line;
 #[cfg(test)]
 mod tests;
 
-/// Discovers and runs every guard pair under `scripts/`.
+/// Discovers and runs every guard pair under `scripts/`, then every
+/// Rust guard.
 ///
 /// # Errors
 ///
@@ -40,11 +46,33 @@ pub fn run_guards(repo_root: &Path) -> Result<(), XtaskError> {
             }
         }
     }
+    run_rust_guards(repo_root, &mut failed);
     if failed.is_empty() {
-        print_line(&format!("guards: {} pairs ok", pairs.len()));
+        print_line(&format!(
+            "guards: {} pairs and the Rust guards ok",
+            pairs.len()
+        ));
         Ok(())
     } else {
         Err(XtaskError::GuardsFailed { names: failed })
+    }
+}
+
+fn run_rust_guards(repo_root: &Path, failed: &mut Vec<String>) {
+    let name = "pipefail-pipelines";
+    match pipefail_pipelines::check(repo_root) {
+        Ok(findings) if findings.is_empty() => print_line(&format!("guard {name}: ok")),
+        Ok(findings) => {
+            for finding in &findings {
+                print_line(&finding.to_string());
+            }
+            print_line(&format!("guard {name}: FAILED"));
+            failed.push(name.to_owned());
+        }
+        Err(error) => {
+            print_line(&format!("guard {name}: FAILED: {error}"));
+            failed.push(name.to_owned());
+        }
     }
 }
 

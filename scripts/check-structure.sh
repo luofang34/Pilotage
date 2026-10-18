@@ -199,7 +199,7 @@ check_calibration_id_uniqueness() {
         fi
     done < <(collect_rs_files)
 
-    if ! printf '%s' "$matches" | grep -qxF "$canonical"; then
+    if ! printf '%s' "$matches" | grep -xF "$canonical" >/dev/null; then
         echo "FORBIDDEN: canonical CalibrationId not found at $canonical" >&2
         status=1
     fi
