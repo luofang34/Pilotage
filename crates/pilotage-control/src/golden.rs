@@ -1,6 +1,6 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-//! Executes the SHARED golden-vector file (`../golden-vectors.json`) against
+//! Executes the SHARED golden-vector file (`clients/web-control/golden-vectors.json`) against
 //! the native device stage + control runtime. The wasm suite
 //! (`clients/web/control-runtime.test.mjs`) executes the SAME file through
 //! the compiled artifact, so the two cannot drift: a native/wasm divergence
@@ -16,7 +16,7 @@ use crate::device::SelectOutcome;
 use crate::plan::{AXIS_PITCH, AXIS_ROLL, AXIS_THROTTLE, AXIS_YAW, ControlPlan, LeaseAction};
 use crate::sample::{ButtonSample, Mode, RawSample, SessionState};
 
-const VECTORS: &str = include_str!("../golden-vectors.json");
+const VECTORS: &str = include_str!("../../../clients/web-control/golden-vectors.json");
 
 /// Both harnesses build pad samples with this many buttons, so pressed-set
 /// semantics match bit for bit.

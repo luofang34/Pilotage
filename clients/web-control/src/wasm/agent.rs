@@ -3,8 +3,8 @@
 use wasm_bindgen::prelude::*;
 
 use super::{FLAG_AGENT_OVERRIDE, WebControl};
-use crate::coordinator::{AgentInput, AgentTick};
-use crate::sample::{ButtonSample, DirectDemand};
+use pilotage_control::{AgentInput, AgentTick};
+use pilotage_control::{ButtonSample, DirectDemand};
 
 impl WebControl {
     /// Refills the sample for one agent tick from the stored agent input and

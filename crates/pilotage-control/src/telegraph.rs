@@ -14,6 +14,18 @@
 //!   fresh human decision, never a reconciliation loop's.
 //! - The confirmed lamp only ever repeats the flight controller's own
 //!   report. An accepted command moves the lever, not the lamp.
+//!
+//! An order is never left waiting in silence either: the flight
+//! controller's own refusal answers it, and an order nothing answers
+//! within [`ANSWER_WINDOW_MS`] snaps back to SAFE saying so, and is
+//! still answered if the vehicle carries it out late.
+
+/// How long an order waits for the vehicle's answer. A PX4 offboard
+/// arm streams setpoints for a moment before it commands the arm.
+pub const ANSWER_WINDOW_MS: f64 = 5000.0;
+
+/// `MAV_RESULT_IN_PROGRESS`: the command is not answered yet.
+const MAV_RESULT_IN_PROGRESS: u32 = 5;
 
 /// What the operator's lever orders.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -66,20 +78,41 @@ pub struct ArmTelegraph {
     order: ArmOrder,
     confirmed: ArmConfirmed,
     phase: TelegraphPhase,
+    /// The FC's last acknowledgement, as (command kind, `MAV_RESULT`).
+    verdict: Option<(u32, u32)>,
+    /// The acknowledgement standing when the last order went out: a
+    /// verdict equal to it answers an earlier order, not this one.
+    verdict_at_order: Option<(u32, u32)>,
+    /// When the clock first saw the order awaiting its answer.
+    awaiting_since_ms: Option<f64>,
+    /// An order that went unanswered in the window: a late answer from
+    /// the FC still answers it, as a starved link can delay a real arm.
+    unanswered: Option<ArmOrder>,
 }
 
 impl ArmTelegraph {
     /// Moves the lever. Returns the one command this move sends, or
     /// `None` when the vehicle already answers the ordered state — an
     /// idempotent move is a display act, not a command.
+    ///
+    /// Moving the lever from SAFE to ARMED always sends, even onto a
+    /// vehicle that already reports armed: that is an operator taking
+    /// over a live vehicle someone else left armed (a ground station
+    /// that dropped and came back, a failsafe flying it), and the arm is
+    /// what brings it back under command. Re-ordering ARMED is still a
+    /// display act.
     pub fn set_order(&mut self, order: ArmOrder) -> Option<OrderAction> {
+        let taking_over = order == ArmOrder::Armed && self.order == ArmOrder::Safe;
         self.order = order;
         self.phase = TelegraphPhase::InSync;
+        self.verdict_at_order = self.verdict;
+        self.awaiting_since_ms = None;
+        self.unanswered = None;
         let answered = matches!(
             (order, self.confirmed),
             (ArmOrder::Armed, ArmConfirmed::Armed) | (ArmOrder::Safe, ArmConfirmed::Disarmed)
         );
-        if answered {
+        if answered && !taking_over {
             return None;
         }
         self.phase = TelegraphPhase::AwaitingAnswer;
@@ -119,6 +152,20 @@ impl ArmTelegraph {
         };
         let was = self.confirmed;
         self.confirmed = confirmed;
+        if let Some(late) = self.unanswered.take() {
+            if matches!(
+                (late, confirmed),
+                (ArmOrder::Armed, ArmConfirmed::Armed) | (ArmOrder::Safe, ArmConfirmed::Disarmed)
+            ) {
+                // The vehicle did what was ordered, only late: the lever
+                // shows it, so the screen never reads SAFE over a live
+                // vehicle. Nothing is sent.
+                self.order = late;
+                self.phase = TelegraphPhase::InSync;
+                return;
+            }
+            self.unanswered = Some(late);
+        }
         match (self.order, confirmed) {
             (ArmOrder::Armed, ArmConfirmed::Armed) | (ArmOrder::Safe, ArmConfirmed::Disarmed) => {
                 if matches!(self.phase, TelegraphPhase::AwaitingAnswer) {
@@ -131,6 +178,62 @@ impl ArmTelegraph {
             }
             _ => {}
         }
+    }
+
+    /// Feeds the FC's acknowledgement of the last arm or disarm it was
+    /// sent (`FcState.last_command_kind`: 0 none, 1 arm, 2 disarm;
+    /// `last_command_result`: the raw `MAV_RESULT`). A refusal of the
+    /// awaited command, newer than the order, answers it: the lever
+    /// snaps back to SAFE with the FC's reason.
+    pub fn on_fc_command_verdict(&mut self, kind: u32, result: u32) {
+        if kind == 0 {
+            return;
+        }
+        self.verdict = Some((kind, result));
+        if self.verdict != self.verdict_at_order {
+            self.answer_with_refusal();
+        }
+    }
+
+    /// Advances the telegraph's clock. An order still unanswered after
+    /// [`ANSWER_WINDOW_MS`] is answered by the FC's standing refusal of
+    /// that command when there is one (a repeated refusal reads the same
+    /// as the last), and otherwise snaps back to SAFE as unanswered.
+    pub fn on_tick(&mut self, now_ms: f64) {
+        if !matches!(self.phase, TelegraphPhase::AwaitingAnswer) {
+            self.awaiting_since_ms = None;
+            return;
+        }
+        let since = *self.awaiting_since_ms.get_or_insert(now_ms);
+        if now_ms - since < ANSWER_WINDOW_MS {
+            return;
+        }
+        if !self.answer_with_refusal() {
+            self.unanswered = Some(self.order);
+            self.order = ArmOrder::Safe;
+            self.phase = TelegraphPhase::Refused("no answer from the vehicle".to_owned());
+        }
+    }
+
+    /// Answers an awaited order with the FC's last verdict when that
+    /// verdict refuses the same command; whether it did.
+    fn answer_with_refusal(&mut self) -> bool {
+        if !matches!(self.phase, TelegraphPhase::AwaitingAnswer) {
+            return false;
+        }
+        let awaited = match self.order {
+            ArmOrder::Armed => 1,
+            ArmOrder::Safe => 2,
+        };
+        let Some((kind, result)) = self.verdict else {
+            return false;
+        };
+        if kind != awaited || result == 0 || result == MAV_RESULT_IN_PROGRESS {
+            return false;
+        }
+        self.order = ArmOrder::Safe;
+        self.phase = TelegraphPhase::Refused(fc_refusal(result));
+        true
     }
 
     /// A fresh session voids every order and every report.
@@ -154,6 +257,20 @@ impl ArmTelegraph {
     #[must_use]
     pub fn phase(&self) -> &TelegraphPhase {
         &self.phase
+    }
+}
+
+/// The FC's reason for refusing, by `MAV_RESULT`, in the operator's words.
+fn fc_refusal(result: u32) -> String {
+    match result {
+        1 => "the flight controller is not ready (temporarily rejected; \
+              its preflight checks are the usual cause)"
+            .to_owned(),
+        2 => "the flight controller denied it".to_owned(),
+        3 => "the flight controller does not support it".to_owned(),
+        4 => "the flight controller failed to carry it out".to_owned(),
+        6 => "the flight controller cancelled it".to_owned(),
+        other => format!("the flight controller refused it (MAV_RESULT {other})"),
     }
 }
 

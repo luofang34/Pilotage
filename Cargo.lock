@@ -2018,6 +2018,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-control"
+version = "0.1.0"
+dependencies = [
+ "pilotage-input",
+ "pilotage-protocol",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "pilotage-control-feel"
 version = "0.1.0"
 dependencies = [
@@ -2031,11 +2042,8 @@ dependencies = [
 name = "pilotage-control-web"
 version = "0.1.0"
 dependencies = [
+ "pilotage-control",
  "pilotage-input",
- "pilotage-protocol",
- "serde",
- "serde_json",
- "thiserror",
  "wasm-bindgen",
 ]
 
