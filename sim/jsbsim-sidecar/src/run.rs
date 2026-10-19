@@ -10,7 +10,7 @@ use crate::args::Args;
 use crate::engine::ModelPaths;
 use crate::sensors::DEFAULT_NOISE;
 use crate::session::{SessionConfig, SessionError, serve_blocking};
-use crate::simulation::Start;
+use crate::simulation::{Start, Vehicle};
 
 /// Why the sidecar stopped.
 #[derive(Debug, thiserror::Error)]
@@ -48,22 +48,25 @@ pub fn run_blocking(args: &Args) -> Result<(), RunError> {
     });
     let config = SessionConfig {
         port: args.port,
-        aircraft: args.aircraft,
-        paths: ModelPaths {
-            root: args.jsbsim_root.clone(),
-            aircraft_dir,
-            model: args.aircraft.model().to_owned(),
+        vehicle: Vehicle {
+            aircraft: args.aircraft,
+            paths: ModelPaths {
+                root: args.jsbsim_root.clone(),
+                aircraft_dir,
+                model: args.aircraft.model().to_owned(),
+            },
+            start: Start {
+                latitude_deg: args.latitude_deg,
+                longitude_deg: args.longitude_deg,
+                heading_deg: args.heading_deg,
+            },
+            seed: args.seed,
+            noise: DEFAULT_NOISE,
+            gimbal: args.gimbal,
+            step_ms: args.step_ms,
         },
-        start: Start {
-            latitude_deg: args.latitude_deg,
-            longitude_deg: args.longitude_deg,
-            heading_deg: args.heading_deg,
-        },
-        seed: args.seed,
-        noise: DEFAULT_NOISE,
         realtime_factor: args.realtime_factor,
         lockstep_timeout: args.lockstep_timeout,
-        gimbal: args.gimbal,
         truth_addr: args.truth_addr,
     };
     let epoch = MagneticEpoch::from_unix_seconds(epoch_unix_s);

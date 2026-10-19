@@ -33,6 +33,7 @@ pilotage-mavlink = { workspace = true }
 pilotage-terrain-query = { workspace = true }
 pilotage-world = { workspace = true, features = ["archive"] }
 thiserror = { workspace = true }
+world-core = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 

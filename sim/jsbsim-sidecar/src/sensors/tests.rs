@@ -6,7 +6,7 @@
 
 use pilotage_world::{MagneticEpoch, N51, UniformTerrain, World};
 
-use super::{DEFAULT_NOISE, Noise, NoiseLevels, Sensors, pressure_altitude_m, time_us};
+use super::{DEFAULT_NOISE, Noise, NoiseLevels, Sensors, time_us};
 use crate::rotation::Euler;
 use crate::truth::Truth;
 
@@ -35,8 +35,6 @@ fn resting(yaw_deg: f64) -> Truth {
         },
         rates_frd: [0.01, -0.02, 0.03],
         specific_force_frd: [0.0, 0.0, -9.806_65],
-        pressure_pa: 100_650.0,
-        temperature_c: 14.6,
         dynamic_pressure_pa: 0.0,
         true_airspeed_mps: 0.0,
         calibrated_airspeed_mps: 0.0,
@@ -74,17 +72,49 @@ fn the_magnetometer_heading_plus_declination_is_the_true_heading() {
 }
 
 #[test]
-fn the_imu_reads_specific_force_and_rate_and_the_barometer_its_pressure() {
+fn the_imu_reads_specific_force_and_rate() {
     let mut sensors = Sensors::new(1, QUIET);
     let sample = sensors.inertial(&resting(0.0), &world()).unwrap();
     assert_eq!(sample.accel_frd, [0.0, 0.0, -9.806_65]);
     assert_eq!(sample.gyro_frd, [0.01, -0.02, 0.03]);
-    assert!((sample.pressure_hpa - 1006.5).abs() < 1e-9);
-    assert!((sample.pressure_altitude_m - pressure_altitude_m(100_650.0)).abs() < 1e-9);
     assert_eq!(sample.time_us, 1_500_000);
-    // The ISA: 1013.25 hPa is 0 m and 1006.5 hPa about 56 m.
-    assert!(pressure_altitude_m(101_325.0).abs() < 1e-6);
-    assert!((pressure_altitude_m(100_650.0) - 56.4).abs() < 0.5);
+}
+
+/// Without noise, every reading derived from the world is the world
+/// model's own value: the barometer the shared atmosphere, the
+/// magnetometer the shared field, the GNSS the true position.
+#[test]
+fn the_sensors_read_the_world_model_at_every_position() {
+    let world = world();
+    let mut sensors = Sensors::new(1, QUIET);
+    for (latitude_deg, longitude_deg, altitude_m) in [
+        (N51.latitude_deg, N51.longitude_deg, 56.4),
+        (47.397_742, 8.545_594, 488.0),
+        (-33.9, 151.2, 3_000.0),
+    ] {
+        let mut truth = resting(0.0);
+        truth.latitude_deg = latitude_deg;
+        truth.longitude_deg = longitude_deg;
+        truth.altitude_m = altitude_m;
+        let sample = sensors.inertial(&truth, &world).unwrap();
+        let air = world
+            .atmosphere(latitude_deg, longitude_deg, altitude_m)
+            .unwrap();
+        assert_eq!(sample.pressure_hpa, air.pressure_pa / 100.0);
+        assert_eq!(sample.temperature_c, air.temperature_c());
+        let field = world
+            .magnetic_field(latitude_deg, longitude_deg, altitude_m)
+            .unwrap();
+        // Level and facing north, body axes are north-east-down.
+        let ned = [field.north_nt, field.east_nt, field.down_nt].map(|nt| nt * 1.0e-5);
+        for (got, want) in sample.mag_frd_gauss.iter().zip(ned) {
+            assert!((got - want).abs() < 1e-12, "{got} vs {want}");
+        }
+        let fix = sensors.gnss(&truth).unwrap();
+        assert!((fix.latitude_deg - latitude_deg).abs() < 1e-12);
+        assert!((fix.longitude_deg - longitude_deg).abs() < 1e-12);
+        assert!((fix.altitude_m - altitude_m).abs() < 1e-6);
+    }
 }
 
 #[test]
@@ -100,8 +130,20 @@ fn noise_is_seeded_and_of_the_stated_size() {
     assert!(mean.abs() < 0.02, "{mean}");
     assert!((sd - 0.5).abs() < 0.02, "{sd}");
     let mut sensors = Sensors::new(7, DEFAULT_NOISE);
-    let fix = sensors.gnss(&resting(0.0));
-    let (per_lat, _) = pilotage_world::metres_per_degree(N51.latitude_deg);
-    assert!(((fix.latitude_deg - N51.latitude_deg) * per_lat).abs() < 1.0);
+    let truth = resting(0.0);
+    let fix = sensors.gnss(&truth).unwrap();
+    let plane =
+        pilotage_world::local_plane(truth.latitude_deg, truth.longitude_deg, truth.altitude_m)
+            .unwrap();
+    let offset = plane
+        .to_ned(pilotage_world::world_position(
+            fix.latitude_deg,
+            fix.longitude_deg,
+            fix.altitude_m,
+        ))
+        .unwrap();
+    // Within five sigma of 0.15 m horizontally and 0.25 m vertically.
+    assert!(offset.north_m.hypot(offset.east_m) < 1.0, "{offset:?}");
+    assert!(offset.down_m.abs() < 1.25, "{offset:?}");
     assert_eq!(time_us(0.004), 4_000);
 }

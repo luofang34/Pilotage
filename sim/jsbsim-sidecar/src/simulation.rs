@@ -13,22 +13,42 @@ use crate::hil::{
 use crate::sensors::{NoiseLevels, Sensors};
 use crate::truth::{Truth, TruthProperties};
 
-/// The sensor period: PX4's simulator rate of 250 Hz.
-pub const STEP_S: f64 = 0.004;
-/// JSBSim steps per sensor period. The landing legs' spring and damper
-/// are stiff: at one 4 ms step their explicit integration rings at the
-/// step rate on the ground, so JSBSim runs at 1 kHz.
-const SUBSTEPS: u32 = 4;
-/// The JSBSim step, s.
-const PHYSICS_DT_S: f64 = STEP_S / SUBSTEPS as f64;
-/// Steps per magnetometer sample (125 Hz).
-const MAG_EVERY: u64 = 2;
-/// Steps per barometer and airspeed sample (50 Hz).
-const BARO_EVERY: u64 = 5;
-/// Steps per GNSS fix (10 Hz).
-const GNSS_EVERY: u64 = 25;
-/// Steps per heartbeat (1 Hz).
-const HEARTBEAT_EVERY: u64 = 250;
+/// The JSBSim step, s. The landing legs' spring and damper are stiff: at
+/// one 4 ms step their explicit integration rings on the ground, so
+/// JSBSim always runs at 1 kHz, several steps per state step when the
+/// state step is longer.
+const PHYSICS_DT_S: f64 = 0.001;
+/// The state steps a flight controller can run on, ms: each divides every
+/// sensor period below, so every sensor keeps its rate.
+pub const STEP_MS_CHOICES: [u32; 3] = [1, 2, 4];
+/// Magnetometer period, ms (125 Hz).
+const MAG_PERIOD_MS: u64 = 8;
+/// Barometer and airspeed period, ms (50 Hz).
+const BARO_PERIOD_MS: u64 = 20;
+/// GNSS period, ms (10 Hz).
+const GNSS_PERIOD_MS: u64 = 100;
+/// Heartbeat period, ms (1 Hz).
+const HEARTBEAT_PERIOD_MS: u64 = 1_000;
+
+/// What one simulated vehicle is and how it is stepped.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Vehicle {
+    /// The aircraft.
+    pub aircraft: Aircraft,
+    /// Where its model lives.
+    pub paths: ModelPaths,
+    /// Where it starts.
+    pub start: Start,
+    /// The sensor noise seed.
+    pub seed: u64,
+    /// The sensor noise.
+    pub noise: NoiseLevels,
+    /// The gimbal's travel, when it carries one.
+    pub gimbal: Option<GimbalLimits>,
+    /// The state step, ms: one of [`STEP_MS_CHOICES`]. PX4 takes 4 (its
+    /// 250 Hz simulator rate); Aviate's JSBSim board takes 1.
+    pub step_ms: u32,
+}
 
 /// Where and how a vehicle starts.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -50,6 +70,9 @@ pub enum SimulationError {
     /// The world could not answer.
     #[error(transparent)]
     World(#[from] WorldError),
+    /// A position is not well formed for the world model.
+    #[error("position: {0}")]
+    Position(#[from] pilotage_world::PositionError),
 }
 
 /// One vehicle in the world.
@@ -60,6 +83,7 @@ pub struct Simulation {
     sensors: Sensors,
     patch: GroundPatch,
     gimbal: Option<Gimbal>,
+    step_ms: u32,
     steps: u64,
 }
 
@@ -71,15 +95,11 @@ impl Simulation {
     ///
     /// Returns [`SimulationError`] when JSBSim or the world fails.
     pub fn new<T: TerrainSource>(
-        aircraft: Aircraft,
-        paths: &ModelPaths,
+        vehicle: &Vehicle,
         world: &mut World<T>,
-        start: Start,
-        seed: u64,
-        noise: NoiseLevels,
-        gimbal: Option<GimbalLimits>,
     ) -> Result<Self, SimulationError> {
-        let mut engine = Engine::load(paths, PHYSICS_DT_S)?;
+        let start = vehicle.start;
+        let mut engine = Engine::load(&vehicle.paths, PHYSICS_DT_S)?;
         let patch = GroundPatch::sample_blocking(
             world,
             start.latitude_deg,
@@ -104,16 +124,22 @@ impl Simulation {
         let trim = engine.input("simulation/do_simple_trim")?;
         engine.command(trim, "simulation/do_simple_trim", 2.0)?;
         let truth = TruthProperties::resolve(&mut engine)?;
-        let actuation = Actuation::resolve(aircraft, &mut engine)?;
+        let actuation = Actuation::resolve(vehicle.aircraft, &mut engine)?;
         Ok(Self {
             engine,
             truth,
             actuation,
-            sensors: Sensors::new(seed, noise),
+            sensors: Sensors::new(vehicle.seed, vehicle.noise),
             patch,
-            gimbal: gimbal.map(Gimbal::new),
+            gimbal: vehicle.gimbal.map(Gimbal::new),
+            step_ms: vehicle.step_ms.clamp(1, 4),
             steps: 0,
         })
+    }
+
+    /// The state step, s.
+    pub fn step_s(&self) -> f64 {
+        f64::from(self.step_ms) * 1e-3
     }
 
     /// The gimbal's angles relative to the body, degrees, if it has one.
@@ -138,17 +164,18 @@ impl Simulation {
         world: &mut World<T>,
         encoder: &mut Encoder,
     ) -> Result<Vec<Vec<u8>>, SimulationError> {
-        for _ in 0..SUBSTEPS {
+        for _ in 0..self.step_ms {
             self.actuation
                 .apply(&mut self.engine, controls, PHYSICS_DT_S);
             self.engine.step()?;
         }
         self.steps = self.steps.wrapping_add(1);
+        let step_s = self.step_s();
         if let Some(gimbal) = &mut self.gimbal {
             let outputs = controls
                 .filter(|c| c.armed())
                 .map(|c| GIMBAL_OUTPUTS.map(|i| c.controls.get(i).map_or(0.0, |&v| f64::from(v))));
-            gimbal.step(outputs, STEP_S);
+            gimbal.step(outputs, step_s);
         }
         let truth = self.truth();
         if self
@@ -168,22 +195,23 @@ impl Simulation {
                 "ground grid sampled around the vehicle"
             );
         }
-        let due = |every: u64| self.steps.is_multiple_of(every);
+        let elapsed_ms = self.steps.wrapping_mul(u64::from(self.step_ms));
+        let due = |period_ms: u64| elapsed_ms.is_multiple_of(period_ms);
         let mut fields = FIELDS_IMU;
-        if due(MAG_EVERY) {
+        if due(MAG_PERIOD_MS) {
             fields |= FIELDS_MAG;
         }
-        if due(BARO_EVERY) {
+        if due(BARO_PERIOD_MS) {
             fields |= FIELDS_BARO | FIELDS_DIFF_PRESSURE;
         }
         let mut frames = Vec::with_capacity(4);
-        if self.steps == 1 || due(HEARTBEAT_EVERY) {
+        if self.steps == 1 || due(HEARTBEAT_PERIOD_MS) {
             frames.push(encoder.heartbeat());
         }
         let inertial = self.sensors.inertial(&truth, world)?;
         frames.push(encoder.hil_sensor(&inertial, fields));
-        if due(GNSS_EVERY) {
-            frames.push(encoder.hil_gps(&self.sensors.gnss(&truth)));
+        if due(GNSS_PERIOD_MS) {
+            frames.push(encoder.hil_gps(&self.sensors.gnss(&truth)?));
         }
         // Truth every step: a flight controller that synthesizes its own
         // sensors (Aviate's JSBSim board) steps on it.

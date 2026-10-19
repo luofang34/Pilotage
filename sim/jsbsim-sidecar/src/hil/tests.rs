@@ -38,7 +38,6 @@ fn hil_sensor_carries_px4s_fields_in_wire_order() {
         gyro_frd: [0.01, 0.02, 0.03],
         mag_frd_gauss: [0.2, -0.04, 0.45],
         pressure_hpa: 1006.5,
-        pressure_altitude_m: 56.0,
         diff_pressure_hpa: 0.0,
         temperature_c: 14.6,
     };
@@ -94,8 +93,6 @@ fn hil_state_quaternion_carries_the_truth_attitude() {
         },
         rates_frd: [0.0; 3],
         specific_force_frd: [0.0, 0.0, -9.806_65],
-        pressure_pa: 101_325.0,
-        temperature_c: 15.0,
         dynamic_pressure_pa: 0.0,
         true_airspeed_mps: 0.0,
         calibrated_airspeed_mps: 0.0,
