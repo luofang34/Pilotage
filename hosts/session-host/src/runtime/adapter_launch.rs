@@ -10,8 +10,8 @@ use crate::error::HostError;
 
 use super::engine_actor::ToEngine;
 use super::{
-    HOST_VEHICLE, RuntimeOptions, aviate_profile, build_engine, media, px4_config,
-    run_until_shutdown, run_with_media_until_shutdown,
+    HOST_VEHICLE, RuntimeOptions, aviate_profile, betaflight_config, build_engine, media,
+    px4_config, run_until_shutdown, run_with_media_until_shutdown,
 };
 #[cfg(feature = "sim")]
 use super::{MAX_CONTROL_AGE, build_reference, gazebo_launch};
@@ -70,6 +70,24 @@ pub(super) async fn spawn_adapter_runtime(
         }
         AdapterKind::Px4 => {
             spawn_px4_runtime(endpoint, options, engine_tx, engine_rx, shutdown_rx, start).await
+        }
+        AdapterKind::Betaflight => {
+            // The adapter's link task connects and reconnects on its own, so
+            // the host comes up before (or without) the flight controller.
+            let config = betaflight_config::from_env()?;
+            let adapter =
+                pilotage_adapter_betaflight::BetaflightAdapter::start(HOST_VEHICLE, config);
+            let engine = build_engine(&adapter, options);
+            Ok(tokio::spawn(run_until_shutdown(
+                endpoint,
+                engine,
+                adapter,
+                None,
+                engine_tx,
+                engine_rx,
+                shutdown_rx,
+                start,
+            )))
         }
     }
 }
