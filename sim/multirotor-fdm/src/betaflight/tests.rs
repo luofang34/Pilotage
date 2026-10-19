@@ -4,8 +4,8 @@ use super::{
     FDM_PACKET_LEN, FdmPacket, PACKET_TIME_STEP_S, PacketClock, accelerometer_field,
     attitude_from_field, decode_servo_packet, gyro_field, orientation_field,
 };
-use crate::geodesy::Origin;
-use crate::quad::{GRAVITY, QuadState};
+use crate::environment::{Environment, Origin};
+use crate::quad::{QuadParams, QuadState};
 use crate::rotation::{Quat, Vec3};
 
 const ORIGIN: Origin = Origin {
@@ -13,6 +13,10 @@ const ORIGIN: Origin = Origin {
     lon_deg: 8.545_594,
     alt_m: 488.0,
 };
+
+fn environment() -> Environment {
+    Environment::new(ORIGIN).expect("well-formed origin")
+}
 
 /// FRD <-> FLU and NED <-> NWU are both `(x, -y, -z)`.
 fn flip(v: Vec3) -> Vec3 {
@@ -58,10 +62,10 @@ fn orientation_round_trips() {
 
 #[test]
 fn a_resting_accelerometer_field_reads_down_so_betaflight_reads_up() {
-    let field = accelerometer_field(Vec3::new(0.0, 0.0, -GRAVITY));
-    assert_eq!(field, [0.0, 0.0, -GRAVITY]);
+    let field = accelerometer_field(Vec3::new(0.0, 0.0, -9.8));
+    assert_eq!(field, [0.0, 0.0, -9.8]);
     // sitl.c negates the field: +1 g on Betaflight's (up) z axis.
-    assert_eq!(-field[2], GRAVITY);
+    assert_eq!(-field[2], 9.8);
     // A forward specific force is +x FLU, so the field carries -x.
     assert_eq!(accelerometer_field(Vec3::new(2.0, 0.0, 0.0))[0], -2.0);
     // A rightward one is -y FLU, so the field carries +y.
@@ -75,18 +79,24 @@ fn gyro_field_is_the_frd_rate() {
 
 #[test]
 fn the_state_maps_to_geodetic_enu_and_pressure_fields() {
-    let mut state = QuadState::landed(Vec3::new(100.0, -50.0, 0.0), 0.0);
+    let environment = environment();
+    let params = QuadParams::six_inch(environment.gravity_mps2());
+    let mut state = QuadState::landed(&params, Vec3::new(100.0, -50.0, 0.0), 0.0);
     state.position.z = -10.0;
     state.velocity = Vec3::new(1.0, 2.0, -0.5);
-    let packet = FdmPacket::from_state(12.5, &state, &ORIGIN);
+    let packet = FdmPacket::from_state(12.5, &state, &environment).expect("air");
     assert_eq!(packet.timestamp, 12.5);
     assert_eq!(packet.velocity, [2.0, 1.0, 0.5], "east, north, up");
     let [lon, lat, alt] = packet.position;
     assert!(lat > ORIGIN.lat_deg && lon < ORIGIN.lon_deg);
-    assert!((alt - 498.0).abs() < 1e-9);
-    let (north, east, down) = ORIGIN.to_local(lat, lon, alt);
-    assert!((north - 100.0).abs() < 1e-6 && (east + 50.0).abs() < 1e-6);
-    assert!((down + 10.0).abs() < 1e-9);
+    // The tangent plane rises over the curved ellipsoid: 1 mm at 112 m.
+    assert!((alt - 498.0 - 0.001).abs() < 1e-4, "{alt}");
+    let local = environment
+        .frame()
+        .to_ned(world_core::GeodeticPosition::wgs84(lat, lon, alt))
+        .expect("same datum");
+    assert!((local.north_m - 100.0).abs() < 1e-6 && (local.east_m + 50.0).abs() < 1e-6);
+    assert!((local.down_m + 10.0).abs() < 1e-6);
     assert!(
         (packet.pressure - 95_480.0).abs() < 50.0,
         "{}",
@@ -96,18 +106,23 @@ fn the_state_maps_to_geodetic_enu_and_pressure_fields() {
 
 #[test]
 fn packet_bytes_are_eighteen_little_endian_doubles_in_struct_order() {
-    let state = QuadState::landed(Vec3::ZERO, 0.0);
-    let packet = FdmPacket::from_state(1.5, &state, &ORIGIN);
+    let environment = environment();
+    let gravity = environment.gravity_mps2();
+    let state = QuadState::landed(&QuadParams::six_inch(gravity), Vec3::ZERO, 0.0);
+    let packet = FdmPacket::from_state(1.5, &state, &environment).expect("air");
     let bytes = packet.to_bytes();
     assert_eq!(bytes.len(), FDM_PACKET_LEN);
     let field = |index: usize| {
         f64::from_le_bytes(bytes[index * 8..index * 8 + 8].try_into().expect("8 bytes"))
     };
     assert_eq!(field(0), 1.5);
-    assert_eq!(field(6), -GRAVITY, "accelerometer z");
+    assert_eq!(field(6), -gravity, "accelerometer z");
     assert_eq!(field(7), 1.0, "quaternion w");
-    assert_eq!(field(14), ORIGIN.lon_deg, "position x is longitude");
-    assert_eq!(field(15), ORIGIN.lat_deg);
+    assert!(
+        (field(14) - ORIGIN.lon_deg).abs() < 1e-9,
+        "position x is longitude"
+    );
+    assert!((field(15) - ORIGIN.lat_deg).abs() < 1e-9);
     assert_eq!(field(17), packet.pressure);
 }
 

@@ -13,9 +13,12 @@ name = "pilotage-multirotor-fdm"
 path = "src/main.rs"
 
 [dependencies]
+pilotage-world = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
+world-atmosphere = { workspace = true }
+world-core = { workspace = true }
 
 [dev-dependencies]
 pilotage-msp = { workspace = true }
