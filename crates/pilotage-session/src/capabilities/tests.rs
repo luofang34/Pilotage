@@ -45,3 +45,30 @@ fn physical_embodiment_reaches_the_wire() {
     let physical = host_capabilities(&caps(VehicleClass::Multicopter, "real", true), "1.0");
     assert!(physical.physically_embodied);
 }
+
+#[test]
+fn each_scope_carries_its_authority_group_to_the_wire() {
+    use pilotage_adapter_api::ScopeDescriptor;
+    use pilotage_protocol::ScopeId;
+    let scope = |name: &str, group: Option<&str>| ScopeDescriptor {
+        authority_group: group.map(str::to_owned),
+        scope: ScopeId::new(name),
+        axes: vec![],
+        intents: vec![],
+        actions: vec![],
+        legacy: None,
+    };
+    let mut adapter = caps(VehicleClass::Multicopter, "quad", false);
+    adapter.vehicles[0].scopes = vec![
+        scope("vehicle.motion", Some("vehicle.motion")),
+        scope("vehicle.motion.direct", Some("vehicle.motion")),
+        scope("vehicle.gimbal", None),
+    ];
+    let wire = host_capabilities(&adapter, "1.0");
+    let groups: Vec<&str> = wire.vehicles[0]
+        .scopes
+        .iter()
+        .map(|scope| scope.authority_group.as_str())
+        .collect();
+    assert_eq!(groups, vec!["vehicle.motion", "vehicle.motion", ""]);
+}

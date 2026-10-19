@@ -17,6 +17,7 @@ fn scope(scope: &str, families: &[wire::IntentFamily]) -> ScopeCatalog {
             })
             .collect(),
         actions: vec![],
+        authority_group: scope.to_owned(),
     }
 }
 
