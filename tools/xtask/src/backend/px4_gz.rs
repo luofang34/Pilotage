@@ -36,7 +36,7 @@ use std::path::{Path, PathBuf};
 
 use super::{SessionContext, SimBackend, Stage};
 use crate::cli::Profile;
-use crate::conflicts::{Claim, Remedy};
+use crate::conflicts::Claim;
 use crate::error::XtaskError;
 use crate::output::print_line;
 use crate::process::ProcessSpec;
@@ -48,11 +48,11 @@ const BACKEND_NAME: &str = "px4-gz";
 /// its `<world name>` is `default` — also what the reset script targets).
 const WORLD_NAME: &str = "default";
 pub(crate) mod ports;
-mod reset;
+pub(crate) mod reset;
 mod server_config;
 pub(crate) mod vehicle;
 
-use ports::{MAX_INSTANCE, Px4Ports, system_id};
+use ports::MAX_INSTANCE;
 use vehicle::Px4Model;
 
 /// The PX4 + Gazebo SITL backend, for one vehicle model.
@@ -71,35 +71,8 @@ impl SimBackend for Px4Gz {
     }
 
     fn host_env(&self, ctx: &SessionContext) -> Vec<(String, String)> {
-        let ports = Px4Ports::for_instance(ctx.instance);
-        let loopback = |port: u16| format!("127.0.0.1:{port}");
-        let mut env = vec![
-            ("GZ_IP".to_owned(), "127.0.0.1".to_owned()),
-            ("PILOTAGE_PX4_PROFILE".to_owned(), "simulation".to_owned()),
-            (
-                "PILOTAGE_PX4_AIRFRAME".to_owned(),
-                self.model.airframe().as_env_value().to_owned(),
-            ),
-            (
-                "PILOTAGE_PX4_ADDR".to_owned(),
-                loopback(ports.host_telemetry),
-            ),
-            (
-                "PILOTAGE_PX4_GCS_ADDR".to_owned(),
-                loopback(ports.gcs_local),
-            ),
-            (
-                "PILOTAGE_PX4_FC_ADDR".to_owned(),
-                loopback(ports.offboard_local),
-            ),
-            (
-                "PILOTAGE_PX4_SYSTEM_ID".to_owned(),
-                system_id(ctx.instance).to_string(),
-            ),
-            // The viewer's reset runs scripts/reset-px4-sim.sh from the
-            // host; this names the instance it resets.
-            ("PILOTAGE_PX4_INSTANCE".to_owned(), ctx.instance.to_string()),
-        ];
+        let mut env = vec![("GZ_IP".to_owned(), "127.0.0.1".to_owned())];
+        env.extend(ports::host_env(ctx.instance, self.model.airframe()));
         // Only a vehicle that carries a gimbal advertises the
         // vehicle.gimbal scope; the flag's absence means none.
         if self.model.has_gimbal() {
@@ -131,25 +104,7 @@ impl SimBackend for Px4Gz {
     }
 
     fn claims(&self, ctx: &SessionContext) -> Vec<Claim> {
-        let ports = Px4Ports::for_instance(ctx.instance);
-        let instance = ctx.instance;
-        let mut claims = vec![
-            Claim::Udp {
-                port: ports.gcs_local,
-                holder: format!("PX4 instance {instance} GCS link"),
-                remedy: Remedy::Instance,
-            },
-            Claim::Udp {
-                port: ports.offboard_local,
-                holder: format!("PX4 instance {instance} offboard link"),
-                remedy: Remedy::Instance,
-            },
-            Claim::Udp {
-                port: ports.host_telemetry,
-                holder: format!("session host MAVLink link for PX4 instance {instance}"),
-                remedy: Remedy::Instance,
-            },
-        ];
+        let mut claims = ports::link_claims(ctx.instance);
         claims.extend(super::gz::partition_claims(ctx, self.name()));
         claims
     }
@@ -279,6 +234,23 @@ pub(crate) fn px4_rootfs(px4: &Path, instance: u16) -> PathBuf {
     }
 }
 
+/// The px4 command line of instance `instance`: the build's `etc`, its
+/// POSIX startup script, daemon mode, and the instance.
+pub(crate) fn px4_args(px4: &Path, instance: u16) -> Vec<String> {
+    let mut args = vec![
+        px4.join("build/px4_sitl_default/etc").display().to_string(),
+        "-s".to_owned(),
+        "etc/init.d-posix/rcS".to_owned(),
+        "-d".to_owned(),
+    ];
+    if instance != 0 {
+        // `-i` shifts every PX4 port and the uORB/daemon socket by the
+        // instance, and sets MAV_SYS_ID to instance + 1.
+        args.extend(["-i".to_owned(), instance.to_string()]);
+    }
+    args
+}
+
 /// The testable core of [`Px4Gz::plan`]: validates every artifact with
 /// an actionable hint, then assembles the gz and PX4 stages.
 fn plan_with_px4_dir(
@@ -401,17 +373,7 @@ fn px4_stage(
         context: "creating the PX4 rootfs directory",
         source,
     })?;
-    let mut args = vec![
-        px4.join("build/px4_sitl_default/etc").display().to_string(),
-        "-s".to_owned(),
-        "etc/init.d-posix/rcS".to_owned(),
-        "-d".to_owned(),
-    ];
-    if ctx.instance != 0 {
-        // `-i` shifts every PX4 port and the uORB/daemon socket by the
-        // instance, and sets MAV_SYS_ID to instance + 1.
-        args.extend(["-i".to_owned(), ctx.instance.to_string()]);
-    }
+    let args = px4_args(px4, ctx.instance);
     let mut env = vec![
         ("PATH".to_owned(), path.to_owned()),
         ("GZ_IP".to_owned(), "127.0.0.1".to_owned()),

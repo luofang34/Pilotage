@@ -16,6 +16,7 @@ mod aviate_xplane;
 mod betaflight_sitl;
 pub(crate) mod gz;
 pub(crate) mod px4_gz;
+mod px4_jsbsim;
 mod px4_xplane;
 mod xplane_handshake;
 mod xplane_simulator;
@@ -333,6 +334,11 @@ const BACKENDS: &[BackendEntry] = &[
         name: "px4-gz",
         alias: Some("px4"),
         make: || Box::new(px4_gz::Px4Gz::default()),
+    },
+    BackendEntry {
+        name: "px4-jsbsim",
+        alias: None,
+        make: || Box::new(px4_jsbsim::Px4Jsbsim::default()),
     },
     BackendEntry {
         name: "px4-xplane",
