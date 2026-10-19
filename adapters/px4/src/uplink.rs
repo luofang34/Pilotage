@@ -119,7 +119,7 @@ impl Px4Uplink {
     /// # Errors
     ///
     /// Returns the socket bind error.
-    pub fn new(target: SocketAddr) -> std::io::Result<Self> {
+    pub fn new(profile: crate::config::Px4Profile, target: SocketAddr) -> std::io::Result<Self> {
         let socket = UdpSocket::bind("127.0.0.1:0")?;
         socket.set_nonblocking(true)?;
         info!(%target, "PX4 offboard uplink ready");
@@ -144,7 +144,7 @@ impl Px4Uplink {
             last_generation: None,
             neutralized_generation: None,
             resume_offboard_at: None,
-            failsafe: crate::pinning::ParamPinning::new(&failsafe::PINNED),
+            failsafe: crate::pinning::ParamPinning::new(profile, &failsafe::PINNED),
         })
     }
 

@@ -21,8 +21,13 @@ pub const MAX_TILT_RAD: f32 = core::f32::consts::FRAC_PI_6;
 /// Betaflight operating profiles supported by this adapter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BetaflightProfile {
-    /// Betaflight SITL closed by a simulated airframe.
+    /// Betaflight SITL closed by a simulated airframe. The adapter writes
+    /// the aux mode ranges its channel layout needs (`link/setup.rs`).
     Simulation,
+    /// A real flight controller: the adapter never writes its
+    /// configuration. It reads the aux mode ranges and refuses to arm
+    /// while one differs.
+    Physical,
 }
 
 /// Where and how to reach the flight controller.

@@ -13,6 +13,7 @@
 
 mod aviate_control_feel;
 mod pipefail_pipelines;
+mod vehicle_writes;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -65,6 +66,30 @@ fn run_rust_guards(repo_root: &Path, failed: &mut Vec<String>) {
     run_aviate_control_feel(repo_root, failed);
     run_fc_vocabulary(repo_root, failed);
     run_pipefail_pipelines(repo_root, failed);
+    run_vehicle_writes(repo_root, failed);
+}
+
+fn run_vehicle_writes(repo_root: &Path, failed: &mut Vec<String>) {
+    let name = "vehicle-writes";
+    match vehicle_writes::scan(repo_root) {
+        Ok(findings) if findings.is_empty() => print_line(&format!("guard {name}: ok")),
+        Ok(findings) => {
+            for finding in &findings {
+                print_line(&format!(
+                    "FORBIDDEN: a vehicle write outside its adapter's simulation-gated module: {}:{}: {}",
+                    finding.path.display(),
+                    finding.line,
+                    finding.text
+                ));
+            }
+            print_line(&format!("guard {name}: FAILED at the check"));
+            failed.push(name.to_owned());
+        }
+        Err(error) => {
+            print_line(&format!("guard {name}: FAILED: {error}"));
+            failed.push(name.to_owned());
+        }
+    }
 }
 
 fn run_aviate_control_feel(repo_root: &Path, failed: &mut Vec<String>) {

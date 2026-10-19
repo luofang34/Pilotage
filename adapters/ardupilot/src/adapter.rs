@@ -97,6 +97,7 @@ impl ArduPilotAdapter {
             )
         });
         let direct = params::DirectParams::new(
+            config.profile(),
             link.param_sender(),
             link_config.system_id,
             link_config.component_id,
@@ -142,7 +143,8 @@ impl ArduPilotAdapter {
         uplink: ArduPilotUplink,
         params: tokio::sync::mpsc::Sender<pilotage_mavlink::OutboundParam>,
     ) -> Self {
-        let direct = params::DirectParams::new(params, 1, 1);
+        let direct =
+            params::DirectParams::new(crate::config::ArduPilotProfile::Simulation, params, 1, 1);
         Self::assemble(vehicle, state, None, Some(uplink), direct)
     }
 

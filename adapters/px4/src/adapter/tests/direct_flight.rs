@@ -59,7 +59,9 @@ fn a_multicopter_advertises_body_rate_and_attitude_on_a_grouped_direct_scope() {
 fn a_fixed_wing_advertises_and_admits_no_direct_flight() {
     let (_fc, addr) = fake_fc();
     let mut adapter = Px4Adapter::from_state(VehicleId::new(1), live_state());
-    adapter.fixed_wing = Some(FixedWingUplink::new(addr, 1, 1).expect("uplink"));
+    adapter.fixed_wing = Some(
+        FixedWingUplink::new(crate::config::Px4Profile::Simulation, addr, 1, 1).expect("uplink"),
+    );
     let advertised = adapter.capabilities().vehicles[0]
         .scopes
         .iter()
@@ -223,8 +225,9 @@ fn a_disarm_is_never_resumed_by_a_frame() {
 #[test]
 fn arming_waits_for_the_pinned_offboard_loss_hold() {
     let (fc, addr) = fake_fc();
-    let mut adapter = Px4Adapter::from_state(VehicleId::new(1), live_state())
-        .with_uplink(crate::uplink::Px4Uplink::new(addr).expect("uplink"));
+    let mut adapter = Px4Adapter::from_state(VehicleId::new(1), live_state()).with_uplink(
+        crate::uplink::Px4Uplink::new(crate::config::Px4Profile::Simulation, addr).expect("uplink"),
+    );
     let mut arm = frame(vec![], vec![]);
     arm.actions = vec![pilotage_protocol::ControlAction::Arm];
     let refused = adapter.apply_control(&arm);
