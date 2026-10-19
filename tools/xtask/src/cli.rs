@@ -350,8 +350,9 @@ commands:
       tear it down on ctrl-c.
 
       --fc <name>          FC backend: aviate-gz (alias aviate, default),
-                           px4-gz (alias px4), px4-xplane, or
-                           aviate-xplane; px4-gz takes a vehicle model
+                           px4-gz (alias px4), px4-xplane,
+                           aviate-xplane, or betaflight-sitl (alias
+                           betaflight); px4-gz takes a vehicle model
                            as px4-gz:<model>: x500_gimbal (default) or
                            rc_cessna
       --profile <profile>  physical | simulation (default) | oracle-only
