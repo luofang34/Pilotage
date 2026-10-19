@@ -1,5 +1,6 @@
-//! The world the cameras see: fast base imagery with detail imagery over it
-//! at close range, draped over Terrarium terrain under
+//! The world the cameras see: base imagery with detail imagery past its
+//! deepest zoom (one source, see [`crate::imagery`]), draped over Terrarium
+//! terrain under
 //! a daylight sky, or a complete style the operator supplies (Sokoly's own
 //! style file renders its tactical map from the vehicle's eye).
 
@@ -15,17 +16,10 @@ pub fn camera_style_json(config: &Config) -> serde_json::Value {
         "version": 8,
         "projection": {"type": "mercator"},
         "sources": {
-            "base-imagery": {
-                "type": "raster",
-                "tiles": [config.base_imagery_url],
-                "tileSize": 256,
-                "maxzoom": config.base_imagery_max_zoom,
-            },
             "imagery": {
                 "type": "raster",
-                "tiles": [config.imagery_url],
+                "tiles": [crate::imagery::TEMPLATE],
                 "tileSize": 256,
-                "minzoom": config.imagery_min_zoom,
                 "maxzoom": config.imagery_max_zoom,
             },
             "terrain": {
@@ -47,11 +41,7 @@ pub fn camera_style_json(config: &Config) -> serde_json::Value {
         },
         "layers": [
             {"id": "ground", "type": "background", "paint": {"background-color": "#6d7a58"}},
-            {"id": "base-imagery", "type": "raster", "source": "base-imagery"},
-            // Detail over the base: where a detail tile has not arrived,
-            // the base shows through instead of bare ground.
-            {"id": "imagery", "type": "raster", "source": "imagery",
-             "minzoom": config.imagery_min_zoom},
+            {"id": "imagery", "type": "raster", "source": "imagery"},
         ],
     })
 }

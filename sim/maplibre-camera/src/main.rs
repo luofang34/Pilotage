@@ -68,6 +68,9 @@ fn run(arguments: &[String]) -> Result<(), CameraError> {
         port = config.host_port,
         cache, "maplibre camera producer up"
     );
+    let loader = maplibre::io::resource_loader::SharedLoader::new(
+        pilotage_maplibre_camera::imagery::ImageryRouter::new(&config, &cache),
+    );
     let handle = runtime.handle().clone();
     let fps = config.fps;
     // A map is bound to the thread that builds it, so the render thread
@@ -79,7 +82,7 @@ fn run(arguments: &[String]) -> Result<(), CameraError> {
             let built = handle.block_on(async {
                 let mut cameras = Vec::new();
                 for spec in specs {
-                    cameras.push(Camera::new(spec, style.clone(), &cache).await?);
+                    cameras.push(Camera::new(spec, style.clone(), loader.clone()).await?);
                 }
                 Ok::<_, CameraError>(cameras)
             });

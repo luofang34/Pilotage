@@ -26,12 +26,11 @@ fn style() -> Style {
 
 fn camera(runtime: &tokio::runtime::Runtime) -> Camera {
     let cache = std::env::temp_dir().join("maplibre-camera-render-test");
+    let loader = maplibre::io::resource_loader::SharedLoader::new(
+        maplibre::platform::http_client::ReqwestHttpClient::new(Some(cache)),
+    );
     runtime
-        .block_on(Camera::new(
-            CameraSpec::gimbal((160, 120)),
-            style(),
-            cache.to_str().expect("UTF-8"),
-        ))
+        .block_on(Camera::new(CameraSpec::gimbal((160, 120)), style(), loader))
         .expect("camera")
 }
 

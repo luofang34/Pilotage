@@ -8,6 +8,7 @@ pub mod args;
 pub mod calibration;
 pub mod error;
 pub mod geometry;
+pub mod imagery;
 pub mod link;
 pub mod prewarm;
 pub mod producer;

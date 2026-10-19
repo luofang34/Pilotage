@@ -7,7 +7,7 @@ use cgmath::{Matrix4, SquareMatrix};
 use maplibre::{
     coords::LatLon,
     headless::{
-        create_headless_renderer,
+        create_headless_renderer_with_loader,
         environment::HeadlessEnvironment,
         map::{
             HeadlessMap,
@@ -71,7 +71,7 @@ fn plugins() -> Vec<Box<dyn Plugin<HeadlessEnvironment>>> {
 
 impl Camera {
     /// Builds the camera's map on its own offscreen renderer. Tiles are
-    /// fetched over HTTP and cached in `cache_dir`.
+    /// fetched through `loader`.
     ///
     /// # Errors
     ///
@@ -80,13 +80,17 @@ impl Camera {
     pub async fn new(
         spec: CameraSpec,
         mut style: Style,
-        cache_dir: &str,
+        loader: maplibre::io::resource_loader::SharedLoader,
     ) -> Result<Self, CameraError> {
         let camera_id = spec.camera_id;
-        let (kernel, renderer) =
-            create_headless_renderer(spec.width, spec.height, Some(cache_dir.to_owned()))
-                .await
-                .map_err(|source| CameraError::Renderer { camera_id, source })?;
+        let (kernel, renderer) = create_headless_renderer_with_loader(
+            spec.width,
+            spec.height,
+            maplibre::render::settings::RendererSettings::default(),
+            loader,
+        )
+        .await
+        .map_err(|source| CameraError::Renderer { camera_id, source })?;
         maplibre::headless::map::resolve_tile_json_sources(&mut style, kernel.source_client())
             .await;
         let map = HeadlessMap::new(style, renderer, kernel, plugins())

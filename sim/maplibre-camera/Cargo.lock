@@ -2416,6 +2416,7 @@ version = "0.1.0"
 name = "pilotage-maplibre-camera"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "base64 0.22.1",
  "cgmath",
  "directories",
