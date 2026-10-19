@@ -94,3 +94,32 @@ fn a_camera_sees_ground_below_the_horizon_and_sky_above_it() {
         "looking up sees no ground: {top} {bottom}"
     );
 }
+
+#[test]
+fn a_height_above_unknown_ground_keeps_drawing_but_sends_nothing() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let _entered = runtime.enter();
+    let mut camera = camera(&runtime);
+    let above_ground = BodyPose {
+        height: Height::Agl(60.0),
+        ..pose()
+    };
+    // The offline style has no terrain, so the ground never becomes known;
+    // every frame still draws and reports it rather than wedging.
+    for frame in 1..=3_u64 {
+        let result = camera.render_blocking(
+            &above_ground,
+            Pointing::default(),
+            0,
+            Duration::from_millis(16 * frame),
+        );
+        assert!(
+            matches!(result, Err(super::FrameError::GroundUnknown)),
+            "frame {frame}: {:?}",
+            result.map(<[u8]>::len)
+        );
+    }
+}

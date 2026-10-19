@@ -136,14 +136,15 @@ impl Camera {
         timestamp: Duration,
     ) -> Result<&[u8], FrameError> {
         let position = LatLon::new(pose.latitude_deg, pose.longitude_deg);
-        let altitude_meters = match pose.height {
-            Height::Msl(metres) => metres,
-            Height::Agl(metres) => {
-                self.map
-                    .terrain_elevation_at(position)
-                    .ok_or(FrameError::GroundUnknown)?
-                    + metres
-            }
+        // Terrain is requested by frames, so a height above an unknown ground
+        // still draws one, over sea level, to fetch the ground it stands on;
+        // that image is not sent.
+        let (altitude_meters, ground_known) = match pose.height {
+            Height::Msl(metres) => (metres, true),
+            Height::Agl(metres) => match self.map.terrain_elevation_at(position) {
+                Some(ground) => (ground + metres, true),
+                None => (metres, false),
+            },
         };
         let eye = XrEye {
             world_from_eye: world_from_eye(&self.spec, pose, pointing),
@@ -167,6 +168,9 @@ impl Camera {
             request_overscan: 1.2,
             prefetch: None,
         })?;
+        if !ground_known {
+            return Err(FrameError::GroundUnknown);
+        }
         self.readback.read_into_blocking(
             &self.map,
             &self.color,
