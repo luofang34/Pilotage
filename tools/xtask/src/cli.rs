@@ -62,7 +62,7 @@ pub struct SimArgs {
 }
 
 /// Options for `cargo xtask fleet`.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub struct FleetArgs {
     /// One `<backend>[:<model>]` per vehicle, in launch order
     /// (`--vehicle`, repeated).
@@ -80,10 +80,12 @@ pub struct FleetArgs {
     /// Open every vehicle's viewer URL (`--open`; off by default, since a
     /// fleet opens one tab per vehicle).
     pub open: bool,
+    /// The airfield every vehicle spawns on (`--site`).
+    pub site: crate::site::Site,
 }
 
 /// A parsed xtask invocation.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub enum Command {
     /// Launch a full SITL session and supervise it.
     Sim(SimArgs),
@@ -274,6 +276,7 @@ fn parse_fleet(args: &[String]) -> Result<FleetArgs, XtaskError> {
         viewer_port: 8080,
         instance_base: 0,
         open: false,
+        site: crate::site::DEFAULT_SITE,
     };
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
@@ -286,6 +289,9 @@ fn parse_fleet(args: &[String]) -> Result<FleetArgs, XtaskError> {
             "--viewer-port" => fleet.viewer_port = required_port(&mut iter, "--viewer-port")?,
             "--instance-base" => {
                 fleet.instance_base = required_number(&mut iter, "--instance-base")?;
+            }
+            "--site" => {
+                fleet.site = crate::site::Site::parse(&required_value(&mut iter, "--site")?)?
             }
             "--open" => fleet.open = true,
             "--no-open" => fleet.open = false,
@@ -385,10 +391,12 @@ commands:
 
   fleet --vehicle <backend>[:<model>] [--vehicle ...] [options]
       Launch one session per vehicle, each with its own simulator,
-      host, and viewer, spawned 30 m apart east of 47.397742 N
-      8.545594 E. Writes target/xtask-fleet/fleet.json and serves the
-      first vehicle's clients/web/session.json; supervises every
-      session and tears all of them down on ctrl-c.
+      host, and viewer, spawned on one airfield: a fixed-wing on the
+      runway threshold facing down the runway, every other vehicle on
+      the grass beside it, 40 m apart. Writes
+      target/xtask-fleet/fleet.json and serves the first vehicle's
+      clients/web/session.json; supervises every session and tears all
+      of them down on ctrl-c.
 
       --vehicle <spec>     a backend with an optional model, as for
                            sim --fc (repeat once per vehicle)
@@ -399,6 +407,11 @@ commands:
                            gets viewer-port + k
       --instance-base <n>  first simulator instance (default: 0);
                            vehicle k gets instance-base + k
+      --site <site>        the airfield: n51 (default, Solberg-Hunterdon,
+                           runway 04), zurich (PX4's default home), or
+                           latitude_deg,longitude_deg,elevation_m,heading_deg
+                           for a threshold, its ground elevation (m
+                           MSL), and the runway's true course
       --open               open every vehicle's viewer URL
       --no-open            open none (default)
 

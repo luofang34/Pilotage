@@ -56,12 +56,13 @@ fn the_sidecar_runs_the_sitl_with_the_repository_config_and_waits_for_flight() {
     let args = &stage.spec.args;
     assert!(value_after(args, "--betaflight").ends_with("obj/main/betaflight_SITL.elf"));
     assert!(value_after(args, "--betaflight-config").ends_with("sim/betaflight/sitl.cli"));
+    let home = crate::site::ZURICH.spawn_point(crate::site::Ground::Field, 1);
     assert_eq!(
-        value_after(args, "--north"),
-        "30",
-        "apart from the other demo vehicles"
+        value_after(args, "--origin-lat"),
+        format!("{:.7}", home.latitude_deg)
     );
-    assert_eq!(value_after(args, "--origin-lat"), "47.3977420");
+    assert_eq!(value_after(args, "--origin-alt"), "488.00");
+    assert_eq!(value_after(args, "--north"), "0");
     assert!(matches!(
         stage.readiness,
         Readiness::LogContains { needle, .. } if needle == READY_LINE
@@ -74,20 +75,25 @@ fn the_sidecar_runs_the_sitl_with_the_repository_config_and_waits_for_flight() {
 }
 
 #[test]
-fn spawn_moves_the_model_frame_to_the_fleet_point() {
+fn spawn_moves_the_model_frame_to_the_fleet_point_altitude_and_heading() {
     let ctx = context("spawn", 0);
     let mut stages = plan_with_betaflight_dir(&ctx, &scaffolded(&ctx)).expect("plan");
     let point = SpawnPoint {
-        latitude_deg: 47.398_012,
-        longitude_deg: 8.545_194,
+        latitude_deg: 40.577_186_1,
+        longitude_deg: -74.738_191_8,
+        elevation_m: 56.3,
+        heading_deg: 29.5,
     };
     BetaflightSitl
         .spawn(&ctx, &point, &mut stages)
         .expect("spawn");
     let args = &stages[0].spec.args;
-    assert_eq!(value_after(args, "--origin-lat"), "47.3980120");
-    assert_eq!(value_after(args, "--origin-lon"), "8.5451940");
+    assert_eq!(value_after(args, "--origin-lat"), "40.5771861");
+    assert_eq!(value_after(args, "--origin-lon"), "-74.7381918");
+    assert_eq!(value_after(args, "--origin-alt"), "56.30");
+    assert_eq!(value_after(args, "--heading-deg"), "29.50");
     assert_eq!(value_after(args, "--north"), "0");
+    assert_eq!(value_after(args, "--east"), "0");
 }
 
 #[test]

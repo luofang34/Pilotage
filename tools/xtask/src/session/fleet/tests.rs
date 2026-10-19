@@ -1,18 +1,18 @@
 //! Fleet planning tests: distinct names, ports, instances, and spawn
-//! points per vehicle, self-conflicts refused up front, and a manifest
-//! whose entries carry the single-session connect fields.
+//! points per vehicle on the site, self-conflicts refused up front, and a
+//! manifest whose entries carry the single-session connect fields.
 
 #![allow(clippy::expect_used, clippy::panic)]
 
 use std::path::Path;
 
 use super::{
-    FLEET_ORIGIN, FleetEntry, FleetManifest, refuse_overlapping_claims, resolve_slots,
-    session_name, spawn_point,
+    FleetEntry, FleetManifest, refuse_overlapping_claims, resolve_slots, session_name, spawn_points,
 };
 use crate::cli::{FleetArgs, Profile};
 use crate::conflicts::{Claim, session_claims};
 use crate::error::XtaskError;
+use crate::site::{DEFAULT_SITE, Ground};
 
 fn fleet(vehicles: &[&str]) -> FleetArgs {
     FleetArgs {
@@ -22,24 +22,59 @@ fn fleet(vehicles: &[&str]) -> FleetArgs {
         viewer_port: 8180,
         instance_base: 5,
         open: false,
+        site: DEFAULT_SITE,
     }
 }
 
-/// Metres between two points at the origin's latitude.
+/// Metres between two points on a sphere, flat at the default site's
+/// latitude: within half a metre over a layout.
 fn distance_m(a: &crate::backend::SpawnPoint, b: &crate::backend::SpawnPoint) -> f64 {
     let north = (b.latitude_deg - a.latitude_deg) * 111_320.0;
     let east = (b.longitude_deg - a.longitude_deg)
         * 111_320.0
-        * FLEET_ORIGIN.latitude_deg.to_radians().cos();
+        * DEFAULT_SITE.latitude_deg.to_radians().cos();
     north.hypot(east)
 }
 
+/// The plane takes the runway threshold wherever it is in the launch
+/// order; the quads stand in a row on the grass, 40 m apart, and no two
+/// vehicles share a spot.
 #[test]
-fn vehicles_spawn_thirty_metres_apart_from_the_origin() {
-    assert_eq!(spawn_point(0), FLEET_ORIGIN);
-    for index in 1..4 {
-        let step = distance_m(&spawn_point(index - 1), &spawn_point(index));
-        assert!((step - 30.0).abs() < 0.01, "vehicle {index}: {step} m");
+fn the_plane_takes_the_threshold_and_the_quads_a_row_beside_the_runway() {
+    let slots = resolve_slots(
+        &fleet(&[
+            "px4-gz:x500_gimbal",
+            "ardupilot-sitl",
+            "px4-gz:rc_cessna",
+            "betaflight-sitl",
+        ]),
+        Path::new("/repo"),
+    )
+    .expect("slots resolve");
+    let grounds: Vec<Ground> = slots.iter().map(|slot| slot.backend.ground()).collect();
+    assert_eq!(
+        grounds,
+        [Ground::Field, Ground::Field, Ground::Runway, Ground::Field]
+    );
+    let points = spawn_points(&DEFAULT_SITE, &grounds);
+    let plane = points[2];
+    assert_eq!(
+        (plane.latitude_deg, plane.longitude_deg),
+        (DEFAULT_SITE.latitude_deg, DEFAULT_SITE.longitude_deg)
+    );
+    assert_eq!(plane.heading_deg, DEFAULT_SITE.heading_deg);
+    for (first, second) in [(0, 1), (1, 3)] {
+        let step = distance_m(&points[first], &points[second]);
+        assert!((step - 40.0).abs() < 0.5, "{first}->{second}: {step} m");
+    }
+    for (index, point) in points.iter().enumerate() {
+        assert_eq!(
+            point.elevation_m, DEFAULT_SITE.elevation_m,
+            "vehicle {index}"
+        );
+        for other in points.iter().skip(index + 1) {
+            assert!(distance_m(point, other) > 30.0, "vehicle {index} overlaps");
+        }
     }
 }
 

@@ -200,7 +200,7 @@ fn both_telemetry_ends_move_together_and_clear_of_px4() {
 }
 
 /// A fleet-placed Aviate reports GNSS at its spawn point: the FC is told
-/// the relocated origin at the world's own elevation.
+/// the relocated origin at the site's ground elevation.
 #[test]
 fn a_placed_vehicle_states_its_gnss_origin_to_the_fc() {
     use crate::backend::{SimBackend, SpawnPoint};
@@ -219,8 +219,10 @@ fn a_placed_vehicle_states_its_gnss_origin_to_the_fc() {
     std::fs::create_dir_all(&ctx.log_dir).expect("log dir");
     let mut stages = plan_with_aviate_dir(&ctx, &aviate).expect("plans");
     let point = SpawnPoint {
-        latitude_deg: 47.397742,
-        longitude_deg: 8.546_390_3,
+        latitude_deg: 40.577_186_1,
+        longitude_deg: -74.738_191_8,
+        elevation_m: 56.3,
+        heading_deg: 29.5,
     };
     super::AviateGz
         .spawn(&ctx, &point, &mut stages)
@@ -232,6 +234,6 @@ fn a_placed_vehicle_states_its_gnss_origin_to_the_fc() {
         .find(|(key, _)| key == "AVIATE_GNSS_ORIGIN")
         .map(|(_, value)| value.clone())
         .expect("the FC is told its origin");
-    assert_eq!(origin, "47.3977420,8.5463903,488");
+    assert_eq!(origin, "40.5771861,-74.7381918,56.3");
     std::fs::remove_dir_all(repo.parent().expect("base")).ok();
 }

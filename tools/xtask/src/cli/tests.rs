@@ -209,6 +209,11 @@ fn fleet_takes_one_vehicle_per_flag_and_documented_defaults() {
         (4433, 8080, 0)
     );
     assert!(!fleet.open, "a fleet opens no tabs by default");
+    assert_eq!(
+        fleet.site,
+        crate::site::N51,
+        "a fleet stands on N51 by default"
+    );
     assert!(USAGE.contains("  fleet --vehicle <backend>[:<model>]"));
 
     let Command::Fleet(fleet) = parse_args(&args(&[
@@ -222,6 +227,8 @@ fn fleet_takes_one_vehicle_per_flag_and_documented_defaults() {
         "--instance-base",
         "5",
         "--open",
+        "--site",
+        "zurich",
     ]))
     .expect("parses") else {
         panic!("expected fleet");
@@ -235,6 +242,11 @@ fn fleet_takes_one_vehicle_per_flag_and_documented_defaults() {
         ),
         (4533, 8180, 5, true)
     );
+    assert_eq!(fleet.site, crate::site::ZURICH);
+    assert!(matches!(
+        parse_args(&args(&["fleet", "--vehicle", "px4-gz", "--site", "mars"])),
+        Err(XtaskError::Usage { .. })
+    ));
 }
 
 #[test]

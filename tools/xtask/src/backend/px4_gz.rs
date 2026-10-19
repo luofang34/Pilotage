@@ -118,6 +118,13 @@ impl SimBackend for Px4Gz {
         super::gz::spawn_in_world(ctx, point, stages)
     }
 
+    fn ground(&self) -> crate::site::Ground {
+        match self.model.airframe() {
+            vehicle::Airframe::FixedWing => crate::site::Ground::Runway,
+            vehicle::Airframe::Multicopter => crate::site::Ground::Field,
+        }
+    }
+
     fn select_model(&mut self, model: &str) -> Result<(), XtaskError> {
         self.model = Px4Model::parse(model)?;
         Ok(())

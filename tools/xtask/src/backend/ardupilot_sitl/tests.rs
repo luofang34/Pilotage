@@ -61,19 +61,21 @@ fn each_instance_sends_to_the_endpoint_its_host_listens_on() {
 }
 
 #[test]
-fn spawn_places_the_home_at_the_fleet_point() {
+fn spawn_places_the_home_at_the_fleet_point_elevation_and_heading() {
     let ctx = context("spawn", 1);
     let mut stages = plan_with_ardupilot_dir(&ctx, &scaffolded(&ctx)).expect("plan");
     let point = SpawnPoint {
-        latitude_deg: 47.397_742,
-        longitude_deg: 8.546_392,
+        latitude_deg: 40.577_186_1,
+        longitude_deg: -74.738_191_8,
+        elevation_m: 56.3,
+        heading_deg: 29.5,
     };
     ArduPilotSitl
         .spawn(&ctx, &point, &mut stages)
         .expect("spawn");
     let args = &stages[0].spec.args;
     let at = args.iter().position(|arg| arg == "--home").expect("--home");
-    assert_eq!(args[at + 1], "47.3977420,8.5463920,0,0");
+    assert_eq!(args[at + 1], "40.5771861,-74.7381918,56.3,29.5");
 }
 
 #[test]

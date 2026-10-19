@@ -20,16 +20,6 @@ const MAVLINK_PORT_BASE: u16 = 14_700;
 /// SITL's own ports for instance 0; `-I<n>` adds 10·n to each.
 const SITL_RC_IN_UDP: u16 = 5_501;
 const SITL_SERIAL_TCP: [u16; 2] = [5_762, 5_763];
-/// Home altitude, metres above mean sea level: the elevation the PX4
-/// flight-deck worlds (`sim/worlds/px4_flightdeck.sdf`) give their origin,
-/// so a copter beside a PX4 vehicle reports the same ground height.
-const HOME_ALTITUDE_M: f64 = 0.0;
-/// A plain `sim` session's home: the demo origin moved 30 m east, so the
-/// copter stands apart from a vehicle at the origin.
-const DEFAULT_HOME: SpawnPoint = SpawnPoint {
-    latitude_deg: 47.397_742,
-    longitude_deg: 8.545_992,
-};
 /// How to build the binary. The linker flag is for Apple's current
 /// linker, which refuses the unaligned pointers ArduPilot's packed
 /// structs produce under chained fixups.
@@ -55,10 +45,18 @@ fn mavlink_port(instance: u16) -> u16 {
     MAVLINK_PORT_BASE + instance
 }
 
+/// A plain `sim` session's home: the first place on the grass of
+/// Zurich, where PX4's own worlds stand, apart from a vehicle at the
+/// origin.
+fn default_home() -> SpawnPoint {
+    crate::site::ZURICH.spawn_point(crate::site::Ground::Field, 0)
+}
+
+/// SITL's `--home latitude,longitude,altitude_msl,heading`.
 fn home_arg(point: &SpawnPoint) -> String {
     format!(
-        "{:.7},{:.7},{HOME_ALTITUDE_M},0",
-        point.latitude_deg, point.longitude_deg
+        "{:.7},{:.7},{},{}",
+        point.latitude_deg, point.longitude_deg, point.elevation_m, point.heading_deg
     )
 }
 
@@ -194,7 +192,7 @@ fn plan_with_ardupilot_dir(
                 defaults.display().to_string(),
                 format!("-I{}", ctx.instance),
                 "--home".to_owned(),
-                home_arg(&DEFAULT_HOME),
+                home_arg(&default_home()),
                 "--serial0".to_owned(),
                 format!("udpclient:127.0.0.1:{}", mavlink_port(ctx.instance)),
             ],

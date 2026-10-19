@@ -450,3 +450,16 @@ fn the_cessna_plans_its_own_world_and_airframe() {
     assert_eq!(value(fc, "PX4_GZ_MODEL_NAME"), Some("rc_cessna_0"));
     std::fs::remove_dir_all(&root).ok();
 }
+
+/// The plane takes off along a runway, so a fleet puts it on one; the
+/// quad lifts off where it stands.
+#[test]
+fn only_the_fixed_wing_starts_on_the_runway() {
+    let ground = |model: &str| {
+        let mut backend = Px4Gz::default();
+        backend.select_model(model).expect("known model");
+        backend.ground()
+    };
+    assert_eq!(ground("rc_cessna"), crate::site::Ground::Runway);
+    assert_eq!(ground("x500_gimbal"), crate::site::Ground::Field);
+}
