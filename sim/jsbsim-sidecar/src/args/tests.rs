@@ -51,6 +51,8 @@ fn every_flag_parses() {
         "0.5",
         "--gimbal",
         "180,45,-135,720",
+        "--truth-addr",
+        "127.0.0.1:19580",
     ]))
     .unwrap();
     assert_eq!(args.port, 4580);
@@ -59,6 +61,7 @@ fn every_flag_parses() {
     assert_eq!(args.epoch_unix_s, Some(1_767_225_600));
     assert_eq!(args.seed, 9);
     assert_eq!(args.lockstep_timeout.as_millis(), 500);
+    assert_eq!(args.truth_addr.map(|a| a.port()), Some(19_580));
     let gimbal = args.gimbal.unwrap();
     assert_eq!((gimbal.pitch.min_deg, gimbal.yaw.max_deg), (-135.0, 360.0));
 }

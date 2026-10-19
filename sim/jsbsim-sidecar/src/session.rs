@@ -40,6 +40,8 @@ pub struct SessionConfig {
     pub noise: NoiseLevels,
     /// The gimbal's travel, when the vehicle carries one.
     pub gimbal: Option<GimbalLimits>,
+    /// Where the truth also goes every step (the host's truth lane).
+    pub truth_addr: Option<std::net::SocketAddr>,
     /// Simulation seconds per wall second; 0 runs unpaced.
     pub realtime_factor: f64,
     /// How long to wait for PX4's answer to a step before stepping on.
@@ -139,6 +141,8 @@ fn run_connection<T: TerrainSource>(
 ) -> Result<(), ConnectionError> {
     stream.set_nodelay(true)?;
     let mut encoder = Encoder::default();
+    let mut truth_encoder = Encoder::default();
+    let truth_lane = config.truth_addr.and_then(TruthLane::open);
     let mut reader = FrameReader::default();
     let mut controls: Option<ActuatorControls> = None;
     let mut lockstep = false;
@@ -149,6 +153,9 @@ fn run_connection<T: TerrainSource>(
     loop {
         for frame in simulation.step(controls.as_ref(), world, &mut encoder)? {
             stream.write_all(&frame)?;
+        }
+        if let Some(lane) = &truth_lane {
+            lane.send(&truth_encoder.hil_state_quaternion(&simulation.truth()));
         }
         let wait = if lockstep {
             config.lockstep_timeout
@@ -231,6 +238,35 @@ fn receive(
                 return Ok(Received::Closed);
             }
             Err(error) => return Err(error),
+        }
+    }
+}
+
+/// The truth's second destination: a UDP datagram per step to the host.
+struct TruthLane {
+    socket: std::net::UdpSocket,
+    to: std::net::SocketAddr,
+}
+
+impl TruthLane {
+    fn open(to: std::net::SocketAddr) -> Option<Self> {
+        match std::net::UdpSocket::bind(("127.0.0.1", 0)) {
+            Ok(socket) => {
+                tracing::info!(%to, "sending truth to the host");
+                Some(Self { socket, to })
+            }
+            Err(error) => {
+                tracing::warn!(%error, "the truth lane could not open; PX4 alone gets truth");
+                None
+            }
+        }
+    }
+
+    /// Sends one frame. A host not listening yet costs nothing: the
+    /// datagram is dropped and the next step sends a newer one.
+    fn send(&self, frame: &[u8]) {
+        if let Err(error) = self.socket.send_to(frame, self.to) {
+            tracing::debug!(%error, "truth datagram not sent");
         }
     }
 }
