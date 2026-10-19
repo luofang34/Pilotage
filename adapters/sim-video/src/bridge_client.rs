@@ -22,8 +22,10 @@ use tokio::task::JoinHandle;
 use tracing::warn;
 
 use crate::error::SimVideoError;
-use crate::pump::{reader_loop, writer_loop};
-use crate::wire::{BridgeCameraCommand, BridgeControl, BridgeFrame, BridgeNavSat, BridgeOdometry};
+use crate::pump::{OutboundLanes, reader_loop, writer_loop};
+use crate::wire::{
+    BridgeCameraCommand, BridgeControl, BridgeFrame, BridgeNavSat, BridgeOdometry, BridgeViewPose,
+};
 
 /// Environment variable overriding the sidecar bridge binary path.
 pub const BRIDGE_BIN_ENV: &str = "PILOTAGE_GZ_BRIDGE_BIN";
@@ -140,6 +142,7 @@ pub struct BridgeClient {
     writer_task: JoinHandle<()>,
     control_tx: watch::Sender<Option<BridgeControl>>,
     camera_tx: watch::Sender<Option<BridgeCameraCommand>>,
+    view_pose_tx: watch::Sender<Option<BridgeViewPose>>,
     state_rx: watch::Receiver<LatestBridgeState>,
     reader_health_rx: watch::Receiver<ReaderHealth>,
     frame_rx: Option<mpsc::Receiver<BridgeFrame>>,
@@ -213,6 +216,9 @@ impl BridgeClient {
         // command must never displace a pending motion command, nor the
         // reverse.
         let (camera_tx, camera_rx) = watch::channel::<Option<BridgeCameraCommand>>(None);
+        // Poses ride a third lane for the same reason: a pose stream at the
+        // truth rate must not starve a camera command.
+        let (view_pose_tx, view_pose_rx) = watch::channel::<Option<BridgeViewPose>>(None);
         let (reader_health_tx, reader_health_rx) = watch::channel(ReaderHealth::Alive);
         let dropped_frames = Arc::new(AtomicU64::new(0));
 
@@ -223,7 +229,14 @@ impl BridgeClient {
             reader_health_tx,
             Arc::clone(&dropped_frames),
         ));
-        let writer_task = tokio::spawn(writer_loop(write_half, control_rx, camera_rx));
+        let writer_task = tokio::spawn(writer_loop(
+            write_half,
+            OutboundLanes {
+                control: control_rx,
+                camera: camera_rx,
+                view_pose: view_pose_rx,
+            },
+        ));
 
         Self {
             child,
@@ -231,6 +244,7 @@ impl BridgeClient {
             writer_task,
             control_tx,
             camera_tx,
+            view_pose_tx,
             state_rx,
             reader_health_rx,
             frame_rx: Some(frame_rx),
@@ -339,6 +353,15 @@ impl BridgeClient {
     #[must_use]
     pub fn try_send_camera_command(&self, command: BridgeCameraCommand) -> bool {
         self.camera_tx.send(Some(command)).is_ok()
+    }
+
+    /// Publishes the vehicle's true pose as the single latest pose for the
+    /// writer task without blocking on the socket. A producer that renders
+    /// from a world model draws its next frames from it. Returns `false`
+    /// once the writer path is gone (the producer disconnected).
+    #[must_use]
+    pub fn try_send_view_pose(&self, pose: BridgeViewPose) -> bool {
+        self.view_pose_tx.send(Some(pose)).is_ok()
     }
 
     /// Takes the raw-frame receiver, if not already taken. Frames are exposed
