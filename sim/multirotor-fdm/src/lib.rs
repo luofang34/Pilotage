@@ -17,6 +17,7 @@
 pub mod atmosphere;
 pub mod betaflight;
 pub mod geodesy;
+pub mod msp_watch;
 pub mod quad;
 pub mod rotation;
 pub mod supervisor;

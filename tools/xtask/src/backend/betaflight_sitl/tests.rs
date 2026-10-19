@@ -104,7 +104,7 @@ fn only_one_betaflight_runs_per_machine() {
             _ => None,
         })
         .collect();
-    assert_eq!(ports, vec![9_001, 9_002, 9_003, 9_004, 5_761]);
+    assert_eq!(ports, vec![9_001, 9_002, 9_003, 9_004, 5_761, 5_768]);
     assert!(claims.iter().all(|claim| match claim {
         Claim::Udp { remedy, .. } | Claim::Tcp { remedy, .. } => *remedy == Remedy::StopOther,
         _ => true,
