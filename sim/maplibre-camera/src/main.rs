@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use pilotage_maplibre_camera::{
-    args, calibration, error::CameraError, link, producer, render::Camera, rig::CameraSpec, style,
+    args, calibration, error::CameraError, link, prewarm, producer, render::Camera,
+    rig::CameraSpec, style,
 };
 use tracing::{error, info};
 
@@ -58,6 +59,9 @@ fn run(arguments: &[String]) -> Result<(), CameraError> {
         .thread_name("maplibre-camera")
         .build()
         .map_err(CameraError::Runtime)?;
+    if let Some((latitude, longitude)) = config.prewarm {
+        runtime.block_on(prewarm::prewarm(&config, &cache, latitude, longitude));
+    }
     let _entered = runtime.enter();
     let (ends, link_task) = link::spawn(config.host_port);
     info!(

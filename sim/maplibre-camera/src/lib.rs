@@ -9,6 +9,7 @@ pub mod calibration;
 pub mod error;
 pub mod geometry;
 pub mod link;
+pub mod prewarm;
 pub mod producer;
 pub mod render;
 pub mod rig;
