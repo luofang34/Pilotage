@@ -1,5 +1,6 @@
 adapters/aviate/src/uplink.rs	*at += dt;
 adapters/aviate/src/uplink/control.rs	value += 2.0 * core::f32::consts::PI;
+adapters/betaflight/src/outer_loop/steady.rs	self.accel += (raw - self.accel) * (dt / ACCEL_TIME_CONSTANT_S).min(1.0);
 adapters/px4/src/fixed_wing.rs	*at += by;
 adapters/px4/src/gimbal.rs	*at += by;
 adapters/px4/src/uplink.rs	*at += by;
