@@ -52,6 +52,11 @@ message BridgeFrame {
   // Video source this frame came from: 0 = onboard FPV camera, 1 = chase
   // camera. Additional sources may be assigned higher ids later.
   uint32 camera_id = 6;
+  // The published camera calibration this frame was captured with, for a
+  // producer whose calibration changes from frame to frame (a zoom
+  // detent). Zero states none, and the host keeps the calibration it
+  // binds to the camera.
+  uint32 calibration_id = 7;
 }
 
 // A camera command from the host to a producer that owns a controllable
@@ -79,6 +84,49 @@ message BridgeCameraCommand {
   uint32 zoom_detent = 4;
 }
 
+// The pointing of a vehicle's gimbal payload camera at one instant, with
+// the same angle conventions as BridgeCameraCommand.
+message BridgeGimbalPose {
+  // Pan, radians, positive right, relative to the vehicle body heading.
+  float pan_rad = 1;
+  // Tilt, radians, positive up, relative to the horizon.
+  float tilt_rad = 2;
+  // Zoom detent index into the producer's published detent table.
+  uint32 zoom_detent = 3;
+}
+
+// The true pose of the vehicle at one simulation instant, from the host to
+// a producer that renders the vehicle's cameras from a world model rather
+// than from a simulator scene. One pose drives every camera the producer
+// owns: the forward camera is fixed to the body, the gimbal camera follows
+// `gimbal`. Camera mounting offsets belong to the producer's published
+// camera calibration, not to this message.
+message BridgeViewPose {
+  // Clock reading of the truth sample this pose came from. A frame the
+  // producer renders from this pose carries this value as its
+  // `BridgeFrame.sim_time_ns`.
+  uint64 sim_time_ns = 1;
+  // WGS-84 latitude of the body origin, degrees.
+  double latitude_deg = 2;
+  // WGS-84 longitude of the body origin, degrees.
+  double longitude_deg = 3;
+  // Height of the body origin, metres, against `vertical_datum`.
+  double altitude_m = 4;
+  // The reference of `altitude_m`, in the `pilotage.v1` vertical-datum
+  // codes (1 ellipsoid, 2 mean sea level, 3 above ground level). A
+  // producer refuses a datum it cannot place against its terrain rather
+  // than guessing a height.
+  uint32 vertical_datum = 5;
+  // Body FRD to local NED attitude quaternion, Hamilton, scalar first.
+  double q_w = 6;
+  double q_x = 7;
+  double q_y = 8;
+  double q_z = 9;
+  // The gimbal camera's pointing; absent when the vehicle reports no
+  // gimbal, and the producer then keeps the last BridgeCameraCommand.
+  BridgeGimbalPose gimbal = 10;
+}
+
 // Wraps exactly one bridge payload for length-delimited framing over the
 // host<->sidecar TCP connection.
 message BridgeEnvelope {
@@ -88,5 +136,6 @@ message BridgeEnvelope {
     BridgeFrame frame = 3;
     BridgeCameraCommand camera_command = 4;
     BridgeNavSat navsat = 5;
+    BridgeViewPose view_pose = 6;
   }
 }

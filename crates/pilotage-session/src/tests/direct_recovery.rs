@@ -33,6 +33,14 @@ fn capability(family: IntentFamily, frames: Vec<ReferenceFrame>) -> IntentCapabi
 
 /// A multicopter whose velocity and direct scopes share one authority group.
 fn multicopter_engine() -> SessionEngine {
+    SessionEngine::new(
+        multicopter_engine_capabilities(),
+        StalenessPolicy::new(core::time::Duration::from_millis(50)),
+        SessionConfig::new(1, "host-test"),
+    )
+}
+
+fn multicopter_engine_capabilities() -> AdapterCapabilities {
     let scope = |name: &str, intents: Vec<IntentCapability>| ScopeDescriptor {
         authority_group: Some(MOTION.to_owned()),
         scope: ScopeId::new(name),
@@ -41,7 +49,7 @@ fn multicopter_engine() -> SessionEngine {
         actions: vec![],
         legacy: None,
     };
-    let capabilities = AdapterCapabilities {
+    AdapterCapabilities {
         execution: ExecutionMode {
             real_time: true,
             deterministic: true,
@@ -62,15 +70,11 @@ fn multicopter_engine() -> SessionEngine {
                 scope(DIRECT, vec![capability(IntentFamily::BodyRate, vec![])]),
             ],
             link_loss_actions: vec![LinkLossPolicy::Neutralize],
+            heading_reference: None,
         }],
         adapter_version: "test".to_owned(),
         control_feel: None,
-    };
-    SessionEngine::new(
-        capabilities,
-        StalenessPolicy::new(core::time::Duration::from_millis(50)),
-        SessionConfig::new(1, "host-test"),
-    )
+    }
 }
 
 /// Activates a control profile, as every flying client does first.
@@ -203,5 +207,97 @@ fn a_neutral_body_rate_frame_clears_the_latch_a_scheme_transfer_engaged() {
         clears(&outcome.actions),
         "zero rates at centre thrust clear the latch: {:?}",
         outcome.actions
+    );
+}
+
+/// Welcomes `client`, returning its session, principal, and the wire
+/// capabilities the welcome advertised.
+fn welcome_full(
+    engine: &mut SessionEngine,
+    client: ClientKey,
+) -> (
+    SessionId,
+    pilotage_protocol::PrincipalId,
+    pilotage_protocol::wire::HostCapabilities,
+) {
+    let outcome = engine.handle_client_message(
+        client,
+        DomainEnvelope::Hello(pilotage_protocol::ClientHello {
+            protocol_version: 1,
+            client_name: "unit".to_owned(),
+            join_token: Vec::new(),
+        }),
+        MonoTimestamp::from_nanos(0),
+    );
+    match outcome.actions.as_slice() {
+        [
+            SessionAction::SendToClient {
+                envelope: OutboundMessage::Welcome(welcome),
+                ..
+            },
+        ] => (
+            welcome.session,
+            welcome.principal,
+            welcome.host_capabilities.clone(),
+        ),
+        other => panic!("expected a single welcome, got {other:?}"),
+    }
+}
+
+/// The host side of losing the direct lease to another operator: the
+/// welcome tells clients both flight scopes are in the motion group, and
+/// the handover a client receives names that group, at a generation past
+/// the direct lease, so the client can end its direct lane.
+#[test]
+fn a_handover_while_holding_direct_names_the_flight_group() {
+    let mut engine = multicopter_engine();
+    let (holder, taker) = (ClientKey::new(1), ClientKey::new(2));
+    let (holder_session, _, capabilities) = welcome_full(&mut engine, holder);
+    let groups: Vec<&str> = capabilities.vehicles[0]
+        .scopes
+        .iter()
+        .map(|scope| scope.authority_group.as_str())
+        .collect();
+    assert_eq!(groups, vec![MOTION, MOTION], "the welcome states the group");
+    let (_, taker_principal, _) = welcome_full(&mut engine, taker);
+    announce(&mut engine, holder, holder_session);
+    let generation = lease(&mut engine, holder, DIRECT, 2);
+    let offered = engine.handle_client_message(
+        holder,
+        DomainEnvelope::TransferOffer(pilotage_protocol::ScopeTransferOffer {
+            vehicle: VEHICLE,
+            scope: ScopeId::new(DIRECT),
+            to: taker_principal,
+        }),
+        MonoTimestamp::from_nanos(3),
+    );
+    assert!(!offered.actions.is_empty(), "the offer is announced");
+    let accepted = engine.handle_client_message(
+        taker,
+        DomainEnvelope::TransferAccept(pilotage_protocol::ScopeTransferAccept {
+            vehicle: VEHICLE,
+            scope: ScopeId::new(DIRECT),
+        }),
+        MonoTimestamp::from_nanos(4),
+    );
+    let committed = accepted.actions.iter().find_map(|action| match action {
+        SessionAction::Broadcast {
+            envelope:
+                OutboundMessage::Authority(
+                    pilotage_authority::AuthorityEffect::ScopeTransferCommitted {
+                        scope,
+                        generation: committed_at,
+                        ..
+                    },
+                ),
+        } => Some((scope.as_str().to_owned(), *committed_at)),
+        _ => None,
+    });
+    let (scope, committed_at) =
+        committed.unwrap_or_else(|| panic!("a committed handover: {:?}", accepted.actions));
+    assert_eq!(scope, MOTION, "the event names the group, not the member");
+    assert!(
+        committed_at > generation,
+        "at a generation past the direct lease"
     );
 }

@@ -426,12 +426,12 @@ attr outcome pass
 node RESULT-CTRL-GROUP verification-result
 title exclusive authority-group suite — recorded pass
 attr command cargo test -p pilotage-session --lib tests::authority_group
-attr config-digest 27bc04929ec212d25e45a1cb9ca6ec7f5fc34e7f
+attr config-digest 43cdcecaec6e8b8cdf5f5e6eb4a80d6f8dd7260d
 attr tool-version rustc 1.99.0 (b940084d7 2026-09-28)
-attr source-digest git-blob:2d83a5ae7ac3f63cd7e106b8a4ff2aacc3af22a1
+attr source-digest git-blob:2c66890144cc41862f3779717b2eae2d14363673
 attr artifact docs/control/evidence-artifacts/ctrl01/authority-group.run.txt
-attr output-digest sha256:110864da2ff5003478666ba29ec1dcf01add3985c212bc6a8a958208f6d302d3
-attr run-id local:27bc04929ec212d25e45a1cb9ca6ec7f5fc34e7f
+attr output-digest sha256:1ab1e10b142a3c93dc3456a7a8a3afdab9ed19ecc4211e77993227fb9f3154f6
+attr run-id local:43cdcecaec6e8b8cdf5f5e6eb4a80d6f8dd7260d
 attr outcome pass
 node RESULT-CTRL-DEDUP verification-result
 title actor exactly-once dedup suite — recorded pass
@@ -476,12 +476,12 @@ attr outcome pass
 node RESULT-CTRL-FIXTURE verification-result
 title browser-encoded wire fixture suite — recorded pass
 attr command cargo test -p pilotage-session --test typed_wire_e2e
-attr config-digest 27bc04929ec212d25e45a1cb9ca6ec7f5fc34e7f
+attr config-digest 43cdcecaec6e8b8cdf5f5e6eb4a80d6f8dd7260d
 attr tool-version rustc 1.99.0 (b940084d7 2026-09-28)
-attr source-digest git-blob:da10e21494feef23aff8fc086d98d14f5b212d79
+attr source-digest git-blob:05ccde6d2e1543f31829d311ebfeee188c53bedc
 attr artifact docs/control/evidence-artifacts/ctrl01/browser-fixture.run.txt
-attr output-digest sha256:b2d136f9401b0ef8872be01f45cb630ce2bdf5f2cd1d7859c049f68107457642
-attr run-id local:27bc04929ec212d25e45a1cb9ca6ec7f5fc34e7f
+attr output-digest sha256:c80f3b0153d0a0efeed9fd5b7d2828a950e0d7f8910847d10e2eaa4695d295a8
+attr run-id local:43cdcecaec6e8b8cdf5f5e6eb4a80d6f8dd7260d
 attr outcome pass
 
 node RESULT-CTRL-LIFECYCLE-PROFILE verification-result
@@ -536,6 +536,12 @@ title committed baseline for the results re-run when the operator feel-mode path
 attr scm git
 attr commit 27bc04929ec212d25e45a1cb9ca6ec7f5fc34e7f
 attr tree 4f950ed3a499abe35ebe7c7bef6d0884ef410c9e
+
+node CFG-CTRL-HEADING-REFERENCE configuration-item
+title committed baseline for the results re-run when the vehicle descriptor gained its heading reference
+attr scm git
+attr commit 43cdcecaec6e8b8cdf5f5e6eb4a80d6f8dd7260d
+attr tree d392f232ba610bd24f5b4231db653a2b9e005ccf
 
 node CFG-CTRL-VIDEO-V3 configuration-item
 title committed code baseline for session negotiation and transport results
@@ -721,7 +727,7 @@ edge RESULT-CTRL-GROUP result-of CASE-CTRL-GROUP-EXCL
 edge RESULT-CTRL-GROUP result-of CASE-CTRL-GROUP-GEN
 edge RESULT-CTRL-GROUP result-of CASE-CTRL-GROUP-LATCH
 edge RESULT-CTRL-GROUP covers CTRL-GROUP-003
-edge RESULT-CTRL-GROUP justified-by CFG-CTRL-FEEL-MODE
+edge RESULT-CTRL-GROUP justified-by CFG-CTRL-HEADING-REFERENCE
 edge RESULT-CTRL-GROUP justified-by TOOL-CTRL-CARGO
 
 edge RESULT-CTRL-DEDUP result-of CASE-CTRL-ID-REUSE
@@ -760,7 +766,7 @@ edge RESULT-CTRL-FIXTURE result-of CASE-CTRL-BROWSER-FRAME
 edge RESULT-CTRL-FIXTURE result-of CASE-CTRL-BROWSER-COMMAND
 edge RESULT-CTRL-FIXTURE covers CTRL-BIND-001
 edge RESULT-CTRL-FIXTURE covers CTRL-CHAN-002
-edge RESULT-CTRL-FIXTURE justified-by CFG-CTRL-FEEL-MODE
+edge RESULT-CTRL-FIXTURE justified-by CFG-CTRL-HEADING-REFERENCE
 edge RESULT-CTRL-FIXTURE justified-by TOOL-CTRL-CARGO
 
 edge RESULT-CTRL-LIFECYCLE-PROFILE result-of CASE-CTRL-LIFE-PHYSICAL

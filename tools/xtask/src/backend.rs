@@ -49,6 +49,8 @@ pub struct SessionContext {
     /// prove it is up, s (`--ready-timeout`). One value for every
     /// backend: a loaded machine slows them all alike.
     pub ready_timeout_s: u64,
+    /// Add the world-model camera stage (`--camera maplibre`).
+    pub sim_camera: bool,
 }
 
 /// The `--ready-timeout` default, s. A PX4 SITL boots in about 20 s on an
@@ -71,6 +73,7 @@ impl SessionContext {
             lan: false,
             instance: 0,
             ready_timeout_s: DEFAULT_READY_TIMEOUT_S,
+            sim_camera: false,
         }
     }
 }
@@ -322,7 +325,7 @@ pub(crate) fn host_env_for(
 /// but absent from the other is a backend nothing checks — and the
 /// direction that fails is the safe one, since a backend missing here
 /// cannot be selected at all.
-const BACKENDS: &[BackendEntry] = &[
+pub(crate) const BACKENDS: &[BackendEntry] = &[
     // Canonical names pair the FC family with the simulator behind it;
     // the bare FC name stays accepted as the family's default.
     BackendEntry {
@@ -362,8 +365,8 @@ const BACKENDS: &[BackendEntry] = &[
     },
 ];
 
-struct BackendEntry {
-    name: &'static str,
+pub(crate) struct BackendEntry {
+    pub(crate) name: &'static str,
     alias: Option<&'static str>,
     make: fn() -> Box<dyn SimBackend>,
 }

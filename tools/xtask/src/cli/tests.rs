@@ -22,6 +22,30 @@ fn sim_defaults_are_the_documented_ones() {
     assert!(sim.open, "the browser opens by default");
     assert_eq!(sim.instance, 0, "one session per machine is the default");
     assert!(!sim.lan, "the session serves loopback only by default");
+    assert!(!sim.sim_camera, "the backend's own camera by default");
+}
+
+#[test]
+fn the_camera_stage_is_chosen_by_name_and_unknown_cameras_fail_closed() {
+    let Command::Sim(sim) = parse_args(&args(&["sim", "--camera", "maplibre"])).expect("parses")
+    else {
+        panic!("expected sim");
+    };
+    assert!(sim.sim_camera);
+    let Command::Fleet(fleet) = parse_args(&args(&[
+        "fleet",
+        "--vehicle",
+        "px4",
+        "--camera",
+        "maplibre",
+    ]))
+    .expect("parses") else {
+        panic!("expected fleet");
+    };
+    assert!(fleet.sim_camera);
+    assert!(parse_args(&args(&["sim", "--camera", "gazebo"])).is_err());
+    assert!(parse_args(&args(&["sim", "--camera"])).is_err());
+    assert!(USAGE.contains("--camera <camera>"));
 }
 
 #[test]

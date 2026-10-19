@@ -51,6 +51,10 @@ pub struct UnstampedFrame {
     pub rgb: Vec<u8>,
     /// Producer-local camera id (0 = FPV, 1 = chase, 2 = gimbal payload).
     pub camera_id: u32,
+    /// The calibration the producer captured this frame with, when it
+    /// changes from frame to frame; `None` uses the stamper's calibration
+    /// for the camera.
+    pub calibration_id: Option<CalibrationId>,
 }
 
 /// A raw camera frame carrying the capture identity and clock mapping
@@ -169,12 +173,12 @@ impl FrameStamper {
             capture: VideoCaptureStamp {
                 stamp,
                 camera_id: CameraId(frame.camera_id),
-                // The published calibration for this camera, if any; a camera
-                // with no published calibration stamps NONE.
-                calibration_id: self
-                    .calibrations
-                    .get(&frame.camera_id)
-                    .copied()
+                // The producer's own calibration for this frame, else the
+                // published calibration for this camera; a camera with
+                // neither stamps NONE.
+                calibration_id: frame
+                    .calibration_id
+                    .or_else(|| self.calibrations.get(&frame.camera_id).copied())
                     .unwrap_or(CalibrationId::NONE),
                 mapping: self.mapping,
             },

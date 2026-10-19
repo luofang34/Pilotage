@@ -195,12 +195,12 @@ attr outcome pass
 node RESULT-LINK-WIRE verification-result
 title host wire-mapping suite — recorded pass
 attr command cargo test -p pilotage-session-host --lib engine_actor::telemetry
-attr config-digest 27bc04929ec212d25e45a1cb9ca6ec7f5fc34e7f
+attr config-digest 43cdcecaec6e8b8cdf5f5e6eb4a80d6f8dd7260d
 attr tool-version rustc 1.99.0 (b940084d7 2026-09-28)
-attr source-digest git-blob:8a343bc88673e329dc10fe17853481e7fd68b436
+attr source-digest git-blob:d7c05231cb62e87e10dbd40e5df14ea65eae4d49
 attr artifact docs/link/evidence-artifacts/link04/host-wire.run.txt
-attr output-digest sha256:6c8394b5dfd047918f7ef2db5d0650455c8d0e7f85cc887412d40e8ecc29d1b8
-attr run-id local:27bc04929ec212d25e45a1cb9ca6ec7f5fc34e7f
+attr output-digest sha256:a1414ccd3bdef607eda7eb97f30edae722d289746f3f0b5532785ba456184501
+attr run-id local:43cdcecaec6e8b8cdf5f5e6eb4a80d6f8dd7260d
 attr outcome pass
 
 node RESULT-LINK-CAPTURE verification-result
@@ -254,6 +254,12 @@ title committed code baseline of the re-recorded adapter suite (the MAVLink extr
 attr scm git
 attr commit 12ea221583d702b26cc1a9dd75824da9c43d8865
 attr tree 8afac4dc2dd4c7bc42993a42b1d444fe34dc7de5
+
+node CFG-LINK-HEADING-REFERENCE configuration-item
+title committed baseline for the host wire-mapping result re-run when telemetry gained the magnetic-variation sample
+attr scm git
+attr commit 43cdcecaec6e8b8cdf5f5e6eb4a80d6f8dd7260d
+attr tree d392f232ba610bd24f5b4231db653a2b9e005ccf
 
 node CFG-LINK-WORKTREE configuration-item
 title committed code baseline the recorded results were produced against (engineering SCM, not certified SCM)
@@ -361,7 +367,7 @@ edge RESULT-LINK-ADAPTER justified-by TOOL-LINK-CARGO
 
 edge RESULT-LINK-WIRE result-of CASE-LINK-WIRE
 edge RESULT-LINK-WIRE covers LINK-PROV-003
-edge RESULT-LINK-WIRE justified-by CFG-LINK-WORKTREE
+edge RESULT-LINK-WIRE justified-by CFG-LINK-HEADING-REFERENCE
 edge RESULT-LINK-WIRE justified-by TOOL-LINK-CARGO
 
 edge RESULT-LINK-CAPTURE result-of CASE-LINK-CAPTURE

@@ -103,6 +103,10 @@ message ScopeDescriptor {
   repeated IntentCapability intents = 4;
   // The typed discrete actions this scope accepts (CTRL-01).
   repeated ActionCapability actions = 5;
+  // The exclusive-authority group this scope belongs to. Scopes in one group
+  // are held, fenced, and revoked as one authority, and authority events name
+  // the group, not the member. Empty means the scope is its own group.
+  string authority_group = 6;
 }
 
 // The kind of vehicle, as the adapter declares it. A client chooses its
@@ -123,6 +127,16 @@ enum VehicleClass {
   VEHICLE_CLASS_SURFACE_VESSEL = 5;
 }
 
+// Which north a heading is measured from.
+enum HeadingReference {
+  // Not stated. A receiver treats the heading reference as unknown.
+  HEADING_REFERENCE_UNSPECIFIED = 0;
+  // True (geographic) north.
+  HEADING_REFERENCE_TRUE = 1;
+  // Magnetic north.
+  HEADING_REFERENCE_MAGNETIC = 2;
+}
+
 // Describes one vehicle a host can offer for control.
 message VehicleDescriptor {
   VehicleId vehicle = 1;
@@ -131,6 +145,11 @@ message VehicleDescriptor {
   repeated ScopeDescriptor scopes = 3;
   repeated ExecutionMode supported_modes = 4;
   VehicleClass vehicle_class = 5;
+  // Which north the yaw of this vehicle's attitude quaternion is
+  // referenced to, as the adapter knows it when the client is admitted.
+  // The vehicle's stamped AvionicsState.magnetic_variation is the live
+  // statement and overrides this value when the two disagree.
+  HeadingReference heading_reference = 6;
 }
 
 // Describes what a session host can offer at session setup (ADR-0008).

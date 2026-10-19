@@ -14,7 +14,8 @@ use tracing::{debug, warn};
 use crate::bridge_client::{LatestBridgeState, ReaderHealth};
 use crate::framing::read_envelope;
 use crate::wire::{
-    BridgeCameraCommand, BridgeControl, BridgeEnvelope, BridgeFrame, bridge_envelope,
+    BridgeCameraCommand, BridgeControl, BridgeEnvelope, BridgeFrame, BridgeViewPose,
+    bridge_envelope,
 };
 
 /// Reads length-delimited envelopes until EOF or error: odometry updates the
@@ -86,15 +87,27 @@ fn handle_envelope(
     }
 }
 
-/// Writes the latest published control as a length-delimited envelope whenever
-/// it changes. A slow socket coalesces intervening updates to the newest value
-/// (latest-valid-value, ADR-0009). Exits on channel close (client dropped) or a
-/// socket write error.
+/// The host-to-producer lanes the writer drains, each holding only its
+/// newest value.
+pub(crate) struct OutboundLanes {
+    pub(crate) control: watch::Receiver<Option<BridgeControl>>,
+    pub(crate) camera: watch::Receiver<Option<BridgeCameraCommand>>,
+    pub(crate) view_pose: watch::Receiver<Option<BridgeViewPose>>,
+}
+
+/// Writes the latest published value of each lane as a length-delimited
+/// envelope whenever it changes. A slow socket coalesces intervening updates
+/// to the newest value (latest-valid-value, ADR-0009). Exits on channel close
+/// (client dropped) or a socket write error.
 pub(crate) async fn writer_loop(
     mut write_half: WriteHalf<tokio::net::TcpStream>,
-    mut control_rx: watch::Receiver<Option<BridgeControl>>,
-    mut camera_rx: watch::Receiver<Option<BridgeCameraCommand>>,
+    lanes: OutboundLanes,
 ) {
+    let OutboundLanes {
+        control: mut control_rx,
+        camera: mut camera_rx,
+        view_pose: mut view_pose_rx,
+    } = lanes;
     loop {
         let payload = tokio::select! {
             changed = control_rx.changed() => {
@@ -108,6 +121,12 @@ pub(crate) async fn writer_loop(
                     return;
                 }
                 (*camera_rx.borrow_and_update()).map(bridge_envelope::Payload::CameraCommand)
+            }
+            changed = view_pose_rx.changed() => {
+                if changed.is_err() {
+                    return;
+                }
+                (*view_pose_rx.borrow_and_update()).map(bridge_envelope::Payload::ViewPose)
             }
         };
         let Some(payload) = payload else {

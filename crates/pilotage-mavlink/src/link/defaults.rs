@@ -25,6 +25,7 @@ impl Default for LinkState {
             baro: None,
             sim_truth: None,
             gnss_fix: None,
+            geomagnetic_reference: None,
             started_at: Instant::now(),
             truth_origin: None,
             gimbal_device: None,

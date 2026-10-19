@@ -5,6 +5,7 @@
 //! cannot drift: a divergence reddens exactly one of them.
 
 mod catalog;
+mod groups;
 mod lanes;
 mod stream_bounds;
 mod takeover;
@@ -63,6 +64,7 @@ pub(super) fn admit(engine: &mut ClientEngine, session: u64, principal: u64) -> 
                         }],
                         supported_modes: Vec::new(),
                         vehicle_class: wire::VehicleClass::FixedWing as i32,
+                        heading_reference: wire::HeadingReference::True as i32,
                     }],
                     supported_modes: Vec::new(),
                     control_feel: None,

@@ -24,6 +24,7 @@ fn fleet(vehicles: &[&str]) -> FleetArgs {
         open: false,
         site: DEFAULT_SITE,
         ready_timeout_s: crate::backend::DEFAULT_READY_TIMEOUT_S,
+        sim_camera: false,
     }
 }
 
