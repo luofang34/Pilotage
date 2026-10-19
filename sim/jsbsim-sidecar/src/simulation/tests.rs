@@ -110,7 +110,7 @@ fn full_motor_commands_lift_the_x500_and_disarmed_ones_do_not() {
 }
 
 #[test]
-fn px4_gets_the_imu_every_step_and_the_rest_at_their_rates() {
+fn px4_gets_the_imu_and_truth_every_step_and_the_rest_at_their_rates() {
     let mut world = world();
     let mut simulation = x500(&mut world);
     let mut encoder = Encoder::default();
@@ -125,8 +125,8 @@ fn px4_gets_the_imu_every_step_and_the_rest_at_their_rates() {
             }
         }
     }
-    // One second: 250 IMU samples, 10 fixes, 50 truth messages.
-    assert_eq!(counts, [250, 10, 50]);
+    // One second: 250 IMU samples, 10 fixes, and truth with every step.
+    assert_eq!(counts, [250, 10, 250]);
 }
 
 #[test]

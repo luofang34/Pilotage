@@ -1,6 +1,7 @@
 //! Command-line options. Defaults stand the vehicle on the runway 04
 //! threshold of Solberg-Hunterdon Airport (N51) and serve PX4 instance 0.
 
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -42,6 +43,9 @@ pub struct Args {
     pub lockstep_timeout: Duration,
     /// The gimbal PX4 drives, from its `MNT_*` travel parameters.
     pub gimbal: Option<GimbalLimits>,
+    /// Where to send the truth every step, besides PX4: the session
+    /// host's simulator truth lane.
+    pub truth_addr: Option<SocketAddr>,
 }
 
 /// A malformed command line.
@@ -85,6 +89,7 @@ impl Default for Args {
             realtime_factor: 1.0,
             lockstep_timeout: Duration::from_secs(2),
             gimbal: None,
+            truth_addr: None,
         }
     }
 }
@@ -180,6 +185,9 @@ impl Args {
                     args.lockstep_timeout =
                         Duration::from_secs_f64(finite(flag, value()?)?.clamp(0.001, 3_600.0));
                 }
+                "--truth-addr" => {
+                    args.truth_addr = Some(parse(flag, value()?, "a socket address")?)
+                }
                 "--gimbal" => args.gimbal = Some(gimbal_limits(flag, value()?)?),
                 other => return Err(ArgsError::Unrecognized(other.to_owned())),
             }
@@ -202,7 +210,7 @@ pub fn usage() -> String {
          [--jsbsim-root DIR] [--latitude-deg D --longitude-deg D --heading-deg D] \
          [--site-elevation-m M] [--terrain ARCHIVE.mbtiles] [--epoch-unix-s S] [--seed N] \
          [--realtime-factor F] [--lockstep-timeout-s S] \
-         [--gimbal RANGE_ROLL,MAX_PITCH,MIN_PITCH,RANGE_YAW]",
+         [--gimbal RANGE_ROLL,MAX_PITCH,MIN_PITCH,RANGE_YAW] [--truth-addr HOST:PORT]",
         AIRCRAFT_NAMES.join("|")
     )
 }
