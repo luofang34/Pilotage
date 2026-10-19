@@ -118,7 +118,7 @@ manifest records what the build produced.
 
 Serve the repository root statically and open the viewer:
 
-    python3 -m http.server 8000
+    cargo xtask serve-viewer --dir . --port 8000
     open http://localhost:8000/clients/web/index.html
 
 Select "situation / globe" in the main-view control.

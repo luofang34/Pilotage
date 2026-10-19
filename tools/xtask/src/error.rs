@@ -52,7 +52,7 @@ pub enum XtaskError {
     /// Session processes from a previous run are still alive. The
     /// launcher never kills processes it did not start.
     #[error(
-        "session processes are already running:\n{listing}\nstop them first: pkill -f \"gz sim\"; pkill -f sitl-gazebo-x500; pkill -f pilotage-session-host; pkill -f \"http.server\""
+        "session processes are already running:\n{listing}\nstop them first: pkill -f \"gz sim\"; pkill -f sitl-gazebo-x500; pkill -f pilotage-session-host; pkill -f \"xtask serve-viewer\""
     )]
     StaleSession {
         /// `pgrep` listing of the offending processes.

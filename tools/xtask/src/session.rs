@@ -63,7 +63,11 @@ pub async fn run_sim(args: &SimArgs) -> Result<(), XtaskError> {
 
     let mut stages = backend.plan(&ctx)?;
     stages.push(host_stage(&ctx, backend.as_ref()));
-    stages.push(viewer_stage(&ctx)?);
+    let xtask = std::env::current_exe().map_err(|source| XtaskError::Io {
+        context: "locating the xtask executable for the viewer stage",
+        source,
+    })?;
+    stages.push(viewer_stage(&ctx, &xtask)?);
 
     // The cancellation source must exist before the first child spawns:
     // each child lives in its own process group, so a terminal ctrl-c
@@ -365,10 +369,10 @@ pub(crate) fn host_stage(ctx: &SessionContext, backend: &dyn SimBackend) -> Stag
     }
 }
 
-/// The static viewer. The host learning `--serve-web` retires this
-/// stage; until then python3 serves `clients/web` exactly like the
-/// recorded runbook.
-fn viewer_stage(ctx: &SessionContext) -> Result<Stage, XtaskError> {
+/// The static viewer: this xtask binary's `serve-viewer` subcommand
+/// serving `clients/web` with caching disabled, so the browser always
+/// runs the working-tree client.
+fn viewer_stage(ctx: &SessionContext, xtask: &Path) -> Result<Stage, XtaskError> {
     let viewer_dir = ctx.repo_root.join("clients/web");
     if !viewer_dir.join("index.html").is_file() {
         return Err(XtaskError::MissingArtifact {
@@ -377,28 +381,22 @@ fn viewer_stage(ctx: &SessionContext) -> Result<Stage, XtaskError> {
             hint: "run from the Pilotage repository root",
         });
     }
-    // Cache-Control: no-store on every response: the served client must
-    // always equal the working-tree source. The viewer is served straight
-    // from the tree, so any heuristic caching of main.js would let the
-    // browser run a client that has diverged from the source on disk;
-    // no-store holds the served client and the on-disk source identical.
-    let server = format!(
-        "import http.server\n\
-         class H(http.server.SimpleHTTPRequestHandler):\n\
-         \tdef end_headers(self):\n\
-         \t\tself.send_header('Cache-Control', 'no-store')\n\
-         \t\tsuper().end_headers()\n\
-         http.server.test(HandlerClass=H, port={port}, bind='{bind}')\n",
-        port = ctx.viewer_port,
-        // Loopback by default: serving the working tree to the network is
-        // an explicit request, never a side effect of running a sim.
-        bind = if ctx.lan { "0.0.0.0" } else { "127.0.0.1" }
-    );
+    // Loopback by default: serving the working tree to the network is
+    // an explicit request, never a side effect of running a sim.
+    let bind = if ctx.lan { "0.0.0.0" } else { "127.0.0.1" };
     Ok(Stage {
         spec: ProcessSpec {
             name: "viewer",
-            program: "python3".to_owned(),
-            args: vec!["-c".to_owned(), server],
+            program: xtask.display().to_string(),
+            args: vec![
+                "serve-viewer".to_owned(),
+                "--dir".to_owned(),
+                viewer_dir.display().to_string(),
+                "--port".to_owned(),
+                ctx.viewer_port.to_string(),
+                "--bind".to_owned(),
+                bind.to_owned(),
+            ],
             cwd: Some(viewer_dir),
             env: vec![],
             remove_env: vec![],
