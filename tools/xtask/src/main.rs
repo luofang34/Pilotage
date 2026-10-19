@@ -6,6 +6,7 @@ use std::process::ExitCode;
 
 mod affected;
 mod backend;
+mod camera;
 mod cli;
 mod conflicts;
 mod error;
