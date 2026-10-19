@@ -198,6 +198,7 @@ impl VehicleAdapter for ReferenceAdapter {
                     LinkLossPolicy::Neutralize,
                     LinkLossPolicy::HoldBrief { ticks: 0 },
                 ],
+                heading_reference: None,
             }],
             adapter_version: ADAPTER_VERSION.to_owned(),
             control_feel: None,

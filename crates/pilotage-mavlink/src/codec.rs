@@ -60,6 +60,9 @@ pub const COMMAND_ACK_ID: u32 = 77;
 pub const ESTIMATOR_STATUS_ID: u32 = 230;
 /// Aviate's lossless estimator authorization message id.
 pub const AVIATE_ESTIMATOR_STATUS_ID: u32 = 20_000;
+/// Aviate's AVIATE_GEOMAGNETIC_REFERENCE: the declination its estimator
+/// applies to the magnetometer heading, and its source.
+pub const AVIATE_GEOMAGNETIC_REFERENCE_ID: u32 = 20_001;
 /// BATTERY_STATUS message id.
 pub const BATTERY_STATUS_ID: u32 = 147;
 /// PARAM_VALUE message id (downlink: a parameter's current value).
@@ -211,6 +214,16 @@ pub enum FcMessage {
         /// Source quality enum: 0 unusable, 1 degraded, 2 good.
         quality: u8,
     },
+    /// Aviate's geomagnetic reference report.
+    AviateGeomagneticReference {
+        /// Microseconds since FC boot.
+        time_usec: u64,
+        /// Declination, radians, positive east; NaN when the source is
+        /// none.
+        declination_rad: f32,
+        /// Source code: 0 none, 1 model, 2 configured.
+        source: u8,
+    },
     /// Battery report, in wire units. `None` is the sender's "unknown"
     /// value for that field.
     BatteryStatus {
@@ -306,6 +319,7 @@ fn crc_extra(msg_id: u32) -> Option<u8> {
         COMMAND_ACK_ID => Some(143),
         ESTIMATOR_STATUS_ID => Some(163),
         AVIATE_ESTIMATOR_STATUS_ID => Some(171),
+        AVIATE_GEOMAGNETIC_REFERENCE_ID => Some(235),
         COMMAND_LONG_ID => Some(152),
         SET_POSITION_TARGET_ID => Some(143),
         GIMBAL_MANAGER_SET_ATTITUDE_ID => Some(123),

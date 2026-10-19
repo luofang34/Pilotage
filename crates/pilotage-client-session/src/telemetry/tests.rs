@@ -1,9 +1,12 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use pilotage_protocol::{CommandOutcome, GimbalYawFrame, wire};
+use pilotage_protocol::{
+    CommandOutcome, GimbalYawFrame, HeadingReference, MagneticVariationSource, wire,
+};
 
 use super::{
-    ArmState, CommandVerdict, EstimateQuality, EstimatorValidity, command_verdict, gimbal_reference,
+    ArmState, CommandVerdict, EstimateQuality, EstimatorValidity, command_verdict,
+    gimbal_reference, magnetic_variation,
 };
 
 #[test]
@@ -82,4 +85,66 @@ fn a_gimbal_report_without_a_yaw_frame_has_no_reference() {
     let reference = gimbal_reference(&earth).expect("a frame is named");
     assert_eq!(reference.yaw_frame, GimbalYawFrame::Earth);
     assert!(reference.locks.yaw && !reference.locks.roll && !reference.locks.pitch);
+}
+
+fn stated(source: wire::MagneticVariationSource, declination_rad: f32) -> wire::AvionicsState {
+    wire::AvionicsState {
+        magnetic_variation: Some(wire::MagneticVariation {
+            declination_rad,
+            source: source as i32,
+            model_id: String::new(),
+            model_epoch: 0.0,
+        }),
+        magnetic_variation_stamp: Some(wire::MeasurementStamp::default()),
+        ..wire::AvionicsState::default()
+    }
+}
+
+#[test]
+fn a_stated_model_variation_reads_as_a_true_heading_with_its_declination() {
+    let mut avionics = stated(wire::MagneticVariationSource::FcModel, -0.2113);
+    if let Some(variation) = avionics.magnetic_variation.as_mut() {
+        variation.model_id = "WMM2025".to_owned();
+        variation.model_epoch = 2025.0;
+    }
+    let variation = magnetic_variation(&avionics).expect("a stamped, known variation");
+    assert_eq!(variation.source, MagneticVariationSource::FcModel);
+    assert_eq!(variation.declination_rad, Some(-0.2113));
+    assert_eq!(variation.model_id.as_deref(), Some("WMM2025"));
+    assert_eq!(variation.model_epoch, Some(2025.0));
+    assert_eq!(variation.heading_reference(), HeadingReference::True);
+}
+
+#[test]
+fn a_vehicle_that_applies_no_variation_reads_as_a_magnetic_heading() {
+    let variation = magnetic_variation(&stated(wire::MagneticVariationSource::None, 0.0))
+        .expect("NONE is a statement");
+    assert_eq!(variation.declination_rad, None);
+    assert_eq!(variation.heading_reference(), HeadingReference::Magnetic);
+    assert_eq!((variation.model_id, variation.model_epoch), (None, None));
+}
+
+#[test]
+fn an_unusable_variation_reads_as_none() {
+    // No stamp.
+    let mut unstamped = stated(wire::MagneticVariationSource::FcModel, 0.1);
+    unstamped.magnetic_variation_stamp = None;
+    assert_eq!(magnetic_variation(&unstamped), None);
+    // An unstated or unknown source.
+    assert_eq!(
+        magnetic_variation(&stated(wire::MagneticVariationSource::Unspecified, 0.1)),
+        None
+    );
+    let mut unknown = stated(wire::MagneticVariationSource::FcModel, 0.1);
+    if let Some(variation) = unknown.magnetic_variation.as_mut() {
+        variation.source = 42;
+    }
+    assert_eq!(magnetic_variation(&unknown), None);
+    // An applied declination that is not a number.
+    assert_eq!(
+        magnetic_variation(&stated(wire::MagneticVariationSource::FcModel, f32::NAN)),
+        None
+    );
+    // Nothing stated at all.
+    assert_eq!(magnetic_variation(&wire::AvionicsState::default()), None);
 }
