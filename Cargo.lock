@@ -2192,6 +2192,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-jsbsim-sidecar"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "pilotage-geo",
+ "pilotage-mavlink",
+ "pilotage-terrain-query",
+ "pilotage-world",
+ "thiserror",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "pilotage-mavlink"
 version = "0.1.0"
 dependencies = [

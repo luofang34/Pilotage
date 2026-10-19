@@ -35,10 +35,11 @@ pub(super) fn encode_frame_v2(
 }
 
 /// Writes a MAVLink 2.0 frame under an explicit SOURCE identity — the
-/// FC-side encoder for messages an autopilot originates (a fake FC in a
-/// test, a gateway loopback).
+/// encoder for messages another party originates (an autopilot, a fake
+/// FC in a test, a gateway loopback, a simulator). `out` must hold
+/// `10 + payload.len() + 2` bytes; a too-small buffer returns 0.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn encode_frame_v2_from(
+pub fn encode_frame_v2_from(
     seq: u8,
     msg_id: u32,
     payload: &[u8],

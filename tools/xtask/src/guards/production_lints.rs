@@ -33,7 +33,11 @@ pub(crate) struct FfiCrate {
 }
 
 /// Every crate that binds a foreign library.
-pub(crate) const FFI_CRATES: &[FfiCrate] = &[];
+pub(crate) const FFI_CRATES: &[FfiCrate] = &[FfiCrate {
+    package: "pilotage-jsbsim-sidecar",
+    dir: "sim/jsbsim-sidecar",
+    unsafe_module: "src/engine/ffi.rs",
+}];
 
 /// The panic-capable operations no production target may use.
 const PANIC_LINTS: [&str; 3] = [
