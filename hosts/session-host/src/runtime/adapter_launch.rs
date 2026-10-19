@@ -116,6 +116,21 @@ pub(super) async fn spawn_adapter_runtime(
             let video = session_video("betaflight", None, sim_camera_port, &host.engine_tx).await?;
             Ok(spawn_runtime(engine, adapter, video, host))
         }
+        #[cfg(target_os = "macos")]
+        AdapterKind::Dji => {
+            if sim_camera_port.is_some() {
+                return Err(HostError::SimCameraConflict { adapter: "dji" });
+            }
+            let adapter = super::dji::start_blocking(HOST_VEHICLE)?;
+            let engine = build_engine(&adapter, options);
+            let video = SessionVideo {
+                frames: None,
+                producer: None,
+            };
+            Ok(spawn_runtime(engine, adapter, video, host))
+        }
+        #[cfg(not(target_os = "macos"))]
+        AdapterKind::Dji => Err(HostError::AdapterNotInBuild { adapter: "dji" }),
     }
 }
 

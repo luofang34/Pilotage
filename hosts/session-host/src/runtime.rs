@@ -10,6 +10,8 @@ mod automation;
 mod aviate_profile;
 mod betaflight_config;
 mod connection;
+#[cfg(target_os = "macos")]
+pub(crate) mod dji;
 mod engine_actor;
 #[cfg(feature = "sim")]
 mod gazebo_launch;

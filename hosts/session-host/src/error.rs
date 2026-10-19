@@ -206,6 +206,10 @@ pub enum HostError {
     /// The Betaflight adapter's environment configuration is invalid.
     #[error(transparent)]
     BetaflightConfig(#[from] BetaflightConfigError),
+    /// The DJI bench transport or its explicit configuration failed.
+    #[cfg(target_os = "macos")]
+    #[error("DJI adapter: {0}")]
+    Dji(#[from] crate::runtime::dji::DjiHostError),
     /// A host environment variable could not be decoded as UTF-8.
     #[error("{variable} is not valid UTF-8: {source}")]
     MissionVarEncoding {

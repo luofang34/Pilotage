@@ -52,6 +52,28 @@ You provide the pieces git does not vendor:
   Gazebo dev libraries (camera sidecar, optional). Each build script prints its
   own install hint on failure.
 
+## DJI USB bench connection on macOS
+
+Select the RC-N1 USB CDC callout path and a new capture file. The capture
+directory must exist. The host refuses to overwrite a capture.
+
+```sh
+PILOTAGE_DJI_SERIAL=/dev/cu.usbmodemDEVICE \
+PILOTAGE_DJI_CAPTURE=/tmp/dji-session-01.jsonl \
+cargo run --release -p pilotage-session-host --no-default-features -- --adapter dji
+```
+
+This adapter exposes a DJI Mini 3 bench object with gimbal control. Flight,
+positioning, and video are not implemented. Gimbal pitch targets are limited
+to -5 through 0 degrees. The adapter ignores horizontal gimbal input because
+yaw control is not implemented. Keep the propellers removed.
+The adapter requires fresh gimbal observations before it sends a pitch command.
+An RC version response alone does not establish the aircraft route.
+
+The capture contains received and transmitted bytes with host monotonic times.
+A lost connection or a capture failure stops control. Restart the host to open
+a new connection and capture. The adapter does not reconnect automatically.
+
 ## What the architecture protects
 
 - **Portable sans-IO core.** All protocol, authority, input, timing, and replay logic

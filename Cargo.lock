@@ -1913,6 +1913,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-adapter-dji"
+version = "0.1.0"
+dependencies = [
+ "pilotage-adapter-api",
+ "pilotage-client-session",
+ "pilotage-protocol",
+ "pilotage-timing",
+ "rustix",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
 name = "pilotage-adapter-gazebo"
 version = "0.1.0"
 dependencies = [
@@ -2330,6 +2343,7 @@ dependencies = [
  "pilotage-adapter-ardupilot",
  "pilotage-adapter-aviate",
  "pilotage-adapter-betaflight",
+ "pilotage-adapter-dji",
  "pilotage-adapter-gazebo",
  "pilotage-adapter-px4",
  "pilotage-adapter-reference",
