@@ -38,6 +38,7 @@ members = [
     "adapters/reference-headless",
     "adapters/aviate",
     "adapters/px4",
+    "adapters/ardupilot",
     "tools/hid-probe",
     "tools/flight-tune",
     "tools/flight-tune-campaign",
@@ -144,6 +145,7 @@ pilotage-adapter-gazebo = { path = "adapters/gazebo" }
 pilotage-sim-video = { path = "adapters/sim-video" }
 pilotage-adapter-aviate = { path = "adapters/aviate", default-features = false }
 pilotage-adapter-px4 = { path = "adapters/px4", default-features = false }
+pilotage-adapter-ardupilot = { path = "adapters/ardupilot" }
 pilotage-session = { path = "crates/pilotage-session" }
 pilotage-mission = { path = "crates/pilotage-mission" }
 pilotage-instrument-runtime = { path = "crates/pilotage-instrument-runtime" }

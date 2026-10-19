@@ -1861,6 +1861,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-adapter-ardupilot"
+version = "0.1.0"
+dependencies = [
+ "pilotage-adapter-api",
+ "pilotage-mavlink",
+ "pilotage-protocol",
+ "pilotage-timing",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "pilotage-adapter-aviate"
 version = "0.1.0"
 dependencies = [
@@ -2264,6 +2278,7 @@ dependencies = [
  "jpeg-encoder",
  "navigate-contract",
  "pilotage-adapter-api",
+ "pilotage-adapter-ardupilot",
  "pilotage-adapter-aviate",
  "pilotage-adapter-gazebo",
  "pilotage-adapter-px4",
