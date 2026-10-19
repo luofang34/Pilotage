@@ -194,10 +194,25 @@ impl BridgeClient {
         let listener = TcpListener::bind(("127.0.0.1", port))
             .await
             .map_err(|source| SimVideoError::ListenerBind { source })?;
+        Self::accept_from(&listener, frame_channel_depth).await
+    }
+
+    /// Waits on a listener the caller bound for the next producer to dial
+    /// in. A caller that keeps the listener across producer sessions lets a
+    /// reconnecting producer dial while the previous session winds down.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`SimVideoError`] if the listener's address cannot be read
+    /// or the inbound connection cannot be accepted.
+    pub async fn accept_from(
+        listener: &TcpListener,
+        frame_channel_depth: usize,
+    ) -> Result<Self, SimVideoError> {
         let local_addr = listener
             .local_addr()
             .map_err(|source| SimVideoError::ListenerAddr { source })?;
-        let stream = Self::accept(&listener, local_addr).await?;
+        let stream = Self::accept(listener, local_addr).await?;
         Ok(Self::from_stream(stream, None, frame_channel_depth))
     }
 
