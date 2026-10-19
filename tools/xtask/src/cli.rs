@@ -1,6 +1,6 @@
 //! Argument parsing for the xtask entry point: `sim`, `reset`,
 //! `handshake`, `affected`, `guards`, `serve-viewer`, `build-jsbsim`,
-//! `help`.
+//! `build-sim-terrain`, `help`.
 
 use crate::error::XtaskError;
 
@@ -118,6 +118,8 @@ pub enum Command {
     ServeViewer(crate::viewer_server::ServeViewerArgs),
     /// Clone, build, and install the pinned JSBSim release.
     BuildJsbsim,
+    /// Fetch and pack every site's simulator terrain.
+    BuildSimTerrain,
     /// Print usage.
     Help,
 }
@@ -141,34 +143,33 @@ pub fn parse_args(args: &[String]) -> Result<Command, XtaskError> {
             Ok(Command::Reset { fc, instance })
         }
         "handshake" => Ok(Command::Handshake(parse_handshake(rest)?)),
-        "guards" => {
-            if let Some(extra) = rest.first() {
-                return Err(XtaskError::Usage {
-                    message: format!("unknown guards argument {extra:?}"),
-                });
-            }
-            Ok(Command::Guards)
-        }
+        "guards" => without_arguments(rest, "guards", Command::Guards),
         "affected" => Ok(Command::Affected {
             base: parse_affected(rest)?,
         }),
         "serve-viewer" => Ok(Command::ServeViewer(crate::viewer_server::parse_args(
             rest,
         )?)),
-        "build-jsbsim" => {
-            if let Some(extra) = rest.first() {
-                return Err(XtaskError::Usage {
-                    message: format!("unknown build-jsbsim argument {extra:?}"),
-                });
-            }
-            Ok(Command::BuildJsbsim)
+        "build-jsbsim" => without_arguments(rest, "build-jsbsim", Command::BuildJsbsim),
+        "build-sim-terrain" => {
+            without_arguments(rest, "build-sim-terrain", Command::BuildSimTerrain)
         }
         "help" | "--help" | "-h" => Ok(Command::Help),
         other => Err(XtaskError::Usage {
             message: format!(
-                "unknown command {other:?} (expected sim, fleet, reset, handshake, affected, guards, serve-viewer, build-jsbsim, or help)"
+                "unknown command {other:?} (expected sim, fleet, reset, handshake, affected, guards, serve-viewer, build-jsbsim, build-sim-terrain, or help)"
             ),
         }),
+    }
+}
+
+/// A command that takes no arguments, refusing any.
+fn without_arguments(rest: &[String], name: &str, command: Command) -> Result<Command, XtaskError> {
+    match rest.first() {
+        Some(extra) => Err(XtaskError::Usage {
+            message: format!("unknown {name} argument {extra:?}"),
+        }),
+        None => Ok(command),
     }
 }
 
@@ -487,6 +488,10 @@ commands:
       Clone JSBSim v1.3.3 into $JSBSIM_DIR (default: ~/jsbsim) when it
       is absent, then build and install its static library into
       $JSBSIM_DIR/install with CMake. The JSBSim sidecar links it.
+
+  build-sim-terrain
+      Fetch AWS Terrain Tiles around N51 into target/sim-terrain/n51.mbtiles,
+      the ground px4-jsbsim sessions stand their vehicles on.
 
   help
       Print this help text.";
