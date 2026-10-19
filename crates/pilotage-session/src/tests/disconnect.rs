@@ -136,6 +136,7 @@ fn many_scope_capabilities(scopes: usize) -> AdapterCapabilities {
             display_name: "test rover".to_owned(),
             scopes: scope_descriptors,
             link_loss_actions: vec![LinkLossPolicy::Neutralize],
+            heading_reference: None,
         }],
         adapter_version: "test".to_owned(),
         control_feel: None,

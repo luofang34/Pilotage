@@ -9,7 +9,8 @@ use pilotage_adapter_api::{
     LegacyCommandMap, LinkLossPolicy, ScopeDescriptor, VehicleDescriptor,
 };
 use pilotage_protocol::{
-    ActionKind, IntentFamily, LogicalAxisId, ReferenceFrame, ScopeId, VehicleClass,
+    ActionKind, HeadingReference, IntentFamily, LogicalAxisId, ReferenceFrame, ScopeId,
+    VehicleClass,
 };
 
 /// The operator's name for this vehicle.
@@ -46,6 +47,10 @@ impl ArduPilotAdapter {
                 } else {
                     vec![]
                 },
+                // ArduPilot corrects its compass heading by COMPASS_DEC (from its
+                // own geomagnetic tables when COMPASS_AUTODEC is set), so its
+                // yaw is true.
+                heading_reference: Some(HeadingReference::True),
             }],
             adapter_version: env!("CARGO_PKG_VERSION").to_owned(),
             control_feel: None,
