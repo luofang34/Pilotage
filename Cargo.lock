@@ -2184,6 +2184,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-jsbsim-sidecar"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "pilotage-geo",
+ "pilotage-mavlink",
+ "pilotage-terrain-query",
+ "pilotage-world",
+ "thiserror",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "pilotage-mavlink"
 version = "0.1.0"
 dependencies = [
@@ -2323,11 +2337,13 @@ dependencies = [
  "pilotage-client-session",
  "pilotage-control-feel",
  "pilotage-geo",
+ "pilotage-mavlink",
  "pilotage-mission",
  "pilotage-protocol",
  "pilotage-session",
  "pilotage-sim-video",
  "pilotage-timing",
+ "pilotage-world",
  "prost",
  "serde_json",
  "thiserror",
@@ -2431,6 +2447,21 @@ dependencies = [
  "sha2 0.10.9",
  "tempfile",
  "thiserror",
+]
+
+[[package]]
+name = "pilotage-world"
+version = "0.1.0"
+dependencies = [
+ "libm",
+ "pilotage-geo",
+ "pilotage-terrain-query",
+ "png",
+ "rusqlite",
+ "tempfile",
+ "thiserror",
+ "world-core",
+ "world-geomag",
 ]
 
 [[package]]
@@ -4003,6 +4034,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
+name = "world-core"
+version = "0.1.0"
+source = "git+https://github.com/luofang34/world?rev=d1bf66d2d7aaaf2f5730a94a18f48e276789ea42#d1bf66d2d7aaaf2f5730a94a18f48e276789ea42"
+
+[[package]]
+name = "world-geomag"
+version = "0.1.0"
+source = "git+https://github.com/luofang34/world?rev=d1bf66d2d7aaaf2f5730a94a18f48e276789ea42#d1bf66d2d7aaaf2f5730a94a18f48e276789ea42"
+dependencies = [
+ "libm",
+ "world-core",
+]
+
+[[package]]
 name = "writeable"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4067,6 +4112,7 @@ name = "xtask"
 version = "0.1.0"
 dependencies = [
  "pilotage-trial",
+ "pilotage-world",
  "pilotage-xplane-trial",
  "serde",
  "serde_json",

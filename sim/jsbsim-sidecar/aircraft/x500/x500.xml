@@ -1,0 +1,105 @@
+<?xml version="1.0"?>
+<!--
+  A quadcopter with the mass, inertia, rotor layout, and landing legs of
+  PX4's Gazebo x500. JSBSim integrates the rigid body, the leg contacts,
+  and the drag; the sidecar's motor model drives the four rotor thrusts
+  and their summed drag torque through the external reactions below.
+
+  Structural frame (JSBSim): x aft, y right, z up, origin at the CG.
+-->
+<fdm_config name="x500" version="2.0" release="ALPHA">
+  <fileheader>
+    <author>Pilotage</author>
+    <description>x500-class quadcopter driven by an external motor model</description>
+  </fileheader>
+
+  <metrics>
+    <wingarea unit="M2">0.25</wingarea>
+    <wingspan unit="M">0.5</wingspan>
+    <chord unit="M">0.5</chord>
+    <htailarea unit="M2">0</htailarea>
+    <htailarm unit="M">0</htailarm>
+    <vtailarea unit="M2">0</vtailarea>
+    <vtailarm unit="M">0</vtailarm>
+    <location name="AERORP" unit="M"><x>0</x><y>0</y><z>0</z></location>
+    <location name="EYEPOINT" unit="M"><x>0</x><y>0</y><z>0</z></location>
+    <location name="VRP" unit="M"><x>0</x><y>0</y><z>0</z></location>
+  </metrics>
+
+  <mass_balance>
+    <ixx unit="KG*M2">0.0216667</ixx>
+    <iyy unit="KG*M2">0.0216667</iyy>
+    <izz unit="KG*M2">0.04</izz>
+    <ixy unit="KG*M2">0</ixy>
+    <ixz unit="KG*M2">0</ixz>
+    <iyz unit="KG*M2">0</iyz>
+    <emptywt unit="KG">2.0</emptywt>
+    <location name="CG" unit="M"><x>0</x><y>0</y><z>0</z></location>
+  </mass_balance>
+
+  <ground_reactions>
+    <contact type="STRUCTURE" name="leg_front_right">
+      <location unit="M"><x>-0.17</x><y>0.17</y><z>-0.12</z></location>
+      <static_friction>0.8</static_friction>
+      <dynamic_friction>0.5</dynamic_friction>
+      <spring_coeff unit="N/M">4000</spring_coeff>
+      <damping_coeff unit="N/M/SEC">120</damping_coeff>
+    </contact>
+    <contact type="STRUCTURE" name="leg_rear_left">
+      <location unit="M"><x>0.17</x><y>-0.17</y><z>-0.12</z></location>
+      <static_friction>0.8</static_friction>
+      <dynamic_friction>0.5</dynamic_friction>
+      <spring_coeff unit="N/M">4000</spring_coeff>
+      <damping_coeff unit="N/M/SEC">120</damping_coeff>
+    </contact>
+    <contact type="STRUCTURE" name="leg_front_left">
+      <location unit="M"><x>-0.17</x><y>-0.17</y><z>-0.12</z></location>
+      <static_friction>0.8</static_friction>
+      <dynamic_friction>0.5</dynamic_friction>
+      <spring_coeff unit="N/M">4000</spring_coeff>
+      <damping_coeff unit="N/M/SEC">120</damping_coeff>
+    </contact>
+    <contact type="STRUCTURE" name="leg_rear_right">
+      <location unit="M"><x>0.17</x><y>0.17</y><z>-0.12</z></location>
+      <static_friction>0.8</static_friction>
+      <dynamic_friction>0.5</dynamic_friction>
+      <spring_coeff unit="N/M">4000</spring_coeff>
+      <damping_coeff unit="N/M/SEC">120</damping_coeff>
+    </contact>
+  </ground_reactions>
+
+  <external_reactions>
+    <force name="rotor0" frame="BODY">
+      <location unit="M"><x>-0.174</x><y>0.174</y><z>0.03</z></location>
+      <direction><x>0</x><y>0</y><z>-1</z></direction>
+    </force>
+    <force name="rotor1" frame="BODY">
+      <location unit="M"><x>0.174</x><y>-0.174</y><z>0.03</z></location>
+      <direction><x>0</x><y>0</y><z>-1</z></direction>
+    </force>
+    <force name="rotor2" frame="BODY">
+      <location unit="M"><x>-0.174</x><y>-0.174</y><z>0.03</z></location>
+      <direction><x>0</x><y>0</y><z>-1</z></direction>
+    </force>
+    <force name="rotor3" frame="BODY">
+      <location unit="M"><x>0.174</x><y>0.174</y><z>0.03</z></location>
+      <direction><x>0</x><y>0</y><z>-1</z></direction>
+    </force>
+    <moment name="rotor_drag" frame="BODY">
+      <direction><x>0</x><y>0</y><z>1</z></direction>
+    </moment>
+  </external_reactions>
+
+  <aerodynamics>
+    <!-- Bluff-body drag: about 0.06 m2 of frontal area at a drag
+         coefficient of 1, in pounds from the dynamic pressure in psf. -->
+    <axis name="DRAG">
+      <function name="aero/force/body_drag">
+        <product>
+          <property>aero/qbar-psf</property>
+          <value>0.65</value>
+        </product>
+      </function>
+    </axis>
+  </aerodynamics>
+</fdm_config>

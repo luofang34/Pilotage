@@ -43,7 +43,7 @@ pub(super) struct DirectParams {
 /// float field.
 const ENCODING: ParamEncoding = ParamEncoding::CCast;
 
-fn number(value: ParamValue) -> f32 {
+pub(super) fn number(value: ParamValue) -> f32 {
     ENCODING.number(value) as f32
 }
 

@@ -10,6 +10,17 @@ use crate::tile::{DecodedTile, TileAddress, WEB_MERCATOR_MAX_LAT_DEG, address_fo
 
 const TILE_CACHE_CAPACITY: usize = 16;
 
+/// One elevation and the tile level that supplied it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ElevationSample {
+    /// Terrarium elevation, metres.
+    pub elevation_m: f64,
+    /// The zoom of the tile that held the pixel.
+    pub zoom: u8,
+    /// The tile width in pixels.
+    pub tile_size: u32,
+}
+
 /// A read-only Terrarium MBTiles archive.
 pub struct TerrainArchive {
     path: PathBuf,
@@ -81,6 +92,25 @@ impl TerrainArchive {
         latitude_deg: f64,
         longitude_deg: f64,
     ) -> Result<Option<f64>, TerrainQueryError> {
+        Ok(self
+            .elevation_sample_blocking(latitude_deg, longitude_deg)?
+            .map(|sample| sample.elevation_m))
+    }
+
+    /// Read elevation at one WGS84 position, with the zoom of the tile
+    /// that supplied it.
+    ///
+    /// A sparse archive answers some positions from a less detailed tile;
+    /// the zoom tells a caller how coarse that answer is.
+    ///
+    /// # Errors
+    ///
+    /// The same errors as [`Self::elevation_m_blocking`].
+    pub fn elevation_sample_blocking(
+        &mut self,
+        latitude_deg: f64,
+        longitude_deg: f64,
+    ) -> Result<Option<ElevationSample>, TerrainQueryError> {
         validate_position(latitude_deg, longitude_deg)?;
         if !(-WEB_MERCATOR_MAX_LAT_DEG..=WEB_MERCATOR_MAX_LAT_DEG).contains(&latitude_deg) {
             return Ok(None);
@@ -88,11 +118,40 @@ impl TerrainArchive {
         for zoom in (self.min_zoom..=self.max_zoom).rev() {
             let (address, pixel) =
                 address_for_position(zoom, latitude_deg, longitude_deg, self.tile_size);
-            if let Some(elevation) = self.cached_elevation(address, pixel)? {
-                return Ok(Some(elevation));
+            if let Some(elevation_m) = self.cached_elevation(address, pixel)? {
+                return Ok(Some(ElevationSample {
+                    elevation_m,
+                    zoom,
+                    tile_size: self.tile_size,
+                }));
             }
         }
         Ok(None)
+    }
+
+    /// The archive's `name` metadata and its `version` when it states
+    /// one: together they identify the terrain it holds.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TerrainQueryError::ArchiveRead`] if `name` is absent or
+    /// SQLite fails.
+    pub fn identity_blocking(&self) -> Result<(String, Option<String>), TerrainQueryError> {
+        let name = metadata(&self.connection, &self.path, "name")?;
+        let version = self
+            .connection
+            .query_row(
+                "SELECT value FROM metadata WHERE name = 'version'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|source| TerrainQueryError::ArchiveRead {
+                path: self.path.clone(),
+                context: "metadata version".to_owned(),
+                source,
+            })?;
+        Ok((name, version))
     }
 
     fn cached_elevation(

@@ -235,6 +235,7 @@ async fn camera_frame_reaches_the_subscriber() {
                 sim_time_ns: 77,
                 rgb: vec![9_u8; 24],
                 camera_id: 0,
+                calibration_id: 0,
             })),
         },
     )
@@ -277,6 +278,7 @@ async fn chase_camera_frame_carries_its_source_id() {
                 sim_time_ns: 88,
                 rgb: vec![7_u8; 12],
                 camera_id: 1,
+                calibration_id: 0,
             })),
         },
     )

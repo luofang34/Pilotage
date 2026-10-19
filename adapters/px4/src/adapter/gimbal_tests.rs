@@ -84,6 +84,10 @@ fn capabilities_declare_the_configured_airframe_with_a_name() {
     let vehicle = &default.capabilities().vehicles[0];
     assert_eq!(vehicle.class, VehicleClass::Multicopter);
     assert_eq!(vehicle.display_name, "PX4 multicopter");
+    assert_eq!(
+        vehicle.heading_reference,
+        Some(pilotage_protocol::HeadingReference::True)
+    );
     let plane = Px4Adapter::from_state(VehicleId::new(1), live_state())
         .with_vehicle_class(VehicleClass::FixedWing);
     let vehicle = &plane.capabilities().vehicles[0];

@@ -194,6 +194,10 @@ pub struct VehicleDescriptor {
     /// The kind of vehicle. A client chooses its default control scheme
     /// from it.
     pub class: pilotage_protocol::VehicleClass,
+    /// Which north the vehicle's attitude yaw uses, as the adapter knows it
+    /// when the client is admitted; `None` when it does not know. The
+    /// vehicle's [`crate::MagneticVariationSample`] is the live statement.
+    pub heading_reference: Option<pilotage_protocol::HeadingReference>,
     /// The name of the vehicle for the operator. Not empty.
     pub display_name: String,
     /// Control scopes assignable on this vehicle.
@@ -285,6 +289,7 @@ mod tests {
                     legacy: None,
                 }],
                 link_loss_actions: vec![],
+                heading_reference: None,
             }],
             adapter_version: "0.1.0".to_owned(),
             control_feel: None,

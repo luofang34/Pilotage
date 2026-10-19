@@ -2,9 +2,9 @@ Pilotage evidence — captured verification run (SIM / NOT FOR FLIGHT)
 scope: LINK-04
 suite: host wire-mapping
 command: cargo test -p pilotage-session-host --lib engine_actor::telemetry
-config-digest: 27bc04929ec212d25e45a1cb9ca6ec7f5fc34e7f
+config-digest: 43cdcecaec6e8b8cdf5f5e6eb4a80d6f8dd7260d
 tool-version: rustc 1.99.0 (b940084d7 2026-09-28)
-run-id: local:27bc04929ec212d25e45a1cb9ca6ec7f5fc34e7f
+run-id: local:43cdcecaec6e8b8cdf5f5e6eb4a80d6f8dd7260d
 outcome: pass
 summary:
-test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 124 filtered out; finished in 0.00s
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 124 filtered out; finished in 0.00s
