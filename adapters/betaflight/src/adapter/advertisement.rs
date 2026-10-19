@@ -9,7 +9,8 @@ use pilotage_adapter_api::{
     LegacyCommandMap, LinkLossPolicy, ScopeDescriptor, VehicleDescriptor,
 };
 use pilotage_protocol::{
-    ActionKind, IntentFamily, LogicalAxisId, ReferenceFrame, ScopeId, VehicleClass,
+    ActionKind, HeadingReference, IntentFamily, LogicalAxisId, ReferenceFrame, ScopeId,
+    VehicleClass,
 };
 
 use super::{
@@ -37,6 +38,8 @@ impl BetaflightAdapter {
                 display_name: DISPLAY_NAME.to_owned(),
                 scopes: vec![flight_scope_descriptor(), direct_scope_descriptor()],
                 link_loss_actions: vec![LinkLossPolicy::Neutralize],
+                // Betaflight applies no declination: its yaw is magnetic.
+                heading_reference: Some(HeadingReference::Magnetic),
             }],
             adapter_version: env!("CARGO_PKG_VERSION").to_owned(),
             control_feel: None,

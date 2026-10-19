@@ -74,6 +74,7 @@ fn capabilities() -> AdapterCapabilities {
                 legacy: None,
             }],
             link_loss_actions: vec![],
+            heading_reference: None,
         }],
         adapter_version: "typed-e2e".to_owned(),
         control_feel: None,

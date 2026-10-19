@@ -108,7 +108,7 @@ impl SimBackend for AviateGz {
     fn spawn(
         &self,
         ctx: &SessionContext,
-        point: &super::SpawnPoint,
+        point: &super::Placement,
         stages: &mut [Stage],
     ) -> Result<(), XtaskError> {
         super::gz::spawn_in_world(ctx, point, stages)?;
@@ -146,7 +146,7 @@ impl SimBackend for AviateGz {
 /// vehicle placed at `point` states that origin, at the world's own
 /// elevation, as `AVIATE_GNSS_ORIGIN=latitude_deg,longitude_deg,elevation_m`.
 /// Without it the FC reports the default origin wherever it stands.
-fn state_gnss_origin(point: &super::SpawnPoint, stages: &mut [Stage]) -> Result<(), XtaskError> {
+fn state_gnss_origin(point: &super::Placement, stages: &mut [Stage]) -> Result<(), XtaskError> {
     let world = stages
         .iter()
         .filter(|stage| stage.spec.name == "gazebo")

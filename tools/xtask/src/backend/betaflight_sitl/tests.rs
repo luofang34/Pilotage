@@ -1,7 +1,7 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use super::{BetaflightSitl, READY_LINE, plan_with_betaflight_dir};
-use crate::backend::{SessionContext, SimBackend, SpawnPoint};
+use crate::backend::{Placement, SessionContext, SimBackend};
 use crate::cli::Profile;
 use crate::conflicts::{Claim, Remedy};
 use crate::error::XtaskError;
@@ -56,7 +56,7 @@ fn the_sidecar_runs_the_sitl_with_the_repository_config_and_waits_for_flight() {
     let args = &stage.spec.args;
     assert!(value_after(args, "--betaflight").ends_with("obj/main/betaflight_SITL.elf"));
     assert!(value_after(args, "--betaflight-config").ends_with("sim/betaflight/sitl.cli"));
-    let home = crate::site::ZURICH.spawn_point(crate::site::Ground::Field, 1);
+    let home = crate::site::ZURICH.placement(crate::site::Ground::Field, 1);
     assert_eq!(
         value_after(args, "--origin-lat"),
         format!("{:.7}", home.latitude_deg)
@@ -78,7 +78,7 @@ fn the_sidecar_runs_the_sitl_with_the_repository_config_and_waits_for_flight() {
 fn spawn_moves_the_model_frame_to_the_fleet_point_altitude_and_heading() {
     let ctx = context("spawn", 0);
     let mut stages = plan_with_betaflight_dir(&ctx, &scaffolded(&ctx)).expect("plan");
-    let point = SpawnPoint {
+    let point = Placement {
         latitude_deg: 40.577_186_1,
         longitude_deg: -74.738_191_8,
         elevation_m: 56.3,

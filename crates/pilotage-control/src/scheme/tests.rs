@@ -27,6 +27,7 @@ fn vehicle(class: Option<VehicleClass>, scopes: Vec<ScopeCatalog>) -> VehicleCat
         display_name: "test".to_owned(),
         vehicle_class: class,
         scopes,
+        heading_reference: None,
     }
 }
 

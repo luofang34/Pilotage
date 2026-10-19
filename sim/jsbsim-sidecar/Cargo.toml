@@ -1,0 +1,43 @@
+[package]
+name = "pilotage-jsbsim-sidecar"
+description = "JSBSim flight-dynamics sidecar: rigid-body truth on the shared world, synthetic sensors, and PX4's MAVLink simulator link"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+build = "build.rs"
+
+# The workspace table, repeated, with one change: unsafe code is denied
+# instead of forbidden. Calling JSBSim's C++ library needs it; every
+# unsafe use sits in src/engine/ffi.rs, and the production-rust-lints
+# guard refuses it anywhere else in this crate.
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "deny"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+let_underscore_must_use = "deny"
+let_underscore_future = "deny"
+await_holding_lock = "deny"
+disallowed_types = "deny"
+disallowed_macros = "deny"
+
+[[bin]]
+name = "pilotage-jsbsim-sidecar"
+path = "src/main.rs"
+
+[dependencies]
+pilotage-mavlink = { workspace = true }
+pilotage-terrain-query = { workspace = true }
+pilotage-world = { workspace = true, features = ["archive"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+
+[dev-dependencies]
+pilotage-geo = { workspace = true }
+
+[build-dependencies]
+cc = "1.2.66"

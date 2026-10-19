@@ -70,6 +70,7 @@ fn multicopter_engine_capabilities() -> AdapterCapabilities {
                 scope(DIRECT, vec![capability(IntentFamily::BodyRate, vec![])]),
             ],
             link_loss_actions: vec![LinkLossPolicy::Neutralize],
+            heading_reference: None,
         }],
         adapter_version: "test".to_owned(),
         control_feel: None,

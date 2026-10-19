@@ -1,5 +1,6 @@
 //! Argument parsing for the xtask entry point: `sim`, `reset`,
-//! `handshake`, `affected`, `guards`, `serve-viewer`, `help`.
+//! `handshake`, `affected`, `guards`, `serve-viewer`, `build-jsbsim`,
+//! `help`.
 
 use crate::error::XtaskError;
 
@@ -115,6 +116,8 @@ pub enum Command {
     },
     /// Serve a directory to the browser viewer.
     ServeViewer(crate::viewer_server::ServeViewerArgs),
+    /// Clone, build, and install the pinned JSBSim release.
+    BuildJsbsim,
     /// Print usage.
     Help,
 }
@@ -152,10 +155,18 @@ pub fn parse_args(args: &[String]) -> Result<Command, XtaskError> {
         "serve-viewer" => Ok(Command::ServeViewer(crate::viewer_server::parse_args(
             rest,
         )?)),
+        "build-jsbsim" => {
+            if let Some(extra) = rest.first() {
+                return Err(XtaskError::Usage {
+                    message: format!("unknown build-jsbsim argument {extra:?}"),
+                });
+            }
+            Ok(Command::BuildJsbsim)
+        }
         "help" | "--help" | "-h" => Ok(Command::Help),
         other => Err(XtaskError::Usage {
             message: format!(
-                "unknown command {other:?} (expected sim, fleet, reset, handshake, affected, guards, serve-viewer, or help)"
+                "unknown command {other:?} (expected sim, fleet, reset, handshake, affected, guards, serve-viewer, build-jsbsim, or help)"
             ),
         }),
     }
@@ -300,9 +311,7 @@ fn parse_fleet(args: &[String]) -> Result<FleetArgs, XtaskError> {
             "--instance-base" => {
                 fleet.instance_base = required_number(&mut iter, "--instance-base")?;
             }
-            "--site" => {
-                fleet.site = crate::site::Site::parse(&required_value(&mut iter, "--site")?)?
-            }
+            "--site" => fleet.site = crate::site::parse(&required_value(&mut iter, "--site")?)?,
             "--ready-timeout" => fleet.ready_timeout_s = required_timeout(&mut iter)?,
             "--open" => fleet.open = true,
             "--no-open" => fleet.open = false,
@@ -396,12 +405,13 @@ commands:
       tear it down on ctrl-c.
 
       --fc <name>          FC backend: aviate-gz (alias aviate, default),
-                           px4-gz (alias px4), px4-xplane,
+                           px4-gz (alias px4), px4-jsbsim, px4-xplane,
                            aviate-xplane, ardupilot-sitl (alias
                            ardupilot), or betaflight-sitl (alias
                            betaflight); px4-gz takes a vehicle model
                            as px4-gz:<model>: x500_gimbal (default) or
-                           rc_cessna
+                           rc_cessna; px4-jsbsim as px4-jsbsim:<model>:
+                           quad (default) or plane
       --profile <profile>  physical | simulation (default) | oracle-only
       --port <port>        host WebTransport port (default: 4433)
       --viewer-port <port> static viewer port (default: 8080)
@@ -472,6 +482,11 @@ commands:
       Serve <dir> statically to the browser viewer with caching disabled,
       on 127.0.0.1 unless --bind says otherwise; port 0 picks a free port
       and prints it.
+
+  build-jsbsim
+      Clone JSBSim v1.3.3 into $JSBSIM_DIR (default: ~/jsbsim) when it
+      is absent, then build and install its static library into
+      $JSBSIM_DIR/install with CMake. The JSBSim sidecar links it.
 
   help
       Print this help text.";

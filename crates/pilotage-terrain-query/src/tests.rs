@@ -22,6 +22,55 @@ fn deepest_covering_tile_supplies_elevation() {
 }
 
 #[test]
+fn a_sample_names_the_zoom_that_supplied_it() {
+    let file = archive(&[(0, 0, 0, 1_000.0), (1, 1, 0, 300.0)]);
+    let mut terrain = TerrainArchive::open_blocking(file.path()).expect("open terrain archive");
+
+    let deep = terrain
+        .elevation_sample_blocking(-0.1, 0.1)
+        .expect("query terrain")
+        .expect("zoom 1 coverage");
+    let coarse = terrain
+        .elevation_sample_blocking(10.0, 0.1)
+        .expect("query terrain")
+        .expect("zoom 0 coverage");
+
+    assert_eq!((deep.zoom, deep.tile_size), (1, 2));
+    assert!((deep.elevation_m - 300.0).abs() <= 1.0 / 256.0);
+    assert_eq!(coarse.zoom, 0);
+    assert!((coarse.elevation_m - 1_000.0).abs() <= 1.0 / 256.0);
+}
+
+#[test]
+fn the_identity_is_the_name_and_the_stated_version() {
+    let file = archive(&[(0, 0, 0, 0.0)]);
+    let connection = Connection::open(file.path()).expect("open fixture archive");
+    connection
+        .execute(
+            "INSERT INTO metadata (name, value) VALUES ('name', 'fixture')",
+            [],
+        )
+        .expect("name the fixture");
+    let unversioned = TerrainArchive::open_blocking(file.path()).expect("open terrain archive");
+    assert_eq!(
+        unversioned.identity_blocking().expect("identity"),
+        ("fixture".to_owned(), None)
+    );
+    connection
+        .execute(
+            "INSERT INTO metadata (name, value) VALUES ('version', '3')",
+            [],
+        )
+        .expect("version the fixture");
+    drop(connection);
+    let versioned = TerrainArchive::open_blocking(file.path()).expect("open terrain archive");
+    assert_eq!(
+        versioned.identity_blocking().expect("identity"),
+        ("fixture".to_owned(), Some("3".to_owned()))
+    );
+}
+
+#[test]
 fn missing_deep_tile_uses_a_less_detailed_tile() {
     let file = archive(&[(0, 0, 0, 1_000.0), (1, 0, 1, 200.0)]);
     let mut terrain = TerrainArchive::open_blocking(file.path()).expect("open terrain archive");

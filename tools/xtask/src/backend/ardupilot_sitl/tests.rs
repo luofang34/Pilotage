@@ -1,7 +1,7 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use super::{ArduPilotSitl, plan_with_ardupilot_dir};
-use crate::backend::{SessionContext, SimBackend, SpawnPoint};
+use crate::backend::{Placement, SessionContext, SimBackend};
 use crate::cli::Profile;
 use crate::conflicts::Claim;
 use crate::error::XtaskError;
@@ -64,7 +64,7 @@ fn each_instance_sends_to_the_endpoint_its_host_listens_on() {
 fn spawn_places_the_home_at_the_fleet_point_elevation_and_heading() {
     let ctx = context("spawn", 1);
     let mut stages = plan_with_ardupilot_dir(&ctx, &scaffolded(&ctx)).expect("plan");
-    let point = SpawnPoint {
+    let point = Placement {
         latitude_deg: 40.577_186_1,
         longitude_deg: -74.738_191_8,
         elevation_m: 56.3,

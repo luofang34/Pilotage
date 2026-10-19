@@ -204,7 +204,7 @@ fn both_telemetry_ends_move_together_and_clear_of_px4() {
 /// the relocated origin at the site's ground elevation.
 #[test]
 fn a_placed_vehicle_states_its_gnss_origin_to_the_fc() {
-    use crate::backend::{SimBackend, SpawnPoint};
+    use crate::backend::{Placement, SimBackend};
 
     let (repo, aviate) = scaffold("origin");
     std::fs::write(
@@ -219,7 +219,7 @@ fn a_placed_vehicle_states_its_gnss_origin_to_the_fc() {
     let ctx = context(repo.clone());
     std::fs::create_dir_all(&ctx.log_dir).expect("log dir");
     let mut stages = plan_with_aviate_dir(&ctx, &aviate).expect("plans");
-    let point = SpawnPoint {
+    let point = Placement {
         latitude_deg: 40.577_186_1,
         longitude_deg: -74.738_191_8,
         elevation_m: 56.3,

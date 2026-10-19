@@ -13,6 +13,7 @@
 
 mod aviate_control_feel;
 mod pipefail_pipelines;
+mod production_lints;
 mod vehicle_writes;
 
 use std::path::{Path, PathBuf};
@@ -66,7 +67,26 @@ fn run_rust_guards(repo_root: &Path, failed: &mut Vec<String>) {
     run_aviate_control_feel(repo_root, failed);
     run_fc_vocabulary(repo_root, failed);
     run_pipefail_pipelines(repo_root, failed);
+    run_production_lints(repo_root, failed);
     run_vehicle_writes(repo_root, failed);
+}
+
+fn run_production_lints(repo_root: &Path, failed: &mut Vec<String>) {
+    let name = "production-rust-lints";
+    match production_lints::check(repo_root) {
+        Ok(failures) if failures.is_empty() => print_line(&format!("guard {name}: ok")),
+        Ok(failures) => {
+            for failure in &failures {
+                print_line(failure);
+            }
+            print_line(&format!("guard {name}: FAILED"));
+            failed.push(name.to_owned());
+        }
+        Err(error) => {
+            print_line(&format!("guard {name}: FAILED: {error}"));
+            failed.push(name.to_owned());
+        }
+    }
 }
 
 fn run_vehicle_writes(repo_root: &Path, failed: &mut Vec<String>) {

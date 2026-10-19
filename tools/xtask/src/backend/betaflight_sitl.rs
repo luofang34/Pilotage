@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::{SessionContext, SimBackend, SpawnPoint, Stage};
+use super::{Placement, SessionContext, SimBackend, Stage};
 use crate::cli::Profile;
 use crate::conflicts::{Claim, Remedy};
 use crate::error::XtaskError;
@@ -95,7 +95,7 @@ impl SimBackend for BetaflightSitl {
     fn spawn(
         &self,
         _ctx: &SessionContext,
-        point: &SpawnPoint,
+        point: &Placement,
         stages: &mut [Stage],
     ) -> Result<(), XtaskError> {
         let stage = stages
@@ -151,14 +151,14 @@ impl SimBackend for BetaflightSitl {
 /// A plain `sim` session's spawn point: the second place on the grass
 /// of Zurich, apart from a vehicle at the origin and an ArduPilot one at
 /// the first place.
-fn default_spawn() -> SpawnPoint {
-    crate::site::ZURICH.spawn_point(crate::site::Ground::Field, 1)
+fn default_spawn() -> Placement {
+    crate::site::ZURICH.placement(crate::site::Ground::Field, 1)
 }
 
 /// The sidecar options that put the model at `point`. Its local frame is
 /// tangent there, so the spawn offset is zero; the origin altitude sets
 /// the GNSS altitude and the barometer's pressure.
-fn origin_args(point: &SpawnPoint) -> [(&'static str, String); 6] {
+fn origin_args(point: &Placement) -> [(&'static str, String); 6] {
     [
         ("--origin-lat", format!("{:.7}", point.latitude_deg)),
         ("--origin-lon", format!("{:.7}", point.longitude_deg)),

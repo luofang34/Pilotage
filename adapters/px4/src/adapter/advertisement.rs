@@ -8,7 +8,8 @@ use pilotage_adapter_api::{
     LegacyCommandMap, LinkLossPolicy, ScopeDescriptor, VehicleDescriptor,
 };
 use pilotage_protocol::{
-    ActionKind, IntentFamily, LogicalAxisId, ReferenceFrame, ScopeId, VehicleClass,
+    ActionKind, HeadingReference, IntentFamily, LogicalAxisId, ReferenceFrame, ScopeId,
+    VehicleClass,
 };
 
 use super::{
@@ -94,6 +95,9 @@ impl Px4Adapter {
                 } else {
                     vec![]
                 },
+                // PX4's estimator corrects its magnetometer heading by the declination
+                // from its own geomagnetic tables, so its yaw is true.
+                heading_reference: Some(HeadingReference::True),
             }],
             adapter_version: env!("CARGO_PKG_VERSION").to_owned(),
             control_feel: None,

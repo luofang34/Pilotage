@@ -28,6 +28,7 @@ use crate::uplink::ArduPilotUplink;
 
 mod advertisement;
 mod control;
+mod declination;
 mod link_loss;
 mod params;
 #[cfg(test)]
@@ -63,6 +64,7 @@ pub struct ArduPilotAdapter {
     _link: Option<MavlinkLink>,
     uplink: Option<ArduPilotUplink>,
     direct: Option<params::DirectParams>,
+    declination: declination::DeclinationParams,
     arm: ArmTracker,
     incarnation: SourceIncarnation,
     started_at: Instant,
@@ -102,6 +104,11 @@ impl ArduPilotAdapter {
             link_config.system_id,
             link_config.component_id,
         );
+        let declination = declination::DeclinationParams::new(
+            link.param_sender(),
+            link_config.system_id,
+            link_config.component_id,
+        );
         info!(endpoint = %config.endpoint, "ArduPilot adapter started");
         Ok(Self::assemble(
             vehicle,
@@ -109,6 +116,7 @@ impl ArduPilotAdapter {
             Some(link),
             uplink,
             direct,
+            declination,
         ))
     }
 
@@ -118,12 +126,14 @@ impl ArduPilotAdapter {
         link: Option<MavlinkLink>,
         uplink: Option<ArduPilotUplink>,
         direct: params::DirectParams,
+        declination: declination::DeclinationParams,
     ) -> Self {
         Self {
             vehicle,
             state,
             _link: link,
             direct: uplink.is_some().then_some(direct),
+            declination,
             uplink,
             arm: ArmTracker::default(),
             incarnation: SourceIncarnation::new(rand_incarnation()),
@@ -143,9 +153,25 @@ impl ArduPilotAdapter {
         uplink: ArduPilotUplink,
         params: tokio::sync::mpsc::Sender<pilotage_mavlink::OutboundParam>,
     ) -> Self {
+        let declination = declination::DeclinationParams::new(params.clone(), 1, 1);
         let direct =
             params::DirectParams::new(crate::config::ArduPilotProfile::Simulation, params, 1, 1);
-        Self::assemble(vehicle, state, None, Some(uplink), direct)
+        Self::assemble(vehicle, state, None, Some(uplink), direct, declination)
+    }
+
+    /// States the FC's declination on every estimate the batch carries.
+    fn attach_declination(&self, batch: &mut TelemetryBatch) {
+        let Some(variation) = self
+            .state
+            .lock()
+            .ok()
+            .and_then(|latest| self.declination.sample(&latest))
+        else {
+            return;
+        };
+        for avionics in batch.samples.iter_mut().filter_map(|s| s.avionics.as_mut()) {
+            avionics.magnetic_variation = Some(variation);
+        }
     }
 
     fn current_pose(&self) -> Option<OperationalPose> {
@@ -166,6 +192,7 @@ impl ArduPilotAdapter {
         if let Some(direct) = self.direct.as_mut() {
             direct.maintain(&latest, Instant::now());
         }
+        self.declination.maintain(&latest, Instant::now());
         let mode = latest
             .fc_reports
             .custom_mode
@@ -263,6 +290,7 @@ impl VehicleAdapter for ArduPilotAdapter {
             self.started_at,
         );
         let mut batch = estimate_batch(self.vehicle, &self.state);
+        self.attach_declination(&mut batch);
         let reports = VehicleReports {
             fc_state,
             gimbal: None,
