@@ -260,6 +260,7 @@ async fn start_sim_compat_host() -> runtime::RunningHost {
         runtime::RuntimeOptions {
             legacy_compatibility: true,
             mission: None,
+            sim_camera_port: None,
         },
     )
     .await
