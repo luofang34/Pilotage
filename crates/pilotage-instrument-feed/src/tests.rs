@@ -50,6 +50,8 @@ fn wire_sample(sequence: u32, yaw_rad: f64) -> wire::TelemetrySample {
         attitude_stamp: stamp(sequence),
         kinematics_stamp: stamp(sequence),
         estimator_status_stamp: stamp(sequence),
+        magnetic_variation: None,
+        magnetic_variation_stamp: None,
     };
     wire::TelemetrySample {
         vehicle: Some(wire::VehicleId { value: 1 }),

@@ -73,6 +73,7 @@ impl AviateAdapter {
                 } else {
                     vec![]
                 },
+                heading_reference: None,
             }],
             adapter_version: adapter_version(self),
             control_feel: self.feel_entry().map(control_feel_descriptor),

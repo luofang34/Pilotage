@@ -77,6 +77,7 @@ fn two_scope_welcome() -> wire::Envelope {
                         supported_modes: Vec::new(),
                         // The quasimode tests below fly the multicopter scheme.
                         vehicle_class: wire::VehicleClass::Multicopter as i32,
+                        heading_reference: 0,
                     }],
                     supported_modes: Vec::new(),
                     physically_embodied: false,

@@ -34,6 +34,7 @@ fn an_absent_geodetic_fix_is_absent_and_never_null_island() {
         estimator_status_stamp: None,
         valid_flags: 0,
         quality: 0,
+        magnetic_variation: None,
     });
     assert!(
         avionics.geodetic.is_none(),
@@ -217,6 +218,7 @@ fn the_simulator_separation_cannot_ride_an_operational_role() {
         estimator_status_stamp: None,
         valid_flags: 0,
         quality: 0,
+        magnetic_variation: None,
     });
     assert!(
         estimate.geodetic.is_none(),
@@ -332,6 +334,7 @@ fn the_estimate_lane_refuses_a_fix_from_another_role() {
         estimator_status_stamp: None,
         valid_flags: 0,
         quality: 0,
+        magnetic_variation: None,
     };
 
     let wrong = super::super::avionics_to_wire(sample(SourceRole::SimulationTruth));

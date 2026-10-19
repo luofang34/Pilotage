@@ -1,7 +1,7 @@
 //! Telemetry sampling vocabulary (ADR-0008).
 
 use pilotage_geo::{GeodeticPosition, PositionQuality};
-use pilotage_protocol::VehicleId;
+use pilotage_protocol::{MagneticVariationSource, VehicleId};
 use pilotage_timing::SimTick;
 
 // Source identity moved to `pilotage-ingress` so the ingress rules can be
@@ -57,6 +57,25 @@ pub struct GeodeticFixSample {
     pub stamp: MeasurementStamp,
 }
 
+/// The magnetic variation a vehicle states for its own position, and so
+/// which north its attitude yaw uses.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MagneticVariationSample {
+    /// Declination: the angle from true north to magnetic north, radians,
+    /// positive east. Not meaningful when `source` is
+    /// [`MagneticVariationSource::None`].
+    pub declination_rad: f32,
+    /// Where the value comes from.
+    pub source: MagneticVariationSource,
+    /// The geomagnetic model that produced the value, when the source
+    /// states it.
+    pub model_id: Option<&'static str>,
+    /// The model's epoch as a decimal year, when the source states it.
+    pub model_epoch: Option<f64>,
+    /// Identity and acquisition time of this value.
+    pub stamp: MeasurementStamp,
+}
+
 /// One independently published position/velocity measurement group.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AvionicsKinematicsSample {
@@ -86,6 +105,9 @@ pub struct AvionicsSample {
     /// and carries its own stamp. A simulator's truth oracle publishes a
     /// fix on [`SimTruthSample`] instead; the two are never merged.
     pub geodetic: Option<GeodeticFixSample>,
+    /// The magnetic variation the vehicle states, or `None` when it states
+    /// none. It advances independently and carries its own stamp.
+    pub magnetic_variation: Option<MagneticVariationSample>,
     /// Identity and acquisition time of the estimator status observation
     /// backing the effective authorization, or `None` when no explicit
     /// authorization was supplied.

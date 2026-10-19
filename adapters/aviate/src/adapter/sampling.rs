@@ -290,6 +290,7 @@ pub(crate) fn mavlink_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -
         estimator_status_stamp,
         valid_flags,
         quality,
+        magnetic_variation: None,
     });
     let source_time_ms = kinematics
         .map(|kin| kin.time_boot_ms)

@@ -153,6 +153,7 @@ pub fn estimate_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -> Tele
         estimator_status_stamp,
         valid_flags,
         quality,
+        magnetic_variation: None,
     });
     let source_time_ms = kinematics
         .map(|kin| kin.time_boot_ms)

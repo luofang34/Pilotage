@@ -51,6 +51,8 @@ fn full_avionics() -> wire::AvionicsState {
         attitude_stamp: Some(stamp(7, vec![0xAB; 16])),
         kinematics_stamp: Some(stamp(8, vec![0xCD; 16])),
         estimator_status_stamp: Some(stamp(9, vec![0xEF; 16])),
+        magnetic_variation: None,
+        magnetic_variation_stamp: None,
     }
 }
 
