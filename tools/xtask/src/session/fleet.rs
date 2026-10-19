@@ -232,7 +232,10 @@ fn plan_slot(slot: &mut Slot, point: &SpawnPoint) -> Result<(), XtaskError> {
     ));
     planned.push(stages::host_stage(&slot.ctx, slot.backend.as_ref())?);
     if slot.ctx.sim_camera {
-        planned.push(crate::camera::stage(&slot.ctx)?);
+        planned.push(crate::camera::stage(
+            &slot.ctx,
+            Some((point.latitude_deg, point.longitude_deg)),
+        )?);
     }
     let xtask = std::env::current_exe().map_err(|source| XtaskError::Io {
         context: "locating the xtask executable for the viewer stage",

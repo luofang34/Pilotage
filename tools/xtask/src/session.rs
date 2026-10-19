@@ -60,7 +60,9 @@ pub async fn run_sim(args: &SimArgs) -> Result<(), XtaskError> {
     if ctx.sim_camera {
         print_line("building the maplibre camera (release)...");
         crate::camera::build(&repo_root)?;
-        stages.push(crate::camera::stage(&ctx)?);
+        // A single session spawns where its world puts the vehicle, which
+        // xtask does not know, so its tiles load as the cameras ask.
+        stages.push(crate::camera::stage(&ctx, None)?);
     }
     let xtask = std::env::current_exe().map_err(|source| XtaskError::Io {
         context: "locating the xtask executable for the viewer stage",

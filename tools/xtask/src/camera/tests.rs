@@ -24,7 +24,7 @@ fn each_instance_has_its_own_camera_port() {
 #[test]
 fn the_producer_dials_the_port_the_host_binds() {
     let ctx = context(3);
-    let stage = stage(&ctx).expect("stage");
+    let stage = stage(&ctx, None).expect("stage");
     let host_port = host_env(port(&ctx).expect("port"))
         .into_iter()
         .find(|(name, _)| name == "PILOTAGE_SIM_CAMERA_PORT")
@@ -85,4 +85,18 @@ fn every_backend_host_binds_the_camera_port_only_with_the_stage() {
             entry.name
         );
     }
+}
+
+#[test]
+fn a_known_spawn_point_is_cached_before_the_cameras_start() {
+    let with = stage(&context(1), Some((40.5771861, -74.7381918))).expect("stage");
+    let prewarm = with
+        .spec
+        .args
+        .windows(2)
+        .find(|pair| pair[0] == "--prewarm")
+        .map(|pair| pair[1].clone());
+    assert_eq!(prewarm.as_deref(), Some("40.5771861,-74.7381918"));
+    let without = stage(&context(1), None).expect("stage");
+    assert!(!without.spec.args.iter().any(|arg| arg == "--prewarm"));
 }

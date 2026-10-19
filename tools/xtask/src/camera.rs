@@ -24,8 +24,9 @@ const CAMERA_MANIFEST: &str = "sim/maplibre-camera/Cargo.toml";
 const CAMERA_BINARY: &str = "sim/maplibre-camera/target/release/pilotage-maplibre-camera";
 /// The line the producer logs once its renderers and link are up.
 const READY_LINE: &str = "maplibre camera producer up";
-/// How long the producer may take to build its GPU renderers, s.
-const READY_TIMEOUT_S: u64 = 60;
+/// How long the producer may take to cache its site's tiles (it gives up on
+/// the rest after four minutes) and build its GPU renderers, s.
+const READY_TIMEOUT_S: u64 = 330;
 
 /// The sim camera port of `ctx`'s instance.
 ///
@@ -55,27 +56,34 @@ pub fn host_env(port: u16) -> Vec<(String, String)> {
     ]
 }
 
-/// The producer stage, started after the host so its port is bound.
+/// The producer stage, started after the host so its port is bound. With
+/// the vehicle's spawn point known, the producer caches the tiles around it
+/// before it reports ready, so the cameras open on imagery.
 ///
 /// # Errors
 ///
 /// [`XtaskError::Usage`] when the instance has no sim camera port.
-pub fn stage(ctx: &SessionContext) -> Result<Stage, XtaskError> {
+pub fn stage(ctx: &SessionContext, spawn: Option<(f64, f64)>) -> Result<Stage, XtaskError> {
     let port = port(ctx)?;
     let mut env = Vec::new();
     if std::env::var_os("RUST_LOG").is_none() {
         env.push(("RUST_LOG".to_owned(), "info,wgpu=warn,naga=warn".to_owned()));
     }
+    let mut args = vec![
+        "--host-port".to_owned(),
+        port.to_string(),
+        "--calibration-dir".to_owned(),
+        ctx.log_dir.join("calibrations").display().to_string(),
+    ];
+    if let Some((latitude, longitude)) = spawn {
+        args.push("--prewarm".to_owned());
+        args.push(format!("{latitude},{longitude}"));
+    }
     Ok(Stage {
         spec: ProcessSpec {
             name: "maplibre-camera",
             program: ctx.repo_root.join(CAMERA_BINARY).display().to_string(),
-            args: vec![
-                "--host-port".to_owned(),
-                port.to_string(),
-                "--calibration-dir".to_owned(),
-                ctx.log_dir.join("calibrations").display().to_string(),
-            ],
+            args,
             cwd: Some(ctx.repo_root.clone()),
             env,
             remove_env: vec![],
