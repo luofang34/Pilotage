@@ -39,6 +39,6 @@ pub use calibration::{
     OpticalConvention, PinholeIntrinsics, ProvenanceSource, RecoveryReport, Residuals,
     SIM_FPV_CALIBRATION_HASH, SIM_FPV_CALIBRATION_ID, SIM_FPV_CAMERA_ID, SyntheticTarget,
     ToolVersion, ValidityStatus, VerifiedCameraModel, Viewport, content_hash, derive_budget,
-    radians_per_pixel, recover_intrinsics, sim_fpv_calibration, to_canonical, validate, verify,
-    verify_camera, verify_sim_recovery,
+    radians_per_pixel, recover_intrinsics, recovery_report, sim_fpv_calibration, to_canonical,
+    validate, verify, verify_camera, verify_sim_recovery,
 };

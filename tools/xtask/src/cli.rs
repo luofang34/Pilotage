@@ -62,6 +62,8 @@ pub struct SimArgs {
     /// How long each simulator and FC stage may take to come up, s
     /// (`--ready-timeout`).
     pub ready_timeout_s: u64,
+    /// Add the world-model camera stage (`--camera maplibre`).
+    pub sim_camera: bool,
 }
 
 /// Options for `cargo xtask fleet`.
@@ -88,6 +90,9 @@ pub struct FleetArgs {
     /// How long each simulator and FC stage may take to come up, s
     /// (`--ready-timeout`).
     pub ready_timeout_s: u64,
+    /// Add the world-model camera stage to every vehicle
+    /// (`--camera maplibre`).
+    pub sim_camera: bool,
 }
 
 /// A parsed xtask invocation.
@@ -246,6 +251,7 @@ fn parse_sim(args: &[String]) -> Result<SimArgs, XtaskError> {
     let mut lan = false;
     let mut instance: u16 = 0;
     let mut ready_timeout_s = crate::backend::DEFAULT_READY_TIMEOUT_S;
+    let mut sim_camera = false;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
@@ -258,6 +264,9 @@ fn parse_sim(args: &[String]) -> Result<SimArgs, XtaskError> {
             "--no-open" => open = false,
             "--lan" => lan = true,
             "--ready-timeout" => ready_timeout_s = required_timeout(&mut iter)?,
+            "--camera" => {
+                sim_camera = crate::camera::parse_choice(&required_value(&mut iter, "--camera")?)?
+            }
             other => {
                 return Err(XtaskError::Usage {
                     message: format!("unknown sim flag {other:?}"),
@@ -274,6 +283,7 @@ fn parse_sim(args: &[String]) -> Result<SimArgs, XtaskError> {
         lan,
         instance,
         ready_timeout_s,
+        sim_camera,
     })
 }
 
@@ -287,6 +297,7 @@ fn parse_fleet(args: &[String]) -> Result<FleetArgs, XtaskError> {
         open: false,
         site: crate::site::DEFAULT_SITE,
         ready_timeout_s: crate::backend::DEFAULT_READY_TIMEOUT_S,
+        sim_camera: false,
     };
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
@@ -304,6 +315,10 @@ fn parse_fleet(args: &[String]) -> Result<FleetArgs, XtaskError> {
                 fleet.site = crate::site::Site::parse(&required_value(&mut iter, "--site")?)?
             }
             "--ready-timeout" => fleet.ready_timeout_s = required_timeout(&mut iter)?,
+            "--camera" => {
+                fleet.sim_camera =
+                    crate::camera::parse_choice(&required_value(&mut iter, "--camera")?)?;
+            }
             "--open" => fleet.open = true,
             "--no-open" => fleet.open = false,
             other => {
@@ -413,6 +428,10 @@ commands:
       --lan                serve the session to the local network
       --ready-timeout <s>  how long each simulator and flight-controller
                            stage may take to come up (default: 180)
+      --camera <camera>    none (default) | maplibre: render the vehicle's
+                           cameras from the map world model at its
+                           simulator truth, on port 46000 + instance,
+                           instead of the backend's own camera
 
   fleet --vehicle <backend>[:<model>] [--vehicle ...] [options]
       Launch one session per vehicle, each with its own simulator,
@@ -438,6 +457,7 @@ commands:
                            for a threshold, its ground elevation (m
                            MSL), and the runway's true course
       --ready-timeout <s>  as for sim, per vehicle (default: 180)
+      --camera <camera>    as for sim, for every vehicle (default: none)
       --open               open every vehicle's viewer URL
       --no-open            open none (default)
 
