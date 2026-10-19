@@ -141,6 +141,20 @@ pub trait SimBackend {
         let _ = ctx;
         Ok(())
     }
+    /// Selects the vehicle model named after the backend (`--fc
+    /// <backend>:<model>`). A backend with one vehicle has no models.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`XtaskError::UnknownModel`] for a model this backend does
+    /// not launch.
+    fn select_model(&mut self, model: &str) -> Result<(), XtaskError> {
+        Err(XtaskError::UnknownModel {
+            backend: self.name(),
+            model: model.to_owned(),
+            known: Vec::new(),
+        })
+    }
     /// `pgrep -f` patterns that mark a stale session of this backend.
     fn stale_process_patterns(&self) -> Vec<&'static str>;
     /// What this session holds that another session must not: the ports
@@ -258,7 +272,7 @@ const BACKENDS: &[BackendEntry] = &[
     BackendEntry {
         name: "px4-gz",
         alias: Some("px4"),
-        make: || Box::new(px4_gz::Px4Gz),
+        make: || Box::new(px4_gz::Px4Gz::default()),
     },
     BackendEntry {
         name: "px4-xplane",
@@ -311,20 +325,30 @@ pub(crate) fn produce_xplane_handshake_blocking(
     xplane_handshake::produce_blocking(&root, &alia_xplane_preset(repo_root), out_dir)
 }
 
-/// Resolves `--fc` to a backend, fail-closed on unknown names.
+/// Resolves `--fc <backend>[:<model>]` to a backend, fail-closed on
+/// unknown names and models.
 ///
 /// # Errors
 ///
 /// Returns [`XtaskError::UnknownBackend`] for any name this launcher
-/// does not implement.
-pub fn backend_for(name: &str) -> Result<Box<dyn SimBackend>, XtaskError> {
-    BACKENDS
+/// does not implement, and [`XtaskError::UnknownModel`] for a model the
+/// backend does not launch.
+pub fn backend_for(spec: &str) -> Result<Box<dyn SimBackend>, XtaskError> {
+    let (name, model) = match spec.split_once(':') {
+        Some((name, model)) => (name, Some(model)),
+        None => (spec, None),
+    };
+    let mut backend = BACKENDS
         .iter()
         .find(|entry| entry.name == name || entry.alias == Some(name))
         .map(|entry| (entry.make)())
         .ok_or_else(|| XtaskError::UnknownBackend {
             name: name.to_owned(),
-        })
+        })?;
+    if let Some(model) = model {
+        backend.select_model(model)?;
+    }
+    Ok(backend)
 }
 
 #[cfg(test)]
