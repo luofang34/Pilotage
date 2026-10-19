@@ -103,6 +103,21 @@ fn the_quad_plans_the_sidecar_then_px4_on_the_instance_port() {
     assert_eq!(env(&px4_stage.env, "PX4_PARAM_CA_ROTOR0_PX"), Some("0.174"));
     assert_eq!(env(&px4_stage.env, "PX4_PARAM_SDLOG_MODE"), Some("-1"));
     assert!(px4_stage.remove_env.contains(&"PX4_SIMULATOR"));
+    // PX4 drives the gimbal on outputs 5-7 with the travel the sidecar's
+    // gimbal model maps them back with.
+    assert_eq!(env(&px4_stage.env, "PX4_PARAM_MNT_MODE_OUT"), Some("0"));
+    assert_eq!(env(&px4_stage.env, "PX4_PARAM_MNT_DO_STAB"), Some("1"));
+    assert_eq!(env(&px4_stage.env, "PX4_PARAM_PWM_MAIN_FUNC6"), Some("421"));
+    let travel = [
+        env(&px4_stage.env, "PX4_PARAM_MNT_RANGE_ROLL").unwrap(),
+        env(&px4_stage.env, "PX4_PARAM_MNT_MAX_PITCH").unwrap(),
+        env(&px4_stage.env, "PX4_PARAM_MNT_MIN_PITCH").unwrap(),
+        env(&px4_stage.env, "PX4_PARAM_MNT_RANGE_YAW").unwrap(),
+    ];
+    assert_eq!(
+        arg(&sidecar.args, "--gimbal"),
+        Some(travel.join(",").as_str())
+    );
     assert!(px4_stage.cwd.as_ref().unwrap().ends_with("rootfs/21"));
 }
 
@@ -118,6 +133,7 @@ fn the_plane_flies_the_rascal_with_airframe_1033() {
     assert_eq!(arg(&sidecar.args, "--latitude-deg"), Some("40.5771861"));
     assert_eq!(arg(&sidecar.args, "--heading-deg"), Some("29.50"));
     assert_eq!(env(&stages[1].spec.env, "PX4_SYS_AUTOSTART"), Some("1033"));
+    assert_eq!(arg(&sidecar.args, "--gimbal"), None);
     let params: Vec<&str> = stages[1]
         .spec
         .env
@@ -206,4 +222,7 @@ fn the_host_flies_the_selected_airframe_on_the_instance_links() {
     assert_eq!(env(&host, "PILOTAGE_PX4_ADDR"), Some("127.0.0.1:14570"));
     assert_eq!(env(&host, "PILOTAGE_PX4_SYSTEM_ID"), Some("21"));
     assert!(env(&host, "GZ_IP").is_none());
+    assert_eq!(env(&host, "PILOTAGE_PX4_GIMBAL"), None);
+    let quad = Px4Jsbsim::default().host_env(&ctx);
+    assert_eq!(env(&quad, "PILOTAGE_PX4_GIMBAL"), Some("1"));
 }

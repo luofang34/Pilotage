@@ -5,6 +5,7 @@ use pilotage_world::{TerrainSource, World, WorldError};
 
 use crate::aircraft::{Actuation, Aircraft};
 use crate::engine::{Engine, EngineError, ModelPaths};
+use crate::gimbal::{GIMBAL_OUTPUTS, Gimbal, GimbalLimits};
 use crate::ground::{GroundPatch, HALF_CELLS};
 use crate::hil::{
     ActuatorControls, Encoder, FIELDS_BARO, FIELDS_DIFF_PRESSURE, FIELDS_IMU, FIELDS_MAG,
@@ -60,6 +61,7 @@ pub struct Simulation {
     actuation: Actuation,
     sensors: Sensors,
     patch: GroundPatch,
+    gimbal: Option<Gimbal>,
     steps: u64,
 }
 
@@ -77,6 +79,7 @@ impl Simulation {
         start: Start,
         seed: u64,
         noise: NoiseLevels,
+        gimbal: Option<GimbalLimits>,
     ) -> Result<Self, SimulationError> {
         let mut engine = Engine::load(paths, PHYSICS_DT_S)?;
         let patch = GroundPatch::sample_blocking(
@@ -110,8 +113,14 @@ impl Simulation {
             actuation,
             sensors: Sensors::new(seed, noise),
             patch,
+            gimbal: gimbal.map(Gimbal::new),
             steps: 0,
         })
+    }
+
+    /// The gimbal's angles relative to the body, degrees, if it has one.
+    pub fn gimbal_angles_deg(&self) -> Option<[f64; 3]> {
+        self.gimbal.as_ref().map(Gimbal::angles_deg)
     }
 
     /// The vehicle's true state now.
@@ -137,6 +146,12 @@ impl Simulation {
             self.engine.step()?;
         }
         self.steps = self.steps.wrapping_add(1);
+        if let Some(gimbal) = &mut self.gimbal {
+            let outputs = controls
+                .filter(|c| c.armed())
+                .map(|c| GIMBAL_OUTPUTS.map(|i| c.controls.get(i).map_or(0.0, |&v| f64::from(v))));
+            gimbal.step(outputs, STEP_S);
+        }
         let truth = self.truth();
         if self
             .patch

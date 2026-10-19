@@ -13,7 +13,8 @@ use crate::site::Ground;
 /// A vehicle model px4-jsbsim can launch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum JsbsimModel {
-    /// The x500-class quadcopter (airframe 3010, x500 rotor geometry).
+    /// The x500-class quadcopter with a gimbal (airframe 3010, x500
+    /// rotor geometry).
     #[default]
     Quad,
     /// The Rascal 110 fixed-wing (airframe 1033, which PX4 tunes for it).
@@ -24,7 +25,7 @@ pub(crate) enum JsbsimModel {
 /// (which describes PX4's larger `quadrotor_x` JSBSim model): the Gazebo
 /// x500 airframe's rotor positions and the sidecar motor model's hover
 /// command.
-const X500_PARAMS: [(&str, &str); 9] = [
+const X500_PARAMS: [(&str, &str); 23] = [
     ("CA_ROTOR0_PX", "0.174"),
     ("CA_ROTOR0_PY", "0.174"),
     ("CA_ROTOR1_PX", "-0.174"),
@@ -34,7 +35,43 @@ const X500_PARAMS: [(&str, &str); 9] = [
     ("CA_ROTOR3_PX", "-0.174"),
     ("CA_ROTOR3_PY", "0.174"),
     ("MPC_THR_HOVER", "0.71"),
+    // The gimbal: PX4's own gimbal module takes the MAVLink gimbal
+    // protocol v2 in and drives outputs 5-7 (AUX mode), which the sidecar's
+    // gimbal model follows; PX4 then reports the gimbal attitude itself.
+    // Servos do not stabilize, so PX4 compensates the vehicle's attitude
+    // on every axis; without it an absolute setpoint never moves them.
+    ("MNT_MODE_IN", "4"),
+    ("MNT_MODE_OUT", "0"),
+    ("MNT_DO_STAB", "1"),
+    ("MNT_RC_IN_MODE", "1"),
+    ("MNT_MAN_ROLL", "1"),
+    ("MNT_MAN_PITCH", "2"),
+    ("MNT_MAN_YAW", "3"),
+    ("MNT_RANGE_ROLL", X500_GIMBAL.range_roll),
+    ("MNT_MAX_PITCH", X500_GIMBAL.max_pitch),
+    ("MNT_MIN_PITCH", X500_GIMBAL.min_pitch),
+    ("MNT_RANGE_YAW", X500_GIMBAL.range_yaw),
+    ("PWM_MAIN_FUNC5", "420"),
+    ("PWM_MAIN_FUNC6", "421"),
+    ("PWM_MAIN_FUNC7", "422"),
 ];
+
+/// A gimbal's travel, degrees, as PX4's `MNT_*` parameters state it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct GimbalTravel {
+    pub(crate) range_roll: &'static str,
+    pub(crate) max_pitch: &'static str,
+    pub(crate) min_pitch: &'static str,
+    pub(crate) range_yaw: &'static str,
+}
+
+/// The x500's gimbal: the travel of PX4 airframe 4019's gimbal.
+const X500_GIMBAL: GimbalTravel = GimbalTravel {
+    range_roll: "180",
+    max_pitch: "45",
+    min_pitch: "-135",
+    range_yaw: "720",
+};
 
 impl JsbsimModel {
     /// Every model, in the order help and errors list them.
@@ -85,6 +122,14 @@ impl JsbsimModel {
         match self {
             JsbsimModel::Quad => &X500_PARAMS,
             JsbsimModel::Plane => &[],
+        }
+    }
+
+    /// The gimbal the vehicle carries, if any.
+    pub(crate) fn gimbal(self) -> Option<GimbalTravel> {
+        match self {
+            JsbsimModel::Quad => Some(X500_GIMBAL),
+            JsbsimModel::Plane => None,
         }
     }
 
