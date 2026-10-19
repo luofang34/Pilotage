@@ -1,7 +1,7 @@
 //! The `--site` vocabulary: a named airfield from pilotage-world, or one
 //! an operator states.
 
-pub use pilotage_world::{DEFAULT_SITE, Ground, NAMED_SITES, Site, ZURICH};
+pub use pilotage_world::{DEFAULT_SITE, Ground, NAMED_SITES, Placement, Site, ZURICH};
 
 use crate::error::XtaskError;
 
@@ -47,6 +47,20 @@ pub fn parse(spec: &str) -> Result<Site, XtaskError> {
         elevation_m,
         heading_deg,
     })
+}
+
+/// Where the `index`-th vehicle on `ground` of `site` starts.
+///
+/// # Errors
+///
+/// Returns [`XtaskError::SitePosition`] for a site position the world
+/// model refuses.
+pub fn place(site: &Site, ground: Ground, index: usize) -> Result<Placement, XtaskError> {
+    site.placement(ground, index)
+        .map_err(|source| XtaskError::SitePosition {
+            site: site.name,
+            source,
+        })
 }
 
 #[cfg(test)]

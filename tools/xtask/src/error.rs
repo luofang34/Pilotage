@@ -167,6 +167,15 @@ pub enum XtaskError {
         /// The observed refusal or protocol error.
         detail: String,
     },
+    /// A site cannot place a vehicle: its position is not well formed.
+    #[error("site {site:?} cannot place a vehicle: {source}")]
+    SitePosition {
+        /// The site's name.
+        site: &'static str,
+        /// Why the world model refused the position.
+        #[source]
+        source: pilotage_world::PositionError,
+    },
     /// An I/O operation outside process management failed.
     #[error("I/O failure during {context}: {source}")]
     Io {
