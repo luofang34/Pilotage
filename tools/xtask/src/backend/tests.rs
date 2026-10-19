@@ -319,6 +319,10 @@ fn backend_selection_fails_closed() {
         backend_for("aviate-xplane").expect("known").name(),
         "aviate-xplane"
     );
-    let refusal = backend_for("px4-jsbsim");
+    assert_eq!(
+        backend_for("px4-jsbsim").expect("known").name(),
+        "px4-jsbsim"
+    );
+    let refusal = backend_for("px4-flightgear");
     assert!(matches!(refusal, Err(XtaskError::UnknownBackend { .. })));
 }

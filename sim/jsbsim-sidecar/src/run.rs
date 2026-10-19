@@ -63,6 +63,7 @@ pub fn run_blocking(args: &Args) -> Result<(), RunError> {
         noise: DEFAULT_NOISE,
         realtime_factor: args.realtime_factor,
         lockstep_timeout: args.lockstep_timeout,
+        gimbal: args.gimbal,
     };
     let epoch = MagneticEpoch::from_unix_seconds(epoch_unix_s);
     match &args.terrain {
