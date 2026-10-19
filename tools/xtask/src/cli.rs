@@ -405,12 +405,13 @@ commands:
       tear it down on ctrl-c.
 
       --fc <name>          FC backend: aviate-gz (alias aviate, default),
-                           px4-gz (alias px4), px4-xplane,
+                           px4-gz (alias px4), px4-jsbsim, px4-xplane,
                            aviate-xplane, ardupilot-sitl (alias
                            ardupilot), or betaflight-sitl (alias
                            betaflight); px4-gz takes a vehicle model
                            as px4-gz:<model>: x500_gimbal (default) or
-                           rc_cessna
+                           rc_cessna; px4-jsbsim as px4-jsbsim:<model>:
+                           quad (default) or plane
       --profile <profile>  physical | simulation (default) | oracle-only
       --port <port>        host WebTransport port (default: 4433)
       --viewer-port <port> static viewer port (default: 8080)

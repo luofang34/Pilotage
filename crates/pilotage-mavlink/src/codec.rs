@@ -19,9 +19,9 @@ use decoding::decode_known;
 pub use encoding::{
     GCS_COMPONENT_ID, GCS_SYSTEM_ID, GIMBAL_FLAGS_HORIZON_YAW_FOLLOW, MAV_FRAME_BODY_OFFSET_NED,
     ManualControlSticks, encode_arm_command, encode_autopilot_heartbeat,
-    encode_body_velocity_setpoint, encode_command_ack, encode_command_long, encode_gcs_heartbeat,
-    encode_gimbal_rate_setpoint, encode_manual_control, encode_position_setpoint,
-    encode_velocity_setpoint,
+    encode_body_velocity_setpoint, encode_command_ack, encode_command_long, encode_frame_v2_from,
+    encode_gcs_heartbeat, encode_gimbal_rate_setpoint, encode_manual_control,
+    encode_position_setpoint, encode_velocity_setpoint,
 };
 pub use param_encoding::ParamEncoding;
 pub use parameters::{
@@ -327,7 +327,7 @@ fn crc_accumulate(byte: u8, crc: u16) -> u16 {
 }
 
 /// MAVLink CRC over `data`, finished with the message's CRC_EXTRA.
-fn compute_crc(data: &[u8], extra: u8) -> u16 {
+pub fn compute_crc(data: &[u8], extra: u8) -> u16 {
     let mut crc = 0xFFFFu16;
     for &b in data {
         crc = crc_accumulate(b, crc);
