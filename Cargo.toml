@@ -60,6 +60,9 @@ members = [
     "clients/apple-instrument-bridge",
     "crates/pilotage-aircraft",
 ]
+# The world-model camera links the maplibre-rs fork and its GPU stack; it
+# builds on its own so the workspace does not compile a renderer.
+exclude = ["sim/maplibre-camera"]
 
 [workspace.package]
 edition = "2024"
