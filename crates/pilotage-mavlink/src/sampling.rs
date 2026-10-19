@@ -89,6 +89,33 @@ fn effective_authorization(
     (flags, quality)
 }
 
+/// The planar pose and ground speed an authorized, coherent pair supports.
+fn planar_projection(
+    pair: Option<(AttitudeUpdate, KinematicsUpdate)>,
+    authorized: bool,
+    maximum_inter_group_skew_ms: u32,
+) -> (Option<pilotage_adapter_api::Pose2d>, Option<f64>) {
+    match pair {
+        Some((att, kin))
+            if authorized
+                && measurement_pair_is_coherent(att, kin, maximum_inter_group_skew_ms)
+                && measurement_pair_supports_pose(att, kin) =>
+        {
+            let pose = pilotage_adapter_api::Pose2d {
+                x: f64::from(kin.pos_ned_m[0]),
+                y: f64::from(kin.pos_ned_m[1]),
+                heading: yaw_of(att.quat_wxyz),
+            };
+            let speed = f64::from(
+                (kin.vel_ned_mps[0] * kin.vel_ned_mps[0] + kin.vel_ned_mps[1] * kin.vel_ned_mps[1])
+                    .sqrt(),
+            );
+            (Some(pose), Some(speed))
+        }
+        _ => (None, None),
+    }
+}
+
 /// The estimate as one telemetry sample: the avionics group with its
 /// authorization, and the planar pose when the pair supports one. Empty
 /// when neither group is fresh.
@@ -107,25 +134,11 @@ pub fn estimate_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -> Tele
     }
 
     let estimator_status_stamp = latest.estimator_status_stamp();
-    let (planar_pose, planar_speed) = match (attitude, kinematics) {
-        (Some(att), Some(kin))
-            if estimator_status_stamp.is_some()
-                && measurement_pair_is_coherent(att, kin, latest.maximum_inter_group_skew_ms)
-                && measurement_pair_supports_pose(att, kin) =>
-        {
-            let pose = pilotage_adapter_api::Pose2d {
-                x: f64::from(kin.pos_ned_m[0]),
-                y: f64::from(kin.pos_ned_m[1]),
-                heading: yaw_of(att.quat_wxyz),
-            };
-            let speed = f64::from(
-                (kin.vel_ned_mps[0] * kin.vel_ned_mps[0] + kin.vel_ned_mps[1] * kin.vel_ned_mps[1])
-                    .sqrt(),
-            );
-            (Some(pose), Some(speed))
-        }
-        _ => (None, None),
-    };
+    let (planar_pose, planar_speed) = planar_projection(
+        attitude.zip(kinematics),
+        estimator_status_stamp.is_some(),
+        latest.maximum_inter_group_skew_ms,
+    );
     let (valid_flags, quality) = if estimator_status_stamp.is_some() {
         effective_authorization(attitude, kinematics)
     } else {

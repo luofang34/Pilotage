@@ -192,6 +192,30 @@ fn apply_gnss_fix(latest: &mut LinkState, message: FcMessage, now: Instant) {
     });
 }
 
+/// Applies one geomagnetic reference report. Its own timestamp is not
+/// read, for the same reason as the receiver fix's: the lane orders by
+/// its own sequence and is stamped on the receiving clock.
+fn apply_geomagnetic_reference(
+    latest: &mut LinkState,
+    declination_rad: f32,
+    source: u8,
+    now: Instant,
+) {
+    let sequence = latest
+        .geomagnetic_reference
+        .map_or(0, |update| update.sequence.wrapping_add(1));
+    let received_since_start_ns =
+        u64::try_from(now.saturating_duration_since(latest.started_at).as_nanos())
+            .unwrap_or(u64::MAX);
+    latest.geomagnetic_reference = Some(crate::link::GeomagneticReferenceUpdate {
+        declination_rad,
+        source,
+        sequence,
+        received_since_start_ns,
+        received_at: now,
+    });
+}
+
 /// Applies one simulator ground-truth report: latches the projection
 /// origin on the first fix and projects geodetic truth into local NED.
 /// The flat-earth projection's error over a SITL flight is far below
@@ -339,6 +363,11 @@ fn apply_message(latest: &mut LinkState, message: FcMessage, now: Instant) {
             vel_ned_mps,
         } => apply_kinematics(latest, time_boot_ms, pos_ned_m, vel_ned_mps, now),
         FcMessage::GnssFix { .. } => apply_gnss_fix(latest, message, now),
+        FcMessage::AviateGeomagneticReference {
+            declination_rad,
+            source,
+            ..
+        } => apply_geomagnetic_reference(latest, declination_rad, source, now),
         FcMessage::ScaledPressure {
             time_boot_ms,
             press_abs_hpa,

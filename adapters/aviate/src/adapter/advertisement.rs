@@ -5,9 +5,10 @@
 
 use pilotage_adapter_api::{
     ActionCapability, AdapterCapabilities, ControlFeelDescriptor, ControlFeelMode, ExecutionMode,
-    IntentCapability, LegacyAxisRoute, LegacyCommandMap, LinkLossPolicy, ScopeDescriptor,
-    VehicleDescriptor,
+    IntentCapability, LegacyAxisRoute, LegacyCommandMap, LinkLossPolicy, MagneticVariationSource,
+    ScopeDescriptor, VehicleDescriptor,
 };
+use pilotage_mavlink::link::fc_variation_source;
 use pilotage_protocol::{ActionKind, IntentFamily, LogicalAxisId, ReferenceFrame, ScopeId};
 
 #[cfg(feature = "sim")]
@@ -20,6 +21,16 @@ use super::{
 use super::{GIMBAL_NEUTRAL_BUTTON, GIMBAL_SCOPE};
 
 impl AviateAdapter {
+    /// The heading reference the FC's latest geomagnetic reference states,
+    /// unstated before its first report. It describes the FC's
+    /// configuration rather than a timed measurement, so an aged report
+    /// still states it.
+    fn heading_reference(&self) -> Option<pilotage_protocol::HeadingReference> {
+        let latest = self.estimate.as_ref()?.state.lock().ok()?;
+        let update = latest.geomagnetic_reference?;
+        fc_variation_source(update.source).map(MagneticVariationSource::heading_reference)
+    }
+
     /// The capability report `VehicleAdapter::capabilities` returns.
     pub(super) fn advertised_capabilities(&self) -> AdapterCapabilities {
         AdapterCapabilities {
@@ -73,7 +84,7 @@ impl AviateAdapter {
                 } else {
                     vec![]
                 },
-                heading_reference: None,
+                heading_reference: self.heading_reference(),
             }],
             adapter_version: adapter_version(self),
             control_feel: self.feel_entry().map(control_feel_descriptor),

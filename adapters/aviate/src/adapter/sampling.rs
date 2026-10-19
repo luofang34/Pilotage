@@ -16,6 +16,7 @@ use pilotage_geo::{
 use pilotage_mavlink::link::estimator::{QUALITY_DEGRADED, QUALITY_UNUSABLE};
 use pilotage_mavlink::link::{
     AttitudeUpdate, KinematicsUpdate, LinkState, SimTruthUpdate, estimate_geodetic_fix,
+    fc_magnetic_variation,
 };
 use tracing::warn;
 
@@ -290,7 +291,11 @@ pub(crate) fn mavlink_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -
         estimator_status_stamp,
         valid_flags,
         quality,
-        magnetic_variation: None,
+        magnetic_variation: latest
+            .geomagnetic_reference
+            .filter(|update| update.received_at.elapsed() <= WITHHOLD_AFTER)
+            .as_ref()
+            .and_then(|update| fc_magnetic_variation(update, &latest)),
     });
     let source_time_ms = kinematics
         .map(|kin| kin.time_boot_ms)
