@@ -17,7 +17,7 @@ pub struct Site {
     pub longitude_deg: f64,
     /// Declared ground elevation at the threshold, metres above mean sea
     /// level. A world with terrain coverage there replaces it with the
-    /// terrain's own height (see [`crate::World::site_elevation`]).
+    /// terrain's own height (see [`crate::World::site_elevation_blocking`]).
     pub elevation_m: f64,
     /// The runway's true course from the threshold, degrees clockwise
     /// from north.
