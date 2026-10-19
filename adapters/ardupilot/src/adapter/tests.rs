@@ -181,6 +181,30 @@ fn an_ekf_authorized_estimate_samples_a_pose() {
 }
 
 #[test]
+fn the_fc_declination_rides_the_estimate() {
+    let mut harness = Harness::new();
+    harness.feed(&[
+        FcMessage::ParamValue {
+            param_id: pilotage_mavlink::codec::param_id("COMPASS_DEC"),
+            value: pilotage_mavlink::codec::ParamValue::Real32(-0.2113),
+        },
+        FcMessage::ParamValue {
+            param_id: pilotage_mavlink::codec::param_id("COMPASS_AUTODEC"),
+            value: pilotage_mavlink::codec::ParamValue::Int32(1.0_f32.to_bits() as i32),
+        },
+    ]);
+    harness.estimate(-1.0, false);
+    let batch = harness.adapter.sample_telemetry();
+    let avionics = batch.samples[0].avionics.expect("an estimate");
+    let variation = avionics.magnetic_variation.expect("the FC declination");
+    assert_eq!(
+        variation.source,
+        pilotage_adapter_api::MagneticVariationSource::FcModel
+    );
+    assert_eq!(variation.declination_rad, -0.2113);
+}
+
+#[test]
 fn arm_goes_to_the_fc_without_an_estimate() {
     let mut harness = Harness::new();
     let outcome = harness
@@ -314,4 +338,8 @@ fn the_vehicle_advertises_itself_as_a_named_multicopter() {
     let vehicle = &capabilities.vehicles[0];
     assert_eq!(vehicle.class, pilotage_protocol::VehicleClass::Multicopter);
     assert_eq!(vehicle.display_name, "ArduPilot quad");
+    assert_eq!(
+        vehicle.heading_reference,
+        Some(pilotage_protocol::HeadingReference::True)
+    );
 }

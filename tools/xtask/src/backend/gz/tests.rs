@@ -46,13 +46,13 @@ fn every_other_session_gets_a_partition_of_its_own() {
 #[test]
 fn every_gz_world_relocates_to_the_spawn_point() {
     use super::relocate_world;
-    use crate::backend::SpawnPoint;
+    use crate::backend::Placement;
 
     let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(std::path::Path::parent)
         .expect("repo root");
-    let point = SpawnPoint {
+    let point = Placement {
         latitude_deg: 40.577_186_1,
         longitude_deg: -74.738_191_8,
         elevation_m: 56.3,
@@ -152,9 +152,9 @@ fn true_headings_become_enu_yaw() {
 #[test]
 fn a_world_without_one_origin_or_spawn_frame_is_refused() {
     use super::relocate_world;
-    use crate::backend::SpawnPoint;
+    use crate::backend::Placement;
 
-    let point = SpawnPoint {
+    let point = Placement {
         latitude_deg: 1.0,
         longitude_deg: 2.0,
         elevation_m: 3.0,

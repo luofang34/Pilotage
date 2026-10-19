@@ -211,7 +211,7 @@ fn fleet_takes_one_vehicle_per_flag_and_documented_defaults() {
     assert!(!fleet.open, "a fleet opens no tabs by default");
     assert_eq!(
         fleet.site,
-        crate::site::N51,
+        pilotage_world::N51,
         "a fleet stands on N51 by default"
     );
     assert!(USAGE.contains("  fleet --vehicle <backend>[:<model>]"));
@@ -316,4 +316,18 @@ fn ready_timeout_defaults_to_180_s_and_is_settable_on_sim_and_fleet() {
         );
     }
     assert!(USAGE.contains("--ready-timeout <s>"));
+}
+
+#[test]
+fn build_jsbsim_takes_no_arguments_and_is_documented() {
+    assert_eq!(
+        parse_args(&args(&["build-jsbsim"])).expect("parses"),
+        Command::BuildJsbsim
+    );
+    assert!(matches!(
+        parse_args(&args(&["build-jsbsim", "--tag", "v1.2.0"])),
+        Err(XtaskError::Usage { .. })
+    ));
+    assert_eq!(USAGE.matches("\n  build-jsbsim\n").count(), 1);
+    assert!(USAGE.contains(super::super::jsbsim::JSBSIM_TAG));
 }
