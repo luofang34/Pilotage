@@ -63,6 +63,26 @@ pub enum HostError {
         #[source]
         source: pilotage_control_feel::ProfileLoadError,
     },
+    /// A present Aviate telemetry endpoint was not a socket address.
+    #[error("invalid {variable} value {value:?}: {source}")]
+    AviateEndpoint {
+        /// The environment variable being parsed.
+        variable: &'static str,
+        /// The rejected value.
+        value: String,
+        /// The socket-address parse failure.
+        #[source]
+        source: std::net::AddrParseError,
+    },
+    /// An Aviate telemetry endpoint could not be decoded as UTF-8.
+    #[error("{variable} is not valid UTF-8: {source}")]
+    AviateEndpointEncoding {
+        /// The environment variable being parsed.
+        variable: &'static str,
+        /// The environment decoding failure.
+        #[source]
+        source: std::env::VarError,
+    },
     /// The PX4 adapter requires an explicit simulation profile.
     #[error("PILOTAGE_PX4_PROFILE is required and must be set to simulation")]
     Px4ProfileMissing,
@@ -90,7 +110,17 @@ pub enum HostError {
         #[source]
         source: std::net::AddrParseError,
     },
-    /// A PX4 endpoint could not be decoded as UTF-8.
+    /// A present PX4 setting was outside the values the adapter accepts.
+    #[error("invalid {variable} value {value:?} (expected {expected})")]
+    Px4Setting {
+        /// The environment variable being parsed.
+        variable: &'static str,
+        /// The rejected value.
+        value: String,
+        /// What the variable accepts.
+        expected: &'static str,
+    },
+    /// A PX4 endpoint or setting could not be decoded as UTF-8.
     #[error("{variable} is not valid UTF-8: {source}")]
     Px4EndpointEncoding {
         /// The environment variable being parsed.
@@ -115,6 +145,39 @@ pub enum HostError {
     /// Starting the PX4 MAVLink link failed.
     #[error("failed to start the PX4 adapter: {0}")]
     Px4Adapter(#[source] pilotage_adapter_px4::Px4AdapterError),
+    /// The ArduPilot adapter requires an explicit simulation profile.
+    #[error("PILOTAGE_ARDUPILOT_PROFILE is required and must be set to simulation")]
+    ArduPilotProfileMissing,
+    /// A present ArduPilot profile did not name the only supported policy.
+    #[error("invalid PILOTAGE_ARDUPILOT_PROFILE value {value:?} (expected simulation)")]
+    ArduPilotProfile {
+        /// The rejected value.
+        value: String,
+    },
+    /// The ArduPilot endpoint was not a socket address.
+    #[error("invalid PILOTAGE_ARDUPILOT_ADDR value {value:?}: {source}")]
+    ArduPilotEndpoint {
+        /// The rejected value.
+        value: String,
+        /// The socket-address parse failure.
+        #[source]
+        source: std::net::AddrParseError,
+    },
+    /// An ArduPilot variable could not be decoded as UTF-8.
+    #[error("{variable} is not valid UTF-8: {source}")]
+    ArduPilotEnvEncoding {
+        /// The environment variable being parsed.
+        variable: &'static str,
+        /// The environment decoding failure.
+        #[source]
+        source: std::env::VarError,
+    },
+    /// Starting the ArduPilot MAVLink link failed.
+    #[error("failed to start the ArduPilot adapter: {0}")]
+    ArduPilotAdapter(#[source] pilotage_adapter_ardupilot::ArduPilotAdapterError),
+    /// The Betaflight adapter's environment configuration is invalid.
+    #[error(transparent)]
+    BetaflightConfig(#[from] BetaflightConfigError),
     /// A `PILOTAGE_MISSION_*` variable could not be decoded as UTF-8.
     #[error("{variable} is not valid UTF-8: {source}")]
     MissionVarEncoding {
@@ -170,4 +233,42 @@ pub enum HostError {
     /// otherwise dominate every `Result<_, HostError>` on the startup path.
     #[error("failed to build the mission plan: {0}")]
     MissionBuild(#[source] Box<pilotage_mission::MissionBuildError>),
+}
+
+/// Why the Betaflight adapter's environment configuration was refused.
+/// Parsing fails closed: a present but malformed value never falls back
+/// to a default.
+#[derive(Debug, thiserror::Error)]
+pub enum BetaflightConfigError {
+    /// `PILOTAGE_BETAFLIGHT_PROFILE` is unset; a direct start must name it.
+    #[error("PILOTAGE_BETAFLIGHT_PROFILE is not set (the one supported profile is \"simulation\")")]
+    ProfileMissing,
+    /// The profile is not one this adapter implements.
+    #[error(
+        "unsupported PILOTAGE_BETAFLIGHT_PROFILE {value:?} (the one supported profile is \"simulation\")"
+    )]
+    Profile {
+        /// The rejected value.
+        value: String,
+    },
+    /// A Betaflight variable could not be decoded as UTF-8.
+    #[error("{variable} is not valid UTF-8: {source}")]
+    Encoding {
+        /// The environment variable being parsed.
+        variable: &'static str,
+        /// The environment decoding failure.
+        #[source]
+        source: std::env::VarError,
+    },
+    /// The MSP endpoint was not a socket address.
+    #[error("invalid {variable} value {value:?}: {source}")]
+    Endpoint {
+        /// The environment variable being parsed.
+        variable: &'static str,
+        /// The rejected value.
+        value: String,
+        /// The socket-address parse failure.
+        #[source]
+        source: std::net::AddrParseError,
+    },
 }

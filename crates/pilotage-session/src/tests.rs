@@ -10,6 +10,7 @@
 mod action_command;
 mod authority_group;
 mod deadline;
+mod direct_recovery;
 mod disconnect;
 mod frame;
 mod handshake;
@@ -57,6 +58,8 @@ pub(crate) fn capabilities() -> AdapterCapabilities {
         },
         vehicles: vec![VehicleDescriptor {
             id: VEHICLE,
+            class: pilotage_protocol::VehicleClass::GroundRover,
+            display_name: "test rover".to_owned(),
             scopes: vec![ScopeDescriptor {
                 authority_group: None,
                 scope: motion(),

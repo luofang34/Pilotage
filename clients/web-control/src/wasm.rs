@@ -177,7 +177,7 @@ impl WebControl {
 
     /// Evaluates one control tick from the input buffer and the session
     /// scalars, writes the plan into the output buffer, and returns the plan
-    /// flags. `mode` is 0 pilot, 1 cruise, 2 fpv, 3 rover.
+    /// flags. `mode` is 0 pilot, 1 cruise, 2 fpv, 3 rover, 4 plane, 5 acro.
     /// `source` is `0` for a pad sample in the input buffer, `1` for the
     /// held-key state (the input buffer is ignored).
     #[allow(clippy::too_many_arguments)]
@@ -445,6 +445,8 @@ fn mode_from_u32(mode: u32) -> Mode {
         1 => Mode::QuadCruise,
         2 => Mode::Fpv,
         3 => Mode::Rover,
+        4 => Mode::Plane,
+        5 => Mode::Acro,
         _ => Mode::QuadPilot,
     }
 }

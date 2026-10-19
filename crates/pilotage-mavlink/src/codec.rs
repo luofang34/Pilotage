@@ -9,14 +9,24 @@
 //! `aviate-link` implementation, the peer this parser must interoperate
 //! with byte-for-byte).
 
+mod attitude_target;
 mod decoding;
 mod encoding;
+mod param_encoding;
+mod parameters;
+pub use attitude_target::{AttitudeTargetKind, SET_ATTITUDE_TARGET_ID, encode_attitude_target};
 use decoding::decode_known;
 pub use encoding::{
-    AttitudeTarget, GCS_COMPONENT_ID, GCS_SYSTEM_ID, GIMBAL_FLAGS_HORIZON_YAW_FOLLOW,
-    encode_arm_command, encode_attitude_setpoint, encode_command_ack, encode_command_long,
-    encode_gcs_heartbeat, encode_gimbal_rate_setpoint, encode_position_setpoint,
+    GCS_COMPONENT_ID, GCS_SYSTEM_ID, GIMBAL_FLAGS_HORIZON_YAW_FOLLOW, MAV_FRAME_BODY_OFFSET_NED,
+    ManualControlSticks, encode_arm_command, encode_autopilot_heartbeat,
+    encode_body_velocity_setpoint, encode_command_ack, encode_command_long, encode_gcs_heartbeat,
+    encode_gimbal_rate_setpoint, encode_manual_control, encode_position_setpoint,
     encode_velocity_setpoint,
+};
+pub use param_encoding::ParamEncoding;
+pub use parameters::{
+    PARAM_ID_LEN, ParamValue, encode_param_request_read, encode_param_set, encode_param_value,
+    param_id,
 };
 
 /// MAVLink 2.0 start-of-frame marker.
@@ -52,6 +62,23 @@ pub const ESTIMATOR_STATUS_ID: u32 = 230;
 pub const AVIATE_ESTIMATOR_STATUS_ID: u32 = 20_000;
 /// BATTERY_STATUS message id.
 pub const BATTERY_STATUS_ID: u32 = 147;
+/// PARAM_VALUE message id (downlink: a parameter's current value).
+pub const PARAM_VALUE_ID: u32 = 22;
+/// PARAM_SET message id (uplink: a parameter write).
+pub const PARAM_SET_ID: u32 = 23;
+/// MANUAL_CONTROL message id (uplink: joystick sticks).
+pub const MANUAL_CONTROL_ID: u32 = 69;
+/// ATTITUDE_TARGET message id (downlink: the attitude and thrust the FC
+/// commands).
+pub const ATTITUDE_TARGET_ID: u32 = 83;
+/// EKF_STATUS_REPORT message id (ardupilotmega dialect).
+pub const EKF_STATUS_REPORT_ID: u32 = 193;
+/// STATUSTEXT message id.
+pub const STATUSTEXT_ID: u32 = 253;
+/// Bytes of text one STATUSTEXT frame carries.
+pub const STATUS_TEXT_LEN: usize = 50;
+/// MAV_AUTOPILOT_ARDUPILOTMEGA.
+pub const MAV_AUTOPILOT_ARDUPILOTMEGA: u8 = 3;
 
 /// One parsed frame event from the Aviate subset.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -64,6 +91,41 @@ pub enum FcMessage {
     Heartbeat {
         /// Whether the sender reports itself armed.
         armed: bool,
+        /// The autopilot-specific flight mode. Its meaning depends on
+        /// `autopilot`: [`crate::ardupilot::ArduCopterMode`] reads it for
+        /// ArduPilot.
+        custom_mode: u32,
+        /// MAV_AUTOPILOT of the sender.
+        autopilot: u8,
+    },
+    /// ArduPilot's EKF health summary (ardupilotmega EKF_STATUS_REPORT).
+    /// The message has no timestamp of its own.
+    EkfStatusReport {
+        /// EKF_STATUS_FLAGS.
+        flags: u16,
+    },
+    /// Human-readable FC text (STATUSTEXT), e.g. ArduPilot's
+    /// `PreArm: ...` reasons for a refused arm.
+    StatusText {
+        /// MAV_SEVERITY (0 emergency .. 7 debug).
+        severity: u8,
+        /// The NUL-padded text, as the wire carries it.
+        text: [u8; STATUS_TEXT_LEN],
+    },
+    /// The attitude and collective thrust the FC commands now.
+    AttitudeTarget {
+        /// Milliseconds since FC boot.
+        time_boot_ms: u32,
+        /// Normalized collective thrust in `[0, 1]`.
+        thrust: f32,
+    },
+    /// A parameter's current value, sent on request and as the echo of
+    /// every parameter write.
+    ParamValue {
+        /// The NUL-padded parameter name.
+        param_id: [u8; PARAM_ID_LEN],
+        /// The value the sender now holds.
+        value: ParamValue,
     },
     /// Command acknowledgement (arm/disarm feedback).
     CommandAck {
@@ -220,6 +282,10 @@ pub const GIMBAL_MANAGER_SET_ATTITUDE_ID: u32 = 282;
 pub const MAV_CMD_COMPONENT_ARM_DISARM: u16 = 400;
 /// MAV_CMD_DO_SET_MODE (COMMAND_LONG payload).
 pub const MAV_CMD_DO_SET_MODE: u16 = 176;
+/// MAV_CMD_NAV_TAKEOFF (COMMAND_LONG payload; param 7 = altitude, m).
+pub const MAV_CMD_NAV_TAKEOFF: u16 = 22;
+/// MAV_CMD_SET_MESSAGE_INTERVAL (COMMAND_LONG payload).
+pub const MAV_CMD_SET_MESSAGE_INTERVAL: u16 = 511;
 /// MAV_CMD_DO_GIMBAL_MANAGER_PITCHYAW (COMMAND_LONG payload).
 pub const MAV_CMD_DO_GIMBAL_MANAGER_PITCHYAW: u16 = 1000;
 /// MAV_CMD_DO_GIMBAL_MANAGER_CONFIGURE (COMMAND_LONG payload).
@@ -245,6 +311,10 @@ fn crc_extra(msg_id: u32) -> Option<u8> {
         GIMBAL_MANAGER_SET_ATTITUDE_ID => Some(123),
         GIMBAL_DEVICE_ATTITUDE_STATUS_ID => Some(137),
         BATTERY_STATUS_ID => Some(154),
+        PARAM_VALUE_ID => Some(220),
+        ATTITUDE_TARGET_ID => Some(22),
+        EKF_STATUS_REPORT_ID => Some(71),
+        STATUSTEXT_ID => Some(83),
         _ => None,
     }
 }

@@ -85,8 +85,53 @@ impl Response {
     }
 }
 
-/// Answers one request line against `root`, which must be canonical.
-pub(super) fn respond(request_line: &str, root: &Path) -> Response {
+/// The served directory and the trees its top-level links name.
+///
+/// A fleet session's private web root links each viewer entry in from the
+/// source tree, so the files it serves live under those link targets. Only
+/// the launcher builds such a root; a link anywhere deeper is not followed
+/// out of the tree.
+pub(crate) struct ServedTree {
+    root: PathBuf,
+    allowed: Vec<PathBuf>,
+}
+
+impl ServedTree {
+    /// Resolves `dir` and the targets of its top-level links.
+    ///
+    /// # Errors
+    ///
+    /// Returns the I/O error when `dir` cannot be resolved or listed.
+    pub(crate) fn resolve_blocking(dir: &Path) -> std::io::Result<Self> {
+        let root = dir.canonicalize()?;
+        let mut allowed = vec![root.clone()];
+        for entry in std::fs::read_dir(&root)? {
+            let entry = entry?;
+            if entry.file_type()?.is_symlink() {
+                // A dangling link serves nothing; it is not an error.
+                if let Ok(target) = entry.path().canonicalize() {
+                    allowed.push(target);
+                }
+            }
+        }
+        Ok(Self { root, allowed })
+    }
+
+    /// The canonical served directory.
+    pub(crate) fn root(&self) -> &Path {
+        &self.root
+    }
+
+    fn contained(&self, candidate: &Path) -> Option<PathBuf> {
+        candidate
+            .canonicalize()
+            .ok()
+            .filter(|canonical| self.allowed.iter().any(|tree| canonical.starts_with(tree)))
+    }
+}
+
+/// Answers one request line against the served `tree`.
+pub(super) fn respond(request_line: &str, root: &ServedTree) -> Response {
     let mut parts = request_line.split_whitespace();
     let (Some(method), Some(target)) = (parts.next(), parts.next()) else {
         return Response::error(400, "Bad Request");
@@ -105,7 +150,7 @@ pub(super) fn respond(request_line: &str, root: &Path) -> Response {
     response
 }
 
-fn respond_to_target(target: &str, root: &Path) -> Response {
+fn respond_to_target(target: &str, root: &ServedTree) -> Response {
     let without_fragment = target.split('#').next().unwrap_or_default();
     let (raw_path, query) = match without_fragment.split_once('?') {
         Some((path, query)) => (path, Some(query)),
@@ -142,12 +187,12 @@ enum Resolved {
     NotFound,
 }
 
-/// Maps a decoded URL path onto a file under `root`. Canonicalizing
+/// Maps a decoded URL path onto a file under `tree`. Canonicalizing
 /// resolves `..` and symlinks, so the prefix check is what keeps every
 /// served file inside the tree.
-fn resolve(root: &Path, path: &str) -> Resolved {
-    let candidate = root.join(path.trim_start_matches('/'));
-    let Some(canonical) = contained(root, &candidate) else {
+fn resolve(tree: &ServedTree, path: &str) -> Resolved {
+    let candidate = tree.root.join(path.trim_start_matches('/'));
+    let Some(canonical) = tree.contained(&candidate) else {
         return Resolved::NotFound;
     };
     if canonical.is_file() {
@@ -159,17 +204,10 @@ fn resolve(root: &Path, path: &str) -> Resolved {
     if !path.ends_with('/') {
         return Resolved::Directory;
     }
-    match contained(root, &canonical.join("index.html")) {
+    match tree.contained(&canonical.join("index.html")) {
         Some(index) if index.is_file() => Resolved::File(index),
         _ => Resolved::NotFound,
     }
-}
-
-fn contained(root: &Path, candidate: &Path) -> Option<PathBuf> {
-    candidate
-        .canonicalize()
-        .ok()
-        .filter(|canonical| canonical.starts_with(root))
 }
 
 fn file_response(path: &Path) -> Response {

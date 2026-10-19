@@ -28,12 +28,12 @@ export function fcArmToken(fcView) {
   let arm = fcView.stale
     ? "arm: stale"
     : ({ 0: "arm: unknown", 1: "DISARMED", 2: "ARMED" }[fcView.armState] ?? "arm: invalid");
-  // Enactment truth: the FC refused the most recent commanded
-  // arm/disarm. Without this marker, "command accepted" and a stubborn
-  // DISARMED readout are indistinguishable from a dead control.
+  // Enactment truth: the FC refused the most recent commanded arm/disarm
+  // (a pilotage.v1.CommandOutcome of 3 and up). Without this marker,
+  // "command accepted" and a stubborn DISARMED readout look like a dead control.
   const verdict = fcView.lastCommand;
-  if (!fcView.stale && verdict && verdict.result !== 0) {
-    arm += ` (FC refused ${verdict.arm ? "arm" : "disarm"}: result ${verdict.result})`;
+  if (!fcView.stale && verdict && verdict.result >= 3) {
+    arm += ` (FC refused ${verdict.arm ? "arm" : "disarm"}: outcome ${verdict.result})`;
   }
   return arm;
 }

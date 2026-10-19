@@ -10,8 +10,11 @@ use crate::error::XtaskError;
 use crate::process::ProcessSpec;
 use crate::readiness::Readiness;
 
+mod ardupilot_sitl;
 pub(crate) mod aviate_gz;
 mod aviate_xplane;
+mod betaflight_sitl;
+pub(crate) mod gz;
 pub(crate) mod px4_gz;
 mod px4_xplane;
 mod xplane_handshake;
@@ -28,10 +31,62 @@ pub struct SessionContext {
     pub viewer_port: u16,
     /// Session profile handed to the host.
     pub profile: Profile,
-    /// Directory stage logs are written under.
+    /// Directory stage logs are written under. Each session has its own,
+    /// so concurrent sessions never write one another's logs.
     pub log_dir: PathBuf,
+    /// Directory the viewer serves: the session's connect manifest
+    /// (`session.json`) is written here, so each viewer hands a stale tab
+    /// its own session and never another one's.
+    pub web_root: PathBuf,
     /// Serve the session to the local network rather than loopback only.
     pub lan: bool,
+    /// Simulator instance index. Instance 0 is the single-session default;
+    /// a backend that can run several copies at once shifts its ports and
+    /// isolates its simulator by this index.
+    pub instance: u16,
+    /// How long each simulator and flight-controller stage may take to
+    /// prove it is up, s (`--ready-timeout`). One value for every
+    /// backend: a loaded machine slows them all alike.
+    pub ready_timeout_s: u64,
+}
+
+/// The `--ready-timeout` default, s. A PX4 SITL boots in about 20 s on an
+/// idle machine and takes over 60 s under heavy load; this leaves room
+/// for that load without letting a hung stage wait forever.
+pub const DEFAULT_READY_TIMEOUT_S: u64 = 180;
+
+#[cfg(test)]
+impl SessionContext {
+    /// The single-session defaults (instance 0, ports 4433/8080, logs and
+    /// web root under `repo_root`), for tests to adjust field by field.
+    pub(crate) fn for_test(repo_root: PathBuf) -> Self {
+        Self {
+            log_dir: repo_root.join("target/xtask-sim"),
+            web_root: repo_root.join("clients/web"),
+            repo_root,
+            host_port: 4433,
+            viewer_port: 8080,
+            profile: Profile::Simulation,
+            lan: false,
+            instance: 0,
+            ready_timeout_s: DEFAULT_READY_TIMEOUT_S,
+        }
+    }
+}
+
+/// Where a fleet puts one vehicle: a point on the WGS84 ellipsoid, the
+/// ground height there, and the way the vehicle faces.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SpawnPoint {
+    /// Latitude, degrees north.
+    pub latitude_deg: f64,
+    /// Longitude, degrees east.
+    pub longitude_deg: f64,
+    /// Ground elevation, metres above mean sea level. The vehicle stands
+    /// on the ground, so this is also its starting altitude.
+    pub elevation_m: f64,
+    /// True heading of the vehicle's nose, degrees clockwise from north.
+    pub heading_deg: f64,
 }
 
 /// One plannable launch step: a process and the signal proving it is up.
@@ -113,8 +168,82 @@ pub trait SimBackend {
         let _ = ctx;
         Ok(())
     }
+    /// Puts this backend's vehicle at `point` by editing its planned
+    /// stages: a world whose origin moves, a home argument, a sidecar
+    /// option — whatever the simulator takes.
+    ///
+    /// A fleet calls this for every vehicle before it starts anything, so
+    /// a backend that cannot place its vehicle is refused up front rather
+    /// than stacked on top of another vehicle at the same point.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`XtaskError::SpawnUnsupported`] by default, or the
+    /// backend's own failure to place the vehicle.
+    fn spawn(
+        &self,
+        _ctx: &SessionContext,
+        _point: &SpawnPoint,
+        _stages: &mut [Stage],
+    ) -> Result<(), XtaskError> {
+        Err(XtaskError::SpawnUnsupported {
+            backend: self.name(),
+        })
+    }
+    /// Where on a fleet's site this backend's vehicle starts: on the
+    /// runway for one that takes off along it, else on the grass beside.
+    fn ground(&self) -> crate::site::Ground {
+        crate::site::Ground::Field
+    }
+    /// Selects the vehicle model named after the backend (`--fc
+    /// <backend>:<model>`). A backend with one vehicle has no models.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`XtaskError::UnknownModel`] for a model this backend does
+    /// not launch.
+    fn select_model(&mut self, model: &str) -> Result<(), XtaskError> {
+        Err(XtaskError::UnknownModel {
+            backend: self.name(),
+            model: model.to_owned(),
+            known: Vec::new(),
+        })
+    }
+    /// Resets the running simulation world and FC of simulator instance
+    /// `instance`. The default resets only instance 0, through
+    /// [`Self::reset`]: a backend that cannot tell its instances apart must
+    /// not reset the wrong one.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`XtaskError::ResetUnsupported`] for any other instance, or
+    /// the backend's own reset failure.
+    fn reset_instance(&self, repo_root: &std::path::Path, instance: u16) -> Result<(), XtaskError> {
+        if instance == 0 {
+            self.reset(repo_root)
+        } else {
+            Err(XtaskError::ResetUnsupported {
+                backend: self.name(),
+                instance,
+            })
+        }
+    }
     /// `pgrep -f` patterns that mark a stale session of this backend.
     fn stale_process_patterns(&self) -> Vec<&'static str>;
+    /// What this session holds that another session must not: the ports
+    /// its simulator and FC bind, and any machine-wide singleton.
+    ///
+    /// The launcher refuses to start only when one of these is in use, so
+    /// sessions that claim different things run side by side. The default
+    /// treats every process that matches [`Self::stale_process_patterns`]
+    /// as a conflict: a backend that does not say what it holds runs one
+    /// session per machine, never two that fight over a resource.
+    fn claims(&self, _ctx: &SessionContext) -> Vec<crate::conflicts::Claim> {
+        self.stale_process_patterns()
+            .into_iter()
+            .map(crate::conflicts::Claim::Process)
+            .collect()
+    }
     /// Resets the running simulation world and FC.
     ///
     /// # Errors
@@ -216,7 +345,7 @@ const BACKENDS: &[BackendEntry] = &[
     BackendEntry {
         name: "px4-gz",
         alias: Some("px4"),
-        make: || Box::new(px4_gz::Px4Gz),
+        make: || Box::new(px4_gz::Px4Gz::default()),
     },
     BackendEntry {
         name: "px4-xplane",
@@ -227,6 +356,16 @@ const BACKENDS: &[BackendEntry] = &[
         name: "aviate-xplane",
         alias: None,
         make: || Box::new(aviate_xplane::AviateXPlane),
+    },
+    BackendEntry {
+        name: "ardupilot-sitl",
+        alias: Some("ardupilot"),
+        make: || Box::new(ardupilot_sitl::ArduPilotSitl),
+    },
+    BackendEntry {
+        name: "betaflight-sitl",
+        alias: Some("betaflight"),
+        make: || Box::new(betaflight_sitl::BetaflightSitl),
     },
 ];
 
@@ -269,20 +408,30 @@ pub(crate) fn produce_xplane_handshake_blocking(
     xplane_handshake::produce_blocking(&root, &alia_xplane_preset(repo_root), out_dir)
 }
 
-/// Resolves `--fc` to a backend, fail-closed on unknown names.
+/// Resolves `--fc <backend>[:<model>]` to a backend, fail-closed on
+/// unknown names and models.
 ///
 /// # Errors
 ///
 /// Returns [`XtaskError::UnknownBackend`] for any name this launcher
-/// does not implement.
-pub fn backend_for(name: &str) -> Result<Box<dyn SimBackend>, XtaskError> {
-    BACKENDS
+/// does not implement, and [`XtaskError::UnknownModel`] for a model the
+/// backend does not launch.
+pub fn backend_for(spec: &str) -> Result<Box<dyn SimBackend>, XtaskError> {
+    let (name, model) = match spec.split_once(':') {
+        Some((name, model)) => (name, Some(model)),
+        None => (spec, None),
+    };
+    let mut backend = BACKENDS
         .iter()
         .find(|entry| entry.name == name || entry.alias == Some(name))
         .map(|entry| (entry.make)())
         .ok_or_else(|| XtaskError::UnknownBackend {
             name: name.to_owned(),
-        })
+        })?;
+    if let Some(model) = model {
+        backend.select_model(model)?;
+    }
+    Ok(backend)
 }
 
 #[cfg(test)]

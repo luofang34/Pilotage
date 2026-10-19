@@ -1,0 +1,12 @@
+[package]
+name = "pilotage-msp"
+description = "MultiWii Serial Protocol (MSP v1/v2) framing and typed payload codecs for Betaflight-family flight controllers"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = { workspace = true }

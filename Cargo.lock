@@ -1861,6 +1861,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-adapter-ardupilot"
+version = "0.1.0"
+dependencies = [
+ "pilotage-adapter-api",
+ "pilotage-mavlink",
+ "pilotage-protocol",
+ "pilotage-timing",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "pilotage-adapter-aviate"
 version = "0.1.0"
 dependencies = [
@@ -1881,6 +1895,21 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "pilotage-adapter-betaflight"
+version = "0.1.0"
+dependencies = [
+ "pilotage-adapter-api",
+ "pilotage-geo",
+ "pilotage-msp",
+ "pilotage-protocol",
+ "pilotage-timing",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -1911,6 +1940,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -2021,6 +2051,7 @@ dependencies = [
 name = "pilotage-control"
 version = "0.1.0"
 dependencies = [
+ "pilotage-client-session",
  "pilotage-input",
  "pilotage-protocol",
  "serde",
@@ -2108,6 +2139,7 @@ version = "0.1.0"
 dependencies = [
  "indicate-instrument-feeder",
  "indicate-instrument-state",
+ "pilotage-client-session",
  "pilotage-instrument-runtime",
  "pilotage-protocol",
 ]
@@ -2157,6 +2189,8 @@ version = "0.1.0"
 dependencies = [
  "pilotage-adapter-api",
  "pilotage-geo",
+ "pilotage-protocol",
+ "pilotage-timing",
  "thiserror",
  "tokio",
  "tracing",
@@ -2189,6 +2223,23 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "thiserror",
+]
+
+[[package]]
+name = "pilotage-msp"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
+name = "pilotage-multirotor-fdm"
+version = "0.1.0"
+dependencies = [
+ "pilotage-msp",
+ "thiserror",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -2262,7 +2313,9 @@ dependencies = [
  "jpeg-encoder",
  "navigate-contract",
  "pilotage-adapter-api",
+ "pilotage-adapter-ardupilot",
  "pilotage-adapter-aviate",
+ "pilotage-adapter-betaflight",
  "pilotage-adapter-gazebo",
  "pilotage-adapter-px4",
  "pilotage-adapter-reference",

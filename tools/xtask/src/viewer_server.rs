@@ -10,7 +10,7 @@
 //! and serve a tree nobody is watching.
 
 use std::net::{IpAddr, Ipv4Addr, TcpListener, TcpStream};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -94,7 +94,7 @@ pub fn parse_args(args: &[String]) -> Result<ServeViewerArgs, XtaskError> {
 /// Returns [`XtaskError::Io`] when the directory cannot be resolved, the
 /// socket cannot be bound, or the accept thread cannot start or stops.
 pub fn run_serve_viewer(args: &ServeViewerArgs) -> Result<(), XtaskError> {
-    let root = args.dir.canonicalize().map_err(|source| XtaskError::Io {
+    let root = http::ServedTree::resolve_blocking(&args.dir).map_err(|source| XtaskError::Io {
         context: "resolving the viewer directory",
         source,
     })?;
@@ -120,7 +120,7 @@ pub fn run_serve_viewer(args: &ServeViewerArgs) -> Result<(), XtaskError> {
             source,
         })?;
     print_line(&format!("LISTENING {port}"));
-    tracing::info!(root = %root.display(), port, bind = %args.bind, "serving the viewer");
+    tracing::info!(root = %root.root().display(), port, bind = %args.bind, "serving the viewer");
     // Returning from `main` ends every connection thread with it.
     while std::os::unix::process::parent_id() == parent {
         if accepting.is_finished() {
@@ -136,7 +136,7 @@ pub fn run_serve_viewer(args: &ServeViewerArgs) -> Result<(), XtaskError> {
 }
 
 /// Accepts connections forever, serving each on its own thread.
-pub(crate) fn serve(listener: &TcpListener, root: &Arc<PathBuf>) {
+pub(crate) fn serve(listener: &TcpListener, root: &Arc<http::ServedTree>) {
     for stream in listener.incoming() {
         let stream = match stream {
             Ok(stream) => stream,
@@ -155,7 +155,7 @@ pub(crate) fn serve(listener: &TcpListener, root: &Arc<PathBuf>) {
     }
 }
 
-fn handle_connection(mut stream: TcpStream, root: &Path) {
+fn handle_connection(mut stream: TcpStream, root: &http::ServedTree) {
     stream.set_read_timeout(Some(READ_TIMEOUT)).ok();
     // The readiness probe connects and closes without a request; that is
     // not an error worth logging.

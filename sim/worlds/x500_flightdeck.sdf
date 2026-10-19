@@ -81,11 +81,18 @@
       <uri>model://flightdeck_scenery</uri>
     </include>
 
+    <!-- Pilotage: the vehicle and its camera rig are posed relative to
+         this frame, so the launcher turns both with one yaw to face a
+         spawn heading (ENU: yaw counter-clockwise from east). -->
+    <frame name="vehicle_spawn">
+      <pose>0 0 0 0 0 1.5707964</pose>
+    </frame>
+
     <!-- Vehicle: x500 (instance 0) -->
     <include>
       <uri>model://x500</uri>
       <name>x500</name>
-      <pose>0 0 0 0 0 1.5707964</pose>
+      <pose relative_to="vehicle_spawn">0 0 0 0 0 0</pose>
 
       <!-- Odometry publisher -->
       <plugin filename="gz-sim-odometry-publisher-system"
@@ -100,9 +107,9 @@
          bridges (/camera source 0, /chase_camera source 1). The rig is a
          separate model joined to the vehicle at world scope so the
          included x500 model (and the AviateGzPlugin's lookup of it) stays
-         untouched. Spawn pose matches the x500 include (yaw 90°). -->
+         untouched. Both are posed relative to the vehicle_spawn frame. -->
     <model name="x500_camera_rig">
-      <pose>0 0 0.24 0 0 1.5707964</pose>
+      <pose relative_to="vehicle_spawn">0 0 0.24 0 0 0</pose>
       <link name="rig_link">
         <inertial>
           <mass>0.01</mass>

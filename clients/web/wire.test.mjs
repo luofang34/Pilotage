@@ -469,16 +469,19 @@ check(
     message.fcState?.lastCommand === null);
   check("no estimate lane is synthesized alongside truth", message.avionics === null);
 
-  // The FC's COMMAND_ACK verdict lane: kind (1 arm / 2 disarm) plus the
-  // raw MAV_RESULT survive decode — the enactment truth for a refusal.
+  // The FC's verdict lane: kind (1 arm / 2 disarm) plus the typed
+  // CommandOutcome survive decode — the enactment truth for a refusal.
+  // The deprecated FC-specific result code (field 4) is never read.
   const refused = [];
   varint(refused, (1 << 3) | 0); // arm_state
   varint(refused, 1); // DISARMED
   bytesField(refused, 2, measurementStamp(1, 1, 4, 78, 3, 0x22, 3));
   varint(refused, (3 << 3) | 0); // last_command_kind
   varint(refused, 1); // the refused command was an ARM
-  varint(refused, (4 << 3) | 0); // last_command_result
-  varint(refused, 4); // MAV_RESULT_TEMPORARILY_REJECTED
+  varint(refused, (4 << 3) | 0); // deprecated last_command_result
+  varint(refused, 9); // ignored by the decoder
+  varint(refused, (5 << 3) | 0); // last_command_outcome
+  varint(refused, 4); // COMMAND_OUTCOME_DENIED
   const refusedTelemetry = [];
   bytesField(refusedTelemetry, 1, uint64Message(1));
   bytesField(refusedTelemetry, 2, uint64Message(43));
@@ -532,7 +535,7 @@ check(
 
 // ---- LINK-04 payload-device lane: gimbal (9) --------------------------------
 // Gimbal attitude travels as its own payload-device-stamped message: it
-// surfaces orientation, rates, flags, and failure flags, and is unconsumable
+// surfaces orientation, rates, yaw frame, and failure flags, and is unconsumable
 // (null) without a payload-device-role stamp, so a mislabeled lane can never
 // drive the camera view or be mistaken for FC state.
 {
@@ -542,8 +545,10 @@ check(
   f32Field(gimbal, 6, -0.5); // rate_y
   f32Field(gimbal, 7, 0.75); // rate_z
   bytesField(gimbal, 8, measurementStamp(9, 2, 5000, 5_000_000, 4, 0x33, 5)); // payload-device role
-  varint(gimbal, (9 << 3) | 0); // flags
+  varint(gimbal, (9 << 3) | 0); // deprecated flags: ignored by the decoder
   varint(gimbal, 0b101);
+  varint(gimbal, (11 << 3) | 0); // yaw_frame
+  varint(gimbal, 2); // GIMBAL_YAW_FRAME_EARTH
   varint(gimbal, (10 << 3) | 0); // failure_flags
   varint(gimbal, 0b10);
 
@@ -558,8 +563,9 @@ check(
 
   check("gimbal lane decodes orientation and rates",
     message.gimbal?.quat?.w === 1.0 && message.gimbal?.ratesRadS?.[1] === -0.5);
-  check("gimbal lane surfaces device flags and failure flags",
-    message.gimbal?.flags === 0b101 && message.gimbal?.failureFlags === 0b10);
+  check("gimbal lane surfaces the yaw frame and failure flags, not device bits",
+    message.gimbal?.yawFrame === 2 && message.gimbal?.failureFlags === 0b10
+    && message.gimbal?.flags === undefined);
   check("gimbal stamp carries the payload-device role and vehicle-boot clock",
     message.gimbal?.stamp?.role === 5 && message.gimbal?.stamp?.clock === 4);
 

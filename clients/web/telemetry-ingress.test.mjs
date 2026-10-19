@@ -733,7 +733,7 @@ function fcReport(sequence, armState = 2, overrides = {}) {
       acquiredAtNanos: BigInt(sequence) * 1_000_000n,
       clock: 3, // host-monotonic: the FC-state role's only legal clock
       role: 3,
-      integrity: 2, // checksummed-only MAVLink
+      integrity: 2, // checksummed-only link
       ...overrides,
     },
   };

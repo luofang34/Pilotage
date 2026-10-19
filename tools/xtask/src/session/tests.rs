@@ -53,6 +53,9 @@ fn test_context() -> SessionContext {
         profile: crate::cli::Profile::Simulation,
         log_dir: std::env::temp_dir(),
         lan: false,
+        web_root: std::env::temp_dir(),
+        instance: 0,
+        ready_timeout_s: crate::backend::DEFAULT_READY_TIMEOUT_S,
     }
 }
 use super::supervise::supervise;
@@ -185,4 +188,36 @@ impl crate::backend::SimBackend for WaitingRestartWork {
             Ok(())
         }))
     }
+}
+
+/// Instance 0 keeps the run directory the reset scripts read the
+/// supervisor marker from; another instance never shares it.
+#[test]
+fn each_instance_runs_in_a_directory_of_its_own() {
+    assert_eq!(
+        super::sim_run_dir(0),
+        std::path::PathBuf::from("target/xtask-sim")
+    );
+    assert_eq!(
+        super::sim_run_dir(5),
+        std::path::PathBuf::from("target/xtask-sim/instance-5")
+    );
+    assert_ne!(super::sim_run_dir(5), super::sim_run_dir(6));
+}
+
+/// A session claims its own host and viewer ports before anything of
+/// its backend's.
+#[test]
+fn a_session_claims_its_host_and_viewer_ports() {
+    use crate::conflicts::{Claim, session_claims};
+
+    let mut ctx = test_context();
+    ctx.host_port = 4533;
+    ctx.viewer_port = 8180;
+    let claims = session_claims(&ctx, &NoRestartWork);
+    assert!(matches!(
+        claims.first(),
+        Some(Claim::Udp { port: 4533, .. })
+    ));
+    assert!(matches!(claims.get(1), Some(Claim::Tcp { port: 8180, .. })));
 }

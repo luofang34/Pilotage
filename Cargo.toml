@@ -11,6 +11,8 @@ members = [
     "crates/pilotage-timing",
     "crates/pilotage-adapter-api",
     "crates/pilotage-mavlink",
+    "crates/pilotage-msp",
+    "sim/multirotor-fdm",
     "crates/pilotage-conformance",
     "crates/pilotage-situation-view",
     "crates/pilotage-airspace-view",
@@ -38,6 +40,8 @@ members = [
     "adapters/reference-headless",
     "adapters/aviate",
     "adapters/px4",
+    "adapters/ardupilot",
+    "adapters/betaflight",
     "tools/hid-probe",
     "tools/flight-tune",
     "tools/flight-tune-campaign",
@@ -132,6 +136,7 @@ pilotage-ingress = { path = "crates/pilotage-ingress" }
 pilotage-input = { path = "crates/pilotage-input" }
 pilotage-adapter-api = { path = "crates/pilotage-adapter-api" }
 pilotage-mavlink = { path = "crates/pilotage-mavlink" }
+pilotage-msp = { path = "crates/pilotage-msp" }
 pilotage-situation-view = { path = "crates/pilotage-situation-view" }
 pilotage-airspace-view = { path = "crates/pilotage-airspace-view" }
 pilotage-navdata-tiles = { path = "crates/pilotage-navdata-tiles" }
@@ -144,6 +149,8 @@ pilotage-adapter-gazebo = { path = "adapters/gazebo" }
 pilotage-sim-video = { path = "adapters/sim-video" }
 pilotage-adapter-aviate = { path = "adapters/aviate", default-features = false }
 pilotage-adapter-px4 = { path = "adapters/px4", default-features = false }
+pilotage-adapter-ardupilot = { path = "adapters/ardupilot" }
+pilotage-adapter-betaflight = { path = "adapters/betaflight" }
 pilotage-session = { path = "crates/pilotage-session" }
 pilotage-mission = { path = "crates/pilotage-mission" }
 pilotage-instrument-runtime = { path = "crates/pilotage-instrument-runtime" }

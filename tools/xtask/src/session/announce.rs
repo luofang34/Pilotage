@@ -177,7 +177,8 @@ fn lan_address() -> Option<String> {
     Some(socket.local_addr().ok()?.ip().to_string())
 }
 
-/// Writes the served session manifest (`clients/web/session.json`): any
+/// Writes the served session manifest (`session.json` in the session's
+/// web root): any
 /// viewer tab — including one whose URL pins an older session's
 /// certificate — re-reads it after a failed connect and converges on
 /// THIS session. Best-effort: a failed write only loses stale-tab
@@ -189,7 +190,7 @@ fn write_session_manifest(
     port: u16,
     certificate: &str,
 ) {
-    let path = ctx.repo_root.join("clients/web/session.json");
+    let path = ctx.web_root.join(super::stages::MANIFEST_NAME);
     if let Err(error) = std::fs::write(
         &path,
         session_manifest(session_host, lan_ip, port, certificate),

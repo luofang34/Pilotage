@@ -9,10 +9,12 @@ use std::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use super::http::ServedTree;
 use super::{ServeViewerArgs, parse_args, serve};
 
-/// A served tree `<tmp>/<tag>/web` with a sibling file outside it, and a
-/// server on an OS-chosen loopback port.
+/// A served tree `<tmp>/<tag>/web` with a sibling file outside it, a
+/// top-level link into a sibling `source` tree, a nested link out of the
+/// tree, and a server on an OS-chosen loopback port.
 struct Fixture {
     base: PathBuf,
     port: u16,
@@ -28,7 +30,13 @@ impl Fixture {
         std::fs::write(web.join("runtime_bg.wasm"), b"\0asm\x01\0\0\0").expect("wasm is written");
         std::fs::write(web.join("sub/index.html"), "sub").expect("sub index is written");
         std::fs::write(base.join("secret.txt"), "outside").expect("outside file is written");
-        let root = Arc::new(web.canonicalize().expect("the served tree resolves"));
+        std::fs::create_dir_all(base.join("source")).expect("the link source is created");
+        std::fs::write(base.join("source/linked.js"), "export {};")
+            .expect("linked file is written");
+        std::os::unix::fs::symlink(base.join("source"), web.join("linked"))
+            .expect("a top-level link is made");
+        std::os::unix::fs::symlink(&base, web.join("sub/escape")).expect("a nested link is made");
+        let root = Arc::new(ServedTree::resolve_blocking(&web).expect("the served tree resolves"));
         let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port binds");
         let port = listener.local_addr().expect("the port is readable").port();
         std::thread::spawn(move || serve(&listener, &root));
@@ -127,6 +135,7 @@ fn paths_outside_the_tree_are_not_found() {
         "//../secret.txt",
         "/missing.js",
         "/bad%zzescape",
+        "/sub/escape/secret.txt",
     ] {
         let (head, body) = fixture.request("GET", target);
         assert!(
@@ -136,6 +145,14 @@ fn paths_outside_the_tree_are_not_found() {
         assert!(head.contains("cache-control: no-store"), "{head}");
         assert_ne!(body, b"outside", "{target} leaked a file outside the tree");
     }
+}
+
+#[test]
+fn files_under_a_top_level_link_are_served() {
+    let fixture = Fixture::start("linked");
+    let (head, body) = fixture.request("GET", "/linked/linked.js");
+    assert_eq!(status(&head), "200", "{head}");
+    assert_eq!(body, b"export {};");
 }
 
 #[test]

@@ -11,6 +11,7 @@
 //! A guard written in Rust is a function in a submodule here, proven
 //! by its unit tests. Each runs after the pairs.
 
+mod aviate_control_feel;
 mod pipefail_pipelines;
 
 use std::path::{Path, PathBuf};
@@ -18,6 +19,8 @@ use std::process::Command;
 
 use crate::error::XtaskError;
 use crate::output::print_line;
+
+mod fc_vocabulary;
 
 #[cfg(test)]
 mod tests;
@@ -59,6 +62,58 @@ pub fn run_guards(repo_root: &Path) -> Result<(), XtaskError> {
 }
 
 fn run_rust_guards(repo_root: &Path, failed: &mut Vec<String>) {
+    run_aviate_control_feel(repo_root, failed);
+    run_fc_vocabulary(repo_root, failed);
+    run_pipefail_pipelines(repo_root, failed);
+}
+
+fn run_aviate_control_feel(repo_root: &Path, failed: &mut Vec<String>) {
+    let name = "aviate-control-feel-boundary";
+    match aviate_control_feel::check(repo_root) {
+        Ok(findings) if findings.is_empty() => print_line(&format!("guard {name}: ok")),
+        Ok(findings) => {
+            for finding in &findings {
+                print_line(&format!(
+                    "FORBIDDEN: Aviate response constant bypasses the control-feel artifact: {}/{}:{}",
+                    aviate_control_feel::AVIATE_SRC,
+                    finding.path,
+                    finding.name
+                ));
+            }
+            print_line(&format!("guard {name}: FAILED at the check"));
+            failed.push(name.to_owned());
+        }
+        Err(error) => {
+            print_line(&format!("guard {name}: FAILED: {error}"));
+            failed.push(name.to_owned());
+        }
+    }
+}
+
+fn run_fc_vocabulary(repo_root: &Path, failed: &mut Vec<String>) {
+    let name = "fc-vocabulary";
+    match fc_vocabulary::scan(repo_root) {
+        Ok(findings) if findings.is_empty() => print_line(&format!("guard {name}: ok")),
+        Ok(findings) => {
+            for finding in &findings {
+                print_line(&format!(
+                    "FORBIDDEN: flight-controller vocabulary in a client: {}:{}: {}",
+                    finding.path.display(),
+                    finding.line,
+                    finding.text
+                ));
+            }
+            print_line(&format!("guard {name}: FAILED at the check"));
+            failed.push(name.to_owned());
+        }
+        Err(error) => {
+            print_line(&format!("guard {name}: FAILED: {error}"));
+            failed.push(name.to_owned());
+        }
+    }
+}
+
+fn run_pipefail_pipelines(repo_root: &Path, failed: &mut Vec<String>) {
     let name = "pipefail-pipelines";
     match pipefail_pipelines::check(repo_root) {
         Ok(findings) if findings.is_empty() => print_line(&format!("guard {name}: ok")),

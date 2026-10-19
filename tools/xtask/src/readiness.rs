@@ -97,6 +97,14 @@ pub async fn await_ready(
     }
 }
 
+#[cfg(test)]
+impl Readiness {
+    /// The deadline, in seconds.
+    pub(crate) fn timeout_s(&self) -> u64 {
+        describe(self).0
+    }
+}
+
 fn describe(readiness: &Readiness) -> (u64, String) {
     match readiness {
         Readiness::CommandOutput {

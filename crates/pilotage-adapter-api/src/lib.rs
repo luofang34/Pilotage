@@ -19,7 +19,8 @@ pub use capability::{
 };
 pub use control::{
     ActionResult, ApplyOutcome, Disposition, LinkLossEnactError, LinkLossPolicy, RejectReason,
-    attitude_euler, intent_satisfies_neutral_activation, payload_satisfies_neutral_activation,
+    attitude_euler, intent_satisfies_neutral_activation, link_loss_latch_engaged,
+    payload_satisfies_neutral_activation,
 };
 // CAL-01 (#90): the camera calibration contract moved to
 // `pilotage-camera-calibration`; re-export it so `pilotage_adapter_api::…` paths
@@ -33,6 +34,10 @@ pub use pilotage_camera_calibration::{
     ToolVersion, ValidityStatus, VerifiedCameraModel, Viewport, content_hash, derive_budget,
     radians_per_pixel, recover_intrinsics, sim_fpv_calibration, to_canonical, validate, verify,
     verify_camera, verify_sim_recovery,
+};
+// The typed vocabulary an adapter reports, shared with clients.
+pub use pilotage_protocol::{
+    CommandOutcome, GimbalAxisLocks, GimbalReference, GimbalYawFrame, VehicleClass,
 };
 pub use step::{StepBudget, StepOutcome};
 pub use telemetry::{

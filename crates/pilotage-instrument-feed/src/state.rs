@@ -6,6 +6,7 @@ use indicate_instrument_state::{
     AircraftState, Attitude, EstimateQuality, HeadingReference, HeadingSample, Kinematics,
     SnapshotCoherence, SnapshotMeta, Stamped, ValidFlags,
 };
+use pilotage_client_session::telemetry::{self, EstimatorValidity};
 use pilotage_instrument_runtime::feeder::{
     Ingress, IngressParams, NavGuidance, Turn, nav_display_state,
 };
@@ -96,8 +97,8 @@ impl InstrumentFeed {
                 .map_or(f64::NAN, f64::from),
             snapshot.attitude.as_ref().map(|group| &group.stamp),
         );
-        let valid_flags = snapshot.valid_flags;
-        let attitude_valid = valid_flags & 1 != 0;
+        let validity = EstimatorValidity::from_flags(snapshot.valid_flags);
+        let attitude_valid = validity.attitude;
         AircraftState {
             attitude: stamped_group(snapshot.attitude.as_ref(), |group| Attitude {
                 quat: indicate_instrument_state::Quat {
@@ -136,10 +137,10 @@ impl InstrumentFeed {
             quality: quality_from_code(snapshot.quality),
             valid: ValidFlags {
                 attitude: attitude_valid,
-                rates: valid_flags & 2 != 0,
-                position: valid_flags & 4 != 0,
-                velocity_horizontal: valid_flags & 8 != 0,
-                velocity_vertical: valid_flags & 8 != 0,
+                rates: validity.rates,
+                position: validity.position,
+                velocity_horizontal: validity.velocity,
+                velocity_vertical: validity.velocity,
                 heading: attitude_valid && snapshot.attitude.is_some(),
                 turn: attitude_valid,
                 slip: false,
@@ -208,11 +209,11 @@ fn to_age_ms(age_ms: f64) -> Option<f32> {
 }
 
 fn quality_from_code(code: u32) -> EstimateQuality {
-    match code {
-        0 => EstimateQuality::Good,
-        1 => EstimateQuality::Degraded,
-        2 => EstimateQuality::Unusable,
-        _ => EstimateQuality::Unknown,
+    match telemetry::EstimateQuality::from_code(code) {
+        Some(telemetry::EstimateQuality::Good) => EstimateQuality::Good,
+        Some(telemetry::EstimateQuality::Degraded) => EstimateQuality::Degraded,
+        Some(telemetry::EstimateQuality::Unusable) => EstimateQuality::Unusable,
+        None => EstimateQuality::Unknown,
     }
 }
 

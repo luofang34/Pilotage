@@ -44,6 +44,8 @@ pub(crate) fn encode_frame(msg_id: u32, payload: &[u8], truncate: bool) -> Vec<u
         115 => 4,
         24 => 24,
         20_000 => 171,
+        22 => 220,
+        83 => 22,
         // The table is kept apart from the decoder's on purpose, so the
         // two are independent statements of the same wire fact. An id the
         // decoder knows and this table does not would make a frame the
@@ -323,7 +325,10 @@ fn garbage_prefix_resyncs_to_the_next_frame() {
     let mut out: Vec<(FrameSource, FcMessage)> = Vec::new();
     let stats = parse_datagram(&datagram, &mut out);
     assert_eq!(stats.garbage_bytes, 3);
-    assert_eq!(out, vec![(SOURCE, FcMessage::Heartbeat { armed: false })]);
+    assert!(matches!(
+        out.as_slice(),
+        [(SOURCE, FcMessage::Heartbeat { armed: false, .. })]
+    ));
 }
 
 #[test]
@@ -340,7 +345,11 @@ fn gcs_heartbeat_parses_back_as_heartbeat() {
                 component_id: 190,
                 frame_sequence: 4,
             },
-            FcMessage::Heartbeat { armed: false }
+            FcMessage::Heartbeat {
+                armed: false,
+                custom_mode: 0,
+                autopilot: 8, // MAV_AUTOPILOT_INVALID: a GCS has no autopilot.
+            }
         )]
     );
 }
@@ -434,50 +443,17 @@ fn gimbal_status_v2_truncated_payload_zero_extends() {
     }
 }
 
-#[test]
-fn gimbal_rate_setpoint_locks_the_wire_layout() {
-    let frame = super::encode_gimbal_rate_setpoint(9, 0.4, -0.6, 1, 1);
-    // Header: v2 magic, 35-byte payload, GCS identity, msg id 282.
-    assert_eq!(frame[0], MAGIC_V2);
-    assert_eq!(frame[1], 35);
-    assert_eq!(frame[4], 9);
-    assert_eq!(frame[5], 255);
-    assert_eq!(frame[6], 190);
-    assert_eq!(
-        u32::from(frame[7]) | (u32::from(frame[8]) << 8) | (u32::from(frame[9]) << 16),
-        super::GIMBAL_MANAGER_SET_ATTITUDE_ID
-    );
-    let payload = &frame[10..45];
-    assert_eq!(
-        &payload[0..4],
-        &12u32.to_le_bytes(),
-        "horizon + yaw-follow flags"
-    );
-    // q[0..4] and angular_velocity_x are NaN ("ignored").
-    for slot in 0..5 {
-        let at = 4 + slot * 4;
-        let bytes: [u8; 4] = payload[at..at + 4].try_into().expect("slice length");
-        assert!(
-            f32::from_le_bytes(bytes).is_nan(),
-            "slot {slot} must be NaN"
-        );
-    }
-    let pitch: [u8; 4] = payload[24..28].try_into().expect("slice length");
-    let yaw: [u8; 4] = payload[28..32].try_into().expect("slice length");
-    assert_eq!(f32::from_le_bytes(pitch), 0.4);
-    assert_eq!(f32::from_le_bytes(yaw), -0.6);
-    assert_eq!(payload[32], 1, "target system");
-    assert_eq!(payload[33], 1, "target component");
-    assert_eq!(payload[34], 0, "all gimbal devices");
-    // The CRC must verify under CRC_EXTRA 123 (checked against PX4's
-    // generated common-dialect headers).
-    let wire_crc = u16::from(frame[45]) | (u16::from(frame[46]) << 8);
-    assert_eq!(super::compute_crc(&frame[1..45], 123), wire_crc);
-}
-
 /// The truth lane: the payload a simulator's ground-truth report arrives
 /// in, and what a report short of that payload decodes to.
 mod sim_truth;
 
 /// BATTERY_STATUS against frames from an independent encoder.
 mod battery;
+
+/// ArduPilot frames against frames from an independent encoder.
+mod ardupilot;
+/// The joystick and parameter-protocol subset against an independent encoder.
+mod stick_and_parameter;
+
+/// Uplink setpoint layouts and the attitude-target report.
+mod setpoints;

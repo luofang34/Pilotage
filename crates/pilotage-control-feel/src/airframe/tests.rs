@@ -240,3 +240,18 @@ fn shaping_leaves_the_legacy_law_exactly_as_the_adapter_demands_it() {
         );
     }
 }
+
+#[test]
+fn each_shaped_law_hovers_at_its_own_airframes_trim() {
+    for limits in AirframeLimits::ALL {
+        for mode in [FeelMode::Precision, FeelMode::Balanced, FeelMode::Agile] {
+            let shaped = FlightFeelProfile::shaped_for(limits, mode);
+            assert_eq!(
+                shaped.envelope.direct_hover_thrust.to_bits(),
+                limits.hover_thrust.to_bits(),
+                "{} {mode:?}",
+                limits.id
+            );
+        }
+    }
+}

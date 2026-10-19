@@ -4,6 +4,9 @@
 //! the wire, sampling authorization from the standard status, and the
 //! same gate discipline the Aviate adapter carries.
 
+mod battery;
+mod direct_flight;
+mod fixed_wing_advertisement;
 mod uplink_ack;
 
 use std::net::UdpSocket;
@@ -80,8 +83,11 @@ pub(super) fn fake_fc() -> (UdpSocket, std::net::SocketAddr) {
     (fc, addr)
 }
 
+/// An uplink whose offboard-loss Hold PX4 has already confirmed.
 pub(super) fn uplink_to(addr: std::net::SocketAddr) -> Px4Uplink {
-    Px4Uplink::new(addr).expect("uplink")
+    let mut uplink = Px4Uplink::new(addr).expect("uplink");
+    uplink.confirm_failsafe();
+    uplink
 }
 
 fn press(button: u16) -> pilotage_protocol::ScopedControlFrame {
@@ -387,7 +393,7 @@ fn fresh_epoch_and_neutral_input_clear_the_reset_latch() {
     let fc = UdpSocket::bind("127.0.0.1:0").expect("bind fake FC");
     fc.set_read_timeout(Some(Duration::from_secs(2)))
         .expect("timeout");
-    let uplink = Px4Uplink::new(fc.local_addr().expect("addr")).expect("uplink");
+    let uplink = uplink_to(fc.local_addr().expect("addr"));
     let mut adapter = Px4Adapter::from_state(VehicleId::new(1), state.clone()).with_uplink(uplink);
     adapter.apply_control(&lifecycle_reset_frame());
 

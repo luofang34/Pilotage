@@ -50,11 +50,11 @@ pub(crate) use startup::validate_aviate_profile_bindings;
 
 /// The control scope exposes four canonical flight axes as DJI-style
 /// velocity demands.
-pub const FLIGHT_SCOPE: &str = "vehicle.motion";
+pub const FLIGHT_SCOPE: &str = pilotage_protocol::MOTION_SCOPE;
 /// The direct-flight scope (CTRL-01): attitude + collective thrust under its
 /// OWN lease and authority generation — never a reinterpretation of the
 /// velocity scope's numbers.
-pub const DIRECT_SCOPE: &str = "vehicle.motion.direct";
+pub const DIRECT_SCOPE: &str = pilotage_protocol::DIRECT_SCOPE;
 /// The gimbal pointing scope (GIM-01, ADR-0006 vocabulary): pitch/yaw
 /// line-of-sight rate demands, leased and fenced independently of flight.
 /// Here the payload is a producer-rendered view, not a servo gimbal — the

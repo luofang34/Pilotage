@@ -28,7 +28,9 @@ impl FlightUplink {
                     continue;
                 }
                 match *message {
-                    pilotage_mavlink::codec::FcMessage::Heartbeat { armed: a } => armed = Some(a),
+                    pilotage_mavlink::codec::FcMessage::Heartbeat { armed: a, .. } => {
+                        armed = Some(a)
+                    }
                     pilotage_mavlink::codec::FcMessage::CommandAck {
                         command, result, ..
                     } => {

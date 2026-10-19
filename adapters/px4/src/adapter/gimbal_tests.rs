@@ -78,6 +78,20 @@ pub(super) fn next_command(lanes: &mut GimbalLanes) -> u16 {
 }
 
 #[test]
+fn capabilities_declare_the_configured_airframe_with_a_name() {
+    use pilotage_protocol::VehicleClass;
+    let default = Px4Adapter::from_state(VehicleId::new(1), live_state());
+    let vehicle = &default.capabilities().vehicles[0];
+    assert_eq!(vehicle.class, VehicleClass::Multicopter);
+    assert_eq!(vehicle.display_name, "PX4 multicopter");
+    let plane = Px4Adapter::from_state(VehicleId::new(1), live_state())
+        .with_vehicle_class(VehicleClass::FixedWing);
+    let vehicle = &plane.capabilities().vehicles[0];
+    assert_eq!(vehicle.class, VehicleClass::FixedWing);
+    assert_eq!(vehicle.display_name, "PX4 fixed-wing");
+}
+
+#[test]
 fn capabilities_advertise_the_gimbal_scope_alongside_flight() {
     let (fc, addr) = fake_fc();
     drop(fc);
@@ -94,6 +108,7 @@ fn capabilities_advertise_the_gimbal_scope_alongside_flight() {
         scopes,
         vec![
             super::FLIGHT_SCOPE.to_owned(),
+            super::DIRECT_SCOPE.to_owned(),
             pilotage_adapter_api::SIM_LIFECYCLE_SCOPE.to_owned(),
             super::GIMBAL_SCOPE.to_owned(),
         ]
@@ -115,6 +130,7 @@ fn a_vehicle_without_a_gimbal_advertises_no_gimbal_scope() {
         scopes,
         vec![
             super::FLIGHT_SCOPE.to_owned(),
+            super::DIRECT_SCOPE.to_owned(),
             pilotage_adapter_api::SIM_LIFECYCLE_SCOPE.to_owned(),
         ],
         "no gimbal, no gimbal scope — the sim lifecycle scope remains"
@@ -343,7 +359,18 @@ fn gimbal_attitude_is_stamped_as_a_payload_device_on_the_device_clock() {
     );
     // The device's own boot-relative time (ms) carried as ns, not host time.
     assert_eq!(gimbal.stamp.acquired_at_ns, 5_000 * 1_000_000);
-    assert_eq!(gimbal.flags, 12);
+    // Roll and pitch lock (flags 12) with yaw following the vehicle.
+    assert_eq!(
+        gimbal.reference,
+        pilotage_adapter_api::GimbalReference {
+            yaw_frame: pilotage_adapter_api::GimbalYawFrame::Vehicle,
+            locks: pilotage_adapter_api::GimbalAxisLocks {
+                roll: true,
+                pitch: true,
+                yaw: false,
+            },
+        }
+    );
     assert_eq!(gimbal.failure_flags, 0);
 }
 

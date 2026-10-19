@@ -22,6 +22,8 @@ pub struct Admission {
     /// Present holders at the moment of admission, so ownership renders
     /// without waiting for the next authority event.
     pub scope_holders: Vec<wire::ScopeHolderSnapshot>,
+    /// Whether the host drives a physical vehicle rather than a simulation.
+    pub physically_embodied: bool,
 }
 
 /// One vehicle and the scopes it publishes.
@@ -31,6 +33,9 @@ pub struct VehicleCatalog {
     pub vehicle_id: u64,
     /// The host's display name for the vehicle.
     pub display_name: String,
+    /// The kind of vehicle the adapter declares; `None` when it declared
+    /// no class this build knows.
+    pub vehicle_class: Option<pilotage_protocol::VehicleClass>,
     /// The control scopes this vehicle publishes.
     pub scopes: Vec<ScopeCatalog>,
 }
@@ -45,6 +50,10 @@ pub struct ScopeCatalog {
     pub intents: Vec<wire::IntentCapability>,
     /// The typed discrete actions this scope accepts.
     pub actions: Vec<wire::ActionCapability>,
+    /// The exclusive-authority group the host holds this scope under; the
+    /// scope's own name when it is its own group. Authority events name
+    /// the group, so a group revocation also ends this scope's lease.
+    pub authority_group: String,
 }
 
 impl Admission {
@@ -62,6 +71,7 @@ impl Admission {
             .map(|descriptor| VehicleCatalog {
                 vehicle_id: descriptor.vehicle.as_ref().map_or(0, |v| v.value),
                 display_name: descriptor.display_name.clone(),
+                vehicle_class: pilotage_protocol::VehicleClass::from_wire(descriptor.vehicle_class),
                 scopes: descriptor
                     .scopes
                     .iter()
@@ -73,6 +83,15 @@ impl Admission {
                             .unwrap_or_default(),
                         intents: scope.intents.clone(),
                         actions: scope.actions.clone(),
+                        authority_group: if scope.authority_group.is_empty() {
+                            scope
+                                .scope
+                                .as_ref()
+                                .map(|s| s.value.clone())
+                                .unwrap_or_default()
+                        } else {
+                            scope.authority_group.clone()
+                        },
                     })
                     .collect(),
             })
@@ -84,7 +103,19 @@ impl Admission {
             vehicles,
             control_feel: capabilities.control_feel,
             scope_holders: welcome.scope_holders.clone(),
+            physically_embodied: capabilities.physically_embodied,
         })
+    }
+
+    /// The authority group `scope` of `vehicle_id` is held under: the
+    /// scope itself when the host declared no group or does not know it.
+    #[must_use]
+    pub fn authority_group_of<'a>(&'a self, vehicle_id: u64, scope: &'a str) -> &'a str {
+        self.vehicles
+            .iter()
+            .find(|vehicle| vehicle.vehicle_id == vehicle_id)
+            .and_then(|vehicle| vehicle.scopes.iter().find(|s| s.scope == scope))
+            .map_or(scope, |s| s.authority_group.as_str())
     }
 
     /// Whether the host offers any control scope at all. Control further

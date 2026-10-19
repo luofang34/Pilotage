@@ -609,10 +609,10 @@ export function createCockpitReadout({
     const key = verdict ? `${verdict.arm ? "arm" : "disarm"}:${verdict.result}` : null;
     if (key === state.lastFcVerdictLogged) return;
     state.lastFcVerdictLogged = key;
-    if (verdict && verdict.result !== 0) {
+    if (verdict && verdict.result >= 3) {
       const which = verdict.arm ? "arm" : "disarm";
-      els.overlay.textContent = `FC refused ${which} (result ${verdict.result})`;
-      log(`FC refused the ${which} command (MAV_RESULT ${verdict.result})`);
+      els.overlay.textContent = `FC refused ${which} (outcome ${verdict.result})`;
+      log(`FC refused the ${which} command (CommandOutcome ${verdict.result})`);
     }
   }
 

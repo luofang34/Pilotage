@@ -3,7 +3,7 @@
 
 use super::{
     COMMAND_ACK_ID, COMMAND_LONG_ID, GIMBAL_MANAGER_SET_ATTITUDE_ID, HEARTBEAT_ID, MAGIC_V2,
-    SET_POSITION_TARGET_ID, compute_crc,
+    MANUAL_CONTROL_ID, SET_POSITION_TARGET_ID, compute_crc,
 };
 
 /// MAVLink system id stamped on every frame this codec encodes (the
@@ -16,7 +16,13 @@ pub const GCS_COMPONENT_ID: u8 = 190;
 /// Writes a MAVLink 2.0 frame ([`GCS_SYSTEM_ID`]/[`GCS_COMPONENT_ID`])
 /// around `payload` into `out`, returning the frame length. `out` must
 /// hold `10 + payload.len() + 2` bytes; a too-small buffer returns 0.
-fn encode_frame_v2(seq: u8, msg_id: u32, payload: &[u8], extra: u8, out: &mut [u8]) -> usize {
+pub(super) fn encode_frame_v2(
+    seq: u8,
+    msg_id: u32,
+    payload: &[u8],
+    extra: u8,
+    out: &mut [u8],
+) -> usize {
     encode_frame_v2_from(
         seq,
         msg_id,
@@ -32,7 +38,7 @@ fn encode_frame_v2(seq: u8, msg_id: u32, payload: &[u8], extra: u8, out: &mut [u
 /// FC-side encoder for messages an autopilot originates (a fake FC in a
 /// test, a gateway loopback).
 #[allow(clippy::too_many_arguments)]
-fn encode_frame_v2_from(
+pub(super) fn encode_frame_v2_from(
     seq: u8,
     msg_id: u32,
     payload: &[u8],
@@ -218,50 +224,40 @@ pub fn encode_velocity_setpoint(
     frame
 }
 
-/// Absolute FPV attitude demand and the component selected to receive it.
-///
-/// Body-rate demand is intentionally absent because the FC attitude loop
-/// derives rate commands from this target.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct AttitudeTarget {
-    /// Roll demand in radians.
-    pub roll_rad: f32,
-    /// Pitch demand in radians.
-    pub pitch_rad: f32,
-    /// Yaw demand in radians.
-    pub yaw_rad: f32,
-    /// Normalized collective thrust.
-    pub thrust: f32,
-    /// Selected MAVLink system id.
-    pub system_id: u8,
-    /// Selected MAVLink component id.
-    pub component_id: u8,
-}
+/// MAV_FRAME_BODY_OFFSET_NED: axes aligned with the vehicle heading
+/// (x forward, y right, z down), level regardless of roll and pitch.
+pub const MAV_FRAME_BODY_OFFSET_NED: u8 = 9;
 
-/// Encodes one absolute attitude target for the selected component.
-pub fn encode_attitude_setpoint(seq: u8, time_boot_ms: u32, target: AttitudeTarget) -> [u8; 51] {
-    const SET_ATTITUDE_TARGET_ID: u32 = 82;
-    let (sr, cr) = (target.roll_rad * 0.5).sin_cos();
-    let (sp, cp) = (target.pitch_rad * 0.5).sin_cos();
-    let (sy, cy) = (target.yaw_rad * 0.5).sin_cos();
-    let q = [
-        cr * cp * cy + sr * sp * sy,
-        sr * cp * cy - cr * sp * sy,
-        cr * sp * cy + sr * cp * sy,
-        cr * cp * sy - sr * sp * cy,
-    ];
-    let mut payload = [0u8; 39];
+/// Serializes a SET_POSITION_TARGET_LOCAL_NED body-frame velocity and
+/// yaw-rate setpoint in [`MAV_FRAME_BODY_OFFSET_NED`]: position,
+/// acceleration, and absolute yaw are masked out. The FC rotates the
+/// velocity by its own heading, so the caller needs no attitude to fly a
+/// body-frame demand.
+///
+/// Wire order as [`encode_velocity_setpoint`].
+pub fn encode_body_velocity_setpoint(
+    seq: u8,
+    time_boot_ms: u32,
+    vel_frd_mps: [f32; 3],
+    yaw_rate_rps: f32,
+    target_system: u8,
+    target_component: u8,
+) -> [u8; 65] {
+    // Ignore position (1|2|4), acceleration (64|128|256), yaw (1024):
+    // velocity + yaw rate remain.
+    const TYPE_MASK: u16 = 1 | 2 | 4 | 64 | 128 | 256 | 1024;
+    let mut payload = [0u8; 53];
     payload[0..4].copy_from_slice(&time_boot_ms.to_le_bytes());
-    for (i, w) in q.iter().enumerate() {
-        payload[4 + i * 4..8 + i * 4].copy_from_slice(&w.to_le_bytes());
-    }
-    // body rates [20..32) stay zero (masked); thrust at [32..36).
-    payload[32..36].copy_from_slice(&target.thrust.clamp(0.0, 1.0).to_le_bytes());
-    payload[36] = target.system_id;
-    payload[37] = target.component_id;
-    payload[38] = 0b0000_0111; // ignore body roll/pitch/yaw rate
-    let mut frame = [0u8; 51];
-    encode_frame_v2(seq, SET_ATTITUDE_TARGET_ID, &payload, 49, &mut frame);
+    payload[16..20].copy_from_slice(&vel_frd_mps[0].to_le_bytes());
+    payload[20..24].copy_from_slice(&vel_frd_mps[1].to_le_bytes());
+    payload[24..28].copy_from_slice(&vel_frd_mps[2].to_le_bytes());
+    payload[44..48].copy_from_slice(&yaw_rate_rps.to_le_bytes());
+    payload[48..50].copy_from_slice(&TYPE_MASK.to_le_bytes());
+    payload[50] = target_system;
+    payload[51] = target_component;
+    payload[52] = MAV_FRAME_BODY_OFFSET_NED;
+    let mut frame = [0u8; 65];
+    encode_frame_v2(seq, SET_POSITION_TARGET_ID, &payload, 143, &mut frame);
     frame
 }
 
@@ -308,6 +304,71 @@ pub fn encode_gimbal_rate_setpoint(
         GIMBAL_MANAGER_SET_ATTITUDE_ID,
         &payload,
         123,
+        &mut frame,
+    );
+    frame
+}
+
+/// One MANUAL_CONTROL stick sample in the wire's own units: pitch `x`,
+/// roll `y`, and yaw `r` in `[-1000, 1000]`, throttle `z` in `[0, 1000]`.
+/// Out-of-range values are clamped so the FC never discards the sample as
+/// invalid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ManualControlSticks {
+    /// Pitch stick; + is stick forward.
+    pub x: i16,
+    /// Roll stick; + is stick right.
+    pub y: i16,
+    /// Throttle stick; 500 is centered.
+    pub z: i16,
+    /// Yaw stick; + is stick right.
+    pub r: i16,
+}
+
+/// Serializes a MANUAL_CONTROL frame (the MAVLink joystick) addressed to
+/// `target_system`, with no buttons and no extension fields.
+///
+/// Wire order (11 bytes): x/y/z/r i16 @0..8, buttons u16 @8, target @10.
+#[must_use]
+pub fn encode_manual_control(seq: u8, sticks: ManualControlSticks, target_system: u8) -> [u8; 23] {
+    let mut payload = [0u8; 11];
+    payload[0..2].copy_from_slice(&sticks.x.clamp(-1000, 1000).to_le_bytes());
+    payload[2..4].copy_from_slice(&sticks.y.clamp(-1000, 1000).to_le_bytes());
+    payload[4..6].copy_from_slice(&sticks.z.clamp(0, 1000).to_le_bytes());
+    payload[6..8].copy_from_slice(&sticks.r.clamp(-1000, 1000).to_le_bytes());
+    payload[10] = target_system;
+    let mut frame = [0u8; 23];
+    encode_frame_v2(seq, MANUAL_CONTROL_ID, &payload, 243, &mut frame);
+    frame
+}
+
+/// Serializes an FC-sourced HEARTBEAT reporting the armed flag and an
+/// autopilot custom mode, for fake FCs in tests.
+#[must_use]
+pub fn encode_autopilot_heartbeat(
+    seq: u8,
+    armed: bool,
+    custom_mode: u32,
+    system_id: u8,
+    component_id: u8,
+) -> [u8; 21] {
+    // custom_mode u32 @0, type @4 (MAV_TYPE_GENERIC), autopilot @5
+    // (MAV_AUTOPILOT_PX4 = 12), base_mode @6 (CUSTOM_MODE_ENABLED, plus
+    // SAFETY_ARMED when armed), system_status @7 (ACTIVE), version @8.
+    let mut payload = [0u8; 9];
+    payload[0..4].copy_from_slice(&custom_mode.to_le_bytes());
+    payload[5] = 12;
+    payload[6] = 0x01 | if armed { 0x80 } else { 0 };
+    payload[7] = 4;
+    payload[8] = 3;
+    let mut frame = [0u8; 21];
+    encode_frame_v2_from(
+        seq,
+        HEARTBEAT_ID,
+        &payload,
+        50,
+        system_id,
+        component_id,
         &mut frame,
     );
     frame

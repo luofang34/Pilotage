@@ -12,14 +12,22 @@
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
-use pilotage_adapter_api::FcCommandAck;
+use pilotage_adapter_api::{CommandOutcome, FcCommandAck};
+use pilotage_protocol::Generation;
 use tracing::{info, warn};
+
+pub(crate) mod clock;
+pub(crate) mod direct;
+pub(crate) mod failsafe;
+mod resume;
+use clock::UplinkClock;
 
 use pilotage_mavlink::codec::{
     FcMessage, FrameSource, GCS_COMPONENT_ID, GCS_SYSTEM_ID, MAV_CMD_COMPONENT_ARM_DISARM,
     MAV_CMD_DO_SET_MODE, encode_arm_command, encode_command_long, encode_gcs_heartbeat,
     encode_velocity_setpoint, parse_datagram,
 };
+use pilotage_mavlink::command_outcome;
 
 /// Full-stick horizontal velocity demand. Demand scaling is operator
 /// policy destined for per-vehicle profile configuration; these values
@@ -51,25 +59,6 @@ const STREAM_KEEPALIVE: Duration = Duration::from_millis(50);
 const BASE_MODE_CUSTOM: f32 = 1.0;
 /// PX4 custom main mode OFFBOARD.
 const PX4_MAIN_MODE_OFFBOARD: f32 = 6.0;
-
-/// The uplink's time source; tests substitute a manually advanced
-/// instant so sequencing is exercised without real-time sleeps.
-#[derive(Debug)]
-enum UplinkClock {
-    System,
-    #[cfg(test)]
-    Manual(Instant),
-}
-
-impl UplinkClock {
-    fn now(&self) -> Instant {
-        match self {
-            Self::System => Instant::now(),
-            #[cfg(test)]
-            Self::Manual(at) => *at,
-        }
-    }
-}
 
 /// Where the offboard arm sequence stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,6 +102,14 @@ pub struct Px4Uplink {
     send_failures: u64,
     expected_system_id: u8,
     expected_component_id: u8,
+    direct: direct::DirectState,
+    // The lease generation of the latest admitted flight frame, and the one
+    // a link-loss neutralize (not a disarm) stopped the stream under.
+    last_generation: Option<Generation>,
+    neutralized_generation: Option<Generation>,
+    // When a resumed stream asks PX4 for OFFBOARD again.
+    resume_offboard_at: Option<Instant>,
+    failsafe: crate::pinning::ParamPinning,
 }
 
 impl Px4Uplink {
@@ -143,6 +140,11 @@ impl Px4Uplink {
             send_failures: 0,
             expected_system_id: 1,
             expected_component_id: 1,
+            direct: direct::DirectState::default(),
+            last_generation: None,
+            neutralized_generation: None,
+            resume_offboard_at: None,
+            failsafe: crate::pinning::ParamPinning::new(&failsafe::PINNED),
         })
     }
 
@@ -201,14 +203,15 @@ impl Px4Uplink {
             let frame = encode_gcs_heartbeat(self.seq);
             self.send(&frame);
         }
+        self.pin_failsafe(now);
         if self.arm_phase != ArmPhase::Idle
             && self
                 .last_frame
                 .is_none_or(|at| now.duration_since(at) >= STREAM_KEEPALIVE)
         {
-            let velocity = self.last_vel_ned;
-            self.send_velocity(velocity);
+            self.send_keepalive();
         }
+        self.request_offboard_when_due(now);
         if self.arm_phase == ArmPhase::Warmup
             && self
                 .warmup_since
@@ -222,15 +225,44 @@ impl Px4Uplink {
     /// measured yaw and begin the zero-velocity stream; OFFBOARD mode
     /// and the arm command follow after the warmup.
     pub fn begin_arm(&mut self, current_yaw_rad: f32) {
+        self.leave_direct();
+        self.neutralized_generation = None;
         self.heading_sp_rad = current_yaw_rad;
         self.last_vel_ned = [0.0; 3];
         self.arm_phase = ArmPhase::Warmup;
         self.warmup_since = Some(self.clock.now());
+        // The arm goes out only after the warmup: the answer lane says the
+        // order is in work, so the client's answer window starts again.
+        self.last_arm_ack = Some(FcCommandAck {
+            arm: true,
+            outcome: CommandOutcome::InProgress,
+        });
         info!("offboard arm sequence: zero-velocity stream started");
         self.send_velocity([0.0; 3]);
     }
 
     fn command_offboard_and_arm(&mut self) {
+        self.command_offboard();
+        let arm = encode_arm_command(
+            self.seq,
+            true,
+            self.expected_system_id,
+            self.expected_component_id,
+        );
+        self.send(&arm);
+        self.arm_phase = ArmPhase::Commanded;
+        // A fresh command opens a fresh verdict: the ack lane reports the
+        // LATEST arm/disarm, never a stale answer to an earlier one. The
+        // arm is in work until the FC answers it.
+        self.last_sent_arm = Some(true);
+        self.last_arm_ack = Some(FcCommandAck {
+            arm: true,
+            outcome: CommandOutcome::InProgress,
+        });
+        info!("offboard arm sequence: OFFBOARD and arm commanded");
+    }
+
+    fn command_offboard(&mut self) {
         let mode = encode_command_long(
             self.seq,
             MAV_CMD_DO_SET_MODE,
@@ -247,19 +279,6 @@ impl Px4Uplink {
             self.expected_component_id,
         );
         self.send(&mode);
-        let arm = encode_arm_command(
-            self.seq,
-            true,
-            self.expected_system_id,
-            self.expected_component_id,
-        );
-        self.send(&arm);
-        self.arm_phase = ArmPhase::Commanded;
-        // A fresh command opens a fresh verdict: the ack lane reports the
-        // LATEST arm/disarm, never a stale answer to an earlier one.
-        self.last_sent_arm = Some(true);
-        self.last_arm_ack = None;
-        info!("offboard arm sequence: OFFBOARD and arm commanded");
     }
 
     /// The FC's answer to the most recent arm/disarm command, once its
@@ -301,6 +320,13 @@ impl Px4Uplink {
     /// with correlated acks; the heartbeat-derived arm state remains the
     /// ground truth either way.
     fn apply_fc_reply(&mut self, message: &FcMessage) {
+        if self.observe_failsafe_echo(message) {
+            return;
+        }
+        if let FcMessage::AttitudeTarget { thrust, .. } = *message {
+            self.direct.observe_thrust(thrust);
+            return;
+        }
         let FcMessage::CommandAck {
             command,
             result,
@@ -332,12 +358,13 @@ impl Px4Uplink {
         }
         self.last_arm_ack = Some(FcCommandAck {
             arm,
-            result: u32::from(result),
+            outcome: command_outcome(result),
         });
     }
 
     /// Disarms and stops the setpoint stream.
     pub fn send_disarm(&mut self) {
+        self.leave_direct();
         let frame = encode_arm_command(
             self.seq,
             false,
@@ -346,6 +373,8 @@ impl Px4Uplink {
         );
         self.send(&frame);
         self.arm_phase = ArmPhase::Idle;
+        self.neutralized_generation = None;
+        self.resume_offboard_at = None;
         self.warmup_since = None;
         self.last_vel_ned = [0.0; 3];
         self.last_sent_arm = Some(false);
@@ -417,7 +446,15 @@ impl Px4Uplink {
     /// streaming neutral forever — is the honest enactment: a silent
     /// pilot must look silent to the FC too.
     pub fn neutralize(&mut self) {
+        self.leave_direct();
         self.send_velocity([0.0; 3]);
+        // Only a stream that flowed can be resumed, and only by a newer lease.
+        self.neutralized_generation = if self.arm_phase == ArmPhase::Idle {
+            None
+        } else {
+            self.last_generation
+        };
+        self.resume_offboard_at = None;
         self.arm_phase = ArmPhase::Idle;
         self.warmup_since = None;
         info!("neutralized: stream stopped; PX4 offboard-loss failsafe takes over");
