@@ -107,13 +107,27 @@ fn no_open_suppresses_the_browser() {
 fn reset_fc_selection_parses_and_malformed_flags_fail_closed() {
     assert_eq!(
         parse_args(&args(&["reset"])).expect("default reset parses"),
-        Command::Reset("aviate".to_owned())
+        Command::Reset {
+            fc: "aviate".to_owned(),
+            instance: 0
+        }
     );
     assert_eq!(
         parse_args(&args(&["reset", "--fc", "px4-gz"])).expect("explicit PX4 reset parses"),
-        Command::Reset("px4-gz".to_owned())
+        Command::Reset {
+            fc: "px4-gz".to_owned(),
+            instance: 0
+        }
+    );
+    assert_eq!(
+        parse_args(&args(&["reset", "--fc", "px4-gz", "--instance", "7"])).expect("parses"),
+        Command::Reset {
+            fc: "px4-gz".to_owned(),
+            instance: 7
+        }
     );
     for malformed in [
+        args(&["reset", "--fc", "px4-gz", "--instance", "seven"]),
         args(&["reset", "--fc"]),
         args(&["reset", "--backend", "px4-gz"]),
     ] {

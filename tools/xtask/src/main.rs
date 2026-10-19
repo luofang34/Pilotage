@@ -40,7 +40,7 @@ fn run(args: &[String]) -> Result<(), error::XtaskError> {
             print_line(cli::USAGE);
             Ok(())
         }
-        Command::Reset(fc) => session::run_reset(&fc),
+        Command::Reset { fc, instance } => session::run_reset(&fc, instance),
         Command::Handshake(out_dir) => session::run_handshake(&out_dir),
         Command::Guards => guards::run_guards(&session::repo_root()?),
         Command::Affected { base } => affected::run_affected(&base),

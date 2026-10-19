@@ -258,6 +258,20 @@ async fn launch_slot(
             manifest.display()
         ));
     }
+    // The reset finds a vehicle's supervisor by its instance; this fleet
+    // is that supervisor.
+    let marker = super::supervisor_marker(&slot.ctx.repo_root, slot.ctx.instance);
+    let claimed = marker
+        .parent()
+        .map_or(Ok(()), std::fs::create_dir_all)
+        .and_then(|()| std::fs::write(&marker, std::process::id().to_string()));
+    if let Err(source) = claimed {
+        teardown(&mut children);
+        return Err(XtaskError::Io {
+            context: "writing the supervisor pid marker",
+            source,
+        });
+    }
     let session = Running {
         slot,
         children,
@@ -355,6 +369,11 @@ fn stop_all(running: &mut Vec<Running>) {
     while let Some(mut session) = running.pop() {
         print_line(&format!("stopping vehicle {}...", session.slot.name));
         std::fs::remove_file(manifest_of(&session.slot.ctx)).ok();
+        std::fs::remove_file(super::supervisor_marker(
+            &session.slot.ctx.repo_root,
+            session.slot.ctx.instance,
+        ))
+        .ok();
         teardown(&mut session.children);
     }
 }
