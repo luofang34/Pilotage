@@ -33,6 +33,8 @@ const SIDECAR_READY: &str = "jsbsim sidecar listening for PX4";
 /// flight controller on it: simulation time then crawls at a tenth of
 /// real time. The sidecar's truth track and PX4's console log stand in.
 const SESSION_PARAMS: [(&str, &str); 1] = [("SDLOG_MODE", "-1")];
+/// The host's simulator truth lane port of instance 0 (UDP).
+const TRUTH_PORT_BASE: u16 = 19_560;
 /// PX4's simulator link port of instance 0.
 const SIMULATOR_PORT_BASE: u16 = 4_560;
 
@@ -45,6 +47,12 @@ pub struct Px4Jsbsim {
 /// The TCP port PX4 instance `instance` connects its simulator link to.
 pub(crate) fn simulator_port(instance: u16) -> u16 {
     SIMULATOR_PORT_BASE + instance
+}
+
+/// The UDP port the host of instance `instance` takes the sidecar's truth
+/// on, independent of the flight controller.
+pub(crate) fn truth_port(instance: u16) -> u16 {
+    TRUTH_PORT_BASE + instance
 }
 
 fn sidecar_binary(repo_root: &Path) -> PathBuf {
@@ -62,6 +70,10 @@ impl SimBackend for Px4Jsbsim {
 
     fn host_env(&self, ctx: &SessionContext) -> Vec<(String, String)> {
         let mut env = ports::host_env(ctx.instance, self.model.airframe());
+        env.push((
+            "PILOTAGE_SIM_TRUTH_ADDR".to_owned(),
+            format!("127.0.0.1:{}", truth_port(ctx.instance)),
+        ));
         // Only a vehicle that carries a gimbal advertises the
         // vehicle.gimbal scope; the flag's absence means none.
         if self.model.gimbal().is_some() {
@@ -127,6 +139,11 @@ impl SimBackend for Px4Jsbsim {
         claims.push(Claim::Tcp {
             port: simulator_port(instance),
             holder: format!("JSBSim sidecar for PX4 instance {instance}"),
+            remedy: Remedy::Instance,
+        });
+        claims.push(Claim::Udp {
+            port: truth_port(instance),
+            holder: format!("session host truth lane for PX4 instance {instance}"),
             remedy: Remedy::Instance,
         });
         claims
@@ -218,6 +235,8 @@ fn sidecar_stage(ctx: &SessionContext, install: &JsbsimInstall, model: JsbsimMod
         model.sidecar_aircraft().to_owned(),
         "--jsbsim-root".to_owned(),
         install.root.display().to_string(),
+        "--truth-addr".to_owned(),
+        format!("127.0.0.1:{}", truth_port(ctx.instance)),
     ];
     if let Some(travel) = model.gimbal() {
         args.extend([

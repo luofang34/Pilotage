@@ -27,8 +27,6 @@ const MAG_EVERY: u64 = 2;
 const BARO_EVERY: u64 = 5;
 /// Steps per GNSS fix (10 Hz).
 const GNSS_EVERY: u64 = 25;
-/// Steps per ground-truth message (50 Hz).
-const TRUTH_EVERY: u64 = 5;
 /// Steps per heartbeat (1 Hz).
 const HEARTBEAT_EVERY: u64 = 250;
 
@@ -187,9 +185,9 @@ impl Simulation {
         if due(GNSS_EVERY) {
             frames.push(encoder.hil_gps(&self.sensors.gnss(&truth)));
         }
-        if due(TRUTH_EVERY) {
-            frames.push(encoder.hil_state_quaternion(&truth));
-        }
+        // Truth every step: a flight controller that synthesizes its own
+        // sensors (Aviate's JSBSim board) steps on it.
+        frames.push(encoder.hil_state_quaternion(&truth));
         Ok(frames)
     }
 }
