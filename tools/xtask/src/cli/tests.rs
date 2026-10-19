@@ -211,7 +211,7 @@ fn fleet_takes_one_vehicle_per_flag_and_documented_defaults() {
     assert!(!fleet.open, "a fleet opens no tabs by default");
     assert_eq!(
         fleet.site,
-        crate::site::N51,
+        pilotage_world::N51,
         "a fleet stands on N51 by default"
     );
     assert!(USAGE.contains("  fleet --vehicle <backend>[:<model>]"));

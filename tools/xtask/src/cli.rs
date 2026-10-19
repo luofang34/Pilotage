@@ -311,9 +311,7 @@ fn parse_fleet(args: &[String]) -> Result<FleetArgs, XtaskError> {
             "--instance-base" => {
                 fleet.instance_base = required_number(&mut iter, "--instance-base")?;
             }
-            "--site" => {
-                fleet.site = crate::site::Site::parse(&required_value(&mut iter, "--site")?)?
-            }
+            "--site" => fleet.site = crate::site::parse(&required_value(&mut iter, "--site")?)?,
             "--ready-timeout" => fleet.ready_timeout_s = required_timeout(&mut iter)?,
             "--open" => fleet.open = true,
             "--no-open" => fleet.open = false,

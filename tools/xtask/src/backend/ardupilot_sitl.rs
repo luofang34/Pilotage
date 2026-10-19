@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{SessionContext, SimBackend, SpawnPoint, Stage};
+use super::{Placement, SessionContext, SimBackend, Stage};
 use crate::cli::Profile;
 use crate::conflicts::{Claim, Remedy};
 use crate::error::XtaskError;
@@ -48,12 +48,12 @@ fn mavlink_port(instance: u16) -> u16 {
 /// A plain `sim` session's home: the first place on the grass of
 /// Zurich, where PX4's own worlds stand, apart from a vehicle at the
 /// origin.
-fn default_home() -> SpawnPoint {
-    crate::site::ZURICH.spawn_point(crate::site::Ground::Field, 0)
+fn default_home() -> Placement {
+    crate::site::ZURICH.placement(crate::site::Ground::Field, 0)
 }
 
 /// SITL's `--home latitude,longitude,altitude_msl,heading`.
-fn home_arg(point: &SpawnPoint) -> String {
+fn home_arg(point: &Placement) -> String {
     format!(
         "{:.7},{:.7},{},{}",
         point.latitude_deg, point.longitude_deg, point.elevation_m, point.heading_deg
@@ -97,7 +97,7 @@ impl SimBackend for ArduPilotSitl {
     fn spawn(
         &self,
         _ctx: &SessionContext,
-        point: &SpawnPoint,
+        point: &Placement,
         stages: &mut [Stage],
     ) -> Result<(), XtaskError> {
         let home = stages

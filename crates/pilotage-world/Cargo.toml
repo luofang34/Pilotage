@@ -1,0 +1,32 @@
+[package]
+name = "pilotage-world"
+description = "One simulated world for every simulator: sites, terrain elevation, and the magnetic field"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+default = ["archive"]
+# Terrain from a Terrarium MBTiles archive through pilotage-terrain-query.
+# It needs std and SQLite, so a wasm or bare-metal build leaves it off.
+archive = ["std", "dep:pilotage-terrain-query"]
+std = []
+
+[dependencies]
+# The geomagnetic model is Aviate's WMM2025 evaluator, pinned to one
+# exact revision so every simulator and flight controller that uses this
+# crate sees the same field. It is independent of the aviate-xil pins:
+# this crate shares no layout or transport with them.
+aviate-geomag = { git = "https://github.com/luofang34/Aviate.git", rev = "5668208977ee295a0bf4409f1e80dee9f541612e" }
+libm = { workspace = true }
+pilotage-geo = { workspace = true }
+pilotage-terrain-query = { workspace = true, optional = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+png = { workspace = true }
+rusqlite = { workspace = true }
+tempfile = "3.23.0"

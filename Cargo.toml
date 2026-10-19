@@ -24,6 +24,7 @@ members = [
     "crates/pilotage-svs-build",
     "crates/pilotage-terrain-build",
     "crates/pilotage-terrain-query",
+    "crates/pilotage-world",
     "crates/pilotage-mission",
     "crates/pilotage-mission-core",
     "crates/pilotage-instrument-runtime",
@@ -162,6 +163,7 @@ pilotage-flight-quality = { path = "crates/pilotage-flight-quality" }
 pilotage-durable-storage = { path = "crates/pilotage-durable-storage" }
 pilotage-tuning-feedback = { path = "crates/pilotage-tuning-feedback" }
 pilotage-terrain-query = { path = "crates/pilotage-terrain-query" }
+pilotage-world = { path = "crates/pilotage-world", default-features = false }
 flight-tune = { path = "tools/flight-tune" }
 flight-tune-campaign = { path = "tools/flight-tune-campaign" }
 

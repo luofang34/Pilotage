@@ -112,7 +112,7 @@ impl SimBackend for Px4Gz {
     fn spawn(
         &self,
         ctx: &SessionContext,
-        point: &super::SpawnPoint,
+        point: &super::Placement,
         stages: &mut [Stage],
     ) -> Result<(), XtaskError> {
         super::gz::spawn_in_world(ctx, point, stages)
