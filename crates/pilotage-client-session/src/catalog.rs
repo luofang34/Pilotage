@@ -36,6 +36,11 @@ pub struct VehicleCatalog {
     /// The kind of vehicle the adapter declares; `None` when it declared
     /// no class this build knows.
     pub vehicle_class: Option<pilotage_protocol::VehicleClass>,
+    /// Which north the vehicle's attitude yaw uses, as the host knew it at
+    /// admission; `None` when it was not stated. The vehicle's stamped
+    /// magnetic variation ([`crate::telemetry::magnetic_variation`]) is the live
+    /// statement and wins when the two disagree.
+    pub heading_reference: Option<pilotage_protocol::HeadingReference>,
     /// The control scopes this vehicle publishes.
     pub scopes: Vec<ScopeCatalog>,
 }
@@ -72,6 +77,9 @@ impl Admission {
                 vehicle_id: descriptor.vehicle.as_ref().map_or(0, |v| v.value),
                 display_name: descriptor.display_name.clone(),
                 vehicle_class: pilotage_protocol::VehicleClass::from_wire(descriptor.vehicle_class),
+                heading_reference: pilotage_protocol::HeadingReference::from_wire(
+                    descriptor.heading_reference,
+                ),
                 scopes: descriptor
                     .scopes
                     .iter()

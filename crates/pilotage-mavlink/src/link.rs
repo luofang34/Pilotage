@@ -26,6 +26,7 @@ pub use error::LinkError;
 pub use estimate_fix::estimate_geodetic_fix;
 use estimator::EstimatorStatusUpdate;
 pub use fc_reports::{FcReports, ParamReport, STATUS_TEXT_HISTORY, StatusTextReport};
+pub use magnetic_variation::{fc_magnetic_variation, fc_variation_source};
 use outbound::OutboundLanes;
 pub use outbound::{
     AttitudeThrustDemand, BodyVelocityDemand, GimbalRateDemand, OffboardSetpoint, OutboundCommand,
@@ -33,8 +34,8 @@ pub use outbound::{
 };
 use task::run_link;
 pub use updates::{
-    AttitudeUpdate, BaroUpdate, BatteryReport, CommandAckReport, GimbalDeviceAttitude,
-    GnssFixUpdate, KinematicsUpdate, SimTruthUpdate, TruthOrigin,
+    AttitudeUpdate, BaroUpdate, BatteryReport, CommandAckReport, GeomagneticReferenceUpdate,
+    GimbalDeviceAttitude, GnssFixUpdate, KinematicsUpdate, SimTruthUpdate, TruthOrigin,
 };
 
 /// Latest state received from the FC, with receive stamps so staleness
@@ -75,6 +76,8 @@ pub struct LinkState {
     pub sim_truth: Option<SimTruthUpdate>,
     /// The receiver's own fix, when the flight controller reports one.
     pub gnss_fix: Option<GnssFixUpdate>,
+    /// The flight controller's latest geomagnetic reference report.
+    pub geomagnetic_reference: Option<GeomagneticReferenceUpdate>,
     /// When this link began: the clock a report is stamped against when
     /// its own timestamp names a clock nothing identifies.
     pub started_at: Instant,
@@ -133,6 +136,7 @@ pub struct LinkState {
 
 mod defaults;
 mod estimate_fix;
+mod magnetic_variation;
 
 impl LinkState {
     fn for_source(config: LinkConfig, source_incarnation: SourceIncarnation) -> Self {

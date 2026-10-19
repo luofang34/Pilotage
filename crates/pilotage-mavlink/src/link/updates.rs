@@ -134,6 +134,22 @@ pub struct GnssFixUpdate {
     pub received_at: Instant,
 }
 
+/// Latest geomagnetic reference a flight controller reported.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GeomagneticReferenceUpdate {
+    /// Declination, radians, positive east; not meaningful when `source`
+    /// is 0 (none).
+    pub declination_rad: f32,
+    /// The FC's source code: 0 none, 1 model, 2 configured.
+    pub source: u8,
+    /// Wrapping publication sequence for this lane.
+    pub sequence: u32,
+    /// Nanoseconds from the link's start to when this report arrived.
+    pub received_since_start_ns: u64,
+    /// When this update was received.
+    pub received_at: Instant,
+}
+
 /// Latest gimbal-device orientation (Gimbal Protocol v2 attitude
 /// status), with its receive stamp for staleness handling.
 #[derive(Debug, Clone, Copy)]

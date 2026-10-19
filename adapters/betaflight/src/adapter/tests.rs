@@ -85,6 +85,11 @@ fn the_advertisement_is_one_velocity_scope_with_arm_and_disarm() {
     let vehicle = &capabilities.vehicles[0];
     assert_eq!(vehicle.class, pilotage_protocol::VehicleClass::Multicopter);
     assert_eq!(vehicle.display_name, "Betaflight quad");
+    // Betaflight applies no declination: its heading is magnetic.
+    assert_eq!(
+        vehicle.heading_reference,
+        Some(pilotage_protocol::HeadingReference::Magnetic)
+    );
     assert_eq!(vehicle.scopes.len(), 2);
     let direct = &vehicle.scopes[1];
     assert_eq!(direct.scope.as_str(), super::DIRECT_SCOPE);

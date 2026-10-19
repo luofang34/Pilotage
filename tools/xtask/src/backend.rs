@@ -16,6 +16,7 @@ mod aviate_xplane;
 mod betaflight_sitl;
 pub(crate) mod gz;
 pub(crate) mod px4_gz;
+mod px4_jsbsim;
 mod px4_xplane;
 mod xplane_handshake;
 mod xplane_simulator;
@@ -77,20 +78,7 @@ impl SessionContext {
     }
 }
 
-/// Where a fleet puts one vehicle: a point on the WGS84 ellipsoid, the
-/// ground height there, and the way the vehicle faces.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SpawnPoint {
-    /// Latitude, degrees north.
-    pub latitude_deg: f64,
-    /// Longitude, degrees east.
-    pub longitude_deg: f64,
-    /// Ground elevation, metres above mean sea level. The vehicle stands
-    /// on the ground, so this is also its starting altitude.
-    pub elevation_m: f64,
-    /// True heading of the vehicle's nose, degrees clockwise from north.
-    pub heading_deg: f64,
-}
+pub use pilotage_world::Placement;
 
 /// One plannable launch step: a process and the signal proving it is up.
 #[derive(Debug)]
@@ -186,7 +174,7 @@ pub trait SimBackend {
     fn spawn(
         &self,
         _ctx: &SessionContext,
-        _point: &SpawnPoint,
+        _point: &Placement,
         _stages: &mut [Stage],
     ) -> Result<(), XtaskError> {
         Err(XtaskError::SpawnUnsupported {
@@ -349,6 +337,11 @@ pub(crate) const BACKENDS: &[BackendEntry] = &[
         name: "px4-gz",
         alias: Some("px4"),
         make: || Box::new(px4_gz::Px4Gz::default()),
+    },
+    BackendEntry {
+        name: "px4-jsbsim",
+        alias: None,
+        make: || Box::new(px4_jsbsim::Px4Jsbsim::default()),
     },
     BackendEntry {
         name: "px4-xplane",

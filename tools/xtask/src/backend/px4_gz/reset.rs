@@ -32,6 +32,24 @@ pub(super) fn reset_instance(
         "resetting world {world:?} of PX4 instance {instance}..."
     ));
     reset_world(world, instance)?;
+    restart_instance(repo_root, px4, instance)
+}
+
+/// Stops exactly PX4 instance `instance` of the session this checkout
+/// supervises, so its supervisor starts a fresh one.
+///
+/// # Errors
+///
+/// Returns [`XtaskError::Unsupervised`] when no live xtask supervisor runs
+/// that instance: nothing would start the stopped px4 again.
+pub(crate) fn restart_instance(
+    repo_root: &Path,
+    px4: &Path,
+    instance: u16,
+) -> Result<(), XtaskError> {
+    if !supervisor_alive(&crate::session::supervisor_marker(repo_root, instance)) {
+        return Err(XtaskError::Unsupervised { instance });
+    }
     let binary = px4.join("build/px4_sitl_default/bin/px4");
     let pids = instance_pids(&binary.display().to_string(), instance);
     for pid in &pids {

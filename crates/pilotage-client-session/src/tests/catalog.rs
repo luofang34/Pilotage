@@ -3,7 +3,7 @@
 
 #![allow(clippy::expect_used, clippy::panic)]
 
-use pilotage_protocol::VehicleClass;
+use pilotage_protocol::{HeadingReference, VehicleClass};
 
 use super::{admit, engine};
 
@@ -14,6 +14,7 @@ fn the_admission_carries_the_advertised_vehicle_class_and_name() {
     let admission = engine.admission().expect("admitted");
     let vehicle = admission.vehicles.first().expect("one vehicle");
     assert_eq!(vehicle.vehicle_class, Some(VehicleClass::FixedWing));
+    assert_eq!(vehicle.heading_reference, Some(HeadingReference::True));
     assert_eq!(vehicle.display_name, "vehicle");
     assert!(!admission.physically_embodied);
 }
@@ -32,5 +33,7 @@ fn the_host_encoded_welcome_fixture_reaches_the_catalog_with_its_class() {
         .and_then(|admission| admission.vehicles.first())
         .expect("one vehicle admitted");
     assert_eq!(vehicle.vehicle_class, Some(VehicleClass::GroundRover));
+    // The fixture predates the heading reference: unstated reads as None.
+    assert_eq!(vehicle.heading_reference, None);
     assert_eq!(vehicle.display_name, "test rover");
 }

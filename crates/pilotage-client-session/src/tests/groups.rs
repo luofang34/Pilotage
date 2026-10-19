@@ -42,6 +42,7 @@ fn admit_grouped(engine: &mut ClientEngine) {
                         ],
                         supported_modes: Vec::new(),
                         vehicle_class: wire::VehicleClass::Multicopter as i32,
+                        heading_reference: 0,
                     }],
                     supported_modes: Vec::new(),
                     control_feel: None,

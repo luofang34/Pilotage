@@ -11,7 +11,7 @@ use super::{
     SUPERVISE_INTERVAL, prepared_log_dir, repo_root, spawn_cancel_listener, start_stages, teardown,
     verify_listening_port,
 };
-use crate::backend::{SessionContext, SimBackend, SpawnPoint, Stage, backend_for};
+use crate::backend::{Placement, SessionContext, SimBackend, Stage, backend_for};
 use crate::cli::FleetArgs;
 use crate::conflicts::{Claim, refuse_conflicts, session_claims};
 use crate::error::XtaskError;
@@ -32,7 +32,7 @@ const LOOPBACK: &str = "127.0.0.1";
 /// Where each vehicle spawns on `site`, in launch order: each backend
 /// says which ground it starts on, and vehicles on one ground stand in a
 /// row in launch order.
-pub(crate) fn spawn_points(site: &Site, grounds: &[Ground]) -> Vec<SpawnPoint> {
+pub(crate) fn spawn_points(site: &Site, grounds: &[Ground]) -> Vec<Placement> {
     grounds
         .iter()
         .enumerate()
@@ -42,7 +42,7 @@ pub(crate) fn spawn_points(site: &Site, grounds: &[Ground]) -> Vec<SpawnPoint> {
                 .take(index)
                 .filter(|other| *other == ground)
                 .count();
-            site.spawn_point(*ground, before)
+            site.placement(*ground, before)
         })
         .collect()
 }
@@ -222,7 +222,7 @@ fn resolve_slots(args: &FleetArgs, repo_root: &Path) -> Result<Vec<Slot>, XtaskE
 }
 
 /// Plans one vehicle's stages at its spawn point, host and viewer last.
-fn plan_slot(slot: &mut Slot, point: &SpawnPoint) -> Result<(), XtaskError> {
+fn plan_slot(slot: &mut Slot, point: &Placement) -> Result<(), XtaskError> {
     slot.backend.prepare(&slot.ctx)?;
     let mut planned = slot.backend.plan(&slot.ctx)?;
     slot.backend.spawn(&slot.ctx, point, &mut planned)?;

@@ -12,5 +12,5 @@ mod tile;
 #[cfg(test)]
 mod tests;
 
-pub use archive::TerrainArchive;
+pub use archive::{ElevationSample, TerrainArchive};
 pub use error::TerrainQueryError;

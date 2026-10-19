@@ -86,6 +86,9 @@ fn vehicle_descriptor(vehicle: &AdapterVehicle) -> wire::VehicleDescriptor {
             .collect(),
         supported_modes: Vec::new(),
         vehicle_class: vehicle.class.to_wire() as i32,
+        heading_reference: pilotage_protocol::HeadingReference::option_to_wire(
+            vehicle.heading_reference,
+        ) as i32,
     }
 }
 

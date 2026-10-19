@@ -1,9 +1,16 @@
-//! The loopback ports of one PX4 SITL instance and its host.
+//! The loopback ports of one PX4 SITL instance and its host, the claims
+//! they make, and the link environment the host reads them from. Every
+//! PX4 SITL backend shares them: the simulator behind PX4 changes, its
+//! MAVLink links do not.
+
+use crate::conflicts::{Claim, Remedy};
+
+use super::vehicle::Airframe;
 
 /// The highest PX4 instance this backend runs. PX4 shifts its MAVLink
 /// ports by the instance; the host's telemetry port (14550 + instance)
 /// would reach PX4's offboard ports (14580 + instance) past this.
-pub(super) const MAX_INSTANCE: u16 = 29;
+pub(crate) const MAX_INSTANCE: u16 = 29;
 
 /// The loopback ports one PX4 SITL instance and its host use.
 ///
@@ -36,6 +43,61 @@ impl Px4Ports {
 }
 
 /// PX4 instance N boots as MAVLink system N + 1 (`rcS`: `MAV_SYS_ID`).
-pub(super) fn system_id(instance: u16) -> u16 {
+pub(crate) fn system_id(instance: u16) -> u16 {
     instance + 1
+}
+
+/// The UDP ports one PX4 instance and its host's link hold.
+pub(crate) fn link_claims(instance: u16) -> Vec<Claim> {
+    let ports = Px4Ports::for_instance(instance);
+    vec![
+        Claim::Udp {
+            port: ports.gcs_local,
+            holder: format!("PX4 instance {instance} GCS link"),
+            remedy: Remedy::Instance,
+        },
+        Claim::Udp {
+            port: ports.offboard_local,
+            holder: format!("PX4 instance {instance} offboard link"),
+            remedy: Remedy::Instance,
+        },
+        Claim::Udp {
+            port: ports.host_telemetry,
+            holder: format!("session host MAVLink link for PX4 instance {instance}"),
+            remedy: Remedy::Instance,
+        },
+    ]
+}
+
+/// The host environment that names PX4 instance `instance`'s links, its
+/// MAVLink system, and how the vehicle flies.
+pub(crate) fn host_env(instance: u16, airframe: Airframe) -> Vec<(String, String)> {
+    let ports = Px4Ports::for_instance(instance);
+    let loopback = |port: u16| format!("127.0.0.1:{port}");
+    vec![
+        ("PILOTAGE_PX4_PROFILE".to_owned(), "simulation".to_owned()),
+        (
+            "PILOTAGE_PX4_AIRFRAME".to_owned(),
+            airframe.as_env_value().to_owned(),
+        ),
+        (
+            "PILOTAGE_PX4_ADDR".to_owned(),
+            loopback(ports.host_telemetry),
+        ),
+        (
+            "PILOTAGE_PX4_GCS_ADDR".to_owned(),
+            loopback(ports.gcs_local),
+        ),
+        (
+            "PILOTAGE_PX4_FC_ADDR".to_owned(),
+            loopback(ports.offboard_local),
+        ),
+        (
+            "PILOTAGE_PX4_SYSTEM_ID".to_owned(),
+            system_id(instance).to_string(),
+        ),
+        // The viewer's reset runs scripts/reset-px4-sim.sh from the
+        // host; this names the instance it resets.
+        ("PILOTAGE_PX4_INSTANCE".to_owned(), instance.to_string()),
+    ]
 }
