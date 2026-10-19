@@ -5,7 +5,7 @@ use pilotage_protocol::{ControlIntent, GimbalRateIntent, ScopedControlFrame, wir
 use super::TestResult;
 use super::harness::{Harness, frame, observed_poses, packets};
 
-fn mapped_frame(harness: &Harness, pitch: f32, yaw: f32) -> TestResultFrame {
+pub(super) fn mapped_frame(harness: &Harness, pitch: f32, yaw: f32) -> TestResultFrame {
     let advertised = &harness.adapter.capabilities().vehicles[0].scopes[0].intents[0];
     let capability = wire::IntentCapability {
         family: wire::IntentFamily::GimbalRate as i32,

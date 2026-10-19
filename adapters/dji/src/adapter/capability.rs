@@ -1,4 +1,4 @@
-use super::GIMBAL_SCOPE;
+use super::{DjiControlMode, GIMBAL_SCOPE};
 use pilotage_adapter_api::{
     ActionCapability, AdapterCapabilities, ExecutionMode, IntentCapability, LinkLossPolicy,
     ScopeDescriptor, VehicleDescriptor,
@@ -7,7 +7,7 @@ use pilotage_protocol::{ActionKind, IntentFamily, ScopeId, VehicleClass, Vehicle
 
 pub(super) const MAX_PITCH_RATE: f32 = std::f32::consts::PI / 36.0;
 
-pub(super) fn capabilities(vehicle: VehicleId) -> AdapterCapabilities {
+pub(super) fn capabilities(vehicle: VehicleId, mode: DjiControlMode) -> AdapterCapabilities {
     AdapterCapabilities {
         execution: ExecutionMode {
             real_time: true,
@@ -18,7 +18,11 @@ pub(super) fn capabilities(vehicle: VehicleId) -> AdapterCapabilities {
             id: vehicle,
             class: VehicleClass::Multicopter,
             heading_reference: None,
-            display_name: "DJI Mini 3".to_owned(),
+            display_name: match mode {
+                DjiControlMode::Observed => "DJI Mini 3",
+                DjiControlMode::BenchInitialHorizontal => "DJI Mini 3 · one-way bench",
+            }
+            .to_owned(),
             scopes: vec![ScopeDescriptor {
                 authority_group: None,
                 scope: ScopeId::new(GIMBAL_SCOPE),
@@ -40,7 +44,10 @@ pub(super) fn capabilities(vehicle: VehicleId) -> AdapterCapabilities {
                 }],
                 legacy: None,
             }],
-            link_loss_actions: vec![LinkLossPolicy::Neutralize],
+            link_loss_actions: match mode {
+                DjiControlMode::Observed => vec![LinkLossPolicy::Neutralize],
+                DjiControlMode::BenchInitialHorizontal => Vec::new(),
+            },
         }],
         adapter_version: env!("CARGO_PKG_VERSION").to_owned(),
         control_feel: None,

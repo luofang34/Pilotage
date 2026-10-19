@@ -1,5 +1,6 @@
 //! A single-writer connection with a bounded gimbal command envelope.
 
+mod bench;
 mod capability;
 mod connection;
 mod control;
@@ -28,6 +29,19 @@ use observation::Observations;
 
 const GIMBAL_SCOPE: &str = "vehicle.gimbal";
 
+/// The evidence used to permit bounded pitch commands.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DjiControlMode {
+    /// Require fresh continuous gimbal reports within -5 through 0 degrees.
+    #[default]
+    Observed,
+    /// Use an initial horizontal target confirmed by the operator for this start.
+    ///
+    /// This mode tracks command targets within -90 through 0 degrees. It does
+    /// not measure pose or verify the aircraft radio link. Start sends no movement.
+    BenchInitialHorizontal,
+}
+
 /// Explicit paths for one serial attachment and its raw byte capture.
 #[derive(Debug, Clone)]
 pub struct DjiConfig {
@@ -35,6 +49,8 @@ pub struct DjiConfig {
     pub serial_path: PathBuf,
     /// A new JSON-lines file. An existing path is never overwritten.
     pub capture_path: PathBuf,
+    /// The operator's explicit choice of command evidence.
+    pub control_mode: DjiControlMode,
 }
 
 /// A failure to start a DJI connection.
@@ -89,6 +105,13 @@ pub enum DjiFault {
 /// Observed transport state. It does not certify physical gimbal movement.
 #[derive(Debug)]
 pub struct DjiStatus<'a> {
+    /// The selected command mode.
+    pub control_mode: DjiControlMode,
+    /// The bench target after a full recorded write, or the initial confirmed zero.
+    /// This value is not a measured pose.
+    pub commanded_pitch_tenths: Option<i16>,
+    /// Whether this attachment refuses further ordinary control.
+    pub control_locked: bool,
     /// A matching response to the one read-only RC version request arrived.
     pub rc_version_observed: bool,
     /// Last forward gimbal report, including the raw angles.
@@ -111,8 +134,8 @@ pub struct DjiStatus<'a> {
 ///
 /// The caller drives I/O with `step` at 10 ms intervals. Only a fixed RC
 /// version request and bounded APP-to-gimbal pitch commands can be sent.
-/// Valid reports are required, but they do not prove that this transport
-/// can move the physical gimbal. Command completion is not inferred.
+/// The default mode requires valid reports. The explicit bench mode tracks
+/// command targets only. Neither mode infers physical completion.
 pub struct DjiAdapter {
     vehicle: VehicleId,
     origin: Instant,
@@ -150,6 +173,7 @@ impl DjiAdapter {
             Box::new(capture),
             config.capture_path,
             SourceIncarnation::new(identity),
+            config.control_mode,
         ))
     }
 
@@ -159,13 +183,14 @@ impl DjiAdapter {
         capture: Box<dyn Write + Send>,
         capture_path: PathBuf,
         incarnation: SourceIncarnation,
+        control_mode: DjiControlMode,
     ) -> Self {
         Self {
             vehicle,
             origin: Instant::now(),
             connection: Connection::new(transport, capture, capture_path),
             observations: Observations::new(incarnation),
-            control: ControlState::default(),
+            control: ControlState::new(control_mode),
         }
     }
 
@@ -173,6 +198,13 @@ impl DjiAdapter {
     #[must_use]
     pub fn status_cached(&self) -> DjiStatus<'_> {
         DjiStatus {
+            control_mode: self.control.mode(),
+            commanded_pitch_tenths: self
+                .control
+                .bench
+                .as_ref()
+                .map(bench::BenchState::commanded),
+            control_locked: self.control.link_loss || self.connection.fault.is_some(),
             rc_version_observed: self.connection.version_observed,
             latest_angles: self.observations.latest.map(|pose| pose.angles),
             pose_age: self.observations.age(self.origin.elapsed()),
@@ -185,12 +217,30 @@ impl DjiAdapter {
     }
 
     fn step_with_time_blocking(&mut self, mut clock: impl FnMut() -> Duration) {
+        let io_started = clock();
         self.connection
-            .read_available_blocking(clock(), &mut self.observations);
+            .read_available_blocking(io_started, &mut self.observations);
         // Recording can take time. Recheck age at the command write boundary.
         let now = clock();
-        let ready = self.observations.ready(now) && self.connection.input_clear();
+        let ready = self.movement_ready(now);
+        let had_pending = self.connection.pending_pitch().is_some();
         self.connection.write_pending_blocking(now, ready);
+        let written = self.connection.take_written_pitch();
+        if let Some(bench) = &mut self.control.bench {
+            let completed_at = clock();
+            bench.exclude_io(io_started, completed_at);
+            if let Some(pitch) = written {
+                bench.written(pitch, completed_at);
+                tracing::debug!(
+                    elapsed_ns = completed_at.as_nanos(),
+                    commanded_pitch_tenths = pitch.tenths(),
+                    "DJI bench target fully written and recorded; physical completion is unverified"
+                );
+            }
+            if !ready || (had_pending && written.is_none()) {
+                bench.stalled(completed_at, self.connection.pending_pitch().is_some());
+            }
+        }
     }
 
     fn tick(&self) -> SimTick {
@@ -200,7 +250,7 @@ impl DjiAdapter {
 
 impl VehicleAdapter for DjiAdapter {
     fn capabilities(&self) -> AdapterCapabilities {
-        capability::capabilities(self.vehicle)
+        capability::capabilities(self.vehicle, self.control.mode())
     }
 
     fn apply_control(&mut self, frame: &ScopedControlFrame) -> ApplyOutcome {

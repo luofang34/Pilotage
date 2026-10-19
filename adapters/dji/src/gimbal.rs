@@ -4,18 +4,18 @@ use crate::{DumlFrame, RouteAddress, checksum};
 
 const APP: u8 = 2;
 const GIMBAL: u8 = 4;
-const MIN_PITCH_TENTHS: i16 = -50;
+const MIN_PITCH_TENTHS: i16 = -900;
 const MAX_PITCH_TENTHS: i16 = 0;
 
-/// A pitch target outside the supported bench range.
+/// A pitch target outside the supported encoder range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("gimbal pitch {tenths} tenths of a degree is outside -50..=0")]
+#[error("gimbal pitch {tenths} tenths of a degree is outside -900..=0")]
 pub struct PitchTargetError {
     /// The rejected target in tenths of a degree.
     pub tenths: i16,
 }
 
-/// A pitch target from -5 to 0 degrees, with a one-second movement duration.
+/// A pitch target from -90 to 0 degrees, with a one-second movement duration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GimbalPitchTarget {
     tenths: i16,
@@ -26,7 +26,7 @@ impl GimbalPitchTarget {
     ///
     /// # Errors
     ///
-    /// Returns [`PitchTargetError`] when the target is outside -50..=0.
+    /// Returns [`PitchTargetError`] when the target is outside -900..=0.
     pub fn from_tenths(tenths: i16) -> Result<Self, PitchTargetError> {
         if (MIN_PITCH_TENTHS..=MAX_PITCH_TENTHS).contains(&tenths) {
             Ok(Self { tenths })

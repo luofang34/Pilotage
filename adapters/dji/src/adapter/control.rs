@@ -6,20 +6,52 @@ use pilotage_adapter_api::{
 };
 use pilotage_protocol::{ControlAction, ControlIntent, ScopeId, ScopedControlFrame, VehicleId};
 
-use super::{DjiAdapter, capability::MAX_PITCH_RATE};
+use super::{DjiAdapter, DjiControlMode, bench::BenchState, capability::MAX_PITCH_RATE};
 use crate::GimbalPitchTarget;
 
 #[derive(Default)]
 pub(super) struct ControlState {
-    link_loss: bool,
+    pub(super) link_loss: bool,
     active_rate: bool,
     recenter_until: Option<Duration>,
-    sequence: u16,
+    pub(super) sequence: u16,
+    pub(super) bench: Option<BenchState>,
+}
+
+impl ControlState {
+    pub(super) fn new(mode: DjiControlMode) -> Self {
+        Self {
+            bench: (mode == DjiControlMode::BenchInitialHorizontal).then(BenchState::default),
+            ..Self::default()
+        }
+    }
+
+    pub(super) fn mode(&self) -> DjiControlMode {
+        if self.bench.is_some() {
+            DjiControlMode::BenchInitialHorizontal
+        } else {
+            DjiControlMode::Observed
+        }
+    }
 }
 
 impl DjiAdapter {
     pub(super) fn apply_at(&mut self, frame: &ScopedControlFrame, now: Duration) -> ApplyOutcome {
         let result = self.validate_and_queue(frame, now);
+        if result.is_err()
+            && let Some(bench) = &mut self.control.bench
+        {
+            bench.discard_elapsed(now);
+        }
+        tracing::debug!(
+            elapsed_ns = now.as_nanos(),
+            vehicle = self.vehicle.as_u64(),
+            scope = frame.scope.as_str(),
+            intent = ?frame.intent,
+            actions = ?frame.actions,
+            outcome = ?result,
+            "DJI control request evaluated"
+        );
         match result {
             Ok(transformed) => ApplyOutcome {
                 tick: self.tick(),
@@ -54,6 +86,9 @@ impl DjiAdapter {
             return Err(RejectReason::LinkLossEngaged);
         }
         let (rate, recenter, ignored_yaw) = demand(frame)?;
+        if self.control.bench.is_some() {
+            return self.apply_bench(rate, recenter, ignored_yaw, now);
+        }
         if !self.ready(now) {
             return Err(RejectReason::MeasurementUnavailable);
         }
@@ -93,6 +128,14 @@ impl DjiAdapter {
         self.connection.input_clear() && self.observations.ready(now)
     }
 
+    pub(super) fn movement_ready(&self, now: Duration) -> bool {
+        if self.control.bench.is_some() {
+            !self.control.link_loss && self.connection.input_clear()
+        } else {
+            self.ready(now)
+        }
+    }
+
     pub(super) fn link_loss_with_time_blocking(
         &mut self,
         vehicle: VehicleId,
@@ -105,6 +148,9 @@ impl DjiAdapter {
         }
         if scope.as_str() != GIMBAL_SCOPE {
             return Err(rejected("unknown DJI control scope"));
+        }
+        if self.control.bench.is_some() {
+            return self.bench_link_loss(policy);
         }
         if let Some(policy) = policy {
             self.control.link_loss = true;

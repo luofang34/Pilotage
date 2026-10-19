@@ -37,7 +37,7 @@ fn the_pitch_encoder_matches_the_captured_command() -> Result<(), PitchTargetErr
 
 #[test]
 fn every_target_preserves_the_route_ignored_axes_and_duration() -> Result<(), PitchTargetError> {
-    for tenths in -50..=0 {
+    for tenths in -900..=0 {
         let target = GimbalPitchTarget::from_tenths(tenths)?;
         for sequence in [0, 1, u16::MAX] {
             let frames = parse(&target.encode_app_command(sequence));
@@ -56,8 +56,8 @@ fn every_target_preserves_the_route_ignored_axes_and_duration() -> Result<(), Pi
 }
 
 #[test]
-fn a_target_outside_the_bench_range_cannot_be_encoded() {
-    for tenths in [i16::MIN, -51, 1, i16::MAX] {
+fn a_target_outside_the_encoder_range_cannot_be_encoded() {
+    for tenths in [i16::MIN, -901, 1, i16::MAX] {
         assert_eq!(
             GimbalPitchTarget::from_tenths(tenths),
             Err(PitchTargetError { tenths })

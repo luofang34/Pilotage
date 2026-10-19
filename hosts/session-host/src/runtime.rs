@@ -156,8 +156,14 @@ pub async fn start_with_options(
     // The endpoint intentionally keeps OS-default UDP socket buffers. A larger
     // host send buffer would permit a larger video burst but cannot enlarge the
     // browser's receive buffer; per-connection media admission is the bound.
-    let config = ServerConfig::builder()
-        .with_bind_default(port)
+    let builder = ServerConfig::builder();
+    let builder = if adapter == AdapterKind::Dji {
+        // This bench connection accepts operators on the attached computer.
+        builder.with_bind_address(([127, 0, 0, 1], port).into())
+    } else {
+        builder.with_bind_default(port)
+    };
+    let config = builder
         .with_identity(identity)
         .keep_alive_interval(Some(Duration::from_secs(3)))
         .build();

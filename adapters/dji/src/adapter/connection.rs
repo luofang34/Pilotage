@@ -29,7 +29,8 @@ impl Transport for RawSerial {
 struct Pending {
     bytes: Vec<u8>,
     offset: usize,
-    movement: bool,
+    pitch: Option<GimbalPitchTarget>,
+    expires_at: Option<Duration>,
 }
 
 pub(super) struct Connection {
@@ -38,6 +39,7 @@ pub(super) struct Connection {
     capture_path: PathBuf,
     parser: DumlParser,
     pending: Option<Pending>,
+    written_pitch: Option<GimbalPitchTarget>,
     drained: bool,
     pub(super) fault: Option<DjiFault>,
     pub(super) version_observed: bool,
@@ -59,8 +61,10 @@ impl Connection {
             pending: Some(Pending {
                 bytes: version_request(),
                 offset: 0,
-                movement: false,
+                pitch: None,
+                expires_at: None,
             }),
+            written_pitch: None,
             drained: false,
             fault: None,
             version_observed: false,
@@ -80,24 +84,38 @@ impl Connection {
     }
 
     pub(super) fn queue_pitch(&mut self, pitch: GimbalPitchTarget, sequence: u16) -> bool {
+        self.queue_pitch_until(pitch, sequence, None)
+    }
+
+    pub(super) fn queue_pitch_until(
+        &mut self,
+        pitch: GimbalPitchTarget,
+        sequence: u16,
+        expires_at: Option<Duration>,
+    ) -> bool {
         if self.pending.is_some() || self.fault.is_some() {
             return false;
         }
         self.pending = Some(Pending {
             bytes: pitch.encode_app_command(sequence).to_vec(),
             offset: 0,
-            movement: true,
+            pitch: Some(pitch),
+            expires_at,
         });
         true
     }
 
+    pub(super) fn pending_pitch(&self) -> Option<GimbalPitchTarget> {
+        self.pending.as_ref().and_then(|pending| pending.pitch)
+    }
+
     pub(super) fn cancel_movement(&mut self) -> bool {
         if let Some(pending) = &self.pending {
-            if pending.movement && pending.offset > 0 {
+            if pending.pitch.is_some() && pending.offset > 0 {
                 self.fail(DjiFault::PartialCommand);
                 return false;
             }
-            if pending.movement {
+            if pending.pitch.is_some() {
                 self.pending = None;
             }
         }
@@ -184,7 +202,9 @@ impl Connection {
 
     pub(super) fn write_pending_blocking(&mut self, now: Duration, movement_ready: bool) {
         let Some(pending) = &self.pending else { return };
-        if pending.movement && !movement_ready {
+        if pending.pitch.is_some()
+            && (!movement_ready || pending.expires_at.is_some_and(|until| now >= until))
+        {
             self.cancel_movement();
             return;
         }
@@ -217,13 +237,19 @@ impl Connection {
         let actual = pending.bytes[pending.offset..pending.offset + count].to_vec();
         pending.offset += count;
         let complete = pending.offset == pending.bytes.len();
+        let pitch = pending.pitch;
         self.written_bytes = self.written_bytes.wrapping_add(count as u64);
         if !self.record_blocking(now, "tx", &actual) {
             return;
         }
         if complete {
             self.pending = None;
+            self.written_pitch = pitch;
         }
+    }
+
+    pub(super) fn take_written_pitch(&mut self) -> Option<GimbalPitchTarget> {
+        self.written_pitch.take()
     }
 
     fn record_blocking(&mut self, now: Duration, direction: &str, bytes: &[u8]) -> bool {

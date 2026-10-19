@@ -95,6 +95,14 @@ pub(super) struct Harness {
 
 impl Harness {
     pub(super) fn new() -> Self {
+        Self::with_mode(super::super::DjiControlMode::Observed)
+    }
+
+    pub(super) fn bench() -> Self {
+        Self::with_mode(super::super::DjiControlMode::BenchInitialHorizontal)
+    }
+
+    fn with_mode(control_mode: super::super::DjiControlMode) -> Self {
         let recording = Recording(Arc::new(Mutex::new(Wire {
             write_limit: usize::MAX,
             read_limit: usize::MAX,
@@ -106,6 +114,7 @@ impl Harness {
             Box::new(recording.clone()),
             "injected-recording".into(),
             SourceIncarnation::new([42; 16]),
+            control_mode,
         );
         Self { adapter, recording }
     }
