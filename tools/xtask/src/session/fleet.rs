@@ -18,6 +18,7 @@ use crate::error::XtaskError;
 use crate::output::print_line;
 use crate::process::ManagedChild;
 use crate::readiness::{session_manifest, viewer_url};
+use crate::site::{Ground, Site};
 
 /// The fleet's working directory, relative to the repository root. Each
 /// vehicle runs in `<FLEET_DIR>/<name>/`, and the fleet manifest sits
@@ -25,27 +26,25 @@ use crate::readiness::{session_manifest, viewer_url};
 pub(crate) const FLEET_DIR: &str = "target/xtask-fleet";
 /// The fleet manifest's file name inside [`FLEET_DIR`].
 const FLEET_MANIFEST: &str = "fleet.json";
-/// Where the first vehicle spawns: PX4's Zurich default home.
-pub(crate) const FLEET_ORIGIN: SpawnPoint = SpawnPoint {
-    latitude_deg: 47.397742,
-    longitude_deg: 8.545594,
-};
-/// How far apart the vehicles spawn, east of one another. Far enough to
-/// be visibly apart on the map, near enough to share one view.
-const SPACING_M: f64 = 30.0;
-/// Metres per degree of latitude (and of longitude at the equator).
-const METRES_PER_DEGREE: f64 = 111_320.0;
 /// The address every fleet host is reached at: fleets serve loopback.
 const LOOPBACK: &str = "127.0.0.1";
 
-/// Where vehicle `index` spawns: `index * SPACING_M` east of the origin.
-pub(crate) fn spawn_point(index: usize) -> SpawnPoint {
-    let east_m = SPACING_M * index as f64;
-    let metres_per_lon_degree = METRES_PER_DEGREE * FLEET_ORIGIN.latitude_deg.to_radians().cos();
-    SpawnPoint {
-        latitude_deg: FLEET_ORIGIN.latitude_deg,
-        longitude_deg: FLEET_ORIGIN.longitude_deg + east_m / metres_per_lon_degree,
-    }
+/// Where each vehicle spawns on `site`, in launch order: each backend
+/// says which ground it starts on, and vehicles on one ground stand in a
+/// row in launch order.
+pub(crate) fn spawn_points(site: &Site, grounds: &[Ground]) -> Vec<SpawnPoint> {
+    grounds
+        .iter()
+        .enumerate()
+        .map(|(index, ground)| {
+            let before = grounds
+                .iter()
+                .take(index)
+                .filter(|other| *other == ground)
+                .count();
+            site.spawn_point(*ground, before)
+        })
+        .collect()
 }
 
 /// A vehicle's session name: its spec with the model joined by `-`, and
@@ -154,8 +153,10 @@ pub async fn run_fleet(args: &FleetArgs) -> Result<(), XtaskError> {
     for slot in slots.iter_mut().skip(1) {
         slot.ctx.web_root = stages::private_web_root(&repo_root, &slot.ctx.log_dir)?;
     }
-    for (index, slot) in slots.iter_mut().enumerate() {
-        plan_slot(slot, index)?;
+    let grounds: Vec<Ground> = slots.iter().map(|slot| slot.backend.ground()).collect();
+    print_line(&format!("fleet site: {}", describe_site(&args.site)));
+    for (slot, point) in slots.iter_mut().zip(spawn_points(&args.site, &grounds)) {
+        plan_slot(slot, &point)?;
     }
 
     let mut cancel = spawn_cancel_listener()?;
@@ -203,6 +204,7 @@ fn resolve_slots(args: &FleetArgs, repo_root: &Path) -> Result<Vec<Slot>, XtaskE
             web_root: stages::viewer_source(repo_root),
             lan: false,
             instance: args.instance_base.saturating_add(offset),
+            ready_timeout_s: args.ready_timeout_s,
         };
         slots.push(Slot {
             name,
@@ -216,11 +218,14 @@ fn resolve_slots(args: &FleetArgs, repo_root: &Path) -> Result<Vec<Slot>, XtaskE
 }
 
 /// Plans one vehicle's stages at its spawn point, host and viewer last.
-fn plan_slot(slot: &mut Slot, index: usize) -> Result<(), XtaskError> {
+fn plan_slot(slot: &mut Slot, point: &SpawnPoint) -> Result<(), XtaskError> {
     slot.backend.prepare(&slot.ctx)?;
     let mut planned = slot.backend.plan(&slot.ctx)?;
-    slot.backend
-        .spawn(&slot.ctx, &spawn_point(index), &mut planned)?;
+    slot.backend.spawn(&slot.ctx, point, &mut planned)?;
+    print_line(&format!(
+        "vehicle {} spawns at {:.7}, {:.7}, {:.1} m, heading {:.1}",
+        slot.name, point.latitude_deg, point.longitude_deg, point.elevation_m, point.heading_deg
+    ));
     planned.push(stages::host_stage(&slot.ctx, slot.backend.as_ref()));
     let xtask = std::env::current_exe().map_err(|source| XtaskError::Io {
         context: "locating the xtask executable for the viewer stage",
@@ -289,6 +294,13 @@ async fn launch_slot(
         session_url(&session)
     ));
     Ok(session)
+}
+
+fn describe_site(site: &Site) -> String {
+    format!(
+        "{} ({:.7}, {:.7}, {:.1} m, runway {:.1})",
+        site.name, site.latitude_deg, site.longitude_deg, site.elevation_m, site.heading_deg
+    )
 }
 
 fn session_url(session: &Running) -> String {

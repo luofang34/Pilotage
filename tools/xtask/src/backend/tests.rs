@@ -87,6 +87,7 @@ fn the_assembled_host_environment_carries_the_vehicles_law() {
         lan: false,
         web_root: std::env::temp_dir(),
         instance: 0,
+        ready_timeout_s: crate::backend::DEFAULT_READY_TIMEOUT_S,
     };
 
     for (backend, vehicle) in [("aviate-gz", "x500"), ("aviate-xplane", "alia250")] {
@@ -173,6 +174,7 @@ fn no_backend_writes_the_control_feel_variable_itself() {
                 lan: false,
                 web_root: std::env::temp_dir(),
                 instance: 0,
+                ready_timeout_s: crate::backend::DEFAULT_READY_TIMEOUT_S,
             };
             let env = backend_for(backend).expect("known backend").host_env(&ctx);
             assert!(
@@ -209,6 +211,7 @@ fn a_physical_session_is_handed_no_control_feel_law() {
             lan: false,
             web_root: std::env::temp_dir(),
             instance: 0,
+            ready_timeout_s: crate::backend::DEFAULT_READY_TIMEOUT_S,
         };
         let declared = backend_for(backend)
             .expect("known backend")
@@ -245,6 +248,7 @@ fn an_operators_own_control_feel_law_is_not_replaced() {
         lan: false,
         web_root: std::env::temp_dir(),
         instance: 0,
+        ready_timeout_s: crate::backend::DEFAULT_READY_TIMEOUT_S,
     };
 
     let operators = std::ffi::OsString::from("/tmp/an-operators-own-tuning.json");

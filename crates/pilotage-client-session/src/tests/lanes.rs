@@ -218,3 +218,133 @@ fn actions_across_lanes_share_one_correlation_id_space() {
     // second lane reads as a replay with different content.
     assert_ne!(id_of(&arm), id_of(&recenter));
 }
+
+/// Delivers a revocation of `scope` at `generation` on the authority stream.
+fn deliver_revocation(engine: &mut crate::ClientEngine, stream: u64, scope: &str, generation: u64) {
+    let revoked = wire::Envelope {
+        schema_version: 1,
+        payload: Some(wire::envelope::Payload::AuthorityEvent(
+            wire::AuthorityEvent {
+                event: Some(wire::authority_event::Event::ScopeLeaseRevoked(
+                    wire::ScopeLeaseRevoked {
+                        vehicle: Some(wire::VehicleId { value: 1 }),
+                        scope: Some(wire::ScopeId {
+                            value: scope.into(),
+                        }),
+                        generation: Some(wire::Generation { value: generation }),
+                        ..Default::default()
+                    },
+                )),
+            },
+        )),
+    };
+    let mut tagged = vec![0x01];
+    tagged.extend_from_slice(&pilotage_protocol::encode_envelope_length_delimited(
+        &revoked,
+    ));
+    engine.handle(TransportEvent::UniStreamOpened(StreamId(stream)), 0);
+    engine.handle(
+        TransportEvent::UniStreamReceived(StreamId(stream), tagged),
+        0,
+    );
+}
+
+/// Authority events and lease replies ride different streams, so a
+/// revocation of an earlier lease can arrive after the grant that replaced
+/// it. Only a revocation newer than the lane's grant ends the lane.
+#[test]
+fn a_late_revocation_of_an_older_lease_leaves_the_newer_lane_open() {
+    let mut engine = engine();
+    admit(&mut engine, 7, 42);
+    engine.request_lease(1, "vehicle.motion");
+    grant(&mut engine, 5);
+    deliver_revocation(&mut engine, 9, "vehicle.motion", 4);
+    assert!(
+        engine.holds(1, "vehicle.motion"),
+        "generation 4 predates the grant"
+    );
+    deliver_revocation(&mut engine, 10, "vehicle.motion", 5);
+    assert!(
+        engine.holds(1, "vehicle.motion"),
+        "the grant's own generation is not newer"
+    );
+    deliver_revocation(&mut engine, 11, "vehicle.motion", 6);
+    assert!(
+        !engine.holds(1, "vehicle.motion"),
+        "a newer revocation ends the lane"
+    );
+}
+
+/// The scheme switch as the host emits it: releasing a member scope
+/// revokes the flight group (`vehicle.motion`) at a fresh generation, and
+/// the next grant advances it again; the release's revocation lands last.
+#[test]
+fn a_scheme_switch_survives_its_release_arriving_after_the_new_grant() {
+    let mut engine = engine();
+    admit(&mut engine, 7, 42);
+    engine.request_lease(1, "vehicle.motion");
+    grant(&mut engine, 2);
+    // velocity -> direct
+    engine.release_lease(1, "vehicle.motion");
+    engine.request_lease(1, "vehicle.motion.direct");
+    grant_scope(&mut engine, "vehicle.motion.direct", 4);
+    deliver_revocation(&mut engine, 9, "vehicle.motion", 3);
+    assert!(engine.holds(1, "vehicle.motion.direct"));
+    // direct -> velocity
+    engine.release_lease(1, "vehicle.motion.direct");
+    engine.request_lease(1, "vehicle.motion");
+    grant(&mut engine, 6);
+    deliver_revocation(&mut engine, 10, "vehicle.motion", 5);
+    assert!(
+        engine.holds(1, "vehicle.motion"),
+        "the late revocation of the direct lease must not close the new velocity lane"
+    );
+    assert_eq!(
+        engine.control_target(),
+        Some((1, "vehicle.motion".to_owned()))
+    );
+}
+
+/// The ownership mirror is fenced the same way: a revocation older than
+/// the grant it last recorded does not clear the holder.
+#[test]
+fn the_ownership_mirror_ignores_an_older_revocation() {
+    let mut engine = engine();
+    admit(&mut engine, 7, 42);
+    let granted = wire::Envelope {
+        schema_version: 1,
+        payload: Some(wire::envelope::Payload::AuthorityEvent(
+            wire::AuthorityEvent {
+                event: Some(wire::authority_event::Event::ScopeLeaseGranted(
+                    wire::ScopeLeaseGranted {
+                        vehicle: Some(wire::VehicleId { value: 1 }),
+                        scope: Some(wire::ScopeId {
+                            value: "vehicle.motion".into(),
+                        }),
+                        principal: Some(wire::PrincipalId { value: 42 }),
+                        generation: Some(wire::Generation { value: 6 }),
+                        ..Default::default()
+                    },
+                )),
+            },
+        )),
+    };
+    let mut tagged = vec![0x01];
+    tagged.extend_from_slice(&pilotage_protocol::encode_envelope_length_delimited(
+        &granted,
+    ));
+    engine.handle(TransportEvent::UniStreamOpened(StreamId(8)), 0);
+    engine.handle(TransportEvent::UniStreamReceived(StreamId(8), tagged), 0);
+    deliver_revocation(&mut engine, 9, "vehicle.motion", 5);
+    let holder = engine
+        .authority()
+        .holder(1, "vehicle.motion")
+        .expect("recorded");
+    assert_eq!((holder.holder_id, holder.generation), (Some(42), 6));
+    deliver_revocation(&mut engine, 10, "vehicle.motion", 7);
+    let holder = engine
+        .authority()
+        .holder(1, "vehicle.motion")
+        .expect("recorded");
+    assert_eq!((holder.holder_id, holder.generation), (None, 7));
+}
