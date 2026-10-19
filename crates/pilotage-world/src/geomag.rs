@@ -1,7 +1,7 @@
 //! The world's magnetic field: one model, one epoch, so every simulated
 //! magnetometer and every flight controller's declination agree.
 
-pub use aviate_geomag::{MagneticField, ModelId, WMM2025};
+pub use world_geomag::{GeomagModel, MagneticField, WMM2025};
 
 /// The date a world's magnetic field is evaluated at.
 ///
@@ -20,7 +20,7 @@ impl MagneticEpoch {
 
     /// The epoch at a Unix time, seconds.
     pub fn from_unix_seconds(unix_seconds: i64) -> Self {
-        Self::from_decimal_year(aviate_geomag::decimal_year_from_unix_seconds(unix_seconds))
+        Self::from_decimal_year(world_core::DecimalYear::from_unix_seconds(unix_seconds).value())
     }
 
     /// The epoch as a decimal year.
