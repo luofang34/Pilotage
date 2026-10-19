@@ -52,6 +52,11 @@ message BridgeFrame {
   // Video source this frame came from: 0 = onboard FPV camera, 1 = chase
   // camera. Additional sources may be assigned higher ids later.
   uint32 camera_id = 6;
+  // The published camera calibration this frame was captured with, for a
+  // producer whose calibration changes from frame to frame (a zoom
+  // detent). Zero states none, and the host keeps the calibration it
+  // binds to the camera.
+  uint32 calibration_id = 7;
 }
 
 // A camera command from the host to a producer that owns a controllable

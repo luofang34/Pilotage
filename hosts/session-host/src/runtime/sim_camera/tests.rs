@@ -227,6 +227,7 @@ fn a_producer_gets_each_new_truth_pose_and_its_frames_carry_the_truth_clock() {
                 sim_time_ns: 2_000,
                 rgb: vec![1, 2, 3, 4, 5, 6],
                 camera_id: 2,
+                calibration_id: 9,
             })),
         };
         producer
@@ -245,6 +246,11 @@ fn a_producer_gets_each_new_truth_pose_and_its_frames_carry_the_truth_clock() {
             CaptureClockMapping::identity(MeasurementClock::Simulation)
         );
         assert_eq!(stamped.rgb, [1, 2, 3, 4, 5, 6]);
+        assert_eq!(
+            stamped.capture.calibration_id,
+            pilotage_adapter_api::CalibrationId(9),
+            "the producer's per-frame calibration reaches the stamp"
+        );
 
         // The engine actor ending ends the attachment and closes the frames.
         drop(sender);
