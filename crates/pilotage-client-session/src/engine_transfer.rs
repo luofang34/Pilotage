@@ -57,8 +57,22 @@ impl ClientEngine {
             .as_ref()
             .map(|s| s.value.clone())
             .unwrap_or_default();
-        if self.lanes.remove(&(vehicle, scope.clone())).is_some() {
-            let generation = revoked.generation.as_ref().map_or(0, |g| g.value);
+        let generation = revoked.generation.as_ref().map_or(0, |g| g.value);
+        let key = (vehicle, scope.clone());
+        // Fenced by generation: a revocation advances the generation past
+        // the lane it ends, and every later grant advances it again. So a
+        // revocation at or below this lane's generation ended an earlier
+        // lease. Authority events and lease replies ride different streams,
+        // and a scheme switch's release can arrive after the grant that
+        // followed it; that late revocation must not close the new lane.
+        let stale = self
+            .lanes
+            .get(&key)
+            .is_some_and(|lane| generation <= lane.generation());
+        if stale {
+            return Vec::new();
+        }
+        if self.lanes.remove(&key).is_some() {
             return vec![ClientAction::Emit(ModuleEvent::Lease(
                 wire::LeaseResponse {
                     vehicle: Some(wire::VehicleId { value: vehicle }),
