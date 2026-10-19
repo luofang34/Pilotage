@@ -27,12 +27,14 @@ use super::{ArduPilotAdapter, FLIGHT_SCOPE};
 use crate::uplink::ArduPilotUplink;
 
 /// The body velocity a setpoint lane holds, if it holds one.
-fn body_velocity(setpoint: Option<OffboardSetpoint>) -> Option<BodyVelocityDemand> {
+pub(super) fn body_velocity(setpoint: Option<OffboardSetpoint>) -> Option<BodyVelocityDemand> {
     match setpoint? {
         OffboardSetpoint::BodyVelocity(demand) => Some(demand),
         OffboardSetpoint::AttitudeThrust(_) => None,
     }
 }
+
+mod direct;
 
 const SOURCE: FrameSource = FrameSource {
     system_id: 1,
@@ -41,16 +43,17 @@ const SOURCE: FrameSource = FrameSource {
 };
 const HEALTHY_EKF: u16 = 1 | 2 | 4 | 8 | 16 | 32;
 
-struct Harness {
-    adapter: ArduPilotAdapter,
-    state: Arc<Mutex<LinkState>>,
-    commands: mpsc::Receiver<OutboundCommand>,
-    velocity: watch::Receiver<Option<OffboardSetpoint>>,
-    time_boot_ms: u32,
+pub(super) struct Harness {
+    pub(super) adapter: ArduPilotAdapter,
+    pub(super) state: Arc<Mutex<LinkState>>,
+    pub(super) commands: mpsc::Receiver<OutboundCommand>,
+    pub(super) velocity: watch::Receiver<Option<OffboardSetpoint>>,
+    pub(super) params: mpsc::Receiver<pilotage_mavlink::OutboundParam>,
+    pub(super) time_boot_ms: u32,
 }
 
 impl Harness {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let state = Arc::new(Mutex::new(LinkState {
             authorization_source: AuthorizationSource::ArduPilotEkfStatus,
             standard_status_max_lag_ms: 300,
@@ -60,22 +63,29 @@ impl Harness {
         let (command_tx, commands) = mpsc::channel(32);
         let (velocity_tx, velocity) = watch::channel(None);
         let uplink = ArduPilotUplink::new(command_tx, velocity_tx, 1, 1);
+        let (param_tx, params) = mpsc::channel(32);
         Self {
-            adapter: ArduPilotAdapter::from_parts(VehicleId::new(1), state.clone(), uplink),
+            adapter: ArduPilotAdapter::from_parts(
+                VehicleId::new(1),
+                state.clone(),
+                uplink,
+                param_tx,
+            ),
             state,
             commands,
             velocity,
+            params,
             time_boot_ms: 10_000,
         }
     }
 
-    fn feed(&mut self, messages: &[FcMessage]) {
+    pub(super) fn feed(&mut self, messages: &[FcMessage]) {
         let tagged: Vec<_> = messages.iter().map(|m| (SOURCE, *m)).collect();
         apply_messages_at(&self.state, &tagged, 0, 0, Instant::now());
     }
 
     /// One healthy estimate at `down_m`, plus a heartbeat.
-    fn estimate(&mut self, down_m: f32, armed: bool) {
+    pub(super) fn estimate(&mut self, down_m: f32, armed: bool) {
         self.time_boot_ms += 50;
         let t = self.time_boot_ms;
         self.feed(&[
@@ -124,23 +134,31 @@ impl Harness {
 }
 
 fn frame(intent: Option<VelocityIntent>, actions: Vec<ControlAction>) -> ScopedControlFrame {
+    scoped(FLIGHT_SCOPE, intent.map(ControlIntent::Velocity), actions)
+}
+
+pub(super) fn scoped(
+    scope: &str,
+    intent: Option<ControlIntent>,
+    actions: Vec<ControlAction>,
+) -> ScopedControlFrame {
     ScopedControlFrame {
         action_ids: (1..=actions.len() as u32).collect(),
         session: SessionId::new(1),
         vehicle: VehicleId::new(1),
-        scope: ScopeId::new(FLIGHT_SCOPE),
+        scope: ScopeId::new(scope),
         generation: Generation::new(1),
         sequence: SequenceNum::new(1),
         sampled_at: pilotage_timing::MonoTimestamp::from_nanos(0),
         profile_revision: 1,
         activation_revision: 0,
         payload: ControlPayload::default(),
-        intent: intent.map(ControlIntent::Velocity),
+        intent,
         actions,
     }
 }
 
-fn velocity(vx: f32, vz: f32, yaw_rate: f32) -> Option<VelocityIntent> {
+pub(super) fn velocity(vx: f32, vz: f32, yaw_rate: f32) -> Option<VelocityIntent> {
     Some(VelocityIntent {
         frame: ReferenceFrame::BodyFrd,
         vx,

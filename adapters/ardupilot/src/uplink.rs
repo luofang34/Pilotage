@@ -101,6 +101,10 @@ pub struct ArduPilotUplink {
     // so the verdict and the FC's status texts pair with it.
     last_arm_command: Option<(bool, Instant)>,
     send_failures: u64,
+    // The FC thrust the last direct setpoint carried and when, so the
+    // next one slews from it; `None` after a velocity setpoint, so a
+    // switch into direct flight starts from hover thrust.
+    direct_thrust: Option<(f32, Instant)>,
 }
 
 impl ArduPilotUplink {
@@ -118,6 +122,7 @@ impl ArduPilotUplink {
             phase: FlightPhase::Ground,
             last_arm_command: None,
             send_failures: 0,
+            direct_thrust: None,
         }
     }
 
@@ -257,6 +262,7 @@ impl ArduPilotUplink {
     }
 
     fn stream(&mut self, demand: [f32; 4], constrained: bool) -> VelocityOutcome {
+        self.direct_thrust = None;
         let published =
             self.velocity
                 .send(Some(OffboardSetpoint::BodyVelocity(BodyVelocityDemand {
@@ -285,5 +291,8 @@ impl ArduPilotUplink {
     }
 }
 
+mod direct;
+pub(crate) use direct::DirectOutcome;
+pub use direct::{MAX_BODY_RATE_RPS, MAX_DIRECT_TILT_RAD};
 #[cfg(test)]
 mod tests;

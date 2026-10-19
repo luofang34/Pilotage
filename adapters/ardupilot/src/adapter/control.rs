@@ -9,10 +9,16 @@ use pilotage_protocol::{
 };
 use pilotage_timing::SimTick;
 
+use super::params::DirectParams;
 use super::{
-    ArduPilotAdapter, FLIGHT_SCOPE, PITCH_AXIS, ROLL_AXIS, THROTTLE_AXIS, YAW_AXIS, action_results,
+    ArduPilotAdapter, DIRECT_SCOPE, FLIGHT_SCOPE, PITCH_AXIS, ROLL_AXIS, THROTTLE_AXIS, YAW_AXIS,
+    action_results,
 };
-use crate::uplink::{MAX_HORIZONTAL_MPS, MAX_VERTICAL_MPS, MAX_YAW_RATE_RPS, VelocityOutcome};
+use crate::uplink::{
+    DirectOutcome, MAX_BODY_RATE_RPS, MAX_HORIZONTAL_MPS, MAX_VERTICAL_MPS, MAX_YAW_RATE_RPS,
+    VelocityOutcome,
+};
+use pilotage_mavlink::codec::AttitudeTargetKind;
 
 fn rejected(tick: SimTick, reason: RejectReason) -> ApplyOutcome {
     ApplyOutcome::new(tick, Disposition::Rejected(reason))
@@ -35,6 +41,52 @@ pub(super) fn clamp_to_envelope(velocity: &VelocityIntent) -> ([f32; 4], bool) {
     let (vz, c2) = clamp(velocity.vz, MAX_VERTICAL_MPS);
     let (yaw_rate, c3) = clamp(velocity.yaw_rate, MAX_YAW_RATE_RPS);
     ([vx, vy, vz, yaw_rate], c0 || c1 || c2 || c3)
+}
+
+fn wrong_family() -> RejectReason {
+    RejectReason::Other("this scope does not fly that intent family".to_owned())
+}
+
+/// The attitude-loop target a direct intent asks for, its canonical
+/// thrust, and whether a rate was clamped to the envelope. `None` for a
+/// family the direct scope does not fly.
+fn direct_target(intent: &ControlIntent) -> Option<(AttitudeTargetKind, f32, bool)> {
+    match intent {
+        ControlIntent::BodyRate(rates) => {
+            let clamp = |value: f32| {
+                if value.is_nan() {
+                    0.0
+                } else {
+                    value.clamp(-MAX_BODY_RATE_RPS, MAX_BODY_RATE_RPS)
+                }
+            };
+            let demanded = [rates.roll_rate, rates.pitch_rate, rates.yaw_rate];
+            let clamped = demanded.map(clamp);
+            Some((
+                AttitudeTargetKind::BodyRates(clamped),
+                rates.thrust,
+                clamped != demanded,
+            ))
+        }
+        ControlIntent::AttitudeThrust(attitude) => Some((
+            AttitudeTargetKind::Attitude([attitude.qw, attitude.qx, attitude.qy, attitude.qz]),
+            attitude.thrust,
+            false,
+        )),
+        _ => None,
+    }
+}
+
+fn direct_disposition(outcome: DirectOutcome, clamped: bool) -> Disposition {
+    match outcome {
+        DirectOutcome::Streamed { slewed } if slewed || clamped => Disposition::Transformed,
+        DirectOutcome::Streamed { .. } => Disposition::Accepted,
+        DirectOutcome::Landing => Disposition::Constrained,
+        DirectOutcome::NotArmed => Disposition::Rejected(RejectReason::UplinkIdle),
+        DirectOutcome::LaneClosed => Disposition::Rejected(RejectReason::Other(
+            "the ArduPilot setpoint lane is closed".to_owned(),
+        )),
+    }
 }
 
 fn disposition(outcome: VelocityOutcome) -> Disposition {
@@ -61,7 +113,7 @@ impl ArduPilotAdapter {
         if frame.vehicle != self.vehicle {
             return Err(RejectReason::UnknownVehicle);
         }
-        if frame.scope.as_str() != FLIGHT_SCOPE {
+        if frame.scope.as_str() != FLIGHT_SCOPE && frame.scope.as_str() != DIRECT_SCOPE {
             return Err(RejectReason::UnknownScope);
         }
         let known = [ROLL_AXIS, PITCH_AXIS, THROTTLE_AXIS, YAW_AXIS].map(LogicalAxisId::new);
@@ -97,6 +149,7 @@ impl ArduPilotAdapter {
         }
         let armed = self.fc_armed();
         let pose = self.current_pose();
+        let hover = self.direct.as_ref().and_then(DirectParams::ready_hover);
         let Some(uplink) = self.uplink.as_mut() else {
             return rejected(tick, RejectReason::UnknownScope);
         };
@@ -122,25 +175,36 @@ impl ArduPilotAdapter {
             uplink.arm(armed, now);
         }
         let action_results = action_results(frame, &[ActionKind::Arm]);
-        let Some(ControlIntent::Velocity(velocity)) = frame.intent else {
-            return ApplyOutcome {
-                tick,
-                disposition: Disposition::Accepted,
-                action_results,
-            };
+        let disposition = match (frame.scope.as_str(), frame.intent) {
+            (_, None) => Disposition::Accepted,
+            (FLIGHT_SCOPE, Some(ControlIntent::Velocity(velocity))) => match pose {
+                Some(pose) => {
+                    let (demand, constrained) = clamp_to_envelope(&velocity);
+                    disposition(uplink.apply_velocity(
+                        demand,
+                        constrained,
+                        armed,
+                        pose.pos_ned_m[2],
+                        now,
+                    ))
+                }
+                None => Disposition::Rejected(RejectReason::MeasurementUnavailable),
+            },
+            (DIRECT_SCOPE, Some(intent)) => match (direct_target(&intent), hover) {
+                (None, _) => Disposition::Rejected(wrong_family()),
+                (Some(_), None) => Disposition::Rejected(RejectReason::Other(
+                    "ArduCopter hover thrust or GUID_OPTIONS not confirmed yet".to_owned(),
+                )),
+                (Some((kind, thrust, clamped)), Some(hover)) => direct_disposition(
+                    uplink.apply_direct(kind, thrust, armed, hover, now),
+                    clamped,
+                ),
+            },
+            (_, Some(_)) => Disposition::Rejected(wrong_family()),
         };
-        let Some(pose) = pose else {
-            return ApplyOutcome {
-                tick,
-                disposition: Disposition::Rejected(RejectReason::MeasurementUnavailable),
-                action_results,
-            };
-        };
-        let (demand, constrained) = clamp_to_envelope(&velocity);
-        let outcome = uplink.apply_velocity(demand, constrained, armed, pose.pos_ned_m[2], now);
         ApplyOutcome {
             tick,
-            disposition: disposition(outcome),
+            disposition,
             action_results,
         }
     }
