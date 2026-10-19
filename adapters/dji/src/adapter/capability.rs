@@ -18,7 +18,7 @@ pub(super) fn capabilities(vehicle: VehicleId) -> AdapterCapabilities {
             id: vehicle,
             class: VehicleClass::Multicopter,
             heading_reference: None,
-            display_name: "DJI Mini 3 — experimental gimbal".to_owned(),
+            display_name: "DJI Mini 3".to_owned(),
             scopes: vec![ScopeDescriptor {
                 authority_group: None,
                 scope: ScopeId::new(GIMBAL_SCOPE),
