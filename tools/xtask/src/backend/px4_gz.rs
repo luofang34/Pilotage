@@ -47,7 +47,7 @@ const BACKEND_NAME: &str = "px4-gz";
 /// The gz world PX4's x500 model spawns into (PX4 ships `default.sdf`;
 /// its `<world name>` is `default` — also what the reset script targets).
 const WORLD_NAME: &str = "default";
-mod ports;
+pub(crate) mod ports;
 pub(crate) mod vehicle;
 
 use ports::{MAX_INSTANCE, Px4Ports, system_id};
