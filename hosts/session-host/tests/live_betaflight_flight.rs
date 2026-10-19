@@ -79,10 +79,7 @@ async fn flight() {
             runtime::start_with_options(
                 0,
                 AdapterKind::Betaflight,
-                runtime::RuntimeOptions {
-                    legacy_compatibility: false,
-                    mission: None,
-                },
+                runtime::RuntimeOptions::default(),
             )
             .await
             .expect("host starts (PILOTAGE_BETAFLIGHT_PROFILE=simulation)"),

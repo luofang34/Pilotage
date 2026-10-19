@@ -18,6 +18,8 @@ mod options;
 mod px4_config;
 mod registry;
 mod shutdown;
+#[cfg(feature = "sim")]
+mod sim_camera;
 mod stream_tag;
 mod wire_codec;
 // The mission rig is exported for the in-process integration test: the
