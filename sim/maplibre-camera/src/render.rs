@@ -50,7 +50,13 @@ pub struct Camera {
     color: wgpu::Texture,
     readback: FrameReadback,
     rgb: Vec<u8>,
+    /// How far the last frame raised the lens to stand it on the map's ground.
+    ground_lift_m: f64,
 }
+
+/// How far above the map's ground a lens is kept, metres: past the near
+/// clip distance, so the ground is never cut away under the camera.
+const GROUND_CLEARANCE_M: f64 = 0.5;
 
 fn plugins() -> Vec<Box<dyn Plugin<HeadlessEnvironment>>> {
     vec![
@@ -120,7 +126,28 @@ impl Camera {
             color,
             readback,
             rgb,
+            ground_lift_m: 0.0,
         })
+    }
+
+    /// The body origin's altitude, raised when the lens `lens_up_m` above it
+    /// would sit below the map's ground at the vehicle. The simulator's
+    /// ground and the map's terrain model the same surface with different
+    /// data, so a vehicle standing on the first can be centimetres inside
+    /// the second, and a lens there sees the terrain from beneath.
+    fn above_ground(&mut self, altitude_m: f64, lens_up_m: f64, ground: Option<f64>) -> f64 {
+        let lift = ground.map_or(0.0, |ground| {
+            (ground + GROUND_CLEARANCE_M - (altitude_m + lens_up_m)).max(0.0)
+        });
+        if lift > 0.0 && self.ground_lift_m == 0.0 {
+            tracing::warn!(
+                camera = self.spec.camera_id,
+                lift_m = lift,
+                "the vehicle stands below the map's ground; the lens is raised onto it"
+            );
+        }
+        self.ground_lift_m = lift;
+        altitude_m + lift
     }
 
     /// Renders the view of `pose` through `detent`, pointed by `pointing`
@@ -143,15 +170,16 @@ impl Camera {
         // Terrain is requested by frames, so a height above an unknown ground
         // still draws one, over sea level, to fetch the ground it stands on;
         // that image is not sent.
-        let (altitude_meters, ground_known) = match pose.height {
-            Height::Msl(metres) => (metres, true),
-            Height::Agl(metres) => match self.map.terrain_elevation_at(position) {
-                Some(ground) => (ground + metres, true),
-                None => (metres, false),
-            },
+        let ground = self.map.terrain_elevation_at(position);
+        let (altitude_meters, ground_known) = match (pose.height, ground) {
+            (Height::Msl(metres), _) => (metres, true),
+            (Height::Agl(metres), Some(ground)) => (ground + metres, true),
+            (Height::Agl(metres), None) => (metres, false),
         };
+        let world_from_eye = world_from_eye(&self.spec, pose, pointing);
+        let altitude_meters = self.above_ground(altitude_meters, world_from_eye.w.z, ground);
         let eye = XrEye {
-            world_from_eye: world_from_eye(&self.spec, pose, pointing),
+            world_from_eye,
             frustum: self.spec.frustum(detent),
             target: EyeTarget {
                 color: Some(self.color.create_view(&Default::default())),
