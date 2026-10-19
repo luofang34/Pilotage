@@ -49,6 +49,7 @@ const BACKEND_NAME: &str = "px4-gz";
 const WORLD_NAME: &str = "default";
 pub(crate) mod ports;
 mod reset;
+mod server_config;
 pub(crate) mod vehicle;
 
 use ports::{MAX_INSTANCE, Px4Ports, system_id};
@@ -309,6 +310,7 @@ fn plan_with_px4_dir(
             hint: "the PX4 checkout is missing Tools/simulation/gz/server.config",
         });
     }
+    let server_config = server_config::write_corrected(&server_config, &ctx.log_dir)?;
     let path = super::aviate_gz::search_path();
     Ok(vec![
         gz_stage(ctx, px4, &path, &world, &server_config),

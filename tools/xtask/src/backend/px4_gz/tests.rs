@@ -146,7 +146,12 @@ fn complete_scaffold(tag: &str) -> (PathBuf, PathBuf) {
     ] {
         let path = px4.join(file);
         std::fs::create_dir_all(path.parent().expect("parent")).expect("dirs");
-        std::fs::write(&path, b"x").expect("file");
+        let contents: &[u8] = if file.ends_with("server.config") {
+            b"<plugin name=\"gz::sim::systems::Magnetometer\"/>"
+        } else {
+            b"x"
+        };
+        std::fs::write(&path, contents).expect("file");
     }
     let world = root.join("sim/worlds/px4_flightdeck.sdf");
     std::fs::create_dir_all(world.parent().expect("parent")).expect("dirs");
@@ -175,13 +180,18 @@ fn a_complete_checkout_plans_gz_then_px4_standalone() {
             .any(|(k, v)| k == "PX4_GZ_MODEL_NAME" && v == "x500_0"),
         "px4 must attach to the world's rig-bearing model, not spawn one"
     );
+    // gz loads PX4's sensor systems from a copy whose magnetometer
+    // reports the corrected field.
+    let config = value(&stages[0].spec.env, "GZ_SIM_SERVER_CONFIG_PATH").expect("config");
+    assert_eq!(
+        config,
+        ctx.log_dir.join("server.config").display().to_string()
+    );
     assert!(
-        stages[0]
-            .spec
-            .env
-            .iter()
-            .any(|(k, _)| k == "GZ_SIM_SERVER_CONFIG_PATH"),
-        "gz must load PX4's sensor systems via the server config"
+        std::fs::read_to_string(config)
+            .expect("the corrected copy")
+            .contains("<use_units_gauss>false</use_units_gauss>"),
+        "the magnetometer reports the corrected field"
     );
     assert!(
         fc_env
