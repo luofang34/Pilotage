@@ -1,10 +1,11 @@
 //! Payload decoding with MAVLink 2 trailing-zero extension.
 
 use super::{
-    ATTITUDE_QUATERNION_ID, ATTITUDE_TARGET_ID, AVIATE_ESTIMATOR_STATUS_ID, BATTERY_STATUS_ID,
-    COMMAND_ACK_ID, EKF_STATUS_REPORT_ID, ESTIMATOR_STATUS_ID, FcMessage,
-    GIMBAL_DEVICE_ATTITUDE_STATUS_ID, GNSS_RAW_ID, HEARTBEAT_ID, HIL_STATE_QUATERNION_ID,
-    LOCAL_POSITION_NED_ID, PARAM_VALUE_ID, SCALED_PRESSURE_ID, STATUS_TEXT_LEN, STATUSTEXT_ID,
+    ATTITUDE_QUATERNION_ID, ATTITUDE_TARGET_ID, AVIATE_ESTIMATOR_STATUS_ID,
+    AVIATE_GEOMAGNETIC_REFERENCE_ID, BATTERY_STATUS_ID, COMMAND_ACK_ID, EKF_STATUS_REPORT_ID,
+    ESTIMATOR_STATUS_ID, FcMessage, GIMBAL_DEVICE_ATTITUDE_STATUS_ID, GNSS_RAW_ID, HEARTBEAT_ID,
+    HIL_STATE_QUATERNION_ID, LOCAL_POSITION_NED_ID, PARAM_VALUE_ID, SCALED_PRESSURE_ID,
+    STATUS_TEXT_LEN, STATUSTEXT_ID,
 };
 
 fn f32_at(payload: &[u8], off: usize) -> f32 {
@@ -232,6 +233,14 @@ pub(super) fn decode_known(msg_id: u32, payload: &[u8]) -> Option<FcMessage> {
             time_usec: u64_at(payload, 0),
             valid_flags: payload.get(8).copied().unwrap_or(0),
             quality: payload.get(9).copied().unwrap_or(0),
+        }),
+        // Wire order: time_usec u64 @0, declination f32 @8, source u8 @12.
+        // MAVLink 2 trims the trailing zero source of a "none" report, so
+        // the accessors zero-extend rather than require byte 12.
+        AVIATE_GEOMAGNETIC_REFERENCE_ID => Some(FcMessage::AviateGeomagneticReference {
+            time_usec: u64_at(payload, 0),
+            declination_rad: f32_at(payload, 8),
+            source: payload.get(12).copied().unwrap_or(0),
         }),
         GIMBAL_DEVICE_ATTITUDE_STATUS_ID => Some(decode_gimbal_status(payload)),
         BATTERY_STATUS_ID => Some(decode_battery_status(payload)),

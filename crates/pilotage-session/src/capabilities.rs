@@ -86,6 +86,9 @@ fn vehicle_descriptor(vehicle: &AdapterVehicle) -> wire::VehicleDescriptor {
             .collect(),
         supported_modes: Vec::new(),
         vehicle_class: vehicle.class.to_wire() as i32,
+        heading_reference: pilotage_protocol::HeadingReference::option_to_wire(
+            vehicle.heading_reference,
+        ) as i32,
     }
 }
 
@@ -101,6 +104,7 @@ fn scope_descriptor(
         link_loss_action: link_loss as i32,
         intents: scope.intents.iter().map(intent_capability).collect(),
         actions: scope.actions.iter().map(action_capability).collect(),
+        authority_group: scope.authority_group.clone().unwrap_or_default(),
     }
 }
 

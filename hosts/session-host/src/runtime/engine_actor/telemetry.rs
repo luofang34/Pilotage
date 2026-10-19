@@ -2,8 +2,8 @@
 
 use pilotage_adapter_api::{
     AvionicsSample, BatterySample, FcStateSample, GeodeticFixSample, GimbalAttitudeSample,
-    MeasurementClock, MeasurementStamp, SimTruthSample, SourceIntegrity, SourceRole,
-    TelemetrySample,
+    MagneticVariationSample, MagneticVariationSource, MeasurementClock, MeasurementStamp,
+    SimTruthSample, SourceIntegrity, SourceRole, TelemetrySample,
 };
 use pilotage_geo::SIMULATOR_GEOID_MODEL_ID;
 use pilotage_protocol::wire;
@@ -141,6 +141,9 @@ fn avionics_to_wire(sample: AvionicsSample) -> wire::AvionicsState {
         .geodetic
         .filter(|fix| fix.stamp.role == SourceRole::OperationalEstimate)
         .and_then(geodetic_to_wire);
+    let magnetic_variation = sample
+        .magnetic_variation
+        .and_then(magnetic_variation_to_wire);
     wire::AvionicsState {
         quat_w: attitude.map_or(0.0, |group| group.quat_wxyz[0]),
         quat_x: attitude.map_or(0.0, |group| group.quat_wxyz[1]),
@@ -176,7 +179,41 @@ fn avionics_to_wire(sample: AvionicsSample) -> wire::AvionicsState {
             .and(sample.geodetic.as_ref())
             .map(|fix| measurement_stamp_to_wire(fix.stamp)),
         geodetic,
+        // As with the fix: the stamp travels only with a value that
+        // survived the mapping.
+        magnetic_variation_stamp: magnetic_variation
+            .as_ref()
+            .and(sample.magnetic_variation.as_ref())
+            .map(|variation| measurement_stamp_to_wire(variation.stamp)),
+        magnetic_variation,
     }
+}
+
+/// Maps a stated variation onto the wire. A declination that is not a
+/// number is refused rather than sent: a reader would turn every heading
+/// by it. A vehicle that applies no variation states that with no value.
+fn magnetic_variation_to_wire(
+    variation: MagneticVariationSample,
+) -> Option<wire::MagneticVariation> {
+    let applies = variation.source != MagneticVariationSource::None;
+    if applies && !variation.declination_rad.is_finite() {
+        warn!(
+            source_id = variation.stamp.source_id,
+            source = ?variation.source,
+            "non-finite declination refused; no variation published",
+        );
+        return None;
+    }
+    Some(wire::MagneticVariation {
+        declination_rad: if applies {
+            variation.declination_rad
+        } else {
+            0.0
+        },
+        source: variation.source.to_wire() as i32,
+        model_id: variation.model_id.unwrap_or_default().to_owned(),
+        model_epoch: variation.model_epoch.unwrap_or(0.0),
+    })
 }
 
 /// Maps a fix onto the wire. There is deliberately no `map_or` fallback

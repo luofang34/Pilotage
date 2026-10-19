@@ -66,6 +66,12 @@ impl ControlLane {
         &self.scope
     }
 
+    /// The grant's fencing generation this lane stamps on its frames.
+    #[must_use]
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
     /// The vehicle this lane is fenced to.
     #[must_use]
     pub fn vehicle_id(&self) -> u64 {

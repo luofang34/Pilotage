@@ -214,6 +214,7 @@ fn profile(
                 })
                 .collect(),
             link_loss_actions: actions,
+            heading_reference: None,
         }],
         adapter_version: "test".to_owned(),
         control_feel: None,

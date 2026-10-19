@@ -102,6 +102,7 @@ fn capabilities() -> AdapterCapabilities {
                 },
             ],
             link_loss_actions: vec![LinkLossPolicy::Neutralize],
+            heading_reference: None,
         }],
         adapter_version: "welcome-fixture".to_owned(),
         control_feel: Some(ControlFeelDescriptor {

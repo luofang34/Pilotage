@@ -37,14 +37,15 @@ pub use pilotage_camera_calibration::{
 };
 // The typed vocabulary an adapter reports, shared with clients.
 pub use pilotage_protocol::{
-    CommandOutcome, GimbalAxisLocks, GimbalReference, GimbalYawFrame, VehicleClass,
+    CommandOutcome, GimbalAxisLocks, GimbalReference, GimbalYawFrame, HeadingReference,
+    MagneticVariationSource, VehicleClass,
 };
 pub use step::{StepBudget, StepOutcome};
 pub use telemetry::{
     AvionicsAttitudeSample, AvionicsBaroSample, AvionicsKinematicsSample, AvionicsSample,
     BatterySample, FcCommandAck, FcStateSample, GeodeticFixSample, GimbalAttitudeSample,
-    MeasurementClock, MeasurementStamp, Pose2d, SimTruthSample, SourceIncarnation, SourceIntegrity,
-    SourceRole, TelemetryBatch, TelemetrySample, VideoSource,
+    MagneticVariationSample, MeasurementClock, MeasurementStamp, Pose2d, SimTruthSample,
+    SourceIncarnation, SourceIntegrity, SourceRole, TelemetryBatch, TelemetrySample, VideoSource,
 };
 pub use vehicle_adapter::VehicleAdapter;
 pub use video::stamping::{

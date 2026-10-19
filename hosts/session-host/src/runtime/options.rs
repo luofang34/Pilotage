@@ -21,6 +21,10 @@
 //! - `PILOTAGE_MISSION_CRUISE_HEIGHT`: cruise height above the anchor in
 //!   meters. `0` skips the climb phase (planar vehicles); unset keeps the
 //!   [`pilotage_mission::MissionConfig`] default.
+//! - `PILOTAGE_SIM_CAMERA_PORT`: presence enables the simulator camera
+//!   attachment on that loopback port. A world-model camera producer
+//!   dials it, renders from the vehicle's simulator truth, and returns
+//!   the session's video. Simulation builds only.
 
 use std::path::PathBuf;
 
@@ -53,6 +57,10 @@ pub struct RuntimeOptions {
     /// `PILOTAGE_MISSION_ROUTE` is present. `None` leaves every existing
     /// host behavior untouched: no automation task, no extra logs.
     pub mission: Option<MissionOptions>,
+    /// The loopback port a simulator camera producer dials, enabled only
+    /// when `PILOTAGE_SIM_CAMERA_PORT` is present. `None` attaches no
+    /// simulator camera.
+    pub sim_camera_port: Option<u16>,
 }
 
 /// Where the mission executor's navdata snapshot comes from (ADR-0030).
@@ -93,14 +101,28 @@ impl RuntimeOptions {
         Ok(Self {
             legacy_compatibility,
             mission: mission_from_env()?,
+            sim_camera_port: env_var("PILOTAGE_SIM_CAMERA_PORT")?
+                .map(|value| parse_sim_camera_port(&value))
+                .transpose()?,
         })
+    }
+}
+
+/// Parses `PILOTAGE_SIM_CAMERA_PORT`. Port 0 is refused: the producer must
+/// know the port it dials, so an OS-chosen one would attach nothing.
+fn parse_sim_camera_port(value: &str) -> Result<u16, HostError> {
+    match value.parse::<u16>() {
+        Ok(port) if port != 0 => Ok(port),
+        _ => Err(HostError::SimCameraPort {
+            value: value.to_owned(),
+        }),
     }
 }
 
 /// Parses the `PILOTAGE_MISSION_*` family; `PILOTAGE_MISSION_ROUTE` being
 /// unset disables the executor entirely.
 fn mission_from_env() -> Result<Option<MissionOptions>, HostError> {
-    let Some(route) = mission_var("PILOTAGE_MISSION_ROUTE")? else {
+    let Some(route) = env_var("PILOTAGE_MISSION_ROUTE")? else {
         return Ok(None);
     };
     let route = if route == "fixture" {
@@ -108,17 +130,17 @@ fn mission_from_env() -> Result<Option<MissionOptions>, HostError> {
     } else {
         route
     };
-    let navdata = match mission_var("PILOTAGE_MISSION_NAVDATA")? {
+    let navdata = match env_var("PILOTAGE_MISSION_NAVDATA")? {
         None => MissionNavdataSource::Fixture,
         Some(value) if value == "fixture" => MissionNavdataSource::Fixture,
         Some(path) => MissionNavdataSource::Store(PathBuf::from(path)),
     };
-    let anchor = match mission_var("PILOTAGE_MISSION_ANCHOR")? {
+    let anchor = match env_var("PILOTAGE_MISSION_ANCHOR")? {
         None => DEFAULT_MISSION_ANCHOR,
         Some(value) => parse_anchor(&value)?,
     };
     let date =
-        match mission_var("PILOTAGE_MISSION_DATE")? {
+        match env_var("PILOTAGE_MISSION_DATE")? {
             None => None,
             Some(value) => Some(NaiveDate::parse_from_str(&value, "%Y-%m-%d").map_err(
                 |source| HostError::MissionDate {
@@ -130,7 +152,7 @@ fn mission_from_env() -> Result<Option<MissionOptions>, HostError> {
     if date.is_none() && matches!(navdata, MissionNavdataSource::Store(_)) {
         return Err(HostError::MissionDateMissing);
     }
-    let cruise_height_m = match mission_var("PILOTAGE_MISSION_CRUISE_HEIGHT")? {
+    let cruise_height_m = match env_var("PILOTAGE_MISSION_CRUISE_HEIGHT")? {
         None => None,
         Some(value) => Some(parse_cruise_height(&value)?),
     };
@@ -160,9 +182,9 @@ fn parse_cruise_height(value: &str) -> Result<f64, HostError> {
     Ok(height)
 }
 
-/// Reads one `PILOTAGE_MISSION_*` variable, treating "unset" as `None` and
+/// Reads one host environment variable, treating "unset" as `None` and
 /// a non-UTF-8 value as a startup error rather than a silent fallback.
-fn mission_var(variable: &'static str) -> Result<Option<String>, HostError> {
+fn env_var(variable: &'static str) -> Result<Option<String>, HostError> {
     match std::env::var(variable) {
         Ok(value) => Ok(Some(value)),
         Err(std::env::VarError::NotPresent) => Ok(None),
@@ -193,7 +215,7 @@ fn parse_anchor(value: &str) -> Result<GeoPointDegrees, HostError> {
 mod tests {
     #![allow(clippy::expect_used, clippy::panic)]
 
-    use super::parse_cruise_height;
+    use super::{parse_cruise_height, parse_sim_camera_port};
     use crate::error::HostError;
 
     #[test]
@@ -211,6 +233,18 @@ mod tests {
         assert!(matches!(error, HostError::MissionCruiseHeightRange { .. }));
         let error = parse_cruise_height("inf").expect_err("not flyable");
         assert!(matches!(error, HostError::MissionCruiseHeightRange { .. }));
+    }
+
+    #[test]
+    fn a_sim_camera_port_must_name_a_port_a_producer_can_dial() {
+        assert_eq!(parse_sim_camera_port("45991").expect("a port"), 45991);
+        for value in ["0", "65536", "-1", "camera", ""] {
+            let error = parse_sim_camera_port(value).expect_err("not a dialable port");
+            assert!(
+                matches!(&error, HostError::SimCameraPort { value: refused } if refused == value),
+                "got {error:?}"
+            );
+        }
     }
 
     #[test]

@@ -64,6 +64,7 @@ fn publication_time_and_source_acquisition_stamps_stay_distinct() {
         estimator_status_stamp: Some(estimator_status),
         valid_flags: 0b1111,
         quality: 0,
+        magnetic_variation: None,
     };
     let wire_sample = sample_to_wire(
         one_vehicle_sample(avionics),
@@ -123,6 +124,7 @@ fn estimator_authorization_is_normalized_at_wire_boundary() {
         estimator_status_stamp: Some(simulation_stamp(1)),
         valid_flags: u32::MAX,
         quality: u32::MAX,
+        magnetic_variation: None,
     });
 
     assert_eq!(avionics.valid_flags, 0x0f);
@@ -148,6 +150,7 @@ fn kinematics_only_omits_planar_projection_while_group_flows() {
             estimator_status_stamp: None,
             valid_flags: 0b1100,
             quality: 0,
+            magnetic_variation: None,
         }),
         sim_truth: None,
         fc_state: None,
@@ -190,6 +193,7 @@ fn attitude_only_omits_planar_projection_while_group_flows() {
             estimator_status_stamp: None,
             valid_flags: 0b0011,
             quality: 0,
+            magnetic_variation: None,
         }),
         sim_truth: None,
         fc_state: None,
@@ -336,6 +340,7 @@ fn the_fc_command_verdict_crosses_the_wire() {
 }
 
 mod geodetic;
+mod magnetic_variation;
 
 #[test]
 fn a_battery_sample_survives_the_wire_with_unknown_values_as_nan() {

@@ -24,6 +24,7 @@ fn frame(camera_id: u32, time_ns: u64) -> UnstampedFrame {
         time_ns,
         rgb: vec![0; 48],
         camera_id,
+        calibration_id: None,
     }
 }
 
@@ -138,5 +139,32 @@ fn calibration_is_stamped_for_bound_cameras_only() {
         chase.capture.calibration_id,
         CalibrationId::NONE,
         "an unbound camera stamps NONE and stays gate-closed"
+    );
+}
+
+#[test]
+fn a_producer_calibration_overrides_the_camera_binding_for_its_frame() {
+    let mut stamper = stamper();
+    let zoomed = UnstampedFrame {
+        calibration_id: Some(CalibrationId(42)),
+        ..frame(0, 100)
+    };
+    assert_eq!(
+        stamper.stamp(zoomed).capture.calibration_id,
+        CalibrationId(42)
+    );
+    let unbound = UnstampedFrame {
+        calibration_id: Some(CalibrationId(43)),
+        ..frame(2, 110)
+    };
+    assert_eq!(
+        stamper.stamp(unbound).capture.calibration_id,
+        CalibrationId(43),
+        "a camera with no binding still carries the producer's calibration"
+    );
+    assert_eq!(
+        stamper.stamp(frame(0, 120)).capture.calibration_id,
+        CalibrationId(7),
+        "a frame without one falls back to the camera's binding"
     );
 }

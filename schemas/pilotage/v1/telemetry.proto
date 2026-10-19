@@ -155,6 +155,48 @@ message AvionicsState {
   // estimator supplied no fix, never that the vehicle is at 0,0.
   GeodeticFix geodetic = 22;
   MeasurementStamp geodetic_stamp = 23;
+  // The magnetic variation the vehicle states for its own position: the
+  // angle from true north to magnetic north. It is the live statement of
+  // which north the attitude yaw above uses, and it overrides the
+  // heading_reference of the vehicle's capability advertisement when the
+  // two disagree. It advances independently, so it carries its own stamp;
+  // both are meaningful only when that stamp is present.
+  MagneticVariation magnetic_variation = 24;
+  MeasurementStamp magnetic_variation_stamp = 25;
+}
+
+// Where a magnetic variation value comes from.
+enum MagneticVariationSource {
+  // Not stated. A receiver treats the variation as unknown.
+  MAGNETIC_VARIATION_SOURCE_UNSPECIFIED = 0;
+  // The flight controller's own geomagnetic model at its position.
+  MAGNETIC_VARIATION_SOURCE_FC_MODEL = 1;
+  // A value configured on the flight controller.
+  MAGNETIC_VARIATION_SOURCE_FC_CONFIGURED = 2;
+  // A geomagnetic model shared by the host and its clients.
+  MAGNETIC_VARIATION_SOURCE_SHARED_MODEL = 3;
+  // A published aeronautical chart value.
+  MAGNETIC_VARIATION_SOURCE_PUBLISHED_CHART = 4;
+  // A value the operator entered.
+  MAGNETIC_VARIATION_SOURCE_OPERATOR = 5;
+  // The vehicle applies no variation: its attitude yaw is magnetic, and
+  // declination_rad carries no value.
+  MAGNETIC_VARIATION_SOURCE_NONE = 6;
+}
+
+// One magnetic variation value.
+message MagneticVariation {
+  // Declination: the angle from true north to magnetic north, in radians,
+  // positive east. Not meaningful when source is
+  // MAGNETIC_VARIATION_SOURCE_NONE.
+  float declination_rad = 1;
+  MagneticVariationSource source = 2;
+  // The geomagnetic model that produced the value, for example "WMM2025".
+  // Empty when the source does not state it.
+  string model_id = 3;
+  // The model's epoch as a decimal year. 0 when the source does not state
+  // it.
+  double model_epoch = 4;
 }
 
 // One geodetic fix: where a vehicle is on the Earth, with the datum the

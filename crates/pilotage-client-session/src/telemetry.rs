@@ -1,12 +1,16 @@
 //! Typed readings of the telemetry codes a client must interpret: the
 //! estimator's validity and quality, the FC's arm report, its answer to
-//! the last arm or disarm, and the gimbal's yaw reference.
+//! the last arm or disarm, the gimbal's yaw reference, and the vehicle's
+//! magnetic variation.
 //!
 //! Every client reads these through this module, so no client decodes a
 //! bit or a code a second time, and each code fails closed the same way
 //! everywhere.
 
-use pilotage_protocol::{CommandOutcome, GimbalAxisLocks, GimbalReference, GimbalYawFrame, wire};
+use pilotage_protocol::{
+    CommandOutcome, GimbalAxisLocks, GimbalReference, GimbalYawFrame, HeadingReference,
+    MagneticVariationSource, wire,
+};
 
 /// Which estimate groups the estimator authorizes for use
 /// (`AvionicsState.valid_flags`).
@@ -119,6 +123,53 @@ pub fn gimbal_reference(gimbal: &wire::GimbalAttitude) -> Option<GimbalReference
             pitch: gimbal.pitch_locked,
             yaw: gimbal.yaw_locked,
         },
+    })
+}
+
+/// The magnetic variation a vehicle states for its own position.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MagneticVariation {
+    /// Where the value comes from.
+    pub source: MagneticVariationSource,
+    /// Declination: the angle from true north to magnetic north, radians,
+    /// positive east. `None` when the vehicle applies no variation.
+    pub declination_rad: Option<f32>,
+    /// The geomagnetic model that produced the value, when stated.
+    pub model_id: Option<String>,
+    /// The model's epoch as a decimal year, when stated.
+    pub model_epoch: Option<f64>,
+}
+
+impl MagneticVariation {
+    /// Which north the vehicle's attitude yaw uses: magnetic when it
+    /// applies no variation, true otherwise.
+    #[must_use]
+    pub const fn heading_reference(&self) -> HeadingReference {
+        self.source.heading_reference()
+    }
+}
+
+/// The variation an avionics publication states, or `None` when it states
+/// none a client can use: no stamp, a source this build does not know, or
+/// an applied declination that is not a number. A client then treats the
+/// heading reference as unknown, never as true.
+#[must_use]
+pub fn magnetic_variation(avionics: &wire::AvionicsState) -> Option<MagneticVariation> {
+    avionics.magnetic_variation_stamp.as_ref()?;
+    let variation = avionics.magnetic_variation.as_ref()?;
+    let source = MagneticVariationSource::from_wire(variation.source)?;
+    let declination_rad = if source == MagneticVariationSource::None {
+        None
+    } else if variation.declination_rad.is_finite() {
+        Some(variation.declination_rad)
+    } else {
+        return None;
+    };
+    Some(MagneticVariation {
+        source,
+        declination_rad,
+        model_id: (!variation.model_id.is_empty()).then(|| variation.model_id.clone()),
+        model_epoch: (variation.model_epoch != 0.0).then_some(variation.model_epoch),
     })
 }
 
