@@ -52,11 +52,13 @@ pub(super) fn admit(engine: &mut ClientEngine, session: u64, principal: u64) -> 
                 session: Some(wire::SessionId { value: session }),
                 principal: Some(wire::PrincipalId { value: principal }),
                 host_capabilities: Some(wire::HostCapabilities {
+                    control_window_ms: 0,
                     host_version: "test-host".into(),
                     vehicles: vec![wire::VehicleDescriptor {
                         vehicle: Some(wire::VehicleId { value: 1 }),
                         display_name: "vehicle".into(),
                         scopes: vec![wire::ScopeDescriptor {
+                            payload: None,
                             scope: Some(wire::ScopeId {
                                 value: "vehicle.motion".into(),
                             }),
@@ -463,38 +465,4 @@ fn a_schema_the_client_does_not_speak_stops_the_engine() {
     assert!(after.is_empty());
 }
 
-#[test]
-fn telemetry_and_rejections_arrive_as_typed_module_events() {
-    let mut engine = engine();
-    admit(&mut engine, 7, 42);
-
-    let telemetry = wire::Envelope {
-        schema_version: 1,
-        payload: Some(wire::envelope::Payload::TelemetrySample(
-            wire::TelemetrySample::default(),
-        )),
-    };
-    let actions = engine.handle(
-        TransportEvent::DatagramReceived(telemetry.encode_to_vec()),
-        0,
-    );
-    assert!(matches!(
-        actions[0],
-        ClientAction::Emit(ModuleEvent::Telemetry(_))
-    ));
-
-    let rejected = wire::Envelope {
-        schema_version: 1,
-        payload: Some(wire::envelope::Payload::FrameRejected(
-            wire::FrameRejected::default(),
-        )),
-    };
-    let actions = engine.handle(
-        TransportEvent::DatagramReceived(rejected.encode_to_vec()),
-        0,
-    );
-    assert!(matches!(
-        actions[0],
-        ClientAction::Emit(ModuleEvent::ControlRejected(_))
-    ));
-}
+mod events;

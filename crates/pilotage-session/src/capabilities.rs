@@ -22,6 +22,7 @@ pub(crate) fn host_capabilities(
     host_version: &str,
 ) -> wire::HostCapabilities {
     wire::HostCapabilities {
+        control_window_ms: 250,
         host_version: host_version.to_owned(),
         vehicles: caps.vehicles.iter().map(vehicle_descriptor).collect(),
         supported_modes: execution_modes(caps),
@@ -97,6 +98,7 @@ fn scope_descriptor(
     link_loss: wire::LinkLossAction,
 ) -> wire::ScopeDescriptor {
     wire::ScopeDescriptor {
+        payload: scope.payload.clone(),
         scope: Some(wire::ScopeId {
             value: scope.scope.as_str().to_owned(),
         }),
@@ -171,6 +173,7 @@ fn action_kind(kind: pilotage_protocol::ActionKind) -> wire::ControlAction {
         Domain::GimbalRecenter => wire::ControlAction::GimbalRecenter,
         Domain::CameraZoomIn => wire::ControlAction::CameraZoomIn,
         Domain::CameraZoomOut => wire::ControlAction::CameraZoomOut,
+        Domain::CameraZoom => wire::ControlAction::CameraZoom,
         Domain::SimReset => wire::ControlAction::SimReset,
         Domain::FeelModeRequest => wire::ControlAction::FeelModeRequest,
     }

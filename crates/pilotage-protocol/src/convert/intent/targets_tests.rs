@@ -15,6 +15,7 @@ use super::action_from_wire;
 #[test]
 fn a_stray_target_of_the_other_kind_is_refused() {
     let mode_with_feel = wire::ControlActionRequest {
+        zoom: None,
         action: wire::ControlAction::ModeRequest as i32,
         mode_target: wire::ModeTarget::Hold as i32,
         action_id: 7,
@@ -23,6 +24,7 @@ fn a_stray_target_of_the_other_kind_is_refused() {
     assert!(action_from_wire(mode_with_feel).is_err());
 
     let feel_with_mode = wire::ControlActionRequest {
+        zoom: None,
         action: wire::ControlAction::FeelModeRequest as i32,
         mode_target: wire::ModeTarget::Hold as i32,
         action_id: 7,
@@ -32,6 +34,7 @@ fn a_stray_target_of_the_other_kind_is_refused() {
 
     // Each is accepted when it carries only its own target.
     let mode = wire::ControlActionRequest {
+        zoom: None,
         action: wire::ControlAction::ModeRequest as i32,
         mode_target: wire::ModeTarget::Hold as i32,
         action_id: 7,
@@ -40,6 +43,7 @@ fn a_stray_target_of_the_other_kind_is_refused() {
     assert!(action_from_wire(mode).is_ok());
 
     let feel = wire::ControlActionRequest {
+        zoom: None,
         action: wire::ControlAction::FeelModeRequest as i32,
         mode_target: wire::ModeTarget::Unspecified as i32,
         action_id: 7,
@@ -50,6 +54,7 @@ fn a_stray_target_of_the_other_kind_is_refused() {
     // A feel request with no target names no law, and the receiver refuses
     // rather than guessing which one to install.
     let untargeted = wire::ControlActionRequest {
+        zoom: None,
         action: wire::ControlAction::FeelModeRequest as i32,
         mode_target: wire::ModeTarget::Unspecified as i32,
         action_id: 7,

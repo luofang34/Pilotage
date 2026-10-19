@@ -75,6 +75,7 @@ fn sample_welcome() -> ServerWelcome {
         session: SessionId::new(1),
         principal: PrincipalId::new(2),
         host_capabilities: wire::HostCapabilities {
+            control_window_ms: 0,
             host_version: "0.1.0".to_owned(),
             vehicles: vec![],
             supported_modes: vec![],
@@ -212,6 +213,8 @@ fn ping_conversion_fails_on_missing_timestamp() {
 #[test]
 fn pong_roundtrips() {
     let pong = Pong {
+        control_window_id: 0,
+        control_window_ms: 0,
         nonce: 42,
         echoed_sender_sent_at: MonoTimestamp::from_nanos(100),
         responder_sent_at: MonoTimestamp::from_nanos(150),
@@ -224,6 +227,8 @@ fn pong_roundtrips() {
 #[test]
 fn pong_conversion_fails_on_missing_responder_timestamp() {
     let mut wire_pong: wire::Pong = (&Pong {
+        control_window_id: 0,
+        control_window_ms: 0,
         nonce: 1,
         echoed_sender_sent_at: MonoTimestamp::from_nanos(1),
         responder_sent_at: MonoTimestamp::from_nanos(2),
@@ -357,6 +362,8 @@ fn envelope_roundtrips_for_ping_and_pong_arms() {
     assert_eq!(decoded.payload, Some(wire::envelope::Payload::Ping(ping)));
 
     let pong = wire::Pong {
+        control_window_id: 0,
+        control_window_ms: 0,
         nonce: 1,
         echoed_sender_sent_at: Some(wire::MonoTimestamp { nanos: 10 }),
         responder_sent_at: Some(wire::MonoTimestamp { nanos: 20 }),

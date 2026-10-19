@@ -19,8 +19,8 @@ pub enum DjiHostError {
         /// The required environment variable.
         variable: &'static str,
     },
-    /// The selected serial port is not a macOS USB CDC callout device.
-    #[error("DJI serial path {path} must be a /dev/cu.usbmodem callout device")]
+    /// The selected serial port is not an explicit supported USB CDC device.
+    #[error("DJI serial path {path} must name a USB CDC device under /dev")]
     SerialPath {
         /// The rejected path.
         path: PathBuf,
@@ -68,7 +68,7 @@ fn config_from_values(
     if serial_path.parent() != Some(std::path::Path::new("/dev"))
         || !serial_path.file_name().is_some_and(|name| {
             name.to_str().is_some_and(|name| {
-                name.strip_prefix("cu.usbmodem")
+                name.strip_prefix(serial_prefix())
                     .is_some_and(|suffix| !suffix.is_empty())
             })
         })
@@ -87,6 +87,14 @@ fn config_from_values(
         capture_path,
         control_mode: parse_control_mode(control_mode)?,
     })
+}
+
+fn serial_prefix() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "cu.usbmodem"
+    } else {
+        "ttyACM"
+    }
 }
 
 fn parse_control_mode(value: Option<OsString>) -> Result<DjiControlMode, DjiHostError> {

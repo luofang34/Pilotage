@@ -153,6 +153,7 @@ impl VehicleAdapter for ReferenceAdapter {
                 class: pilotage_protocol::VehicleClass::SurfaceVessel,
                 display_name: "Reference skiff".to_owned(),
                 scopes: vec![ScopeDescriptor {
+                    payload: None,
                     authority_group: None,
                     scope: ScopeId::new(MOTION_SCOPE),
                     axes: vec![
@@ -281,6 +282,7 @@ impl VehicleAdapter for ReferenceAdapter {
     fn sample_telemetry(&mut self) -> TelemetryBatch {
         TelemetryBatch {
             samples: vec![TelemetrySample {
+                payload: None,
                 vehicle: self.vehicle,
                 tick: self.tick,
                 pose: Some(Pose2d {
@@ -345,6 +347,8 @@ mod tests {
 
     fn frame(scope: &str, intent: Option<ControlIntent>, vehicle: VehicleId) -> ScopedControlFrame {
         ScopedControlFrame {
+            timing: None,
+            admitted_timing: None,
             action_ids: vec![],
             session: SessionId::new(1),
             vehicle,

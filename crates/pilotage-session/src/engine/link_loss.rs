@@ -60,6 +60,14 @@ pub(crate) struct LinkLossState {
 }
 
 impl LinkLossState {
+    pub(super) fn refresh_policies(
+        &mut self,
+        capabilities: &AdapterCapabilities,
+        overrides: &[(VehicleId, LinkLossPolicy)],
+    ) {
+        self.selected = Self::from_capabilities(capabilities, overrides).selected;
+    }
+
     /// Resolves each vehicle's policy: the configured override when the
     /// vehicle's declared `link_loss_actions` menu contains it, otherwise
     /// `Neutralize` (the fail-closed floor — also the answer for an

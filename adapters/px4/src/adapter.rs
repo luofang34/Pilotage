@@ -32,6 +32,7 @@ use camera_link::CameraBridge;
 #[cfg(not(feature = "sim"))]
 use camera_link::no_camera;
 
+mod camera_control;
 mod control;
 mod flight;
 #[cfg(test)]
@@ -39,6 +40,7 @@ mod gimbal_link_loss_tests;
 #[cfg(test)]
 mod gimbal_tests;
 mod link_loss;
+mod payload;
 mod pointing;
 mod sampling;
 #[cfg(test)]
@@ -91,6 +93,7 @@ pub struct Px4Adapter {
     // because the FC's GCS instance retargets its telemetry stream to
     // the last peer that spoke.
     gimbal: Option<crate::gimbal::Px4GimbalControl>,
+    camera_control: Option<camera_control::CameraControl>,
     // Pilotage's gz sidecar bridges the flight-deck rig's camera topics;
     // the adapter remains usable without video when it cannot spawn.
     frames: Option<tokio::sync::mpsc::Receiver<pilotage_adapter_api::RawVideoFrame>>,
@@ -162,11 +165,17 @@ impl Px4Adapter {
                         link_config.system_id,
                         link_config.component_id,
                     )
+                    .map_err(pilotage_mavlink::LinkError::from)?
+                    .with_manager_state(link.state())
                     .with_dropped_link_loss_stop(config.drop_gimbal_link_loss_stop()),
                 )
             }
             _ => None,
         };
+        let camera_control = Some(camera_control::CameraControl::new(
+            link.command_sender(),
+            link_config.system_id,
+        ));
         let (uplink, fixed_wing) = flight::flight_uplinks(&config, &link_config);
         #[cfg(feature = "sim")]
         let (frames, camera_bridge, frame_forwarder) =
@@ -183,6 +192,7 @@ impl Px4Adapter {
             uplink,
             fixed_wing,
             gimbal,
+            camera_control,
             frames,
             _camera_bridge: camera_bridge,
             _frame_forwarder: frame_forwarder,
@@ -292,6 +302,20 @@ fn rand_incarnation() -> [u8; 16] {
 }
 
 impl VehicleAdapter for Px4Adapter {
+    fn invalidate_pending_commands(&mut self, vehicle: VehicleId, scope: &ScopeId) {
+        if vehicle != self.vehicle {
+            return;
+        }
+        if scope.as_str() == GIMBAL_SCOPE
+            && let Some(gimbal) = self.gimbal.as_mut()
+        {
+            gimbal.invalidate_pending();
+        }
+        if let Some(camera) = self.camera_control.as_mut() {
+            camera.invalidate(scope.as_str());
+        }
+    }
+
     fn capabilities(&self) -> AdapterCapabilities {
         self.advertised_capabilities()
     }
@@ -303,6 +327,9 @@ impl VehicleAdapter for Px4Adapter {
         // gimbal-scope failsafe never suppresses motion frames and vice versa.
         if pilotage_adapter_api::link_loss_latch_engaged(&self.link_loss_policy, &frame.scope) {
             return rejected_control(tick, RejectReason::LinkLossEngaged);
+        }
+        if frame.scope.as_str().starts_with("vehicle.camera.") {
+            return self.apply_camera(frame, tick);
         }
         if frame.scope.as_str() == GIMBAL_SCOPE {
             return self.apply_gimbal(frame, tick);
@@ -320,6 +347,9 @@ impl VehicleAdapter for Px4Adapter {
     }
 
     fn sample_telemetry(&mut self) -> TelemetryBatch {
+        self.expire_camera_reports();
+        self.maintain_camera();
+        self.observe_gimbal_manager();
         self.observe_arm_report();
         let fc_state = fc_state_sample(
             self.arm.report(),
@@ -344,6 +374,7 @@ impl VehicleAdapter for Px4Adapter {
             .as_ref()
             .map(|source| estimate_batch(self.vehicle, &source.state))
             .unwrap_or_default();
+        let payload = self.payload_state(gimbal_attitude.as_ref());
         let reports = VehicleReports {
             fc_state,
             gimbal: gimbal_attitude,
@@ -358,6 +389,20 @@ impl VehicleAdapter for Px4Adapter {
             batch.samples.push(report_only_sample(self.vehicle, tick));
         }
         reports.attach(&mut batch);
+        if let Some(payload) = payload {
+            if batch.samples.is_empty() {
+                batch
+                    .samples
+                    .push(report_only_sample(self.vehicle, SimTick::new(0)));
+            }
+            if let Some(sample) = batch.samples.first_mut() {
+                sample.payload = Some(payload);
+            }
+        }
+        self.append_camera_samples(&mut batch);
+        if let Some(camera) = self.camera_control.as_mut() {
+            camera.probe(std::time::Instant::now());
+        }
         self.maintain_flight_uplink();
         if let Some(gimbal) = self.gimbal.as_mut() {
             gimbal.maintain();

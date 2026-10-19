@@ -13,6 +13,7 @@ use super::{avionics_to_wire, sample_to_wire};
 /// One telemetry sample carrying only the estimate under test.
 fn one_vehicle_sample(avionics: AvionicsSample) -> TelemetrySample {
     TelemetrySample {
+        payload: None,
         vehicle: VehicleId::new(9),
         tick: SimTick::new(42),
         pose: Some(Pose2d {
@@ -134,6 +135,7 @@ fn estimator_authorization_is_normalized_at_wire_boundary() {
 #[test]
 fn kinematics_only_omits_planar_projection_while_group_flows() {
     let sample = TelemetrySample {
+        payload: None,
         vehicle: VehicleId::new(1),
         tick: SimTick::new(0),
         pose: None,
@@ -177,6 +179,7 @@ fn kinematics_only_omits_planar_projection_while_group_flows() {
 #[test]
 fn attitude_only_omits_planar_projection_while_group_flows() {
     let sample = TelemetrySample {
+        payload: None,
         vehicle: VehicleId::new(1),
         tick: SimTick::new(0),
         pose: None,
@@ -234,6 +237,7 @@ fn truth_and_fc_state_survive_the_wire_under_their_own_identities() {
         clock: MeasurementClock::HostMonotonic,
     };
     let sample = TelemetrySample {
+        payload: None,
         vehicle: VehicleId::new(1),
         tick: SimTick::new(1_000_000),
         pose: None,
@@ -357,6 +361,7 @@ fn a_battery_sample_survives_the_wire_with_unknown_values_as_nan() {
         clock: MeasurementClock::HostMonotonic,
     };
     let sample = TelemetrySample {
+        payload: None,
         vehicle: VehicleId::new(1),
         tick: SimTick::new(1),
         pose: None,

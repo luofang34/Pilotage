@@ -66,6 +66,8 @@ fn command(
     action_id: u32,
 ) -> DomainEnvelope {
     DomainEnvelope::ActionCommand(ControlActionCommand {
+        sampled_at: pilotage_timing::MonoTimestamp::from_nanos(0),
+        timing: None,
         session,
         vehicle: VEHICLE,
         scope: motion(),
@@ -245,6 +247,8 @@ fn a_datagram_frame_carrying_typed_actions_is_rejected_whole() {
     };
     let (mut engine, client, session, generation) = bound_engine();
     let frame = ScopedControlFrame {
+        timing: None,
+        admitted_timing: None,
         session,
         vehicle: VEHICLE,
         scope: motion(),
@@ -304,6 +308,8 @@ fn a_sim_reset_needs_the_lifecycle_scopes_own_lease() {
     // scope either — that scope's own lease is required.
     let lifecycle = |generation, id| {
         DomainEnvelope::ActionCommand(ControlActionCommand {
+            sampled_at: pilotage_timing::MonoTimestamp::from_nanos(0),
+            timing: None,
             session,
             vehicle: VEHICLE,
             scope: pilotage_protocol::ScopeId::new(SIM_LIFECYCLE_SCOPE),
@@ -369,6 +375,8 @@ fn an_unadvertised_lifecycle_scope_is_structurally_absent() {
     let outcome = engine.handle_client_message(
         client,
         DomainEnvelope::ActionCommand(ControlActionCommand {
+            sampled_at: pilotage_timing::MonoTimestamp::from_nanos(0),
+            timing: None,
             session,
             vehicle: VEHICLE,
             scope: pilotage_protocol::ScopeId::new(SIM_LIFECYCLE_SCOPE),
@@ -381,3 +389,5 @@ fn an_unadvertised_lifecycle_scope_is_structurally_absent() {
     );
     assert!(rejected_detail(&outcome).contains("unknown scope"));
 }
+
+mod freshness;

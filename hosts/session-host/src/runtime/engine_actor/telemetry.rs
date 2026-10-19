@@ -18,6 +18,7 @@ pub(super) fn sample_to_wire(
     published_at: MonoTimestamp,
 ) -> wire::TelemetrySample {
     wire::TelemetrySample {
+        payload: sample.payload.map(Box::new),
         vehicle: Some(wire::VehicleId {
             value: sample.vehicle.as_u64(),
         }),
@@ -316,3 +317,30 @@ fn fc_state_to_wire(sample: FcStateSample) -> wire::FcState {
 
 #[cfg(test)]
 mod tests;
+
+impl<A: pilotage_adapter_api::VehicleAdapter> super::EngineActor<A> {
+    pub(super) fn broadcast_telemetry(&mut self, now: MonoTimestamp) {
+        let batch = self.adapter.sample_telemetry();
+        let capabilities = self.adapter.capabilities();
+        let refreshed = self.engine.refresh_capabilities(capabilities, now);
+        self.enact(refreshed);
+        for sample in batch.samples {
+            let vehicle = sample.vehicle;
+            #[cfg(feature = "sim")]
+            if let Some(recorder) = self.recorder.as_mut() {
+                recorder.record(&sample, now);
+            }
+            let mut wire_sample = sample_to_wire(sample, now);
+            // Guidance is a host-internal side input, not adapter output
+            // (ADR-0031): the assembly attaches the vehicle's latest
+            // state, re-publishing it unchanged until the navigation
+            // component supplies a new one.
+            wire_sample.nav_guidance = self
+                .nav_guidance
+                .get(&vehicle)
+                .map(|state| Box::new(state.clone()));
+            let bytes = crate::runtime::wire_codec::encode_telemetry_datagram(wire_sample);
+            self.broadcast_datagram(bytes);
+        }
+    }
+}

@@ -63,6 +63,7 @@ fn flight_actions() -> Vec<ActionCapability> {
 /// part slews no faster than the assisted scope's yaw envelope.
 fn direct_scope_descriptor() -> ScopeDescriptor {
     ScopeDescriptor {
+        payload: None,
         authority_group: Some(FLIGHT_SCOPE.to_owned()),
         scope: ScopeId::new(DIRECT_SCOPE),
         axes: vec![],
@@ -91,6 +92,7 @@ fn direct_scope_descriptor() -> ScopeDescriptor {
 
 fn flight_scope_descriptor() -> ScopeDescriptor {
     ScopeDescriptor {
+        payload: None,
         // One FC, one authority: assisted and direct flight are never held
         // at once.
         authority_group: Some(FLIGHT_SCOPE.to_owned()),

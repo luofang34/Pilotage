@@ -9,7 +9,7 @@ use pilotage_adapter_api::{Disposition, LinkLossPolicy, RejectReason, VehicleAda
 use pilotage_protocol::{LogicalAxisId, ScopeId, VehicleId};
 
 use super::Px4Adapter;
-use super::gimbal_tests::{gimbal_control, gimbal_frame, next_command};
+use super::gimbal_tests::{gimbal_control, gimbal_frame};
 use super::tests::{fake_fc, frame, live_state, uplink_to};
 
 /// A full-coverage neutral flight frame (every declared axis reported at
@@ -79,12 +79,7 @@ fn gimbal_link_loss_latches_gimbal_but_leaves_motion_flying() {
 }
 
 #[test]
-fn gimbal_link_loss_engage_queues_a_zero_rate_and_reasserts_the_claim() {
-    // Engaging must actively STOP the slew, not merely latch: a nonzero rate
-    // in flight would otherwise coast until the far slower stale-demand cutoff.
-    // The failsafe re-asserts the primary-control claim (PX4 drops a rate from a
-    // non-primary sender) and QUEUES a zero-rate to the FC's lanes — best-effort
-    // (not FC-confirmed), so the test observes the queued lane traffic.
+fn gimbal_link_loss_engage_queues_a_zero_rate_without_claiming_authority() {
     let (control, mut lanes) = gimbal_control();
     let mut adapter = Px4Adapter::from_state(VehicleId::new(1), live_state()).with_gimbal(control);
 
@@ -96,14 +91,14 @@ fn gimbal_link_loss_engage_queues_a_zero_rate_and_reasserts_the_claim() {
         )
         .expect("the gimbal accepts the zero-rate failsafe");
 
-    assert_eq!(
-        next_command(&mut lanes),
-        1001,
-        "the failsafe re-asserts the primary-control claim"
+    assert!(
+        lanes.commands.try_recv().is_err(),
+        "a stop must not steal manager ownership"
     );
     let rate = lanes
         .rates
         .borrow_and_update()
+        .clone()
         .expect("a zero-rate demand was published");
     assert_eq!(
         (rate.pitch_rps, rate.yaw_rps),
@@ -172,8 +167,8 @@ fn a_dropped_gimbal_stop_is_a_counted_failure_that_still_latches() {
         "a dropped stop sends no claim command"
     );
     assert!(
-        !lanes.rates.has_changed().expect("rate lane open"),
-        "a dropped stop publishes no zero-rate"
+        lanes.rates.borrow().is_none(),
+        "a dropped stop leaves no queued motion"
     );
     let outcome = adapter.apply_control(&gimbal_frame(
         vec![(LogicalAxisId::new(super::PITCH_AXIS), 0.5)],

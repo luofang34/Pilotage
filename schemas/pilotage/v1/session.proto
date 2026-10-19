@@ -7,6 +7,7 @@ package pilotage.v1;
 
 import "pilotage/v1/capability.proto";
 import "pilotage/v1/common.proto";
+import "pilotage/v1/payload.proto";
 import "pilotage/v1/control.proto";
 
 // Requests that the host register this live session with the media fan-out.
@@ -195,6 +196,8 @@ message ScopeTransferAccept {
 // never be compared raw against `echoed_sender_sent_at`; both feed
 // `pilotage-timing`'s estimator, never a direct subtraction.
 message Pong {
+  uint64 control_window_id = 4;
+  uint32 control_window_ms = 5;
   uint64 nonce = 1;
   MonoTimestamp echoed_sender_sent_at = 2;
   MonoTimestamp responder_sent_at = 3;
@@ -281,6 +284,7 @@ message FrameRejected {
 // every accepted frame's action gets exactly one result, so an operator can
 // distinguish "arm honored" from "arm silently dropped" (CTRL-01).
 message ControlActionResult {
+  ZoomCommand zoom = 11;
   VehicleId vehicle = 1;
   ScopeId scope = 2;
   // The fencing generation and sequence of the frame that carried the

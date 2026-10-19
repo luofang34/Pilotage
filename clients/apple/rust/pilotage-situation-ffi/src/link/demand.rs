@@ -249,6 +249,7 @@ impl Link {
             vehicle_id,
             GIMBAL_SCOPE,
             wire::ControlActionRequest {
+                zoom: None,
                 action: Self::ACTION_GIMBAL_RECENTER,
                 mode_target: 0,
                 action_id: 0,
@@ -329,6 +330,7 @@ impl Link {
             vehicle_id,
             Self::LIFECYCLE_SCOPE,
             wire::ControlActionRequest {
+                zoom: None,
                 action: Self::ACTION_SIM_RESET,
                 mode_target: 0,
                 action_id: 0,
@@ -353,6 +355,7 @@ impl Link {
             vehicle_id,
             MOTION_SCOPE,
             wire::ControlActionRequest {
+                zoom: None,
                 action: code,
                 mode_target: 0,
                 action_id: 0,

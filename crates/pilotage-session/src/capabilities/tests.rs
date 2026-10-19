@@ -70,6 +70,7 @@ fn each_scope_carries_its_authority_group_to_the_wire() {
     use pilotage_adapter_api::ScopeDescriptor;
     use pilotage_protocol::ScopeId;
     let scope = |name: &str, group: Option<&str>| ScopeDescriptor {
+        payload: None,
         authority_group: group.map(str::to_owned),
         scope: ScopeId::new(name),
         axes: vec![],

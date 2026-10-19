@@ -11,6 +11,10 @@ use crate::wire;
 impl From<&ControlActionCommand> for wire::ControlActionCommand {
     fn from(command: &ControlActionCommand) -> Self {
         wire::ControlActionCommand {
+            sampled_at: Some(wire::MonoTimestamp {
+                nanos: command.sampled_at.as_nanos(),
+            }),
+            timing: command.timing.map(Into::into),
             session: Some(wire::SessionId {
                 value: command.session.as_u64(),
             }),
@@ -47,6 +51,10 @@ impl TryFrom<wire::ControlActionCommand> for ControlActionCommand {
         let request = command.request.ok_or_else(|| missing("request"))?;
         let (action, action_id) = crate::convert::action_request_from_wire(request)?;
         Ok(ControlActionCommand {
+            sampled_at: pilotage_timing::MonoTimestamp::from_nanos(
+                command.sampled_at.map_or(0, |stamp| stamp.nanos),
+            ),
+            timing: command.timing.map(TryInto::try_into).transpose()?,
             session: SessionId::new(session.value),
             vehicle: VehicleId::new(vehicle.value),
             scope: ScopeId::new(scope.value),
@@ -74,6 +82,7 @@ impl From<&ControlActionResult> for wire::ControlActionResult {
             sequence: Some(wire::SequenceNum {
                 value: result.sequence.as_u32(),
             }),
+            zoom: request.zoom,
             action: request.action,
             mode_target: request.mode_target,
             accepted: result.accepted,
@@ -98,6 +107,7 @@ impl TryFrom<wire::ControlActionResult> for ControlActionResult {
         let sequence = result.sequence.ok_or_else(|| missing("sequence"))?;
         let (action, _): (ControlAction, u32) =
             crate::convert::action_request_from_wire(wire::ControlActionRequest {
+                zoom: result.zoom,
                 action: result.action,
                 mode_target: result.mode_target,
                 action_id: result.action_id,
@@ -241,6 +251,8 @@ mod command_tests {
     #[test]
     fn a_control_action_command_round_trips() {
         let command = ControlActionCommand {
+            sampled_at: pilotage_timing::MonoTimestamp::from_nanos(0),
+            timing: None,
             session: SessionId::new(4),
             vehicle: VehicleId::new(1),
             scope: ScopeId::new("vehicle.motion"),

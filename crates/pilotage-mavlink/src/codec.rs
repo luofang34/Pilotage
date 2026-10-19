@@ -10,6 +10,12 @@
 //! with byte-for-byte).
 
 mod attitude_target;
+mod camera;
+mod gimbal_manager;
+pub use camera::{
+    CAMERA_INFORMATION_ID, CAMERA_SETTINGS_ID, CameraMessage, MAV_CMD_SET_CAMERA_ZOOM,
+};
+pub use gimbal_manager::{GIMBAL_MANAGER_STATUS_ID, GimbalManagerStatus};
 mod decoding;
 mod encoding;
 mod param_encoding;
@@ -86,6 +92,10 @@ pub const MAV_AUTOPILOT_ARDUPILOTMEGA: u8 = 3;
 /// One parsed frame event from the Aviate subset.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FcMessage {
+    /// Actual gimbal-manager primary and secondary control ownership.
+    GimbalManagerStatus(GimbalManagerStatus),
+    /// Camera capabilities or settings, separate from vehicle-state authorization.
+    Camera(CameraMessage),
     /// A private estimator-status frame whose integrity or framing could not
     /// be validated. This event can only revoke authorization.
     InvalidAviateEstimatorStatus,
@@ -310,6 +320,9 @@ pub const GIMBAL_DEVICE_ATTITUDE_STATUS_ID: u32 = 285;
 /// `aviate-link`); `None` for ids this parser cannot verify.
 fn crc_extra(msg_id: u32) -> Option<u8> {
     match msg_id {
+        CAMERA_INFORMATION_ID => Some(92),
+        CAMERA_SETTINGS_ID => Some(146),
+        GIMBAL_MANAGER_STATUS_ID => Some(48),
         HEARTBEAT_ID => Some(50),
         ATTITUDE_QUATERNION_ID => Some(246),
         LOCAL_POSITION_NED_ID => Some(185),

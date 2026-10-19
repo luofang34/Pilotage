@@ -115,7 +115,8 @@ impl Harness {
             "injected-recording".into(),
             SourceIncarnation::new([42; 16]),
             control_mode,
-        );
+        )
+        .unwrap();
         Self { adapter, recording }
     }
 
@@ -235,6 +236,14 @@ pub(super) fn frame(pitch_rate: f32) -> ScopedControlFrame {
         generation: Generation::new(1),
         sequence: SequenceNum::new(1),
         sampled_at: MonoTimestamp::from_nanos(0),
+        timing: None,
+        admitted_timing: Some(pilotage_protocol::AdmittedTiming {
+            admitted_at: MonoTimestamp::from_nanos(0),
+            send_remaining: Duration::from_millis(100),
+            active_remaining: Some(Duration::from_millis(100)),
+            completion_timeout: None,
+            window_bounded: true,
+        }),
         profile_revision: 0,
         activation_revision: 0,
         payload: ControlPayload::default(),

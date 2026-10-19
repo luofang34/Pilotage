@@ -103,6 +103,8 @@ fn action_command(
 ) -> wire::Envelope {
     envelope(wire::envelope::Payload::ControlActionCommand(
         wire::ControlActionCommand {
+            sampled_at: None,
+            timing: None,
             session: Some(wire::SessionId { value: session }),
             vehicle: Some(wire::VehicleId { value: vehicle }),
             scope: Some(wire::ScopeId {
@@ -111,6 +113,7 @@ fn action_command(
             generation: Some(wire::Generation { value: generation }),
             activation_revision: 1,
             request: Some(wire::ControlActionRequest {
+                zoom: None,
                 action: wire::ControlAction::Arm as i32,
                 mode_target: 0,
                 action_id,

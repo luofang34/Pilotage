@@ -22,6 +22,8 @@ use pilotage_protocol::{
 /// authority wire mapping in one place.
 #[derive(Debug, Clone, PartialEq)]
 pub enum OutboundMessage {
+    /// Reliable replacement catalog; affected grants are fenced before this update.
+    Capabilities(pilotage_protocol::wire::HostCapabilities),
     /// The reply to a `ClientHello` (ADR-0005 handshake).
     Welcome(ServerWelcome),
     /// The reply to a `LeaseRequest` (ADR-0006).

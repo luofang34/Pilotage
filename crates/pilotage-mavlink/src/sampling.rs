@@ -174,6 +174,7 @@ pub fn estimate_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -> Tele
         .unwrap_or_default();
     TelemetryBatch {
         samples: vec![TelemetrySample {
+            payload: None,
             vehicle,
             tick: SimTick::new(u64::from(source_time_ms).wrapping_mul(1_000_000)),
             pose: planar_pose,
@@ -270,6 +271,7 @@ impl VehicleReports {
 #[must_use]
 pub fn report_only_sample(vehicle: VehicleId, tick: SimTick) -> TelemetrySample {
     TelemetrySample {
+        payload: None,
         vehicle,
         tick,
         pose: None,

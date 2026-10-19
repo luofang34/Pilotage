@@ -32,6 +32,8 @@ pub enum ClientAction {
 pub enum ModuleEvent {
     /// The host admitted this session; the catalog describes what it offers.
     Admitted(Admission),
+    /// The same session received a reliable replacement capability catalog.
+    CapabilitiesChanged(Admission),
     /// One telemetry sample from the datagram channel.
     Telemetry(Box<wire::TelemetrySample>),
     /// One authority transition from the session-events stream.

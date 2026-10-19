@@ -8,6 +8,46 @@ use super::outbound::to_connection_message;
 use super::*;
 
 impl<A: VehicleAdapter> EngineActor<A> {
+    fn consume_admission_budget(&self, frame: &mut ScopedControlFrame) -> bool {
+        let Some(timing) = frame.admitted_timing.as_mut() else {
+            return true;
+        };
+        let now = self.start.elapsed();
+        let Some(elapsed) = now.checked_sub(std::time::Duration::from_nanos(
+            timing.admitted_at.as_nanos(),
+        )) else {
+            return false;
+        };
+        let Some(remaining) = timing
+            .send_remaining
+            .checked_sub(elapsed)
+            .filter(|value| !value.is_zero())
+        else {
+            return false;
+        };
+        timing.send_remaining = remaining;
+        if let Some(active) = timing.active_remaining {
+            let Some(remaining) = active.checked_sub(elapsed).filter(|value| !value.is_zero())
+            else {
+                return false;
+            };
+            timing.active_remaining = Some(remaining);
+        }
+        if let Some(completion) = timing.completion_timeout {
+            let Some(remaining) = completion
+                .checked_sub(elapsed)
+                .filter(|value| !value.is_zero())
+            else {
+                return false;
+            };
+            timing.completion_timeout = Some(remaining);
+        }
+        timing.admitted_at = pilotage_timing::MonoTimestamp::from_nanos(
+            u64::try_from(now.as_nanos()).unwrap_or(u64::MAX),
+        );
+        true
+    }
+
     /// Applies a gated frame to the adapter with exactly-once semantics for
     /// its correlated actions (CTRL-01): retransmitted actions the adapter
     /// already answered are stripped and their recorded results replayed;
@@ -32,7 +72,16 @@ impl<A: VehicleAdapter> EngineActor<A> {
             return;
         }
         let apply_start = Instant::now();
-        let outcome = self.adapter.apply_control(&frame);
+        let outcome = if self.consume_admission_budget(&mut frame) {
+            self.adapter.apply_control(&frame)
+        } else {
+            pilotage_adapter_api::ApplyOutcome::new(
+                pilotage_timing::SimTick::new(0),
+                Disposition::Rejected(RejectReason::Other(
+                    "command expired before adapter delivery".to_owned(),
+                )),
+            )
+        };
         if let Some(control_feel) = self.adapter.take_control_feel_change() {
             info!(
                 profile_id = %control_feel.profile_id,

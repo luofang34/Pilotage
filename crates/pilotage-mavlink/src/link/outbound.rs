@@ -10,15 +10,27 @@
 //! behind fresh ones.
 
 use std::net::SocketAddr;
+use std::time::Instant;
 
 use tokio::net::UdpSocket;
 use tracing::warn;
 
 use crate::codec::{AttitudeTargetKind, ParamValue};
 
+#[cfg(test)]
+mod tests;
+
 /// One reliably-ordered COMMAND_LONG for the FC's GCS instance.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct OutboundCommand {
+    /// Portable executor command checked and recorded at the final UDP write.
+    pub payload_write: Option<crate::PayloadWrite>,
+    /// Actual complete-write receipt for protocol policy such as primary-control claims.
+    pub receipt: Option<crate::WriteReceipt>,
+    /// Shared generation fence checked immediately before writing.
+    pub fence: Option<super::SendFence>,
+    /// Exclusive local deadline for beginning the UDP write; queues do not refresh it.
+    pub send_before: Option<Instant>,
     /// MAV_CMD id.
     pub command: u16,
     /// COMMAND_LONG params 1..7.
@@ -31,8 +43,18 @@ pub struct OutboundCommand {
 
 /// The latest-value gimbal rate demand (rad/s). Every publication
 /// replaces the previous one; the link task encodes only the newest.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct GimbalRateDemand {
+    /// Concrete device selected from the expected manager status.
+    pub gimbal_device_id: u8,
+    /// Complete-write receipt for stop ordering.
+    pub receipt: Option<crate::WriteReceipt>,
+    /// Portable executor command checked and recorded at the final UDP write.
+    pub payload_write: Option<crate::PayloadWrite>,
+    /// Shared generation fence checked immediately before writing.
+    pub fence: Option<super::SendFence>,
+    /// Exclusive local deadline retained from the input publication.
+    pub send_before: Option<Instant>,
     /// Pitch rate demand, + = camera up.
     pub pitch_rps: f32,
     /// Yaw rate demand, + = camera right.
@@ -121,6 +143,76 @@ async fn send_frame(socket: &UdpSocket, frame: &[u8], target: SocketAddr, what: 
     }
 }
 
+struct WriteContext<'a> {
+    send_before: Option<Instant>,
+    fence: Option<&'a super::SendFence>,
+    payload_write: Option<&'a crate::PayloadWrite>,
+    receipt: Option<&'a crate::WriteReceipt>,
+}
+
+/// Readiness waits consume the original deadline before the actual socket write.
+async fn send_frame_until(
+    socket: &UdpSocket,
+    frame: &[u8],
+    target: SocketAddr,
+    what: &str,
+    context: WriteContext<'_>,
+) {
+    let WriteContext {
+        send_before,
+        fence,
+        payload_write,
+        receipt,
+    } = context;
+    loop {
+        if fence.is_some_and(|fence| !fence.is_valid())
+            || send_before.is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            warn!(what, "outbound command expired before UDP write");
+            return;
+        }
+        if let Err(error) = socket.writable().await {
+            warn!(%error, what, "outbound socket readiness failed");
+            return;
+        }
+        if fence.is_some_and(|fence| !fence.is_valid())
+            || send_before.is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            return;
+        }
+        let write = || {
+            if send_before.is_some_and(|deadline| Instant::now() >= deadline) {
+                return Ok(false);
+            }
+            if let Some(write) = payload_write {
+                write.write(frame.len(), || socket.try_send_to(frame, target))
+            } else {
+                socket
+                    .try_send_to(frame, target)
+                    .map(|written| written == frame.len())
+            }
+        };
+        let result = if let Some(fence) = fence {
+            fence.with_valid_write(write)
+        } else {
+            write()
+        };
+        match result {
+            Ok(sent) => {
+                if sent && let Some(receipt) = receipt {
+                    receipt.record_sent(Instant::now());
+                }
+                return;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => continue,
+            Err(error) => {
+                warn!(%error, what, "outbound send failed");
+                return;
+            }
+        }
+    }
+}
+
 /// Encodes and sends one ordered command through the link socket,
 /// advancing the shared sequence. A missing target drops the command
 /// with a warning.
@@ -140,7 +232,19 @@ pub(super) async fn send_outbound_command(
                 command.target_component,
             );
             *seq = seq.wrapping_add(1);
-            send_frame(socket, &frame, target, "command").await;
+            send_frame_until(
+                socket,
+                &frame,
+                target,
+                "command",
+                WriteContext {
+                    send_before: command.send_before,
+                    fence: command.fence.as_ref(),
+                    payload_write: command.payload_write.as_ref(),
+                    receipt: command.receipt.as_ref(),
+                },
+            )
+            .await;
         }
         (Some(command), None) => {
             warn!(
@@ -168,9 +272,22 @@ pub(super) async fn send_gimbal_rate(
             demand.yaw_rps,
             demand.target_system,
             demand.target_component,
+            demand.gimbal_device_id,
         );
         *seq = seq.wrapping_add(1);
-        send_frame(socket, &frame, target, "gimbal rate setpoint").await;
+        send_frame_until(
+            socket,
+            &frame,
+            target,
+            "gimbal rate setpoint",
+            WriteContext {
+                send_before: demand.send_before,
+                fence: demand.fence.as_ref(),
+                payload_write: demand.payload_write.as_ref(),
+                receipt: demand.receipt.as_ref(),
+            },
+        )
+        .await;
     }
 }
 

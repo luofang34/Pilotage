@@ -169,6 +169,7 @@ fn full_throttle_frame_bytes(
     let envelope = wire::Envelope {
         schema_version: SCHEMA_VERSION,
         payload: Some(wire::envelope::Payload::ControlFrame(wire::ControlFrame {
+            timing: None,
             session: Some(wire::SessionId { value: session }),
             vehicle: Some(wire::VehicleId { value: vehicle }),
             scope: Some(wire::ScopeId {

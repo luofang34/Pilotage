@@ -16,6 +16,7 @@ pub(super) fn capabilities() -> AdapterCapabilities {
             class: pilotage_protocol::VehicleClass::GroundRover,
             display_name: "test rover".to_owned(),
             scopes: vec![ScopeDescriptor {
+                payload: None,
                 authority_group: None,
                 scope: ScopeId::new("vehicle.motion"),
                 axes: vec![LogicalAxisId::new(0)],
@@ -191,6 +192,8 @@ pub(super) fn motion_frame(
     sequence: u32,
 ) -> ScopedControlFrame {
     ScopedControlFrame {
+        timing: None,
+        admitted_timing: None,
         action_ids: vec![],
         session,
         vehicle: VEHICLE,

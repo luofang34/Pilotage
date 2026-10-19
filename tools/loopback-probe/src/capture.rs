@@ -124,6 +124,7 @@ mod tests {
     #[test]
     fn capture_round_trips_every_provenance_field() {
         let sample = wire::TelemetrySample {
+            payload: None,
             vehicle: Some(wire::VehicleId { value: 1 }),
             tick: Some(wire::SimTick { value: 1_000_000 }),
             observed_at: Some(wire::MonoTimestamp { nanos: 5 }),

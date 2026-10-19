@@ -8,7 +8,7 @@ use super::{
     STATUS_TEXT_LEN, STATUSTEXT_ID,
 };
 
-fn f32_at(payload: &[u8], off: usize) -> f32 {
+pub(super) fn f32_at(payload: &[u8], off: usize) -> f32 {
     let mut bytes = [0_u8; 4];
     for (index, slot) in bytes.iter_mut().enumerate() {
         *slot = payload.get(off + index).copied().unwrap_or(0);
@@ -16,7 +16,7 @@ fn f32_at(payload: &[u8], off: usize) -> f32 {
     f32::from_le_bytes(bytes)
 }
 
-fn u32_at(payload: &[u8], off: usize) -> u32 {
+pub(super) fn u32_at(payload: &[u8], off: usize) -> u32 {
     let mut bytes = [0_u8; 4];
     for (index, slot) in bytes.iter_mut().enumerate() {
         *slot = payload.get(off + index).copied().unwrap_or(0);
@@ -172,6 +172,12 @@ fn decode_status_text(payload: &[u8]) -> FcMessage {
 
 pub(super) fn decode_known(msg_id: u32, payload: &[u8]) -> Option<FcMessage> {
     match msg_id {
+        super::GIMBAL_MANAGER_STATUS_ID => Some(FcMessage::GimbalManagerStatus(
+            super::gimbal_manager::decode(payload),
+        )),
+        super::CAMERA_INFORMATION_ID | super::CAMERA_SETTINGS_ID => {
+            super::camera::decode(msg_id, payload).map(FcMessage::Camera)
+        }
         HEARTBEAT_ID => Some(FcMessage::Heartbeat {
             // Payload: custom_mode u32 @0, type @4, autopilot @5,
             // base_mode @6 (bit 0x80 = SAFETY_ARMED).

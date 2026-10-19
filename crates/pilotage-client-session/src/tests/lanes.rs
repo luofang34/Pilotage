@@ -198,6 +198,7 @@ fn actions_across_lanes_share_one_correlation_id_space() {
         1,
         "vehicle.motion",
         wire::ControlActionRequest {
+            zoom: None,
             action: 1,
             mode_target: 0,
             action_id: 0,
@@ -208,6 +209,7 @@ fn actions_across_lanes_share_one_correlation_id_space() {
         1,
         "vehicle.gimbal",
         wire::ControlActionRequest {
+            zoom: None,
             action: 4,
             mode_target: 0,
             action_id: 0,

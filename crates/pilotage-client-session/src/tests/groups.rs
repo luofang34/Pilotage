@@ -15,6 +15,7 @@ const DIRECT: &str = "vehicle.motion.direct";
 /// Admits a multicopter whose two flight scopes share the motion group.
 fn admit_grouped(engine: &mut ClientEngine) {
     let scope = |name: &str| wire::ScopeDescriptor {
+        payload: None,
         scope: Some(wire::ScopeId { value: name.into() }),
         authority_group: MOTION.into(),
         ..Default::default()
@@ -26,6 +27,7 @@ fn admit_grouped(engine: &mut ClientEngine) {
                 session: Some(wire::SessionId { value: 7 }),
                 principal: Some(wire::PrincipalId { value: 42 }),
                 host_capabilities: Some(wire::HostCapabilities {
+                    control_window_ms: 0,
                     host_version: "test-host".into(),
                     vehicles: vec![wire::VehicleDescriptor {
                         vehicle: Some(wire::VehicleId { value: 1 }),
@@ -34,6 +36,7 @@ fn admit_grouped(engine: &mut ClientEngine) {
                             scope(MOTION),
                             scope(DIRECT),
                             wire::ScopeDescriptor {
+                                payload: None,
                                 scope: Some(wire::ScopeId {
                                     value: "vehicle.gimbal".into(),
                                 }),

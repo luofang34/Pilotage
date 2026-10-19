@@ -43,12 +43,14 @@ fn two_scope_welcome() -> wire::Envelope {
                 session: Some(wire::SessionId { value: 7 }),
                 principal: Some(wire::PrincipalId { value: 42 }),
                 host_capabilities: Some(wire::HostCapabilities {
+                    control_window_ms: 0,
                     host_version: "test-host".into(),
                     vehicles: vec![wire::VehicleDescriptor {
                         vehicle: Some(wire::VehicleId { value: 1 }),
                         display_name: "vehicle".into(),
                         scopes: vec![
                             wire::ScopeDescriptor {
+                                payload: None,
                                 scope: Some(wire::ScopeId {
                                     value: "vehicle.motion".into(),
                                 }),
@@ -63,6 +65,7 @@ fn two_scope_welcome() -> wire::Envelope {
                                 ..Default::default()
                             },
                             wire::ScopeDescriptor {
+                                payload: None,
                                 scope: Some(wire::ScopeId {
                                     value: "vehicle.gimbal".into(),
                                 }),

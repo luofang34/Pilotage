@@ -191,6 +191,10 @@ pub struct Ping {
 /// [`pilotage_timing`]'s estimator, never a direct subtraction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Pong {
+    /// Host-issued control window bound to this connection.
+    pub control_window_id: u64,
+    /// Lifetime on the host clock, independent of transport delay.
+    pub control_window_ms: u32,
     /// Echoes the originating `Ping`'s nonce.
     pub nonce: u64,
     /// Echoes the originating `Ping`'s sender-local timestamp verbatim.
@@ -311,6 +315,10 @@ pub struct ControlActionResult {
 /// records before the adapter sees the action.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ControlActionCommand {
+    /// Sender-local sample time.
+    pub sampled_at: MonoTimestamp,
+    /// Sender validity; absent for compatibility clients.
+    pub timing: Option<crate::CommandTiming>,
     /// The sender's session, validated against the connection's own.
     pub session: crate::ids::SessionId,
     /// The vehicle addressed.

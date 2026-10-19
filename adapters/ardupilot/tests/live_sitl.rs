@@ -86,6 +86,8 @@ impl Pilot {
             Some(_) => DIRECT_SCOPE,
         };
         ScopedControlFrame {
+            timing: None,
+            admitted_timing: None,
             action_ids: (1..=actions.len() as u32).collect(),
             session: SessionId::new(1),
             vehicle: VehicleId::new(1),

@@ -108,6 +108,10 @@ fn the_link_answers_the_address_the_fc_spoke_from() {
         harness
             .commands
             .send(OutboundCommand {
+                payload_write: None,
+                receipt: None,
+                fence: None,
+                send_before: None,
                 command: MAV_CMD_NAV_TAKEOFF,
                 params: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.5],
                 target_system: 1,
@@ -161,6 +165,10 @@ fn a_stranger_does_not_become_the_command_target() {
         harness
             .commands
             .send(OutboundCommand {
+                payload_write: None,
+                receipt: None,
+                fence: None,
+                send_before: None,
                 command: MAV_CMD_NAV_TAKEOFF,
                 params: [0.0; 7],
                 target_system: 1,

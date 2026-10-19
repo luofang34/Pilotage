@@ -408,6 +408,8 @@ impl TryFrom<wire::Ping> for Ping {
 impl From<&Pong> for wire::Pong {
     fn from(pong: &Pong) -> Self {
         wire::Pong {
+            control_window_id: pong.control_window_id,
+            control_window_ms: pong.control_window_ms,
             nonce: pong.nonce,
             echoed_sender_sent_at: Some(wire::MonoTimestamp {
                 nanos: pong.echoed_sender_sent_at.as_nanos(),
@@ -434,6 +436,8 @@ impl TryFrom<wire::Pong> for Pong {
             .responder_sent_at
             .ok_or_else(|| missing("responder_sent_at"))?;
         Ok(Pong {
+            control_window_id: pong.control_window_id,
+            control_window_ms: pong.control_window_ms,
             nonce: pong.nonce,
             echoed_sender_sent_at: MonoTimestamp::from_nanos(echoed_sender_sent_at.nanos),
             responder_sent_at: MonoTimestamp::from_nanos(responder_sent_at.nanos),

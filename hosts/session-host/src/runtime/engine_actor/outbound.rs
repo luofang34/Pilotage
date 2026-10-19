@@ -32,7 +32,8 @@ pub(super) fn to_connection_message(envelope: &pilotage_session::OutboundMessage
         | pilotage_session::OutboundMessage::LinkLossCleared(_) => {
             ToConnection::AuthorityMessage(encode_envelope_message(envelope))
         }
-        pilotage_session::OutboundMessage::Welcome(_)
+        pilotage_session::OutboundMessage::Capabilities(_)
+        | pilotage_session::OutboundMessage::Welcome(_)
         | pilotage_session::OutboundMessage::LeaseResponse(_)
         | pilotage_session::OutboundMessage::LeaseReleased(_)
         | pilotage_session::OutboundMessage::ControlActionResult(_)

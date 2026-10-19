@@ -125,6 +125,7 @@ impl Session {
             self.vehicle_id,
             MOTION_SCOPE,
             wire::ControlActionRequest {
+                zoom: None,
                 action: action as i32,
                 ..wire::ControlActionRequest::default()
             },

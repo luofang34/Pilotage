@@ -7,6 +7,7 @@
 
 mod capability;
 mod control;
+mod payload;
 mod step;
 mod telemetry;
 mod vehicle_adapter;
@@ -53,3 +54,8 @@ pub use video::stamping::{
     GIMBAL_SOURCE_ID, RawVideoFrame, UnstampedFrame,
 };
 pub use video::{CalibrationId, CameraId, CaptureClockMapping, VideoCaptureStamp};
+
+pub use payload::{
+    payload_angle_observation_to_wire, payload_capabilities_to_wire, payload_progress_to_wire,
+    payload_rate_observation_to_wire, payload_zoom_observation_to_wire,
+};

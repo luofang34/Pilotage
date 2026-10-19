@@ -380,6 +380,7 @@ async fn arm_and_expect_accepted(driver: &mut Driver) {
         vehicle_id,
         &scope,
         wire::ControlActionRequest {
+            zoom: None,
             action: 1,
             mode_target: 0,
             action_id: 0,

@@ -60,7 +60,7 @@ pub(super) async fn run_link(
                     // The demand producer dropped; stop polling the lane.
                     rates_open = false;
                 } else {
-                    let demand = *lanes.gimbal_rates.borrow_and_update();
+                    let demand = lanes.gimbal_rates.borrow_and_update().clone();
                     send_gimbal_rate(&socket, &mut seq, target, demand).await;
                 }
             }

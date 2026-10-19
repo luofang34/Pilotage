@@ -96,9 +96,15 @@ pub enum BootstrapDecodeError {
 /// One client-origin message carried by the reliable bootstrap stream.
 pub enum InboundBootstrap {
     /// A message decided by the sans-IO session engine.
-    Engine(DomainEnvelope),
+    Engine(Box<DomainEnvelope>),
     /// An idempotent request to register the live connection for media.
     MediaAttach,
+}
+
+impl InboundBootstrap {
+    fn engine(message: DomainEnvelope) -> Self {
+        Self::Engine(Box::new(message))
+    }
 }
 
 /// Decodes one length-delimited envelope from the front of `bytes` into an
@@ -127,42 +133,42 @@ pub fn decode_bootstrap_message(
     }
     let message = match envelope.payload {
         Some(wire::envelope::Payload::ClientHello(hello)) => {
-            InboundBootstrap::Engine(DomainEnvelope::Hello(ClientHello::from(hello)))
+            InboundBootstrap::engine(DomainEnvelope::Hello(ClientHello::from(hello)))
         }
-        Some(wire::envelope::Payload::LeaseRequest(request)) => InboundBootstrap::Engine(
+        Some(wire::envelope::Payload::LeaseRequest(request)) => InboundBootstrap::engine(
             DomainEnvelope::Lease(LeaseRequest::try_from(request).map_err(DecodeError::from)?),
         ),
         Some(wire::envelope::Payload::LeaseRelease(release)) => {
-            InboundBootstrap::Engine(DomainEnvelope::Release(
+            InboundBootstrap::engine(DomainEnvelope::Release(
                 pilotage_protocol::LeaseRelease::try_from(release).map_err(DecodeError::from)?,
             ))
         }
         Some(wire::envelope::Payload::ScopeTransferRequest(request)) => {
-            InboundBootstrap::Engine(DomainEnvelope::TransferRequest(
+            InboundBootstrap::engine(DomainEnvelope::TransferRequest(
                 pilotage_protocol::ScopeTransferRequest::try_from(request)
                     .map_err(DecodeError::from)?,
             ))
         }
         Some(wire::envelope::Payload::ScopeTransferOffer(offer)) => {
-            InboundBootstrap::Engine(DomainEnvelope::TransferOffer(
+            InboundBootstrap::engine(DomainEnvelope::TransferOffer(
                 pilotage_protocol::ScopeTransferOffer::try_from(offer)
                     .map_err(DecodeError::from)?,
             ))
         }
         Some(wire::envelope::Payload::ScopeTransferAccept(accept)) => {
-            InboundBootstrap::Engine(DomainEnvelope::TransferAccept(
+            InboundBootstrap::engine(DomainEnvelope::TransferAccept(
                 pilotage_protocol::ScopeTransferAccept::try_from(accept)
                     .map_err(DecodeError::from)?,
             ))
         }
         Some(wire::envelope::Payload::ProfileActivation(activation)) => {
-            InboundBootstrap::Engine(DomainEnvelope::ProfileActivation(
+            InboundBootstrap::engine(DomainEnvelope::ProfileActivation(
                 pilotage_protocol::ProfileActivation::try_from(activation)
                     .map_err(DecodeError::from)?,
             ))
         }
         Some(wire::envelope::Payload::ControlActionCommand(command)) => {
-            InboundBootstrap::Engine(DomainEnvelope::ActionCommand(
+            InboundBootstrap::engine(DomainEnvelope::ActionCommand(
                 pilotage_protocol::ControlActionCommand::try_from(command)
                     .map_err(DecodeError::from)?,
             ))
@@ -218,6 +224,9 @@ pub fn decode_ping_datagram(bytes: &[u8]) -> Result<Ping, BootstrapDecodeError> 
 #[must_use]
 pub fn encode_envelope_message(message: &OutboundMessage) -> Vec<u8> {
     let payload = match message {
+        OutboundMessage::Capabilities(capabilities) => {
+            wire::envelope::Payload::HostCapabilities(capabilities.clone())
+        }
         OutboundMessage::Welcome(welcome) => wire::envelope::Payload::ServerWelcome(welcome.into()),
         OutboundMessage::LeaseResponse(response) => {
             wire::envelope::Payload::LeaseResponse(response.into())

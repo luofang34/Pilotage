@@ -7,12 +7,13 @@
 //! staleness, and link-loss decisions live here so the host binary is a thin
 //! I/O shell.
 //!
-//! The staleness check treats client-supplied `sampled_at` as same-clock as
-//! the host `now`: a documented loopback-only simplification for increment 0.
-//! See [`SessionEngine`] for the full caveat and the RTT/offset follow-up.
+//! Relative-delay checks use a per-client clock floor. Physical control also
+//! requires a host-issued validity window; no remote clock is trusted as local.
 
 mod action_command;
+mod catalog;
 mod frame_ingress;
+mod freshness;
 mod handlers;
 mod link_loss;
 mod transfer;
@@ -38,20 +39,9 @@ use link_loss::LinkLossState;
 /// embedded [`AuthorityEngine`] and is authoritative for who holds what right
 /// now (ADR-0006).
 ///
-/// # Loopback time simplification (increment 0)
-///
-/// ADR-0009 forbids comparing a remote endpoint's `MonoTimestamp` against a
-/// local one without clock correlation. This engine's staleness check computes
-/// frame age as `receive_now - frame.sampled_at` **directly**, which is only
-/// valid because the increment-0 loopback runs client and host in ONE process
-/// on ONE monotonic clock, so `sampled_at` and `receive_now` share an epoch.
-///
-/// THIS IS A LOOPBACK-ONLY SHORTCUT. On a real WebTransport link the client's
-/// `sampled_at` is in the client's `transport_time` domain and MUST be
-/// correlated through [`pilotage_timing::RttEstimator`] /
-/// [`pilotage_timing::ClockOffset`] (see [`pilotage_timing::estimated_age`])
-/// before comparison. Replacing this direct subtraction with the estimator
-/// path is the tracked follow-up; do not ship it to a networked host as-is.
+/// Physical control must echo a host-issued window. The host checks its own
+/// monotonic time at admission. Relative-delay checks provide a separate
+/// congestion signal; they do not prove source acquisition age.
 #[derive(Debug)]
 pub struct SessionEngine {
     authority: AuthorityEngine,
@@ -267,6 +257,7 @@ impl SessionEngine {
         actions: &mut Actions,
     ) {
         for effect in effects {
+            self.invalidate_pending_for(&effect, actions);
             self.record_holder_change(&effect);
             let transition = self.holder_transition_action(&effect, now, trigger);
             actions.broadcast(OutboundMessage::Authority(effect));

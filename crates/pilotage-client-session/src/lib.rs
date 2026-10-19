@@ -38,5 +38,8 @@ pub use control::{ControlCommand, ControlLane};
 pub use direct_flight::{attitude_thrust_intent, body_rate_intent, integrate_heading};
 pub use engine::{ClientConfig, ClientEngine, ClientPhase};
 pub use event::{StreamId, TransportEvent};
-pub use motion::{MotionDemand, gimbal_rate_intent, intent_capability, velocity_intent};
+pub use motion::{
+    MotionDemand, gimbal_rate_intent, intent_capability, payload_gimbal_rate_intent,
+    velocity_intent,
+};
 pub use reconnect::ReconnectPolicy;

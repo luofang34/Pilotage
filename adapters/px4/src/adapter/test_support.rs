@@ -19,6 +19,7 @@ impl Px4Adapter {
             uplink: None,
             fixed_wing: None,
             gimbal: None,
+            camera_control: None,
             frames: None,
             _camera_bridge: None,
             _frame_forwarder: None,

@@ -12,10 +12,7 @@ use super::Px4Adapter;
 use super::control::rejected_control;
 use crate::gimbal::{CMD_GIMBAL_CONFIGURE, MAX_PITCH_RATE_RPS, MAX_YAW_RATE_RPS};
 
-/// How long a CONFIGURE denial keeps rejecting pointing frames. The
-/// claim is re-asserted every second while demands flow, so a live
-/// denial refreshes itself and a stale one ages out instead of
-/// blocking the scope forever.
+/// Bound the age of a negative device reply independently of confirmed ownership.
 const CLAIM_DENIAL_FRESHNESS: Duration = Duration::from_secs(5);
 
 impl Px4Adapter {
@@ -41,6 +38,7 @@ impl Px4Adapter {
                 RejectReason::Other("the gimbal scope consumes typed commands only".to_owned()),
             );
         }
+        self.observe_gimbal_manager();
         let denial = self.fresh_claim_denial();
         let Some(gimbal) = self.gimbal.as_mut() else {
             return rejected_control(tick, RejectReason::UnknownScope);
@@ -53,6 +51,7 @@ impl Px4Adapter {
                 )),
             );
         }
+        gimbal.bind_timing(frame.admitted_timing);
         // A send that never reached the wire (a full or closed lane)
         // must not report as applied. Track every command/demand this
         // frame issued.
@@ -67,7 +66,7 @@ impl Px4Adapter {
                     if sent {
                         ActionResult::accepted(*action)
                     } else {
-                        ActionResult::rejected(*action, "gimbal command lane full")
+                        ActionResult::rejected(*action, gimbal.rejection_detail())
                     }
                 }
                 // Nothing else is advertised for this scope; the session
@@ -76,7 +75,12 @@ impl Px4Adapter {
             })
             .collect();
         let mut constrained = false;
-        if let Some(intent) = frame.intent {
+        if let Some(intent) = frame.intent
+            && !frame
+                .actions
+                .iter()
+                .any(|action| action.kind() == ActionKind::GimbalRecenter)
+        {
             let ControlIntent::GimbalRate(rate) = intent else {
                 return rejected_control(
                     tick,
@@ -92,7 +96,7 @@ impl Px4Adapter {
         if !delivered {
             return rejected_control(
                 tick,
-                RejectReason::Other("gimbal command lane full; demand not sent".to_owned()),
+                RejectReason::Other(gimbal.rejection_detail().to_owned()),
             );
         }
         ApplyOutcome {

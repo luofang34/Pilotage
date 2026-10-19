@@ -34,6 +34,12 @@ pub(crate) struct ClientState {
     /// floor (offset plus minimum path delay) is the reference against
     /// which a frame's EXTRA delay, the actual staleness, is measured.
     pub(crate) clock_floor_nanos: Option<i64>,
+    pub(crate) control_windows: [(
+        u64,
+        pilotage_timing::MonoTimestamp,
+        pilotage_timing::MonoTimestamp,
+    ); 4],
+    pub(crate) next_window: u64,
 }
 
 /// Registry of connected clients and the scopes each principal holds.
@@ -134,6 +140,12 @@ impl ClientRegistry {
             principal,
             active_profile: None,
             clock_floor_nanos: None,
+            control_windows: [(
+                0,
+                pilotage_timing::MonoTimestamp::from_nanos(0),
+                pilotage_timing::MonoTimestamp::from_nanos(0),
+            ); 4],
+            next_window: 0,
         };
         self.clients.insert(client, state.clone());
         state
@@ -261,5 +273,47 @@ impl ClientRegistry {
             set.remove(pair);
             !set.is_empty()
         });
+    }
+}
+
+impl ClientRegistry {
+    pub(crate) fn issue_control_window(
+        &mut self,
+        client: ClientKey,
+        now: pilotage_timing::MonoTimestamp,
+        source_not_before: pilotage_timing::MonoTimestamp,
+    ) -> u64 {
+        let Some(state) = self.clients.get_mut(&client) else {
+            return 0;
+        };
+        state.next_window = state.next_window.wrapping_add(1).max(1);
+        state.control_windows.rotate_right(1);
+        if let Some(slot) = state.control_windows.first_mut() {
+            *slot = (state.next_window, now, source_not_before);
+        }
+        state.next_window
+    }
+
+    pub(crate) fn control_window_age(
+        &self,
+        client: ClientKey,
+        id: u64,
+        sampled_at: pilotage_timing::MonoTimestamp,
+        now: pilotage_timing::MonoTimestamp,
+    ) -> Option<core::time::Duration> {
+        if id == 0 {
+            return None;
+        }
+        let state = self.clients.get(&client)?;
+        let (_, issued, source_not_before) = state
+            .control_windows
+            .iter()
+            .find(|(window, _, _)| *window == id)?;
+        if sampled_at < *source_not_before {
+            return None;
+        }
+        now.as_nanos()
+            .checked_sub(issued.as_nanos())
+            .map(core::time::Duration::from_nanos)
     }
 }

@@ -329,6 +329,7 @@ impl Link {
                 vehicle_id,
                 GIMBAL_SCOPE,
                 wire::ControlActionRequest {
+                    zoom: None,
                     action: ACTION_GIMBAL_RECENTER,
                     mode_target: 0,
                     action_id: 0,

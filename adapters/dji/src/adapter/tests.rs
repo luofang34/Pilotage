@@ -1,14 +1,13 @@
 use super::GIMBAL_SCOPE;
+mod acknowledgement;
 mod bench;
+mod contract;
 mod harness;
 mod mapping;
 
 use std::time::Duration;
 
-use pilotage_adapter_api::{
-    Disposition, LinkLossPolicy, MeasurementClock, RejectReason, SourceIntegrity, SourceRole,
-    VehicleAdapter,
-};
+use pilotage_adapter_api::{Disposition, LinkLossPolicy, RejectReason, VehicleAdapter};
 use pilotage_protocol::{ControlAction, ControlIntent, GimbalRateIntent, ScopeId};
 
 use super::{DjiFault, capability::MAX_PITCH_RATE};
@@ -59,16 +58,29 @@ fn recorded_poses_publish_payload_only_and_bound_pitch_commands() -> TestResult 
     let sample = &samples[0];
     assert!(sample.pose.is_none() && sample.speed.is_none() && sample.avionics.is_none());
     assert!(sample.fc_state.is_none() && sample.sim_truth.is_none() && sample.battery.is_none());
-    let gimbal = sample.gimbal.ok_or("missing gimbal sample")?;
-    assert_eq!(gimbal.stamp.role, SourceRole::PayloadDevice);
-    assert_eq!(gimbal.stamp.clock, MeasurementClock::HostMonotonic);
-    assert_eq!(gimbal.stamp.integrity, SourceIntegrity::ChecksummedOnly);
-    assert_eq!(gimbal.stamp.acquired_at_ns, 20_000_000);
-    assert!(gimbal.rates_rps.iter().all(|rate| rate.is_nan()));
-    assert!(!gimbal.reference.locks.yaw);
-    let [w, x, y, z] = gimbal.quat_wxyz;
-    let pitch = (2.0 * (w * y - z * x)).asin().to_degrees();
-    assert!((pitch + 4.9).abs() < 0.001);
+    assert!(sample.gimbal.is_none());
+    let payload = sample.payload.as_ref().ok_or("missing payload sample")?;
+    let pitch = payload.pitch.as_ref().ok_or("missing pitch")?;
+    let stamp = pitch.stamp.as_ref().ok_or("missing stamp")?;
+    assert_eq!(
+        stamp.role,
+        pilotage_protocol::wire::SourceRole::PayloadDevice as i32
+    );
+    assert_eq!(
+        stamp.clock,
+        pilotage_protocol::wire::MeasurementClock::HostMonotonic as i32
+    );
+    assert_eq!(
+        pitch.received_at.as_ref().map(|time| time.nanos),
+        Some(20_000_000)
+    );
+    assert!(pitch.sampled_at.is_none());
+    assert!(pitch.rate_rad_s.is_none());
+    assert_eq!(
+        pitch.frame,
+        pilotage_protocol::wire::PayloadReferenceFrame::Unknown as i32
+    );
+    assert!((pitch.angle_rad.ok_or("missing angle")?.to_degrees() + 4.9).abs() < 0.001);
     assert!(h.telemetry(20).samples.is_empty());
     assert_eq!(
         h.apply(frame(-MAX_PITCH_RATE), 20).disposition,
@@ -287,7 +299,7 @@ fn unknown_modes_do_not_publish_or_qualify_a_later_report() -> TestResult {
             pose[17] = 0;
         }
         let length = pose.len();
-        let crc = crate::checksum::frame(&pose[..length - 2]).to_le_bytes();
+        let crc = turret_dji::frame_checksum(&pose[..length - 2]).to_le_bytes();
         pose[length - 2..].copy_from_slice(&crc);
         h.feed(&pose)?;
         h.step(index as u64 * 10);
@@ -364,7 +376,7 @@ fn every_qualifying_arrival_must_be_inside_the_pitch_envelope() -> TestResult {
         if index == 1 {
             pose[11..13].copy_from_slice(&(-51_i16).to_le_bytes());
             let length = pose.len();
-            let crc = crate::checksum::frame(&pose[..length - 2]).to_le_bytes();
+            let crc = turret_dji::frame_checksum(&pose[..length - 2]).to_le_bytes();
             pose[length - 2..].copy_from_slice(&crc);
         }
         h.feed(&pose)?;
@@ -387,7 +399,7 @@ fn an_initial_backlog_cannot_qualify_by_spanning_read_budgets() -> TestResult {
         let mut pose = template.clone();
         pose[6..8].copy_from_slice(&sequence.to_le_bytes());
         let length = pose.len();
-        let crc = crate::checksum::frame(&pose[..length - 2]).to_le_bytes();
+        let crc = turret_dji::frame_checksum(&pose[..length - 2]).to_le_bytes();
         pose[length - 2..].copy_from_slice(&crc);
         backlog.extend(pose);
     }
@@ -449,9 +461,9 @@ fn an_injected_missing_mode_cannot_reuse_the_last_valid_attitude() -> TestResult
     h.prime()?;
     let mut short = observed_poses()[2][..17].to_vec();
     short[1] = 19;
-    short[3] = crate::checksum::header(&short[..3]);
+    short[3] = turret_dji::header_checksum(&short[..3]);
     short[6..8].copy_from_slice(&16072_u16.to_le_bytes());
-    short.extend(crate::checksum::frame(&short).to_le_bytes());
+    short.extend(turret_dji::frame_checksum(&short).to_le_bytes());
     h.feed(&short)?;
     h.step(30);
     assert_eq!(h.adapter.status_cached().consecutive_poses, 0);

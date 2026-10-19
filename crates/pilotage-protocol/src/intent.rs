@@ -74,6 +74,11 @@ pub enum ControlAction {
     CameraZoomIn,
     /// Step the camera one detent toward a wider field of view.
     CameraZoomOut,
+    /// Apply an explicit camera zoom operation.
+    CameraZoom {
+        /// Operation and unit understood by the camera.
+        command: crate::ZoomCommand,
+    },
     /// Reset the simulation (SIM-01 lifecycle, not a flight intent):
     /// advertised only by simulation adapters, never by a physical-vehicle
     /// gateway.
@@ -101,6 +106,8 @@ pub enum ActionKind {
     CameraZoomIn,
     /// Step the camera one detent toward a wider field of view.
     CameraZoomOut,
+    /// Apply an explicit camera zoom operation.
+    CameraZoom,
     /// Reset the simulation.
     SimReset,
     /// Request a control-feel change.
@@ -118,6 +125,7 @@ impl ControlAction {
             Self::GimbalRecenter => ActionKind::GimbalRecenter,
             Self::CameraZoomIn => ActionKind::CameraZoomIn,
             Self::CameraZoomOut => ActionKind::CameraZoomOut,
+            Self::CameraZoom { .. } => ActionKind::CameraZoom,
             Self::SimReset => ActionKind::SimReset,
             Self::FeelModeRequest { .. } => ActionKind::FeelModeRequest,
         }

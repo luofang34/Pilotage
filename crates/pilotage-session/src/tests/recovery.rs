@@ -190,6 +190,7 @@ fn profile(
                             })
                     };
                     ScopeDescriptor {
+                        payload: None,
                         authority_group: None,
                         scope: ScopeId::new(scope),
                         axes: axes.iter().copied().map(LogicalAxisId::new).collect(),
@@ -231,6 +232,8 @@ fn scoped_frame(
     axes: Vec<(u16, f32)>,
 ) -> ScopedControlFrame {
     ScopedControlFrame {
+        timing: None,
+        admitted_timing: None,
         action_ids: vec![],
         session,
         vehicle: VEHICLE,

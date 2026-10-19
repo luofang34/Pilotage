@@ -5,7 +5,10 @@ use std::time::Duration;
 use tracing::error;
 
 use super::{DjiFault, observation::Observations, recording::record_blocking};
-use crate::{DumlParser, GimbalPitchTarget, RawSerial, RouteAddress, checksum};
+use crate::{DumlParser, GimbalPitchTarget, RawSerial, RouteAddress};
+
+use super::execution::Execution;
+use turret_core::{CommandIdentity, PayloadCapabilities};
 
 const READ_BUDGET: usize = 64 * 1024;
 
@@ -31,9 +34,11 @@ struct Pending {
     offset: usize,
     pitch: Option<GimbalPitchTarget>,
     expires_at: Option<Duration>,
+    identity: Option<CommandIdentity>,
 }
 
 pub(super) struct Connection {
+    pub(super) execution: Execution,
     transport: Option<Box<dyn Transport>>,
     capture: Box<dyn Write + Send>,
     capture_path: PathBuf,
@@ -52,17 +57,21 @@ impl Connection {
         transport: Box<dyn Transport>,
         capture: Box<dyn Write + Send>,
         capture_path: PathBuf,
+        capabilities: PayloadCapabilities,
+        epoch: u64,
     ) -> Self {
         Self {
+            execution: Execution::new(capabilities, epoch),
             transport: Some(transport),
             capture,
             capture_path,
             parser: DumlParser::new(),
             pending: Some(Pending {
-                bytes: version_request(),
+                bytes: turret_dji::rc_version_request().to_vec(),
                 offset: 0,
                 pitch: None,
                 expires_at: None,
+                identity: None,
             }),
             written_pitch: None,
             drained: false,
@@ -83,24 +92,29 @@ impl Connection {
             .map_or(0, |pending| pending.bytes.len() - pending.offset)
     }
 
-    pub(super) fn queue_pitch(&mut self, pitch: GimbalPitchTarget, sequence: u16) -> bool {
-        self.queue_pitch_until(pitch, sequence, None)
-    }
-
     pub(super) fn queue_pitch_until(
         &mut self,
         pitch: GimbalPitchTarget,
         sequence: u16,
-        expires_at: Option<Duration>,
+        now: Duration,
+        expires_at: Duration,
     ) -> bool {
         if self.pending.is_some() || self.fault.is_some() {
             return false;
         }
+        let identity = match self.execution.admit(pitch, sequence, now, expires_at) {
+            Ok(identity) => identity,
+            Err(error) => {
+                tracing::debug!(%error, "DJI target rejected by payload executor");
+                return false;
+            }
+        };
         self.pending = Some(Pending {
             bytes: pitch.encode_app_command(sequence).to_vec(),
             offset: 0,
             pitch: Some(pitch),
-            expires_at,
+            expires_at: Some(expires_at),
+            identity: Some(identity),
         });
         true
     }
@@ -119,6 +133,7 @@ impl Connection {
                 self.pending = None;
             }
         }
+        self.execution.cancel();
         true
     }
 
@@ -187,6 +202,7 @@ impl Connection {
             return;
         }
         for frame in frames {
+            self.execution.response(&frame, now);
             if frame.sender() == RouteAddress(6)
                 && frame.receiver() == RouteAddress(10)
                 && frame.sequence() == 1
@@ -200,14 +216,29 @@ impl Connection {
         }
     }
 
-    pub(super) fn write_pending_blocking(&mut self, now: Duration, movement_ready: bool) {
+    pub(super) fn write_pending_blocking(
+        &mut self,
+        now: Duration,
+        movement_ready: bool,
+        completed_at: &mut impl FnMut() -> Duration,
+    ) {
         let Some(pending) = &self.pending else { return };
-        if pending.pitch.is_some()
-            && (!movement_ready || pending.expires_at.is_some_and(|until| now >= until))
-        {
-            self.cancel_movement();
-            return;
+        if pending.pitch.is_some() {
+            if !movement_ready {
+                self.cancel_movement();
+                return;
+            }
+            if pending.offset > 0 && pending.expires_at.is_some_and(|until| now >= until) {
+                self.fail(DjiFault::PartialCommand);
+                return;
+            }
+            if let Err(error) = self.execution.prepare(now) {
+                tracing::debug!(%error, "DJI queued target expired before write");
+                self.pending = None;
+                return;
+            }
         }
+        let Some(pending) = &self.pending else { return };
         let Some(transport) = &mut self.transport else {
             return;
         };
@@ -217,7 +248,7 @@ impl Connection {
                 operation: "write",
                 source: io::ErrorKind::WriteZero.into(),
             }),
-            Ok(count) => self.record_written_blocking(now, count),
+            Ok(count) => self.record_written_blocking(completed_at(), count),
             Err(error)
                 if matches!(
                     error.kind(),
@@ -238,7 +269,17 @@ impl Connection {
         pending.offset += count;
         let complete = pending.offset == pending.bytes.len();
         let pitch = pending.pitch;
+        let identity = pending.identity;
         self.written_bytes = self.written_bytes.wrapping_add(count as u64);
+        if complete {
+            self.pending = None;
+            if let Some(identity) = identity
+                && let Err(source) = self.execution.sent(identity, now)
+            {
+                self.fail(DjiFault::Execution { source });
+                return;
+            }
+        }
         if !self.record_blocking(now, "tx", &actual) {
             return;
         }
@@ -267,16 +308,20 @@ impl Connection {
 
     fn fail(&mut self, fault: DjiFault) {
         error!(%fault, "DJI connection closed; explicit restart required");
+        if let Some(pending) = &self.pending {
+            if pending.offset > 0 {
+                if let Some(identity) = pending.identity {
+                    self.execution.failed(identity);
+                }
+            } else {
+                self.execution.cancel();
+            }
+        } else {
+            self.execution.cancel();
+        }
         self.fault = Some(fault);
         self.pending = None;
         // Closing prevents a partial packet from being followed by a new command.
         self.transport = None;
     }
-}
-
-fn version_request() -> Vec<u8> {
-    let mut bytes = vec![0x55, 13, 4, 0, 10, 6, 1, 0, 0x40, 0, 1];
-    bytes[3] = checksum::header(&bytes[..3]);
-    bytes.extend(checksum::frame(&bytes).to_le_bytes());
-    bytes
 }

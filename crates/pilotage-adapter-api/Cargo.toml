@@ -8,6 +8,7 @@ publish = false
 workspace = true
 
 [dependencies]
+turret-core = { workspace = true }
 pilotage-geo = { workspace = true }
 pilotage-ingress = { workspace = true }
 pilotage-protocol = { workspace = true }
