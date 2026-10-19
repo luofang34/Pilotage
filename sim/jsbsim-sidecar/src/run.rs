@@ -20,9 +20,9 @@ pub enum RunError {
     Terrain {
         /// The archive.
         path: PathBuf,
-        /// Why.
+        /// Why, boxed: SQLite's error would make every result large.
         #[source]
-        source: pilotage_terrain_query::TerrainQueryError,
+        source: Box<pilotage_terrain_query::TerrainQueryError>,
     },
     /// The session failed.
     #[error(transparent)]
@@ -70,7 +70,7 @@ pub fn run_blocking(args: &Args) -> Result<(), RunError> {
             let terrain =
                 ArchiveTerrain::open_blocking(path).map_err(|source| RunError::Terrain {
                     path: path.clone(),
-                    source,
+                    source: Box::new(source),
                 })?;
             serve(&config, World::new(args.site, terrain, epoch))
         }
