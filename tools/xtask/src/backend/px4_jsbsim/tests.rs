@@ -91,6 +91,7 @@ fn the_quad_plans_the_sidecar_then_px4_on_the_instance_port() {
     );
     assert_eq!(arg(&sidecar.args, "--port"), Some("4581"));
     assert_eq!(arg(&sidecar.args, "--aircraft"), Some("x500"));
+    assert_eq!(arg(&sidecar.args, "--truth-addr"), Some("127.0.0.1:19581"));
     assert_eq!(arg(&sidecar.args, "--aircraft-dir"), None);
     assert_eq!(
         arg(&sidecar.args, "--jsbsim-root"),
@@ -209,6 +210,11 @@ fn an_instance_claims_its_simulator_port_and_px4s_links() {
             "{port} unclaimed"
         );
     }
+    assert!(
+        claims
+            .iter()
+            .any(|claim| matches!(claim, Claim::Udp { port: 19_582, .. }))
+    );
     assert_eq!(simulator_port(22), 4582);
 }
 
@@ -222,6 +228,11 @@ fn the_host_flies_the_selected_airframe_on_the_instance_links() {
     assert_eq!(env(&host, "PILOTAGE_PX4_ADDR"), Some("127.0.0.1:14570"));
     assert_eq!(env(&host, "PILOTAGE_PX4_SYSTEM_ID"), Some("21"));
     assert!(env(&host, "GZ_IP").is_none());
+    // The host takes truth from the sidecar, on the port the sidecar sends to.
+    assert_eq!(
+        env(&host, "PILOTAGE_SIM_TRUTH_ADDR"),
+        Some("127.0.0.1:19580")
+    );
     assert_eq!(env(&host, "PILOTAGE_PX4_GIMBAL"), None);
     let quad = Px4Jsbsim::default().host_env(&ctx);
     assert_eq!(env(&quad, "PILOTAGE_PX4_GIMBAL"), Some("1"));
