@@ -204,6 +204,7 @@ fn resolve_slots(args: &FleetArgs, repo_root: &Path) -> Result<Vec<Slot>, XtaskE
             web_root: stages::viewer_source(repo_root),
             lan: false,
             instance: args.instance_base.saturating_add(offset),
+            ready_timeout_s: args.ready_timeout_s,
         };
         slots.push(Slot {
             name,

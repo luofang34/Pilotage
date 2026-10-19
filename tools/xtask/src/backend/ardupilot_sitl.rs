@@ -203,7 +203,7 @@ fn plan_with_ardupilot_dir(
         },
         readiness: Readiness::LogContains {
             needle: "UDP connection",
-            timeout_s: 60,
+            timeout_s: ctx.ready_timeout_s,
         },
     }])
 }

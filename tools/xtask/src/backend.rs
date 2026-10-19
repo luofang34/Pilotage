@@ -44,7 +44,16 @@ pub struct SessionContext {
     /// a backend that can run several copies at once shifts its ports and
     /// isolates its simulator by this index.
     pub instance: u16,
+    /// How long each simulator and flight-controller stage may take to
+    /// prove it is up, s (`--ready-timeout`). One value for every
+    /// backend: a loaded machine slows them all alike.
+    pub ready_timeout_s: u64,
 }
+
+/// The `--ready-timeout` default, s. A PX4 SITL boots in about 20 s on an
+/// idle machine and takes over 60 s under heavy load; this leaves room
+/// for that load without letting a hung stage wait forever.
+pub const DEFAULT_READY_TIMEOUT_S: u64 = 180;
 
 #[cfg(test)]
 impl SessionContext {
@@ -60,6 +69,7 @@ impl SessionContext {
             profile: Profile::Simulation,
             lan: false,
             instance: 0,
+            ready_timeout_s: DEFAULT_READY_TIMEOUT_S,
         }
     }
 }

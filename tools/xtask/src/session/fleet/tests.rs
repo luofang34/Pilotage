@@ -23,6 +23,7 @@ fn fleet(vehicles: &[&str]) -> FleetArgs {
         instance_base: 5,
         open: false,
         site: DEFAULT_SITE,
+        ready_timeout_s: crate::backend::DEFAULT_READY_TIMEOUT_S,
     }
 }
 

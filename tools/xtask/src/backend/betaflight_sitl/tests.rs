@@ -131,3 +131,11 @@ fn plan_refuses_non_simulation_profiles() {
         Err(XtaskError::Usage { .. })
     ));
 }
+
+#[test]
+fn the_fc_waits_the_session_ready_timeout() {
+    let mut ctx = context("ready", 0);
+    ctx.ready_timeout_s = 333;
+    let stages = plan_with_betaflight_dir(&ctx, &scaffolded(&ctx)).expect("plan");
+    assert_eq!(stages[0].readiness.timeout_s(), 333);
+}

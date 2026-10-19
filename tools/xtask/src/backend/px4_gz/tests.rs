@@ -22,6 +22,7 @@ fn context(repo_root: PathBuf) -> SessionContext {
         lan: false,
         web_root: std::env::temp_dir(),
         instance: 0,
+        ready_timeout_s: crate::backend::DEFAULT_READY_TIMEOUT_S,
     }
 }
 
@@ -462,4 +463,19 @@ fn only_the_fixed_wing_starts_on_the_runway() {
     };
     assert_eq!(ground("rc_cessna"), crate::site::Ground::Runway);
     assert_eq!(ground("x500_gimbal"), crate::site::Ground::Field);
+}
+
+/// A loaded machine boots PX4 slowly: the gz server and PX4 both wait as
+/// long as the session allows, 180 s unless the operator says otherwise.
+#[test]
+fn every_stage_waits_the_session_ready_timeout() {
+    let (root, px4) = complete_scaffold("ready");
+    let mut ctx = context(root.clone());
+    assert_eq!(ctx.ready_timeout_s, 180);
+    ctx.ready_timeout_s = 333;
+    let stages = plan_with_px4_dir(&ctx, &px4, Px4Model::X500Gimbal).expect("plan");
+    for stage in &stages {
+        assert_eq!(stage.readiness.timeout_s(), 333, "{}", stage.spec.name);
+    }
+    std::fs::remove_dir_all(&root).ok();
 }

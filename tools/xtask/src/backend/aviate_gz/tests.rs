@@ -20,6 +20,7 @@ fn context(repo_root: PathBuf) -> SessionContext {
         lan: false,
         web_root: std::env::temp_dir(),
         instance: 0,
+        ready_timeout_s: crate::backend::DEFAULT_READY_TIMEOUT_S,
     }
 }
 
@@ -235,5 +236,25 @@ fn a_placed_vehicle_states_its_gnss_origin_to_the_fc() {
         .map(|(_, value)| value.clone())
         .expect("the FC is told its origin");
     assert_eq!(origin, "40.5771861,-74.7381918,56.3");
+    std::fs::remove_dir_all(repo.parent().expect("base")).ok();
+}
+
+/// The simulator and the FC both wait as long as the session allows.
+#[test]
+fn every_stage_waits_the_session_ready_timeout() {
+    let (repo, aviate) = scaffold("ready");
+    std::fs::write(
+        aviate.join("aviate-hal/xil/backends/gz/plugin/build/libAviateGzPlugin.dylib"),
+        b"",
+    )
+    .expect("plugin");
+    std::fs::write(aviate.join("target/debug/sitl-gazebo-x500"), b"").expect("fc");
+    std::fs::write(repo.join("sim/worlds/x500_flightdeck.sdf"), b"x").expect("world");
+    let mut ctx = context(repo.clone());
+    ctx.ready_timeout_s = 333;
+    let stages = plan_with_aviate_dir(&ctx, &aviate).expect("plans");
+    for stage in &stages {
+        assert_eq!(stage.readiness.timeout_s(), 333, "{}", stage.spec.name);
+    }
     std::fs::remove_dir_all(repo.parent().expect("base")).ok();
 }

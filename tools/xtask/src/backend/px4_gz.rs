@@ -384,7 +384,7 @@ fn gz_stage(
             args: vec!["topic".to_owned(), "-l".to_owned()],
             env: gz_env,
             needle: WORLD_NAME,
-            timeout_s: 60,
+            timeout_s: ctx.ready_timeout_s,
         },
     }
 }
@@ -446,7 +446,7 @@ fn px4_stage(
         // honest FC-stage signal.
         readiness: Readiness::LogContains {
             needle: "Startup script returned successfully",
-            timeout_s: 60,
+            timeout_s: ctx.ready_timeout_s,
         },
     })
 }

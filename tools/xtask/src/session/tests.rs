@@ -55,6 +55,7 @@ fn test_context() -> SessionContext {
         lan: false,
         web_root: std::env::temp_dir(),
         instance: 0,
+        ready_timeout_s: crate::backend::DEFAULT_READY_TIMEOUT_S,
     }
 }
 use super::supervise::supervise;

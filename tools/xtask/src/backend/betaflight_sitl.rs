@@ -236,7 +236,7 @@ fn plan_with_betaflight_dir(
         },
         readiness: Readiness::LogContains {
             needle: READY_LINE,
-            timeout_s: 120,
+            timeout_s: ctx.ready_timeout_s,
         },
     }])
 }
