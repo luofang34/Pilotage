@@ -231,7 +231,15 @@ pub(crate) fn validate_aviate_profile_bindings(
     control_feel: &ValidatedFlightFeelProfile,
 ) -> Result<(), AviateAdapterError> {
     let trusted = FlightFeelProfile::legacy_compatibility();
-    if control_feel.profile().envelope != trusted.envelope {
+    // The hover thrust is the one envelope field an airframe owns: a shipped
+    // law fitted to a known airframe hovers at that airframe's trim.
+    let envelope = control_feel.profile().envelope;
+    let known_hover = pilotage_control_feel::AirframeLimits::ALL
+        .iter()
+        .any(|airframe| airframe.hover_thrust.to_bits() == envelope.direct_hover_thrust.to_bits());
+    let mut fitted = trusted.envelope;
+    fitted.direct_hover_thrust = envelope.direct_hover_thrust;
+    if !known_hover || envelope != fitted {
         return Err(AviateAdapterError::UnsupportedControlFeel {
             detail: "the demand envelope does not match the required Alia envelope".to_owned(),
         });

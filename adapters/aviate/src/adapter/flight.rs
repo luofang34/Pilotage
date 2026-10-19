@@ -158,6 +158,13 @@ impl AviateAdapter {
         // when the operator stops aiming the payload.
         #[cfg(feature = "sim")]
         self.maintain_camera_view();
+        let flight_latched = pilotage_adapter_api::link_loss_latch_engaged(
+            &self.link_loss_policy,
+            &ScopeId::new(FLIGHT_SCOPE),
+        );
+        if flight_latched && let Some(uplink) = self.uplink.as_mut() {
+            uplink.keep_holding();
+        }
         if let Some(uplink) = self.uplink.as_mut()
             && let Some(armed) = uplink.poll_fc()
         {

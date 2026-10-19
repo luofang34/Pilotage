@@ -2,7 +2,7 @@
 //! code — headless gz with the Aviate plugin, then the SITL FC over the
 //! versioned shm block, each gated on its own readiness signal.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::{SessionContext, SimBackend, Stage};
 use crate::conflicts::{Claim, Remedy};
@@ -111,7 +111,8 @@ impl SimBackend for AviateGz {
         point: &super::SpawnPoint,
         stages: &mut [Stage],
     ) -> Result<(), XtaskError> {
-        super::gz::spawn_in_world(ctx, point, stages)
+        super::gz::spawn_in_world(ctx, point, stages)?;
+        state_gnss_origin(point, stages)
     }
 
     fn stale_process_patterns(&self) -> Vec<&'static str> {
@@ -138,6 +139,43 @@ impl SimBackend for AviateGz {
             })
         }
     }
+}
+
+/// Tells the FC where its world is. The FC makes its GNSS fix and baro
+/// reading around a world origin it cannot read from Gazebo, so a
+/// vehicle placed at `point` states that origin, at the world's own
+/// elevation, as `AVIATE_GNSS_ORIGIN=latitude_deg,longitude_deg,elevation_m`.
+/// Without it the FC reports the default origin wherever it stands.
+fn state_gnss_origin(point: &super::SpawnPoint, stages: &mut [Stage]) -> Result<(), XtaskError> {
+    let world = stages
+        .iter()
+        .filter(|stage| stage.spec.name == "gazebo")
+        .flat_map(|stage| stage.spec.args.iter())
+        .find(|arg| arg.ends_with(".sdf"))
+        .map(PathBuf::from)
+        .ok_or_else(|| XtaskError::Usage {
+            message: "the aviate-gz plan has no gazebo world to read the elevation from".to_owned(),
+        })?;
+    let text = std::fs::read_to_string(&world).map_err(|source| XtaskError::Io {
+        context: "reading the world's elevation",
+        source,
+    })?;
+    let elevation =
+        super::gz::world_elevation(&text).map_err(|tag| XtaskError::WorldOrigin { world, tag })?;
+    let fc = stages
+        .iter_mut()
+        .find(|stage| stage.spec.name == "flight-controller")
+        .ok_or_else(|| XtaskError::Usage {
+            message: "the aviate-gz plan has no flight-controller stage".to_owned(),
+        })?;
+    fc.spec.env.push((
+        "AVIATE_GNSS_ORIGIN".to_owned(),
+        format!(
+            "{:.7},{:.7},{elevation}",
+            point.latitude_deg, point.longitude_deg
+        ),
+    ));
+    Ok(())
 }
 
 /// `PATH` for spawned tools, with Homebrew's prefix appended when it

@@ -10,6 +10,7 @@ use pilotage_protocol::{ButtonEdge, LogicalButtonId, VehicleId};
 
 use pilotage_mavlink::link::KinematicsUpdate;
 
+mod canonical_thrust;
 mod control_feel;
 mod direct_flight;
 mod exact_direct;

@@ -13,8 +13,9 @@
 //! full, with the hover throttle the assisted loop learned at the midpoint.
 //!
 //! Entering direct flight from assisted flight must not drop or jump the
-//! quad, so the throttle stays at what assisted flight last sent until the
-//! operator's thrust reaches it, then follows the operator.
+//! quad, so the throttle holds the learned hover (on the ground, what
+//! assisted flight last sent) until the operator's thrust reaches it, then
+//! follows the operator.
 
 use crate::rc::{ANGLE_LIMIT_DEG, MAX_RATE_DPS, Sticks};
 
@@ -67,8 +68,8 @@ pub(crate) struct DirectLoop {
 }
 
 impl DirectLoop {
-    /// Direct flight starts with the throttle assisted flight last sent,
-    /// and maps the operator's thrust around the learned `hover` throttle.
+    /// Direct flight starts holding `throttle`, and maps the operator's
+    /// thrust around the learned `hover` throttle.
     pub(crate) fn begin(&mut self, throttle: f64, hover: f64) {
         self.held = Some(throttle);
         self.hover = Some(hover.clamp(0.0, 1.0));

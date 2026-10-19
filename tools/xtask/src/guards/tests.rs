@@ -43,7 +43,6 @@ fn repository_guards_are_discovered() {
         "adr-supersession",
         "airspace-view-contract",
         "apple-client",
-        "aviate-control-feel-boundary",
         "aviate-supervision-boundary",
         "flight-build",
         "flight-tune-boundaries",

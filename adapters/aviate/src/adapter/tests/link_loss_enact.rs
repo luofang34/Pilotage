@@ -214,3 +214,80 @@ fn a_hold_captured_before_link_loss_never_commands_recovery_to_it() {
         "hold north must be the drifted position, got {north}"
     );
 }
+
+/// The FC times a command out after 500 ms and descends, so a latched hold
+/// must keep arriving at telemetry cadence until the host clears it.
+#[test]
+fn a_latched_hold_keeps_reaching_the_fc_until_cleared() {
+    use pilotage_protocol::LogicalAxisId;
+
+    let fc = std::net::UdpSocket::bind("127.0.0.1:0").expect("bind fake FC");
+    fc.set_read_timeout(Some(Duration::from_millis(200)))
+        .expect("timeout");
+    let mut uplink = crate::uplink::FlightUplink::new().expect("uplink");
+    uplink.set_target(fc.local_addr().expect("addr"));
+    uplink.use_manual_clock();
+    let mut adapter = AviateAdapter::from_state(
+        VehicleId::new(1),
+        state_with(Duration::ZERO, Duration::ZERO),
+    )
+    .with_uplink(uplink);
+    let mut buf = [0_u8; 128];
+    let arm = flight_frame(
+        vec![],
+        vec![(
+            LogicalButtonId::new(super::super::ARM_BUTTON),
+            ButtonEdge::Pressed,
+        )],
+    );
+    adapter.apply_control(&arm);
+    fc.recv_from(&mut buf).expect("arm frame");
+    let advance = |adapter: &mut AviateAdapter, ms: u64| {
+        adapter
+            .uplink_mut()
+            .expect("uplink")
+            .advance_clock(Duration::from_millis(ms));
+    };
+    advance(&mut adapter, 200);
+    let climb = flight_frame(
+        vec![(LogicalAxisId::new(super::super::THROTTLE_AXIS), 0.5)],
+        vec![],
+    );
+    adapter.apply_control(&climb);
+    fc.recv_from(&mut buf).expect("takeoff frame");
+
+    adapter
+        .set_link_loss_policy(
+            VehicleId::new(1),
+            &flight_scope(),
+            Some(pilotage_adapter_api::LinkLossPolicy::Neutralize),
+        )
+        .expect("engaged");
+    fc.recv_from(&mut buf).expect("the first hold");
+    let hold_arrives = |adapter: &mut AviateAdapter, fc: &std::net::UdpSocket| {
+        adapter.sample_telemetry();
+        let mut buf = [0_u8; 128];
+        fc.recv_from(&mut buf).is_ok_and(|_| buf[7] == 84)
+    };
+    for _ in 0..10 {
+        advance(&mut adapter, 100);
+        assert!(
+            hold_arrives(&mut adapter, &fc),
+            "the hold repeats every 100 ms"
+        );
+    }
+    advance(&mut adapter, 50);
+    assert!(
+        !hold_arrives(&mut adapter, &fc),
+        "not faster than the keepalive"
+    );
+
+    adapter
+        .set_link_loss_policy(VehicleId::new(1), &flight_scope(), None)
+        .expect("cleared");
+    advance(&mut adapter, 300);
+    assert!(
+        !hold_arrives(&mut adapter, &fc),
+        "a cleared latch sends no hold"
+    );
+}
