@@ -2,7 +2,7 @@
 //! keeps one session's simulator apart from another's, and the world
 //! origin that places its vehicle.
 
-use super::{SessionContext, SpawnPoint, Stage};
+use super::{Placement, SessionContext, Stage};
 use crate::conflicts::Claim;
 use crate::error::XtaskError;
 
@@ -64,7 +64,7 @@ pub(crate) fn partition_claims(ctx: &SessionContext, backend: &str) -> Vec<Claim
 /// copy cannot be written.
 pub(crate) fn spawn_in_world(
     ctx: &SessionContext,
-    point: &SpawnPoint,
+    point: &Placement,
     stages: &mut [Stage],
 ) -> Result<(), XtaskError> {
     let Some(arg) = stages
@@ -102,7 +102,7 @@ pub(crate) fn spawn_in_world(
 /// Fails closed, naming the tag, unless each coordinate and the
 /// [`SPAWN_FRAME`] occur exactly once: a world with several would move
 /// one origin and keep another.
-pub(crate) fn relocate_world(world: &str, point: &SpawnPoint) -> Result<String, &'static str> {
+pub(crate) fn relocate_world(world: &str, point: &Placement) -> Result<String, &'static str> {
     let world = replace_single(world, "latitude_deg", point.latitude_deg)?;
     let world = replace_single(&world, "longitude_deg", point.longitude_deg)?;
     let world = replace_single(&world, "elevation", point.elevation_m)?;
