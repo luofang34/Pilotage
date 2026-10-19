@@ -4,12 +4,18 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-/// Public-domain USGS National Map orthoimagery: keyless, and free to show
-/// in derived video. It covers the United States only; pass
+/// USDA NAIP orthoimagery from the USGS National Map: public domain,
+/// keyless, and free to show in derived video. Its 0.3 m pixels hold detail
+/// a zoomed payload camera resolves, which the cached basemap's 16 zoom
+/// levels do not. It covers the contiguous United States only; pass
 /// `--imagery-url` for other places.
-pub const DEFAULT_IMAGERY_URL: &str = "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}";
-/// The deepest zoom the default imagery serves everywhere it covers.
-pub const DEFAULT_IMAGERY_MAX_ZOOM: u8 = 16;
+pub const DEFAULT_IMAGERY_URL: &str = concat!(
+    "https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer/",
+    "exportImage?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=256,256",
+    "&format=jpg&f=image",
+);
+/// The zoom whose pixels match the default imagery's 0.3 m ground pixels.
+pub const DEFAULT_IMAGERY_MAX_ZOOM: u8 = 19;
 /// Terrarium-encoded elevation, the terrain Sokoly's own style draws.
 pub const DEFAULT_DEM_URL: &str =
     "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
@@ -129,14 +135,14 @@ fn port(value: &str) -> Result<u16, ArgsError> {
 }
 
 fn template(value: &str) -> Result<String, ArgsError> {
-    let complete = ["{z}", "{x}", "{y}"].iter().all(|key| value.contains(key));
-    if complete {
+    let tiled = ["{z}", "{x}", "{y}"].iter().all(|key| value.contains(key));
+    if tiled || value.contains("{bbox-epsg-3857}") {
         Ok(value.to_owned())
     } else {
         Err(invalid(
             "a tile URL",
             value,
-            "a template with {z}, {x} and {y}",
+            "a template with {z}, {x} and {y}, or with {bbox-epsg-3857}",
         ))
     }
 }

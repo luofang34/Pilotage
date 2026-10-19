@@ -15,8 +15,9 @@ name = "pilotage-maplibre-camera"
 path = "src/main.rs"
 
 [dependencies]
-# Pinned to the fork revision that adds FrameReadback.
-maplibre = { git = "https://github.com/luofang34/maplibre-rs-experimental", rev = "044ea9f6806f1f88cb913cce6ff8e4a87399d779", default-features = false, features = ["headless", "raster", "thread-safe-futures"] }
+# Pinned to the fork revision that adds FrameReadback and the
+# {bbox-epsg-3857} tile URL placeholder.
+maplibre = { git = "https://github.com/luofang34/maplibre-rs-experimental", rev = "fb143cd2f9388136ade833a1672dce165d819f86", default-features = false, features = ["headless", "raster", "thread-safe-futures"] }
 wgpu = "30.0.1"
 cgmath = "0.18.0"
 pilotage-sim-video = { path = "../../adapters/sim-video" }

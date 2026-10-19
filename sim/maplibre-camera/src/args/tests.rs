@@ -12,6 +12,8 @@ fn only_the_host_port_is_required_and_the_imagery_is_open_by_default() {
     assert_eq!(config.host_port, 45991);
     assert_eq!(config.imagery_url, DEFAULT_IMAGERY_URL);
     assert!(config.imagery_url.contains("nationalmap.gov"));
+    assert!(config.imagery_url.contains("{bbox-epsg-3857}"));
+    assert_eq!(config.imagery_max_zoom, 19);
     assert_eq!(
         (config.fpv_size, config.gimbal_size),
         ((640, 480), (640, 480))
@@ -29,7 +31,7 @@ fn every_option_is_read() {
         "--imagery-max-zoom",
         "18",
         "--dem-url",
-        "file:///dem/{z}/{x}/{y}.png",
+        "https://dem.example/{z}/{x}/{y}.png",
         "--style",
         "style.json",
         "--cache-dir",
@@ -46,7 +48,7 @@ fn every_option_is_read() {
     .expect("parses");
     assert_eq!(config.imagery_url, "https://tiles.example/{z}/{x}/{y}.jpg");
     assert_eq!(config.imagery_max_zoom, 18);
-    assert_eq!(config.dem_url, "file:///dem/{z}/{x}/{y}.png");
+    assert_eq!(config.dem_url, "https://dem.example/{z}/{x}/{y}.png");
     assert_eq!(
         config.style.as_deref(),
         Some(std::path::Path::new("style.json"))

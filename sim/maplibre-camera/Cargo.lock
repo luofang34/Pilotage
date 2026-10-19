@@ -1891,7 +1891,7 @@ checksum = "fc04a4c58212d57930a24bf47d3fa87485264a3a054e9c10e042eb373573ad3c"
 [[package]]
 name = "maplibre"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/maplibre-rs-experimental?rev=044ea9f6806f1f88cb913cce6ff8e4a87399d779#044ea9f6806f1f88cb913cce6ff8e4a87399d779"
+source = "git+https://github.com/luofang34/maplibre-rs-experimental?rev=fb143cd2f9388136ade833a1672dce165d819f86#fb143cd2f9388136ade833a1672dce165d819f86"
 dependencies = [
  "async-trait",
  "bytemuck",
@@ -1940,7 +1940,7 @@ dependencies = [
 [[package]]
 name = "maplibre-build-tools"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/maplibre-rs-experimental?rev=044ea9f6806f1f88cb913cce6ff8e4a87399d779#044ea9f6806f1f88cb913cce6ff8e4a87399d779"
+source = "git+https://github.com/luofang34/maplibre-rs-experimental?rev=fb143cd2f9388136ade833a1672dce165d819f86#fb143cd2f9388136ade833a1672dce165d819f86"
 dependencies = [
  "flate2",
  "log",
