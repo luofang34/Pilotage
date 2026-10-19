@@ -4,7 +4,7 @@
 use pilotage_geo::TerrainRefId;
 
 use crate::error::WorldError;
-use crate::geomag::{MagneticEpoch, MagneticField, ModelId, WMM2025};
+use crate::geomag::{GeomagModel, MagneticEpoch, MagneticField, WMM2025};
 use crate::site::{Ground, Placement, Site};
 use crate::terrain::{TerrainSample, TerrainSource};
 
@@ -34,7 +34,7 @@ pub struct WorldSources {
     /// The terrain model.
     pub terrain: TerrainRefId,
     /// The magnetic model.
-    pub magnetic_model: ModelId,
+    pub magnetic_model: GeomagModel,
     /// The magnetic epoch.
     pub epoch: MagneticEpoch,
 }
@@ -160,13 +160,9 @@ impl<T: TerrainSource> World<T> {
         height_m: f64,
     ) -> Result<MagneticField, WorldError> {
         let decimal_year = self.epoch.decimal_year();
-        aviate_geomag::wmm2025(
-            aviate_geomag::GeodeticPoint {
-                latitude_deg,
-                longitude_deg,
-                height_m,
-            },
-            decimal_year,
+        world_geomag::wmm2025(
+            world_core::GeodeticPosition::wgs84(latitude_deg, longitude_deg, height_m),
+            world_core::DecimalYear(decimal_year),
         )
         .map_err(|source| WorldError::MagneticField {
             latitude_deg,
