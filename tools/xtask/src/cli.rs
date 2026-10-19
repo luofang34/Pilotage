@@ -1,5 +1,6 @@
 //! Argument parsing for the xtask entry point: `sim`, `reset`,
-//! `handshake`, `affected`, `guards`, `serve-viewer`, `help`.
+//! `handshake`, `affected`, `guards`, `serve-viewer`, `build-jsbsim`,
+//! `help`.
 
 use crate::error::XtaskError;
 
@@ -115,6 +116,8 @@ pub enum Command {
     },
     /// Serve a directory to the browser viewer.
     ServeViewer(crate::viewer_server::ServeViewerArgs),
+    /// Clone, build, and install the pinned JSBSim release.
+    BuildJsbsim,
     /// Print usage.
     Help,
 }
@@ -152,10 +155,18 @@ pub fn parse_args(args: &[String]) -> Result<Command, XtaskError> {
         "serve-viewer" => Ok(Command::ServeViewer(crate::viewer_server::parse_args(
             rest,
         )?)),
+        "build-jsbsim" => {
+            if let Some(extra) = rest.first() {
+                return Err(XtaskError::Usage {
+                    message: format!("unknown build-jsbsim argument {extra:?}"),
+                });
+            }
+            Ok(Command::BuildJsbsim)
+        }
         "help" | "--help" | "-h" => Ok(Command::Help),
         other => Err(XtaskError::Usage {
             message: format!(
-                "unknown command {other:?} (expected sim, fleet, reset, handshake, affected, guards, serve-viewer, or help)"
+                "unknown command {other:?} (expected sim, fleet, reset, handshake, affected, guards, serve-viewer, build-jsbsim, or help)"
             ),
         }),
     }
@@ -472,6 +483,11 @@ commands:
       Serve <dir> statically to the browser viewer with caching disabled,
       on 127.0.0.1 unless --bind says otherwise; port 0 picks a free port
       and prints it.
+
+  build-jsbsim
+      Clone JSBSim v1.3.3 into $JSBSIM_DIR (default: ~/jsbsim) when it
+      is absent, then build and install its static library into
+      $JSBSIM_DIR/install with CMake. The JSBSim sidecar links it.
 
   help
       Print this help text.";
