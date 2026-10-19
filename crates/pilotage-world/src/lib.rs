@@ -22,7 +22,7 @@ mod terrain;
 mod world;
 
 pub use error::{TerrainError, WorldError};
-pub use geomag::{MagneticEpoch, MagneticField, ModelId, WMM2025};
+pub use geomag::{GeomagModel, MagneticEpoch, MagneticField, WMM2025};
 pub use site::{
     DEFAULT_SITE, Ground, N51, NAMED_SITES, Placement, Site, ZURICH, metres_per_degree,
 };

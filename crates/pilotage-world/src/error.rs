@@ -45,6 +45,6 @@ pub enum WorldError {
         decimal_year: f64,
         /// The model's refusal.
         #[source]
-        source: aviate_geomag::GeomagError,
+        source: world_geomag::GeomagError,
     },
 }
