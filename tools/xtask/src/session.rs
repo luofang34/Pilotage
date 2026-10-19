@@ -121,6 +121,7 @@ fn sim_context(
         web_root: stages::viewer_source(repo_root),
         lan: args.lan,
         instance: args.instance,
+        ready_timeout_s: args.ready_timeout_s,
     };
     // Before the run directory is touched: archiving logs out from under
     // a session that already runs there would lose its incident record.

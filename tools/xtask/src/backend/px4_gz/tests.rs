@@ -22,6 +22,7 @@ fn context(repo_root: PathBuf) -> SessionContext {
         lan: false,
         web_root: std::env::temp_dir(),
         instance: 0,
+        ready_timeout_s: crate::backend::DEFAULT_READY_TIMEOUT_S,
     }
 }
 
@@ -146,7 +147,12 @@ fn complete_scaffold(tag: &str) -> (PathBuf, PathBuf) {
     ] {
         let path = px4.join(file);
         std::fs::create_dir_all(path.parent().expect("parent")).expect("dirs");
-        std::fs::write(&path, b"x").expect("file");
+        let contents: &[u8] = if file.ends_with("server.config") {
+            b"<plugin name=\"gz::sim::systems::Magnetometer\"/>"
+        } else {
+            b"x"
+        };
+        std::fs::write(&path, contents).expect("file");
     }
     let world = root.join("sim/worlds/px4_flightdeck.sdf");
     std::fs::create_dir_all(world.parent().expect("parent")).expect("dirs");
@@ -175,13 +181,18 @@ fn a_complete_checkout_plans_gz_then_px4_standalone() {
             .any(|(k, v)| k == "PX4_GZ_MODEL_NAME" && v == "x500_0"),
         "px4 must attach to the world's rig-bearing model, not spawn one"
     );
+    // gz loads PX4's sensor systems from a copy whose magnetometer
+    // reports the corrected field.
+    let config = value(&stages[0].spec.env, "GZ_SIM_SERVER_CONFIG_PATH").expect("config");
+    assert_eq!(
+        config,
+        ctx.log_dir.join("server.config").display().to_string()
+    );
     assert!(
-        stages[0]
-            .spec
-            .env
-            .iter()
-            .any(|(k, _)| k == "GZ_SIM_SERVER_CONFIG_PATH"),
-        "gz must load PX4's sensor systems via the server config"
+        std::fs::read_to_string(config)
+            .expect("the corrected copy")
+            .contains("<use_units_gauss>false</use_units_gauss>"),
+        "the magnetometer reports the corrected field"
     );
     assert!(
         fc_env
@@ -438,5 +449,33 @@ fn the_cessna_plans_its_own_world_and_airframe() {
     assert_eq!(value(fc, "PX4_SYS_AUTOSTART"), Some("4003"));
     assert_eq!(value(fc, "PX4_SIM_MODEL"), Some("gz_rc_cessna"));
     assert_eq!(value(fc, "PX4_GZ_MODEL_NAME"), Some("rc_cessna_0"));
+    std::fs::remove_dir_all(&root).ok();
+}
+
+/// The plane takes off along a runway, so a fleet puts it on one; the
+/// quad lifts off where it stands.
+#[test]
+fn only_the_fixed_wing_starts_on_the_runway() {
+    let ground = |model: &str| {
+        let mut backend = Px4Gz::default();
+        backend.select_model(model).expect("known model");
+        backend.ground()
+    };
+    assert_eq!(ground("rc_cessna"), crate::site::Ground::Runway);
+    assert_eq!(ground("x500_gimbal"), crate::site::Ground::Field);
+}
+
+/// A loaded machine boots PX4 slowly: the gz server and PX4 both wait as
+/// long as the session allows, 180 s unless the operator says otherwise.
+#[test]
+fn every_stage_waits_the_session_ready_timeout() {
+    let (root, px4) = complete_scaffold("ready");
+    let mut ctx = context(root.clone());
+    assert_eq!(ctx.ready_timeout_s, 180);
+    ctx.ready_timeout_s = 333;
+    let stages = plan_with_px4_dir(&ctx, &px4, Px4Model::X500Gimbal).expect("plan");
+    for stage in &stages {
+        assert_eq!(stage.readiness.timeout_s(), 333, "{}", stage.spec.name);
+    }
     std::fs::remove_dir_all(&root).ok();
 }

@@ -19,14 +19,6 @@ use crate::readiness::{Readiness, stage_log};
 const FC_STAGE: &str = "flight-controller";
 /// The sidecar's line once Betaflight sends motor commands.
 const READY_LINE: &str = "Betaflight is flying the model";
-/// The demo origin the model's local frame is tangent to.
-const ORIGIN: SpawnPoint = SpawnPoint {
-    latitude_deg: 47.397_742,
-    longitude_deg: 8.545_594,
-};
-/// A plain `sim` session's spawn offset north of the origin, m: apart
-/// from a PX4 vehicle at the origin and an ArduPilot one 30 m east.
-const DEFAULT_NORTH_M: &str = "30";
 /// Betaflight SITL's fixed UDP ports: raw PWM out (no listener here, but a
 /// second simulator listening there would read it), motors out (the
 /// sidecar listens), state in, RC in. `sitl.c` has no option to move them.
@@ -112,12 +104,7 @@ impl SimBackend for BetaflightSitl {
             .ok_or_else(|| XtaskError::Usage {
                 message: "the Betaflight SITL plan has no flight-controller stage".to_owned(),
             })?;
-        // The model's frame is tangent at the spawn point, zero offset.
-        for (flag, value) in [
-            ("--origin-lat", format!("{:.7}", point.latitude_deg)),
-            ("--origin-lon", format!("{:.7}", point.longitude_deg)),
-            ("--north", "0".to_owned()),
-        ] {
+        for (flag, value) in origin_args(point) {
             set_flag(&mut stage.spec.args, flag, value)?;
         }
         Ok(())
@@ -159,6 +146,27 @@ impl SimBackend for BetaflightSitl {
             message: "the betaflight-sitl backend has no reset; restart the session".to_owned(),
         })
     }
+}
+
+/// A plain `sim` session's spawn point: the second place on the grass
+/// of Zurich, apart from a vehicle at the origin and an ArduPilot one at
+/// the first place.
+fn default_spawn() -> SpawnPoint {
+    crate::site::ZURICH.spawn_point(crate::site::Ground::Field, 1)
+}
+
+/// The sidecar options that put the model at `point`. Its local frame is
+/// tangent there, so the spawn offset is zero; the origin altitude sets
+/// the GNSS altitude and the barometer's pressure.
+fn origin_args(point: &SpawnPoint) -> [(&'static str, String); 6] {
+    [
+        ("--origin-lat", format!("{:.7}", point.latitude_deg)),
+        ("--origin-lon", format!("{:.7}", point.longitude_deg)),
+        ("--origin-alt", format!("{:.2}", point.elevation_m)),
+        ("--heading-deg", format!("{:.2}", point.heading_deg)),
+        ("--north", "0".to_owned()),
+        ("--east", "0".to_owned()),
+    ]
 }
 
 /// Replaces the value after `flag` in `args`.
@@ -203,22 +211,19 @@ fn plan_with_betaflight_dir(
         source,
     })?;
     let config = ctx.repo_root.join("sim/betaflight/sitl.cli");
-    let args = [
+    let mut args = [
         "--betaflight",
         &elf.display().to_string(),
         "--betaflight-dir",
         &work_dir.display().to_string(),
         "--betaflight-config",
         &config.display().to_string(),
-        "--origin-lat",
-        &format!("{:.7}", ORIGIN.latitude_deg),
-        "--origin-lon",
-        &format!("{:.7}", ORIGIN.longitude_deg),
-        "--north",
-        DEFAULT_NORTH_M,
     ]
     .map(str::to_owned)
     .to_vec();
+    for (flag, value) in origin_args(&default_spawn()) {
+        args.extend([flag.to_owned(), value]);
+    }
     Ok(vec![Stage {
         spec: ProcessSpec {
             name: FC_STAGE,
@@ -231,7 +236,7 @@ fn plan_with_betaflight_dir(
         },
         readiness: Readiness::LogContains {
             needle: READY_LINE,
-            timeout_s: 120,
+            timeout_s: ctx.ready_timeout_s,
         },
     }])
 }

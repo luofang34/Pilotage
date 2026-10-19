@@ -27,6 +27,7 @@ fn context(repo_root: PathBuf) -> SessionContext {
         lan: false,
         web_root: std::env::temp_dir(),
         instance: 0,
+        ready_timeout_s: crate::backend::DEFAULT_READY_TIMEOUT_S,
     }
 }
 

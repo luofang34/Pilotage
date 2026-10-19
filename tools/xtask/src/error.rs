@@ -67,6 +67,14 @@ pub enum XtaskError {
         /// The tag found zero or several times.
         tag: &'static str,
     },
+    /// A gz server config cannot be set up for a session.
+    #[error("{}: {reason}", path.display())]
+    ServerConfig {
+        /// The server config file.
+        path: PathBuf,
+        /// What is wrong with it.
+        reason: &'static str,
+    },
     /// A reset named an instance no live xtask supervisor runs: the reset
     /// would stop an FC that nothing starts again.
     #[error(

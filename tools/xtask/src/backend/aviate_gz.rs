@@ -279,7 +279,7 @@ fn gz_stage(ctx: &SessionContext, aviate: &Path, path: &str, world: &Path) -> St
             args: vec!["topic".to_owned(), "-l".to_owned()],
             env: gz_env,
             needle: WORLD_NAME,
-            timeout_s: 60,
+            timeout_s: ctx.ready_timeout_s,
         },
     }
 }
@@ -306,7 +306,7 @@ fn fc_stage(ctx: &SessionContext, aviate: &Path, path: &str, fc: &Path) -> Stage
         },
         readiness: Readiness::LogContains {
             needle: "-> Ready",
-            timeout_s: 30,
+            timeout_s: ctx.ready_timeout_s,
         },
     }
 }

@@ -103,6 +103,10 @@ message ScopeDescriptor {
   repeated IntentCapability intents = 4;
   // The typed discrete actions this scope accepts (CTRL-01).
   repeated ActionCapability actions = 5;
+  // The exclusive-authority group this scope belongs to. Scopes in one group
+  // are held, fenced, and revoked as one authority, and authority events name
+  // the group, not the member. Empty means the scope is its own group.
+  string authority_group = 6;
 }
 
 // The kind of vehicle, as the adapter declares it. A client chooses its

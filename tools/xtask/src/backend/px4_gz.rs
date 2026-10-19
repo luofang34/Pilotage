@@ -49,6 +49,7 @@ const BACKEND_NAME: &str = "px4-gz";
 const WORLD_NAME: &str = "default";
 pub(crate) mod ports;
 mod reset;
+mod server_config;
 pub(crate) mod vehicle;
 
 use ports::{MAX_INSTANCE, Px4Ports, system_id};
@@ -115,6 +116,13 @@ impl SimBackend for Px4Gz {
         stages: &mut [Stage],
     ) -> Result<(), XtaskError> {
         super::gz::spawn_in_world(ctx, point, stages)
+    }
+
+    fn ground(&self) -> crate::site::Ground {
+        match self.model.airframe() {
+            vehicle::Airframe::FixedWing => crate::site::Ground::Runway,
+            vehicle::Airframe::Multicopter => crate::site::Ground::Field,
+        }
     }
 
     fn select_model(&mut self, model: &str) -> Result<(), XtaskError> {
@@ -309,6 +317,7 @@ fn plan_with_px4_dir(
             hint: "the PX4 checkout is missing Tools/simulation/gz/server.config",
         });
     }
+    let server_config = server_config::write_corrected(&server_config, &ctx.log_dir)?;
     let path = super::aviate_gz::search_path();
     Ok(vec![
         gz_stage(ctx, px4, &path, &world, &server_config),
@@ -375,7 +384,7 @@ fn gz_stage(
             args: vec!["topic".to_owned(), "-l".to_owned()],
             env: gz_env,
             needle: WORLD_NAME,
-            timeout_s: 60,
+            timeout_s: ctx.ready_timeout_s,
         },
     }
 }
@@ -437,7 +446,7 @@ fn px4_stage(
         // honest FC-stage signal.
         readiness: Readiness::LogContains {
             needle: "Startup script returned successfully",
-            timeout_s: 60,
+            timeout_s: ctx.ready_timeout_s,
         },
     })
 }

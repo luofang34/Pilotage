@@ -55,6 +55,9 @@ impl AuthorityMirror {
                 let key = scope_key(granted.vehicle.as_ref(), granted.scope.as_ref());
                 let holder = granted.principal.as_ref().map(|p| p.value);
                 let generation = granted.generation.as_ref().map_or(0, |g| g.value);
+                if self.is_stale(&key, generation) {
+                    return None;
+                }
                 self.holders.insert(
                     key,
                     ScopeHolder {
@@ -66,14 +69,28 @@ impl AuthorityMirror {
             }
             wire::authority_event::Event::ScopeLeaseRevoked(revoked) => {
                 let key = scope_key(revoked.vehicle.as_ref(), revoked.scope.as_ref());
+                let generation = revoked.generation.as_ref().map_or(0, |g| g.value);
+                if self.is_stale(&key, generation) {
+                    return None;
+                }
                 if let Some(entry) = self.holders.get_mut(&key) {
                     entry.holder_id = None;
-                    entry.generation = revoked.generation.as_ref().map_or(0, |g| g.value);
+                    entry.generation = generation;
                 }
                 None
             }
             _ => None,
         }
+    }
+
+    /// Whether an event at `generation` is older than what the mirror
+    /// already holds for `key`. Authority events can arrive behind the
+    /// lease reply that superseded them, and an older statement must not
+    /// overwrite a newer one.
+    fn is_stale(&self, key: &(u64, String), generation: u64) -> bool {
+        self.holders
+            .get(key)
+            .is_some_and(|entry| generation < entry.generation)
     }
 
     /// The last-stated holder of one (vehicle, scope).

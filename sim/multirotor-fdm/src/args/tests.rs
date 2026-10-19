@@ -7,12 +7,13 @@ fn argv(items: &[&str]) -> Vec<String> {
 }
 
 #[test]
-fn defaults_put_the_quad_at_the_demo_origin_on_betaflight_ports() {
+fn defaults_put_the_quad_at_n51_on_betaflight_ports() {
     let args = Args::parse(&[]).expect("empty parses");
     assert_eq!(args.motor_listen.port(), 9_002);
     assert_eq!(args.state_target.port(), 9_003);
-    assert_eq!(args.origin.lat_deg, 47.397_742);
-    assert_eq!(args.origin.lon_deg, 8.545_594);
+    assert_eq!(args.origin.lat_deg, 40.577_186_1);
+    assert_eq!(args.origin.lon_deg, -74.738_191_8);
+    assert_eq!(args.origin.alt_m, 56.3);
 }
 
 #[test]

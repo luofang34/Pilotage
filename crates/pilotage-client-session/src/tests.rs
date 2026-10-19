@@ -5,6 +5,7 @@
 //! cannot drift: a divergence reddens exactly one of them.
 
 mod catalog;
+mod groups;
 mod lanes;
 mod stream_bounds;
 mod takeover;
