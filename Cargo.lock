@@ -4034,12 +4034,12 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 [[package]]
 name = "world-core"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/world.git?rev=ddb686df03aa5ec84c394895021ac3305f60f49f#ddb686df03aa5ec84c394895021ac3305f60f49f"
+source = "git+https://github.com/luofang34/world?rev=d1bf66d2d7aaaf2f5730a94a18f48e276789ea42#d1bf66d2d7aaaf2f5730a94a18f48e276789ea42"
 
 [[package]]
 name = "world-geomag"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/world.git?rev=ddb686df03aa5ec84c394895021ac3305f60f49f#ddb686df03aa5ec84c394895021ac3305f60f49f"
+source = "git+https://github.com/luofang34/world?rev=d1bf66d2d7aaaf2f5730a94a18f48e276789ea42#d1bf66d2d7aaaf2f5730a94a18f48e276789ea42"
 dependencies = [
  "libm",
  "world-core",
