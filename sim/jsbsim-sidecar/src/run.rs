@@ -88,7 +88,7 @@ fn serve<T: TerrainSource>(config: &SessionConfig, mut world: World<T>) -> Resul
     let sources = world.sources();
     tracing::info!(
         terrain = sources.terrain.0,
-        magnetic_model = sources.magnetic_model.name,
+        magnetic_model = sources.magnetic_model.dataset.edition,
         epoch = sources.epoch.decimal_year(),
         "world"
     );
