@@ -1,5 +1,6 @@
-//! Command-line options. Defaults put the quad at the shared demo origin
-//! and talk to a Betaflight SITL on loopback.
+//! Command-line options. Defaults put the quad at the runway 04 threshold
+//! of Solberg-Hunterdon Airport (N51) and talk to a Betaflight SITL on
+//! loopback.
 
 use std::net::SocketAddr;
 
@@ -49,9 +50,9 @@ impl Default for Args {
             motor_listen: SocketAddr::from(([127, 0, 0, 1], 9_002)),
             state_target: SocketAddr::from(([127, 0, 0, 1], 9_003)),
             origin: Origin {
-                lat_deg: 47.397_742,
-                lon_deg: 8.545_594,
-                alt_m: 488.0,
+                lat_deg: 40.577_186_1,
+                lon_deg: -74.738_191_8,
+                alt_m: 56.3,
             },
             north_m: 0.0,
             east_m: 0.0,

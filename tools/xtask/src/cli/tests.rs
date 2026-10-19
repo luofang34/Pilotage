@@ -209,6 +209,11 @@ fn fleet_takes_one_vehicle_per_flag_and_documented_defaults() {
         (4433, 8080, 0)
     );
     assert!(!fleet.open, "a fleet opens no tabs by default");
+    assert_eq!(
+        fleet.site,
+        crate::site::N51,
+        "a fleet stands on N51 by default"
+    );
     assert!(USAGE.contains("  fleet --vehicle <backend>[:<model>]"));
 
     let Command::Fleet(fleet) = parse_args(&args(&[
@@ -222,6 +227,8 @@ fn fleet_takes_one_vehicle_per_flag_and_documented_defaults() {
         "--instance-base",
         "5",
         "--open",
+        "--site",
+        "zurich",
     ]))
     .expect("parses") else {
         panic!("expected fleet");
@@ -235,6 +242,11 @@ fn fleet_takes_one_vehicle_per_flag_and_documented_defaults() {
         ),
         (4533, 8180, 5, true)
     );
+    assert_eq!(fleet.site, crate::site::ZURICH);
+    assert!(matches!(
+        parse_args(&args(&["fleet", "--vehicle", "px4-gz", "--site", "mars"])),
+        Err(XtaskError::Usage { .. })
+    ));
 }
 
 #[test]
@@ -259,4 +271,49 @@ fn fleet_refuses_no_vehicles_unknown_flags_and_ports_that_wrap() {
             "{malformed:?} must be refused"
         );
     }
+}
+
+/// One readiness deadline for every simulator and FC stage, on both
+/// launch commands: 180 s by default, any whole number of seconds above 0.
+#[test]
+fn ready_timeout_defaults_to_180_s_and_is_settable_on_sim_and_fleet() {
+    let Command::Sim(sim) = parse_args(&args(&["sim"])).expect("parses") else {
+        panic!("expected sim");
+    };
+    assert_eq!(sim.ready_timeout_s, 180);
+    let Command::Sim(sim) = parse_args(&args(&["sim", "--ready-timeout", "300"])).expect("parses")
+    else {
+        panic!("expected sim");
+    };
+    assert_eq!(sim.ready_timeout_s, 300);
+    let fleet = |extra: &[&str]| {
+        let mut argv = vec!["fleet", "--vehicle", "px4-gz"];
+        argv.extend_from_slice(extra);
+        parse_args(&args(&argv))
+    };
+    let Ok(Command::Fleet(defaults)) = fleet(&[]) else {
+        panic!("expected fleet");
+    };
+    assert_eq!(defaults.ready_timeout_s, 180);
+    let Ok(Command::Fleet(set)) = fleet(&["--ready-timeout", "240"]) else {
+        panic!("expected fleet");
+    };
+    assert_eq!(set.ready_timeout_s, 240);
+    for bad in ["0", "-5", "1.5", "soon"] {
+        assert!(
+            matches!(
+                parse_args(&args(&["sim", "--ready-timeout", bad])),
+                Err(XtaskError::Usage { .. })
+            ),
+            "{bad}"
+        );
+        assert!(
+            matches!(
+                fleet(&["--ready-timeout", bad]),
+                Err(XtaskError::Usage { .. })
+            ),
+            "{bad}"
+        );
+    }
+    assert!(USAGE.contains("--ready-timeout <s>"));
 }

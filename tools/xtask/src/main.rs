@@ -15,6 +15,7 @@ mod output;
 mod process;
 mod readiness;
 mod session;
+mod site;
 mod viewer_server;
 
 use cli::Command;

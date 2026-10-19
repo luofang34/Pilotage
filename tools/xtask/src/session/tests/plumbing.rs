@@ -120,6 +120,7 @@ fn viewer_stage_runs_the_xtask_static_server() {
         lan: false,
         web_root: web.clone(),
         instance: 0,
+        ready_timeout_s: crate::backend::DEFAULT_READY_TIMEOUT_S,
     };
 
     let loopback = viewer_stage(&ctx, xtask).expect("the viewer stage plans");

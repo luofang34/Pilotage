@@ -59,10 +59,13 @@ pub struct SimArgs {
     /// another instance shifts its simulator and FC ports and isolates
     /// its simulator, so it can run beside the instance-0 session.
     pub instance: u16,
+    /// How long each simulator and FC stage may take to come up, s
+    /// (`--ready-timeout`).
+    pub ready_timeout_s: u64,
 }
 
 /// Options for `cargo xtask fleet`.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub struct FleetArgs {
     /// One `<backend>[:<model>]` per vehicle, in launch order
     /// (`--vehicle`, repeated).
@@ -80,10 +83,15 @@ pub struct FleetArgs {
     /// Open every vehicle's viewer URL (`--open`; off by default, since a
     /// fleet opens one tab per vehicle).
     pub open: bool,
+    /// The airfield every vehicle spawns on (`--site`).
+    pub site: crate::site::Site,
+    /// How long each simulator and FC stage may take to come up, s
+    /// (`--ready-timeout`).
+    pub ready_timeout_s: u64,
 }
 
 /// A parsed xtask invocation.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub enum Command {
     /// Launch a full SITL session and supervise it.
     Sim(SimArgs),
@@ -237,6 +245,7 @@ fn parse_sim(args: &[String]) -> Result<SimArgs, XtaskError> {
     let mut open = true;
     let mut lan = false;
     let mut instance: u16 = 0;
+    let mut ready_timeout_s = crate::backend::DEFAULT_READY_TIMEOUT_S;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
@@ -248,6 +257,7 @@ fn parse_sim(args: &[String]) -> Result<SimArgs, XtaskError> {
             "--open" => open = true,
             "--no-open" => open = false,
             "--lan" => lan = true,
+            "--ready-timeout" => ready_timeout_s = required_timeout(&mut iter)?,
             other => {
                 return Err(XtaskError::Usage {
                     message: format!("unknown sim flag {other:?}"),
@@ -263,6 +273,7 @@ fn parse_sim(args: &[String]) -> Result<SimArgs, XtaskError> {
         open,
         lan,
         instance,
+        ready_timeout_s,
     })
 }
 
@@ -274,6 +285,8 @@ fn parse_fleet(args: &[String]) -> Result<FleetArgs, XtaskError> {
         viewer_port: 8080,
         instance_base: 0,
         open: false,
+        site: crate::site::DEFAULT_SITE,
+        ready_timeout_s: crate::backend::DEFAULT_READY_TIMEOUT_S,
     };
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
@@ -287,6 +300,10 @@ fn parse_fleet(args: &[String]) -> Result<FleetArgs, XtaskError> {
             "--instance-base" => {
                 fleet.instance_base = required_number(&mut iter, "--instance-base")?;
             }
+            "--site" => {
+                fleet.site = crate::site::Site::parse(&required_value(&mut iter, "--site")?)?
+            }
+            "--ready-timeout" => fleet.ready_timeout_s = required_timeout(&mut iter)?,
             "--open" => fleet.open = true,
             "--no-open" => fleet.open = false,
             other => {
@@ -326,6 +343,18 @@ fn required_number(
     raw.parse().map_err(|_| XtaskError::Usage {
         message: format!("{flag} expects a number, got {raw:?}"),
     })
+}
+
+/// A `--ready-timeout` in whole seconds, at least one.
+fn required_timeout(iter: &mut std::slice::Iter<'_, String>) -> Result<u64, XtaskError> {
+    let flag = "--ready-timeout";
+    let raw = required_value(iter, flag)?;
+    match raw.parse::<u64>() {
+        Ok(seconds) if seconds > 0 => Ok(seconds),
+        _ => Err(XtaskError::Usage {
+            message: format!("{flag} expects a whole number of seconds above 0, got {raw:?}"),
+        }),
+    }
 }
 
 fn required_value(
@@ -382,13 +411,17 @@ commands:
       --open               open the ready URL (default)
       --no-open            do not open the ready URL
       --lan                serve the session to the local network
+      --ready-timeout <s>  how long each simulator and flight-controller
+                           stage may take to come up (default: 180)
 
   fleet --vehicle <backend>[:<model>] [--vehicle ...] [options]
       Launch one session per vehicle, each with its own simulator,
-      host, and viewer, spawned 30 m apart east of 47.397742 N
-      8.545594 E. Writes target/xtask-fleet/fleet.json and serves the
-      first vehicle's clients/web/session.json; supervises every
-      session and tears all of them down on ctrl-c.
+      host, and viewer, spawned on one airfield: a fixed-wing on the
+      runway threshold facing down the runway, every other vehicle on
+      the grass beside it, 40 m apart. Writes
+      target/xtask-fleet/fleet.json and serves the first vehicle's
+      clients/web/session.json; supervises every session and tears all
+      of them down on ctrl-c.
 
       --vehicle <spec>     a backend with an optional model, as for
                            sim --fc (repeat once per vehicle)
@@ -399,6 +432,12 @@ commands:
                            gets viewer-port + k
       --instance-base <n>  first simulator instance (default: 0);
                            vehicle k gets instance-base + k
+      --site <site>        the airfield: n51 (default, Solberg-Hunterdon,
+                           runway 04), zurich (PX4's default home), or
+                           latitude_deg,longitude_deg,elevation_m,heading_deg
+                           for a threshold, its ground elevation (m
+                           MSL), and the runway's true course
+      --ready-timeout <s>  as for sim, per vehicle (default: 180)
       --open               open every vehicle's viewer URL
       --no-open            open none (default)
 

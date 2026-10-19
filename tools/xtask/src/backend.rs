@@ -44,7 +44,16 @@ pub struct SessionContext {
     /// a backend that can run several copies at once shifts its ports and
     /// isolates its simulator by this index.
     pub instance: u16,
+    /// How long each simulator and flight-controller stage may take to
+    /// prove it is up, s (`--ready-timeout`). One value for every
+    /// backend: a loaded machine slows them all alike.
+    pub ready_timeout_s: u64,
 }
+
+/// The `--ready-timeout` default, s. A PX4 SITL boots in about 20 s on an
+/// idle machine and takes over 60 s under heavy load; this leaves room
+/// for that load without letting a hung stage wait forever.
+pub const DEFAULT_READY_TIMEOUT_S: u64 = 180;
 
 #[cfg(test)]
 impl SessionContext {
@@ -60,19 +69,24 @@ impl SessionContext {
             profile: Profile::Simulation,
             lan: false,
             instance: 0,
+            ready_timeout_s: DEFAULT_READY_TIMEOUT_S,
         }
     }
 }
 
-/// Where a fleet puts one vehicle: a point on the WGS84 ellipsoid. The
-/// height is the backend's own ground, so each vehicle starts on the
-/// field its world models.
+/// Where a fleet puts one vehicle: a point on the WGS84 ellipsoid, the
+/// ground height there, and the way the vehicle faces.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SpawnPoint {
     /// Latitude, degrees north.
     pub latitude_deg: f64,
     /// Longitude, degrees east.
     pub longitude_deg: f64,
+    /// Ground elevation, metres above mean sea level. The vehicle stands
+    /// on the ground, so this is also its starting altitude.
+    pub elevation_m: f64,
+    /// True heading of the vehicle's nose, degrees clockwise from north.
+    pub heading_deg: f64,
 }
 
 /// One plannable launch step: a process and the signal proving it is up.
@@ -175,6 +189,11 @@ pub trait SimBackend {
         Err(XtaskError::SpawnUnsupported {
             backend: self.name(),
         })
+    }
+    /// Where on a fleet's site this backend's vehicle starts: on the
+    /// runway for one that takes off along it, else on the grass beside.
+    fn ground(&self) -> crate::site::Ground {
+        crate::site::Ground::Field
     }
     /// Selects the vehicle model named after the backend (`--fc
     /// <backend>:<model>`). A backend with one vehicle has no models.

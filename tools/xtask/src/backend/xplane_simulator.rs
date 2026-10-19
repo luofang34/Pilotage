@@ -25,6 +25,11 @@ pub(super) use readiness::{prepare_xplane_runtime_blocking, xplane_running_block
 /// X-Plane's UDP command/data port on the local machine.
 const XPLANE_UDP_PORT: u16 = 49000;
 
+/// The least time an X-Plane FC stage gets to prove it is up, s: its
+/// link waits for X-Plane to load an aircraft and a scenery, which takes
+/// minutes whatever the machine's load.
+pub(super) const XPLANE_LOAD_TIMEOUT_S: u64 = 420;
+
 /// One selectable X-Plane airframe: the PX4 `SYS_AUTOSTART` id, the
 /// aircraft file X-Plane loads, and the px4xplane `config_name` whose
 /// channel map matches that aircraft.

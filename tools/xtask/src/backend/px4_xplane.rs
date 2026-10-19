@@ -187,7 +187,9 @@ fn px4_stage(
         },
         readiness: Readiness::LogContains {
             needle: "Startup script returned successfully",
-            timeout_s: 420,
+            timeout_s: ctx
+                .ready_timeout_s
+                .max(super::xplane_simulator::XPLANE_LOAD_TIMEOUT_S),
         },
     })
 }

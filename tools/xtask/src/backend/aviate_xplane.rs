@@ -140,7 +140,9 @@ impl SimBackend for AviateXPlane {
             // coming up — not a boot line printed before it.
             readiness: Readiness::LogContains {
                 needle: "HIL link up",
-                timeout_s: 420,
+                timeout_s: ctx
+                    .ready_timeout_s
+                    .max(super::xplane_simulator::XPLANE_LOAD_TIMEOUT_S),
             },
         }])
     }

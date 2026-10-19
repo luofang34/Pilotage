@@ -118,6 +118,13 @@ impl SimBackend for Px4Gz {
         super::gz::spawn_in_world(ctx, point, stages)
     }
 
+    fn ground(&self) -> crate::site::Ground {
+        match self.model.airframe() {
+            vehicle::Airframe::FixedWing => crate::site::Ground::Runway,
+            vehicle::Airframe::Multicopter => crate::site::Ground::Field,
+        }
+    }
+
     fn select_model(&mut self, model: &str) -> Result<(), XtaskError> {
         self.model = Px4Model::parse(model)?;
         Ok(())
@@ -377,7 +384,7 @@ fn gz_stage(
             args: vec!["topic".to_owned(), "-l".to_owned()],
             env: gz_env,
             needle: WORLD_NAME,
-            timeout_s: 60,
+            timeout_s: ctx.ready_timeout_s,
         },
     }
 }
@@ -439,7 +446,7 @@ fn px4_stage(
         // honest FC-stage signal.
         readiness: Readiness::LogContains {
             needle: "Startup script returned successfully",
-            timeout_s: 60,
+            timeout_s: ctx.ready_timeout_s,
         },
     })
 }
