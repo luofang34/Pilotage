@@ -9,6 +9,7 @@
 pub mod aircraft;
 pub mod args;
 pub mod engine;
+pub mod gimbal;
 pub mod ground;
 pub mod hil;
 pub mod motor;

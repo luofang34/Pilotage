@@ -17,6 +17,7 @@ use pilotage_world::{TerrainSource, World};
 
 use crate::aircraft::Aircraft;
 use crate::engine::ModelPaths;
+use crate::gimbal::GimbalLimits;
 use crate::hil::{ActuatorControls, Encoder, FrameReader};
 use crate::pacer::Pacer;
 use crate::sensors::NoiseLevels;
@@ -37,6 +38,8 @@ pub struct SessionConfig {
     pub seed: u64,
     /// The sensor noise.
     pub noise: NoiseLevels,
+    /// The gimbal's travel, when the vehicle carries one.
+    pub gimbal: Option<GimbalLimits>,
     /// Simulation seconds per wall second; 0 runs unpaced.
     pub realtime_factor: f64,
     /// How long to wait for PX4's answer to a step before stepping on.
@@ -91,6 +94,7 @@ pub fn serve_blocking<T: TerrainSource>(
             config.start,
             config.seed,
             config.noise,
+            config.gimbal,
         )?;
         let truth = simulation.truth();
         tracing::info!(
@@ -177,6 +181,7 @@ fn run_connection<T: TerrainSource>(
                 heading_deg = truth.attitude.yaw.to_degrees().rem_euclid(360.0),
                 ground_speed_mps = truth.velocity_ned[0].hypot(truth.velocity_ned[1]),
                 armed,
+                gimbal_deg = ?simulation.gimbal_angles_deg().map(|a| a.map(|d| d.round())),
                 realtime_factor = (truth.time_s - last_report.1)
                     / last_report.0.elapsed().as_secs_f64().max(1e-3),
                 "stepping"

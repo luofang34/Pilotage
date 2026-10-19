@@ -39,7 +39,7 @@ fn x500(world: &mut World<UniformTerrain>) -> Simulation {
         longitude_deg: N51.longitude_deg,
         heading_deg: N51.heading_deg,
     };
-    Simulation::new(Aircraft::X500, &paths, world, start, 3, DEFAULT_NOISE).unwrap()
+    Simulation::new(Aircraft::X500, &paths, world, start, 3, DEFAULT_NOISE, None).unwrap()
 }
 
 fn controls(command: f32, armed: bool) -> ActuatorControls {
@@ -173,8 +173,16 @@ fn a_powered_landing_comes_to_rest_without_ringing() {
             longitude_deg: N51.longitude_deg,
             heading_deg: heading,
         };
-        let mut simulation =
-            Simulation::new(Aircraft::X500, &paths, &mut world, start, 3, DEFAULT_NOISE).unwrap();
+        let mut simulation = Simulation::new(
+            Aircraft::X500,
+            &paths,
+            &mut world,
+            start,
+            3,
+            DEFAULT_NOISE,
+            None,
+        )
+        .unwrap();
         let mut encoder = Encoder::default();
         let mut spin = controls(0.85, true);
         spin.controls[2] = 0.80;
@@ -229,7 +237,16 @@ fn rascal(world: &mut World<UniformTerrain>) -> Simulation {
         longitude_deg: N51.longitude_deg,
         heading_deg: N51.heading_deg,
     };
-    Simulation::new(Aircraft::Rascal, &paths, world, start, 3, DEFAULT_NOISE).unwrap()
+    Simulation::new(
+        Aircraft::Rascal,
+        &paths,
+        world,
+        start,
+        3,
+        DEFAULT_NOISE,
+        None,
+    )
+    .unwrap()
 }
 
 /// PX4's airframe 1033 outputs: rudder on 3, throttle on 5 (0-based 2, 4).
@@ -285,4 +302,49 @@ fn the_rascal_steers_its_roll_with_px4s_yaw_output() {
         turned > 3.0,
         "right minus left output turned {turned} deg: {headings:?}"
     );
+}
+
+#[test]
+fn px4s_gimbal_outputs_point_the_gimbal() {
+    let mut world = world();
+    let paths = ModelPaths {
+        root: PathBuf::from(env!("PILOTAGE_JSBSIM_ROOT")),
+        aircraft_dir: Aircraft::X500.bundled_dir(),
+        model: "x500".to_owned(),
+    };
+    let start = Start {
+        latitude_deg: N51.latitude_deg,
+        longitude_deg: N51.longitude_deg,
+        heading_deg: N51.heading_deg,
+    };
+    let limits = crate::gimbal::GimbalLimits::from_px4(180.0, 45.0, -135.0, 720.0);
+    let mut simulation = Simulation::new(
+        Aircraft::X500,
+        &paths,
+        &mut world,
+        start,
+        3,
+        DEFAULT_NOISE,
+        Some(limits),
+    )
+    .unwrap();
+    let mut encoder = Encoder::default();
+    // Motors at idle, gimbal pitched to -45 and yawed to 90 degrees.
+    let mut pointing = controls(0.0, true);
+    pointing.controls[5] = -1.0 / 3.0;
+    pointing.controls[6] = 0.25;
+    for _ in 0..250 {
+        simulation
+            .step(Some(&pointing), &mut world, &mut encoder)
+            .unwrap();
+    }
+    let [roll, pitch, yaw] = simulation.gimbal_angles_deg().unwrap();
+    assert!(roll.abs() < 0.1 && (pitch + 45.0).abs() < 0.1 && (yaw - 90.0).abs() < 0.1);
+    // Disarmed, PX4's outputs are zero and the gimbal holds.
+    for _ in 0..250 {
+        simulation
+            .step(Some(&controls(0.0, false)), &mut world, &mut encoder)
+            .unwrap();
+    }
+    assert!((simulation.gimbal_angles_deg().unwrap()[1] + 45.0).abs() < 0.1);
 }

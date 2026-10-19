@@ -61,7 +61,13 @@ impl SimBackend for Px4Jsbsim {
     }
 
     fn host_env(&self, ctx: &SessionContext) -> Vec<(String, String)> {
-        ports::host_env(ctx.instance, self.model.airframe())
+        let mut env = ports::host_env(ctx.instance, self.model.airframe());
+        // Only a vehicle that carries a gimbal advertises the
+        // vehicle.gimbal scope; the flag's absence means none.
+        if self.model.gimbal().is_some() {
+            env.push(("PILOTAGE_PX4_GIMBAL".to_owned(), "1".to_owned()));
+        }
+        env
     }
 
     fn prepare(&self, ctx: &SessionContext) -> Result<(), XtaskError> {
@@ -213,6 +219,18 @@ fn sidecar_stage(ctx: &SessionContext, install: &JsbsimInstall, model: JsbsimMod
         "--jsbsim-root".to_owned(),
         install.root.display().to_string(),
     ];
+    if let Some(travel) = model.gimbal() {
+        args.extend([
+            "--gimbal".to_owned(),
+            [
+                travel.range_roll,
+                travel.max_pitch,
+                travel.min_pitch,
+                travel.range_yaw,
+            ]
+            .join(","),
+        ]);
+    }
     // A plain `sim` session stands on the default site; a fleet moves it.
     let start = crate::site::DEFAULT_SITE.placement(model.ground(), 0);
     for (flag, value) in placement_args(&start) {

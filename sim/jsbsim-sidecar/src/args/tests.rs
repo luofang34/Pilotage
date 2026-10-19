@@ -49,6 +49,8 @@ fn every_flag_parses() {
         "0",
         "--lockstep-timeout-s",
         "0.5",
+        "--gimbal",
+        "180,45,-135,720",
     ]))
     .unwrap();
     assert_eq!(args.port, 4580);
@@ -57,6 +59,8 @@ fn every_flag_parses() {
     assert_eq!(args.epoch_unix_s, Some(1_767_225_600));
     assert_eq!(args.seed, 9);
     assert_eq!(args.lockstep_timeout.as_millis(), 500);
+    let gimbal = args.gimbal.unwrap();
+    assert_eq!((gimbal.pitch.min_deg, gimbal.yaw.max_deg), (-135.0, 360.0));
 }
 
 #[test]
@@ -68,6 +72,8 @@ fn malformed_arguments_are_refused() {
         argv(&["--latitude-deg", "91"]),
         argv(&["--seed"]),
         argv(&["--fly"]),
+        argv(&["--gimbal", "180,45,-135"]),
+        argv(&["--gimbal", "180,-135,45,720"]),
     ] {
         assert!(Args::parse(&bad).is_err(), "{bad:?}");
     }

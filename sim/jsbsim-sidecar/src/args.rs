@@ -7,6 +7,7 @@ use std::time::Duration;
 use pilotage_world::{DEFAULT_SITE, Site};
 
 use crate::aircraft::{AIRCRAFT_NAMES, Aircraft};
+use crate::gimbal::GimbalLimits;
 
 /// Parsed options.
 #[derive(Debug, Clone, PartialEq)]
@@ -39,6 +40,8 @@ pub struct Args {
     pub realtime_factor: f64,
     /// How long to wait for PX4's answer to a step.
     pub lockstep_timeout: Duration,
+    /// The gimbal PX4 drives, from its `MNT_*` travel parameters.
+    pub gimbal: Option<GimbalLimits>,
 }
 
 /// A malformed command line.
@@ -81,6 +84,7 @@ impl Default for Args {
             seed: 1,
             realtime_factor: 1.0,
             lockstep_timeout: Duration::from_secs(2),
+            gimbal: None,
         }
     }
 }
@@ -107,6 +111,31 @@ fn finite(flag: &str, value: String) -> Result<f64, ArgsError> {
             value,
             reason: "a finite number",
         })
+    }
+}
+
+/// `MNT_RANGE_ROLL,MNT_MAX_PITCH,MNT_MIN_PITCH,MNT_RANGE_YAW`, degrees.
+fn gimbal_limits(flag: &str, value: String) -> Result<GimbalLimits, ArgsError> {
+    let invalid = || ArgsError::Invalid {
+        flag: flag.to_owned(),
+        value: value.clone(),
+        reason: "range_roll,max_pitch,min_pitch,range_yaw in degrees",
+    };
+    let numbers: Vec<f64> = value
+        .split(',')
+        .map(|part| part.trim().parse::<f64>())
+        .collect::<Result<_, _>>()
+        .map_err(|_| invalid())?;
+    match numbers[..] {
+        [roll, max_pitch, min_pitch, yaw]
+            if numbers.iter().all(|n| n.is_finite())
+                && roll > 0.0
+                && yaw > 0.0
+                && max_pitch > min_pitch =>
+        {
+            Ok(GimbalLimits::from_px4(roll, max_pitch, min_pitch, yaw))
+        }
+        _ => Err(invalid()),
     }
 }
 
@@ -151,6 +180,7 @@ impl Args {
                     args.lockstep_timeout =
                         Duration::from_secs_f64(finite(flag, value()?)?.clamp(0.001, 3_600.0));
                 }
+                "--gimbal" => args.gimbal = Some(gimbal_limits(flag, value()?)?),
                 other => return Err(ArgsError::Unrecognized(other.to_owned())),
             }
         }
@@ -171,7 +201,8 @@ pub fn usage() -> String {
         "pilotage-jsbsim-sidecar [--port 4560] [--aircraft {}] [--aircraft-dir DIR] \
          [--jsbsim-root DIR] [--latitude-deg D --longitude-deg D --heading-deg D] \
          [--site-elevation-m M] [--terrain ARCHIVE.mbtiles] [--epoch-unix-s S] [--seed N] \
-         [--realtime-factor F] [--lockstep-timeout-s S]",
+         [--realtime-factor F] [--lockstep-timeout-s S] \
+         [--gimbal RANGE_ROLL,MAX_PITCH,MIN_PITCH,RANGE_YAW]",
         AIRCRAFT_NAMES.join("|")
     )
 }
