@@ -18,10 +18,9 @@ pilotage-timing = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["net", "rt", "sync", "time", "macros"] }
 tracing = { workspace = true }
-turret-core = { workspace = true }
-turret-mavlink = { workspace = true }
 
 [dev-dependencies]
+turret-core = { workspace = true }
 tracing-subscriber = { workspace = true }
 tokio = { workspace = true, features = ["net", "rt", "sync", "time", "macros", "rt-multi-thread"] }
 

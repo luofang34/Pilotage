@@ -19,7 +19,7 @@ use pilotage_mavlink::sampling::{
     ArmTracker, VehicleReports, battery_sample, estimate_batch, fc_state_sample,
     landed_state_sample, report_only_sample,
 };
-use pilotage_mavlink::{LinkState, MavlinkLink, gimbal_endpoint};
+use pilotage_mavlink::{CameraEndpoints, LinkState, MavlinkLink, camera_endpoint, gimbal_endpoint};
 
 use crate::config::Px4Config;
 use crate::error::Px4AdapterError;
@@ -29,11 +29,12 @@ mod advertisement;
 #[cfg(feature = "sim")]
 mod camera;
 mod camera_link;
+#[cfg(test)]
+mod camera_tests;
 use camera_link::CameraBridge;
 #[cfg(not(feature = "sim"))]
 use camera_link::no_camera;
 
-mod camera_control;
 mod control;
 mod flight;
 #[cfg(test)]
@@ -91,7 +92,7 @@ pub struct Px4Adapter {
     // because the FC's GCS instance retargets its telemetry stream to
     // the last peer that spoke.
     gimbal: Option<pilotage_mavlink::ManagerControl>,
-    camera_control: Option<camera_control::CameraControl>,
+    camera_control: Option<CameraEndpoints>,
     // Pilotage's gz sidecar bridges the flight-deck rig's camera topics;
     // the adapter remains usable without video when it cannot spawn.
     frames: Option<tokio::sync::mpsc::Receiver<pilotage_adapter_api::RawVideoFrame>>,
@@ -170,9 +171,13 @@ impl Px4Adapter {
             }
             _ => None,
         };
-        let camera_control = Some(camera_control::CameraControl::new(
+        let started_at = std::time::Instant::now();
+        let camera_control = Some(CameraEndpoints::new(
+            vehicle,
+            state.clone(),
             link.command_sender(),
             link_config.system_id,
+            started_at,
         ));
         let (uplink, fixed_wing) = flight::flight_uplinks(&config, &link_config);
         #[cfg(feature = "sim")]
@@ -199,7 +204,7 @@ impl Px4Adapter {
             gimbal_stamp: gimbal_endpoint::GimbalStamp::new(
                 pilotage_adapter_api::SourceIncarnation::new(rand_incarnation()),
             ),
-            started_at: std::time::Instant::now(),
+            started_at,
             last_reset: None,
             reset_latch: None,
             #[cfg(test)]
@@ -310,7 +315,7 @@ impl VehicleAdapter for Px4Adapter {
             gimbal.invalidate_pending();
         }
         if let Some(camera) = self.camera_control.as_mut() {
-            camera.invalidate(scope.as_str());
+            camera.invalidate_pending_commands(vehicle, scope);
         }
     }
 
@@ -326,8 +331,15 @@ impl VehicleAdapter for Px4Adapter {
         if pilotage_adapter_api::link_loss_latch_engaged(&self.link_loss_policy, &frame.scope) {
             return rejected_control(tick, RejectReason::LinkLossEngaged);
         }
-        if frame.scope.as_str().starts_with("vehicle.camera.") {
-            return self.apply_camera(frame, tick);
+        if frame
+            .scope
+            .as_str()
+            .starts_with(camera_endpoint::SCOPE_PREFIX)
+        {
+            return self.camera_control.as_mut().map_or_else(
+                || rejected_control(tick, RejectReason::UnknownScope),
+                |camera| camera.apply_control(frame, tick),
+            );
         }
         if frame.scope.as_str() == GIMBAL_SCOPE {
             return self.gimbal.as_mut().map_or_else(
@@ -348,8 +360,6 @@ impl VehicleAdapter for Px4Adapter {
     }
 
     fn sample_telemetry(&mut self) -> TelemetryBatch {
-        self.expire_camera_reports();
-        self.maintain_camera();
         if let Some(gimbal) = self.gimbal.as_mut() {
             gimbal.refresh_discovery();
         }
@@ -405,9 +415,8 @@ impl VehicleAdapter for Px4Adapter {
                 sample.payload = Some(payload);
             }
         }
-        self.append_camera_samples(&mut batch);
         if let Some(camera) = self.camera_control.as_mut() {
-            camera.probe(std::time::Instant::now());
+            camera.sample_telemetry(&mut batch);
         }
         self.maintain_flight_uplink();
         if let Some(gimbal) = self.gimbal.as_mut() {

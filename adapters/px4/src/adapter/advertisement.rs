@@ -91,7 +91,9 @@ impl Px4Adapter {
                             &self.gimbal_stamp,
                         ));
                     }
-                    scopes.extend(self.camera_scopes());
+                    if let Some(camera) = self.camera_control.as_ref() {
+                        scopes.extend(camera.scopes());
+                    }
                     scopes
                 },
                 link_loss_actions: if self.has_flight_uplink() {
