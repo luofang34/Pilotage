@@ -22,7 +22,7 @@ pub fn payload_progress_to_wire(
         observed_complete_at: value.observed_complete_at.and_then(super::timestamp),
         end_reason: value
             .ended
-            .map_or(wire::PayloadEndReason::None as i32, end_reason),
+            .map_or(wire::PayloadEndReason::Unspecified as i32, end_reason),
         stage: stage(value) as i32,
         ..Default::default()
     };

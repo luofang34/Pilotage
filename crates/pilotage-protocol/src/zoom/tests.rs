@@ -36,7 +36,7 @@ fn invalid_zoom_units_and_rates_are_rejected() {
         ZoomCommand::try_from(wire::ZoomCommand {
             operation: Some(wire::zoom_command::Operation::Absolute(
                 wire::ZoomAbsoluteTarget {
-                    unit: wire::ZoomUnit::Unknown as i32,
+                    unit: wire::ZoomUnit::Unspecified as i32,
                     value_micros: 1_000_000,
                 }
             )),

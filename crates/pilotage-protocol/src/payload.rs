@@ -60,3 +60,6 @@ pub fn payload_zoom_admits(
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

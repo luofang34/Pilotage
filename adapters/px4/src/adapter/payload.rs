@@ -64,7 +64,7 @@ impl Px4Adapter {
                 angle_rad: angle.is_finite().then_some(angle),
                 rate_rad_s: rate.is_finite().then_some(rate),
                 stamp: Some(stamp.clone()),
-                frame: wire::PayloadReferenceFrame::Unknown as i32,
+                frame: wire::PayloadReferenceFrame::Unspecified as i32,
                 source: wire::PayloadObservationSource::Transformed as i32,
                 sampled_at: None,
                 received_at,

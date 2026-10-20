@@ -26,9 +26,10 @@ pub fn payload_rate_observation_to_wire(
 fn axis<T>(value: &Observation<T>, stamp: wire::MeasurementStamp) -> wire::PayloadAxisObservation {
     wire::PayloadAxisObservation {
         source: source(value.source),
-        frame: value
-            .frame
-            .map_or(wire::PayloadReferenceFrame::Unknown as i32, super::frame),
+        frame: value.frame.map_or(
+            wire::PayloadReferenceFrame::Unspecified as i32,
+            super::frame,
+        ),
         sampled_at: value.sampled_at.and_then(super::timestamp),
         received_at: super::timestamp(value.received_at),
         connection_epoch: value.epoch,

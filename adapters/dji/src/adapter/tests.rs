@@ -78,7 +78,7 @@ fn recorded_poses_publish_payload_only_and_bound_pitch_commands() -> TestResult 
     assert!(pitch.rate_rad_s.is_none());
     assert_eq!(
         pitch.frame,
-        pilotage_protocol::wire::PayloadReferenceFrame::Unknown as i32
+        pilotage_protocol::wire::PayloadReferenceFrame::Unspecified as i32
     );
     assert!((pitch.angle_rad.ok_or("missing angle")?.to_degrees() + 4.9).abs() < 0.001);
     assert!(h.telemetry(20).samples.is_empty());

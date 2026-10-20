@@ -25,7 +25,7 @@ pub fn payload_capabilities_to_wire(
             .iter()
             .map(|scope| (*scope).to_owned())
             .collect(),
-        connection_role: wire::PayloadConnectionRole::Unknown as i32,
+        connection_role: wire::PayloadConnectionRole::Unspecified as i32,
         connection_incarnation: Vec::new(),
         connection_epoch: 0,
     }
@@ -34,7 +34,7 @@ pub fn payload_capabilities_to_wire(
 fn declaration<T>(capability: &Capability<T>) -> (i32, Option<&T>, String) {
     use wire::PayloadSupportState as Support;
     match capability {
-        Capability::Unknown => (Support::Unknown as i32, None, String::new()),
+        Capability::Unknown => (Support::Unspecified as i32, None, String::new()),
         Capability::Unsupported => (Support::Unsupported as i32, None, String::new()),
         Capability::Available(value) => (Support::Available as i32, Some(value), String::new()),
         Capability::Unavailable { capability, reason } => (
@@ -141,7 +141,7 @@ fn stop(value: turret_core::StopGuarantee) -> (i32, Option<u32>) {
     use turret_core::StopGuarantee as Source;
     use wire::PayloadStopGuarantee as Target;
     let (kind, micros) = match value {
-        Source::Unknown => return (Target::Unknown as i32, None),
+        Source::Unknown => return (Target::Unspecified as i32, None),
         Source::BestEffort => return (Target::BestEffort as i32, None),
         Source::FiniteMotion {
             maximum_duration_us,
@@ -155,7 +155,7 @@ fn stop(value: turret_core::StopGuarantee) -> (i32, Option<u32>) {
         .filter(|bound| *bound > 0)
     {
         Some(bound) => (kind as i32, Some(bound)),
-        None => (Target::Unknown as i32, None),
+        None => (Target::Unspecified as i32, None),
     }
 }
 
@@ -218,7 +218,11 @@ fn zoom_ranges(value: &turret_core::AbsoluteZoomCapabilities) -> Vec<wire::ZoomA
 
 fn aggregate_feedback(values: &[wire::ZoomAbsoluteCapability]) -> i32 {
     use wire::PayloadSupportState as Support;
-    for state in [Support::Available, Support::Unavailable, Support::Unknown] {
+    for state in [
+        Support::Available,
+        Support::Unavailable,
+        Support::Unspecified,
+    ] {
         if values.iter().any(|value| value.support == state as i32) {
             return state as i32;
         }

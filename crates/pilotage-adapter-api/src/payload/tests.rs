@@ -18,7 +18,7 @@ fn receipt_does_not_become_sample_time_or_reference_frame() {
     assert_eq!(wire.rate_rad_s, None);
     assert_eq!(wire.sampled_at, None);
     assert_eq!(wire.received_at.map(|time| time.nanos), Some(55_000));
-    assert_eq!(wire.frame, wire::PayloadReferenceFrame::Unknown as i32);
+    assert_eq!(wire.frame, wire::PayloadReferenceFrame::Unspecified as i32);
     assert_eq!(wire.connection_epoch, 7);
 }
 
