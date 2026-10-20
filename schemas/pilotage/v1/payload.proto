@@ -153,6 +153,8 @@ message PayloadCommandProgress {
   MonoTimestamp observed_complete_at = 17;
   bool acknowledgement_timed_out = 18;
   PayloadEndReason end_reason = 19;
+  // First device rejection time. Later expiry or cancellation retains this value.
+  MonoTimestamp rejected_at = 20;
   PayloadReferenceFrame frame = 11;
   uint64 connection_epoch = 8;
   uint64 sequence = 9;
