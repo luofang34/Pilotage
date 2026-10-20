@@ -185,10 +185,10 @@ node RESULT-LINK-ADAPTER verification-result
 title adapter source-role acceptance suite — recorded pass
 attr command cargo test -p pilotage-adapter-aviate source_roles
 attr config-digest 4e5eabe3c1a1195cb38edebb4f905b74128a1f4a
-attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
+attr tool-version rustc 1.99.0 (b940084d7 2026-09-28)
 attr source-digest git-blob:9d88dd71aa7a9bc87e0717f6d1e224b4d1389b2a
 attr artifact docs/link/evidence-artifacts/link04/adapter.run.txt
-attr output-digest sha256:032459683fc2c7b870178c50ef76582793dd28e1f62d5f4f535b6ef7eb4f9005
+attr output-digest sha256:88004c98970738ddbbdb5bba6deb89441ae8eba2f7a1598f313b9c0d808336ce
 attr run-id local:4e5eabe3c1a1195cb38edebb4f905b74128a1f4a
 attr outcome pass
 
