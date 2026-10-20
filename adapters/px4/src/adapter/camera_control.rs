@@ -3,7 +3,7 @@ use super::Px4Adapter;
 use pilotage_adapter_api::{
     ActionResult, ApplyOutcome, Disposition, RejectReason, ScopeDescriptor, TelemetryBatch,
 };
-use pilotage_mavlink::CameraReport;
+use pilotage_mavlink::{CameraReport, CameraWriteRequirement, LinkState};
 use pilotage_protocol::{ControlAction, ScopedControlFrame, wire};
 use pilotage_timing::SimTick;
 use std::time::Instant;
@@ -22,31 +22,26 @@ impl Px4Adapter {
         if self.camera_control.is_none() {
             return Vec::new();
         }
-        let incarnation = self
-            .estimate
-            .as_ref()
-            .and_then(|source| source.state.lock().ok())
-            .map(|state| state.source_incarnation.into_bytes().to_vec())
-            .unwrap_or_default();
         self.camera_reports()
             .into_iter()
             .filter(|(_, report)| report.flags.is_some())
-            .filter_map(|(key, report)| match catalog::descriptor(key, &report) {
+            .filter_map(|(requirement, report)| match catalog::descriptor(requirement.key, &report) {
                 Ok(mut descriptor) => {
                     if let Some(payload) = descriptor.payload.as_mut() {
-                        payload.connection_incarnation = incarnation.clone();
+                        payload.connection_incarnation =
+                            requirement.source_incarnation.into_bytes().to_vec();
                     }
                     Some(descriptor)
                 }
                 Err(error) => {
-                    warn!(%error, ?key, "camera capability projection failed");
+                    warn!(%error, key = ?requirement.key, "camera capability projection failed");
                     None
                 }
             })
             .collect()
     }
 
-    fn camera_reports(&self) -> Vec<((u8, u8), CameraReport)> {
+    fn camera_reports(&self) -> Vec<(CameraWriteRequirement, CameraReport)> {
         self.estimate
             .as_ref()
             .and_then(|source| source.state.lock().ok())
@@ -55,7 +50,7 @@ impl Px4Adapter {
                     .fc_reports
                     .cameras
                     .iter()
-                    .map(|(key, report)| (*key, *report))
+                    .map(|(key, report)| (camera_requirement(&state, *key, report), *report))
                     .collect()
             })
             .unwrap_or_default()
@@ -144,10 +139,9 @@ impl Px4Adapter {
                 state.source_incarnation,
                 self.started_at,
             );
-            let command = self
-                .camera_control
-                .as_ref()
-                .and_then(|control| control.progress_cached(*key));
+            let command = self.camera_control.as_ref().and_then(|control| {
+                control.progress_cached(camera_requirement(&state, *key, report))
+            });
             if zoom.is_none() && command.is_none() {
                 continue;
             }
@@ -164,5 +158,20 @@ impl Px4Adapter {
             });
             batch.samples.push(sample);
         }
+    }
+}
+
+fn camera_requirement(
+    state: &LinkState,
+    key: (u8, u8),
+    report: &CameraReport,
+) -> CameraWriteRequirement {
+    CameraWriteRequirement {
+        key,
+        epoch: report.epoch,
+        revision: report.capability_revision,
+        source_id: state.source_id,
+        source_incarnation: state.source_incarnation,
+        source_epoch: state.source_epoch,
     }
 }

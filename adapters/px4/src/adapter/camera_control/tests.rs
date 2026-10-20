@@ -10,6 +10,11 @@ use std::time::Duration;
 
 mod transport;
 
+fn requirement(state: &Arc<Mutex<LinkState>>) -> CameraWriteRequirement {
+    let state = state.lock().unwrap();
+    camera_requirement(&state, (100, 0), &state.fc_reports.cameras[&(100, 0)])
+}
+
 fn frame(command: ZoomCommand) -> ScopedControlFrame {
     ScopedControlFrame {
         timing: None,
@@ -97,7 +102,7 @@ fn discovered_camera_has_own_identity_scope_and_typed_command_route() {
         .camera_control
         .as_ref()
         .unwrap()
-        .progress_cached((100, 0))
+        .progress_cached(requirement(&state))
         .unwrap();
     assert!(progress.sent_at.is_none());
     assert_eq!(progress.zoom_target.unwrap().value_micros, 750_000);
@@ -106,7 +111,7 @@ fn discovered_camera_has_own_identity_scope_and_typed_command_route() {
         .camera_control
         .as_ref()
         .unwrap()
-        .progress_cached((100, 0))
+        .progress_cached(requirement(&state))
         .unwrap();
     assert_eq!(progress.stage, wire::PayloadCommandStage::Cancelled as i32);
     let batch = adapter.sample_telemetry();
@@ -178,7 +183,7 @@ fn undeclared_zoom_operations_never_enter_command_queue() {
             .camera_control
             .as_ref()
             .unwrap()
-            .progress_cached((100, 0))
+            .progress_cached(requirement(&state))
             .is_none()
     );
 }
@@ -212,7 +217,7 @@ fn exhausted_send_budget_and_full_queue_do_not_claim_command_admission() {
             .camera_control
             .as_ref()
             .unwrap()
-            .progress_cached((100, 0))
+            .progress_cached(requirement(&state))
             .is_none()
     );
     drop(permit);
