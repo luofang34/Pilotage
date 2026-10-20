@@ -48,6 +48,6 @@ fn missing_and_unknown_landed_states_do_not_assert_on_ground() {
         .expect("FC state")
         .landed_state
         .expect("unknown observation");
-    assert_eq!(landed.state, wire::LandedState::Unknown as i32);
+    assert_eq!(landed.state, wire::LandedState::Unspecified as i32);
     assert!(landed.stamp.is_some());
 }
