@@ -17,6 +17,7 @@ coastline_manifest="$client/Resources/SituationCoastline.manifest.json"
 coastline_fetcher="$client/scripts/build-situation-coastline.sh"
 coastline_provenance="$client/Resources/SituationCoastline.provenance.md"
 resolver="$client/App/SituationStyleResource.swift"
+app="$client/App/PilotageApp.swift"
 map_view="$client/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/SituationMapView.swift"
 project="$client/project.yml"
 status=0
@@ -26,7 +27,7 @@ status=0
 # they are what says which tiles an archive should contain and what one build produced.
 for path in "$builder/src/lib.rs" "$builder/src/tests.rs" "$style" "$plan" "$manifest" \
     "$fetcher" "$provenance" "$coastline_plan" "$coastline_manifest" \
-    "$coastline_fetcher" "$coastline_provenance" "$resolver" "$map_view" "$project"; do
+    "$coastline_fetcher" "$coastline_provenance" "$resolver" "$app" "$map_view" "$project"; do
     if [ ! -f "$path" ]; then
         echo "FORBIDDEN: required terrain file is missing: $path" >&2
         status=1
@@ -452,6 +453,90 @@ for builder in build-situation-terrain.sh build-situation-coastline.sh; do
         status=1
     fi
 done
+
+# Terrain must be drawn everywhere the map can be panned, not only where the
+# deepest band reaches.
+#
+# The archive's bands narrow as they deepen: one covers the whole Earth, the
+# next a country, the last a valley. A source declaring the deepest band's zoom
+# as its own ceiling makes the renderer ask, at every location, for tiles that
+# exist in one of them — and paint nothing in all the rest. So the source that
+# has to draw everywhere is capped at the deepest band that covers everywhere,
+# and stretches past it; a second source carries the deeper bands where they
+# exist.
+global_zoom="$(jq -r '[.bands[] | select(.min_lon_deg <= -180 and .max_lon_deg >= 180) | .max_zoom] | max' "$plan")"
+base_zoom="$(jq -r '.sources["pilotage-terrain"].maxzoom // "unset"' "$style")"
+if [ "$base_zoom" != "$global_zoom" ]; then
+    echo "FORBIDDEN: the terrain source drawn at every location stops at zoom $base_zoom, but the archive covers the whole Earth only to zoom $global_zoom" >&2
+    status=1
+fi
+
+# The deeper source starts the zoom after the global band stops, or the zooms
+# between draw only the stretched global band where finer tiles exist, and it
+# reaches the deepest band, or that band is built and never drawn.
+deepest_zoom="$(jq -r '[.bands[].max_zoom] | max' "$plan")"
+detail_source="$(jq -r --argjson ceiling "$global_zoom" --argjson deepest "$deepest_zoom" '
+    [.sources | to_entries[]
+     | select(.value.url == "__PILOTAGE_TERRAIN_MBTILES_URL__"
+              and (.value.minzoom // 0) == $ceiling + 1
+              and .value.maxzoom == $deepest)
+     | .key] | first // ""
+' "$style")"
+if [ -z "$detail_source" ]; then
+    echo "FORBIDDEN: no terrain source carries the archive from zoom $((global_zoom + 1)) to its deepest band at zoom $deepest_zoom, so the detail it holds is not all drawn" >&2
+    status=1
+fi
+
+# Each source draws the same relief and the same shading, so the seam where
+# the deeper bands end is a change of resolution and not of palette.
+if ! jq -e '
+    [.sources | to_entries[] | select(.value.url == "__PILOTAGE_TERRAIN_MBTILES_URL__") | .key] as $terrain
+    | [.layers[] | select(.source as $s | $terrain | index($s))]
+    | group_by(.type)
+    | all(map(.paint) | unique | length == 1)
+' "$style" >/dev/null; then
+    echo "FORBIDDEN: the terrain layers of one kind must paint alike whichever source they read" >&2
+    status=1
+fi
+
+# Hydrography draws over every terrain layer, not only the first source's.
+if ! jq -e '
+    [.sources | to_entries[] | select(.value.url == "__PILOTAGE_TERRAIN_MBTILES_URL__") | .key] as $terrain
+    | (.layers | map(.id)) as $order
+    | ([.layers[] | select(.source as $s | $terrain | index($s)) | .id as $id | $order | index($id)] | max) as $last
+    | ["pilotage-ocean-water", "pilotage-lake-water", "pilotage-river"]
+    | all(. as $id | ($order | index($id)) > $last)
+' "$style" >/dev/null; then
+    echo "FORBIDDEN: hydrography must draw over every terrain layer" >&2
+    status=1
+fi
+
+# The reader's terrain switch hides the shading of every source. One left out
+# keeps shading the ground it covers after the reader turned terrain off.
+while IFS= read -r hillshade; do
+    if ! grep -Fq "\"$hillshade\"" "$app"; then
+        echo "FORBIDDEN: the terrain switch does not reach the hillshade layer $hillshade" >&2
+        status=1
+    fi
+done < <(jq -r '
+    [.sources | to_entries[] | select(.value.url == "__PILOTAGE_TERRAIN_MBTILES_URL__") | .key] as $terrain
+    | .layers[] | select(.type == "hillshade" and (.source as $s | $terrain | index($s))) | .id
+' "$style")
+
+# A 3D mesh built from the global source is coarse exactly where the vehicle
+# flies, so the optional terrain build reads the source that reaches deepest.
+if [ -n "$detail_source" ] && ! grep -Fq "\"source\": \"$detail_source\"," "$resolver"; then
+    echo "FORBIDDEN: the 3D terrain must read $detail_source, the source that reaches the archive's deepest band" >&2
+    status=1
+fi
+
+# The resolver has to substitute every source that reads the archive. Naming
+# one leaves any other holding the placeholder, which fails the whole style
+# rather than dropping the one layer.
+if grep -q 'sources\["pilotage-terrain"\]' "$resolver"; then
+    echo "FORBIDDEN: the style resolver substitutes one named terrain source, and the archive is read by more than one" >&2
+    status=1
+fi
 
 if [ "$status" -ne 0 ]; then
     echo "Terrain base layer: FAILED" >&2

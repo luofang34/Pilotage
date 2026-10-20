@@ -24,6 +24,7 @@ cp "$root/crates/pilotage-terrain-build/src/lib.rs" \
 cp "$root/crates/pilotage-terrain-build/examples/build_situation_fixture.rs" \
     "$fixture/crates/pilotage-terrain-build/examples/"
 cp "$root/clients/apple/App/SituationStyleResource.swift" \
+    "$root/clients/apple/App/PilotageApp.swift" \
     "$fixture/clients/apple/App/"
 cp "$root/clients/apple/Resources/SituationStyle.json" \
     "$root/clients/apple/Resources/SituationCoastline.plan.json" \
@@ -549,6 +550,103 @@ json.dump(style, open(path, "w"))
 RELIEF_OPAQUE
 reject_style "a relief that hides the polygon beneath it"
 
+
+# The band that covers the whole Earth is the ceiling for the source that has
+# to draw everywhere. Uncapped, the renderer asks every location for tiles the
+# archive holds over one country, and paints nothing in all the others — which
+# is a map with terrain in a rectangle and blank ground around it.
+python3 - "$fixture/clients/apple/Resources/SituationStyle.json" <<'UNCAPPED'
+import json, sys
+path = sys.argv[1]
+style = json.load(open(path))
+del style["sources"]["pilotage-terrain"]["maxzoom"]
+json.dump(style, open(path, "w"))
+UNCAPPED
+reject_style "a terrain source uncapped past the zoom the archive covers the world to"
+
+# And the deeper bands have to be reached by something, or the archive carries
+# detail nothing ever draws.
+python3 - "$fixture/clients/apple/Resources/SituationStyle.json" <<'NO_DETAIL'
+import json, sys
+path = sys.argv[1]
+style = json.load(open(path))
+del style["sources"]["pilotage-terrain-detail"]
+style["layers"] = [l for l in style["layers"] if not l["id"].endswith("-detail")]
+json.dump(style, open(path, "w"))
+NO_DETAIL
+reject_style "a style that reaches none of the archive's deeper bands"
+
+# The resolver has to substitute every source reading the archive. Naming one
+# leaves the others holding the placeholder, which fails the whole style.
+mutate "$fixture/clients/apple/App/SituationStyleResource.swift" \
+    's/let terrainNames = sources.compactMap/let _ = sources["pilotage-terrain"]; let terrainNames = sources.compactMap/'
+if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
+    bash "$fixture/scripts/check-terrain-base-layer.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the terrain guard accepted a resolver naming one terrain source" >&2
+    exit 1
+fi
+cp "$root/clients/apple/App/SituationStyleResource.swift" \
+    "$fixture/clients/apple/App/"
+
+# The deeper source has to start where the global band stops, or the zooms
+# between draw only the stretched global band where finer tiles exist.
+python3 - "$fixture/clients/apple/Resources/SituationStyle.json" <<'DETAIL_GAP'
+import json, sys
+path = sys.argv[1]
+style = json.load(open(path))
+style["sources"]["pilotage-terrain-detail"]["minzoom"] = 8
+json.dump(style, open(path, "w"))
+DETAIL_GAP
+reject_style "a deeper terrain source that leaves zooms between it and the global band"
+
+# A detail layer painting differently from the global one is a seam a reader
+# sees at the edge of the deeper bands.
+python3 - "$fixture/clients/apple/Resources/SituationStyle.json" <<'DETAIL_DRIFT'
+import json, sys
+path = sys.argv[1]
+style = json.load(open(path))
+for layer in style["layers"]:
+    if layer["id"] == "pilotage-terrain-relief-detail":
+        layer["paint"]["color-relief-opacity"] = 0.5
+json.dump(style, open(path, "w"))
+DETAIL_DRIFT
+reject_style "a detail relief painted unlike the global relief"
+
+# Water under the detail shading is green where the chart says water, inside
+# the very ground the detail covers.
+python3 - "$fixture/clients/apple/Resources/SituationStyle.json" <<'WATER_UNDER_DETAIL'
+import json, sys
+path = sys.argv[1]
+style = json.load(open(path))
+order = [layer["id"] for layer in style["layers"]]
+water = style["layers"].pop(order.index("pilotage-ocean-water"))
+order.remove("pilotage-ocean-water")
+style["layers"].insert(order.index("pilotage-terrain-hillshade-detail"), water)
+json.dump(style, open(path, "w"))
+WATER_UNDER_DETAIL
+reject_style "water drawn under the detail hillshade"
+
+# The terrain switch has to reach the detail shading too.
+mutate "$fixture/clients/apple/App/PilotageApp.swift" \
+    's/, "pilotage-terrain-hillshade-detail"//'
+if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
+    bash "$fixture/scripts/check-terrain-base-layer.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the terrain guard accepted a terrain switch that misses the detail hillshade" >&2
+    exit 1
+fi
+cp "$root/clients/apple/App/PilotageApp.swift" "$fixture/clients/apple/App/"
+
+# The optional 3D terrain built from the global source is coarse where the
+# vehicle flies.
+mutate "$fixture/clients/apple/App/SituationStyleResource.swift" \
+    's/"source": "pilotage-terrain-detail",/"source": "pilotage-terrain",/'
+if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
+    bash "$fixture/scripts/check-terrain-base-layer.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the terrain guard accepted a 3D terrain built from the global source" >&2
+    exit 1
+fi
+cp "$root/clients/apple/App/SituationStyleResource.swift" \
+    "$fixture/clients/apple/App/"
 
 # Half of 4^7 is 8192. One tile short of it is a plan the build did not keep.
 archive_case 8191 reject
