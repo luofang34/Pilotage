@@ -766,12 +766,8 @@ private final class LinkRelay: LinkObserver, @unchecked Sendable {
     /// Sources that have delivered at least one frame; SwiftUI learns
     /// about a source once, not per frame.
     private var seen: Set<UInt8> = []
-    /// Sources with a decode-and-publish in flight. Video is droppable
-    /// by design: decoding every frame while the interface lags queued
-    /// unbounded bitmaps until the process hit its memory limit — the
-    /// operator saw the application vanish, and the jetsam record saw a
-    /// five-gigabyte footprint. One frame in flight per source, the
-    /// rest dropped; the next kept frame is always the newest.
+    /// One decode-and-publish operation per source bounds the frame queue
+    /// when the renderer cannot keep up with the incoming video.
     private var inFlight: Set<UInt8> = []
 
     init(model: HostLinkModel) {
