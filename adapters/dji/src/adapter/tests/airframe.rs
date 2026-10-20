@@ -7,7 +7,7 @@ use super::{
     TestResult,
     harness::{Harness, captured_hex_frames, frame, observed_poses, packets, seal_duml},
 };
-use crate::adapter::HOST_PITCH_RATE_LIMIT_RPS;
+use crate::adapter::BENCH_PITCH_RATE_LIMIT_RPS;
 
 fn captured_reports() -> Vec<Vec<u8>> {
     captured_hex_frames(include_str!(
@@ -232,7 +232,7 @@ fn an_airframe_only_sample_preserves_command_progress_without_payload_angles() -
     harness.feed(&captured_reports()[0])?;
     harness.step(0);
     harness.apply(frame(0.0), 0);
-    harness.apply(frame(-HOST_PITCH_RATE_LIMIT_RPS), 20);
+    harness.apply(frame(-BENCH_PITCH_RATE_LIMIT_RPS), 20);
     harness.step(20);
     let batch = harness.adapter.sample_telemetry();
     let sample = &batch.samples[0];

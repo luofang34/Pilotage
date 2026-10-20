@@ -1,5 +1,5 @@
 use pilotage_adapter_api::{Disposition, LinkLossPolicy};
-use pilotage_protocol::Generation;
+use pilotage_protocol::{ControlAction, Generation};
 
 use super::{Harness, Ordering, commands, frame, observed_poses, packets};
 use crate::adapter::DjiFault;
@@ -52,6 +52,24 @@ fn neutral_hold_preempts_between_keyframe_packets_and_preserves_recovery_interva
     assert!(harness.adapter.status_cached().fault.is_none());
 }
 
+#[test]
+fn a_recenter_rejected_by_active_keyframe_cannot_start_on_the_next_neutral_input() {
+    let mut harness = moving_with_keyframe(usize::MAX);
+    let before = commands(&harness);
+    let mut request = frame(0.0);
+    request.actions.push(ControlAction::GimbalRecenter);
+    assert!(matches!(
+        harness.apply(request, 35).disposition,
+        Disposition::Rejected(_)
+    ));
+    assert_eq!(
+        harness.apply(frame(0.0), 40).disposition,
+        Disposition::Accepted
+    );
+    harness.step(40);
+    assert_eq!(commands(&harness), before);
+    assert!(harness.adapter.status_cached().fault.is_none());
+}
 #[test]
 fn link_loss_hold_preempts_a_complete_keyframe_envelope() {
     let mut harness = moving_with_keyframe(usize::MAX);
