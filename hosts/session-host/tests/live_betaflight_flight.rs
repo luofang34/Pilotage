@@ -11,10 +11,7 @@
 //! ```
 //!
 //! With `PILOTAGE_LIVE_HOST_PORT=<port>` it flies the vehicle of a session
-//! host already listening on that loopback port instead, and with
-//! `PILOTAGE_LIVE_SKIP_DIRECT=1` it leaves out the direct-scope step, for
-//! a vehicle whose adapter does not hand the motion lease to the direct
-//! scope in flight.
+//! host already listening on that loopback port instead.
 //!
 //! The client is the portable client-session core, as every Pilotage
 //! client is: it is admitted, takes the motion lease, arms through the
@@ -79,10 +76,7 @@ async fn flight() {
             runtime::start_with_options(
                 0,
                 AdapterKind::Betaflight,
-                runtime::RuntimeOptions {
-                    legacy_compatibility: false,
-                    mission: None,
-                },
+                runtime::RuntimeOptions::default(),
             )
             .await
             .expect("host starts (PILOTAGE_BETAFLIGHT_PROFILE=simulation)"),
@@ -101,9 +95,7 @@ async fn flight() {
     arm(&mut client).await;
     climb(&mut client).await;
     hold(&mut client).await;
-    if std::env::var("PILOTAGE_LIVE_SKIP_DIRECT").as_deref() != Ok("1") {
-        direct(&mut client).await;
-    }
+    direct(&mut client).await;
     forward(&mut client).await;
     yaw(&mut client).await;
     land_and_disarm(&mut client).await;
@@ -170,15 +162,20 @@ async fn hold(client: &mut Client) {
     );
 }
 
+/// A roll-rate demand near hover, so the operator's thrust takes over at
+/// once.
 fn body_rate(roll_rate: f32) -> wire::ControlIntent {
+    body_rate_at(roll_rate, 0.57)
+}
+
+fn body_rate_at(roll_rate: f32, thrust: f32) -> wire::ControlIntent {
     wire::ControlIntent {
         family: Some(wire::control_intent::Family::BodyRate(
             wire::BodyRateIntent {
                 roll_rate,
                 pitch_rate: 0.0,
                 yaw_rate: 0.0,
-                // Near hover, so the operator's thrust takes over at once.
-                thrust: 0.57,
+                thrust,
             },
         )),
     }
@@ -187,6 +184,13 @@ fn body_rate(roll_rate: f32) -> wire::ControlIntent {
 /// The racing scheme: a body-rate step on the direct scope, then back.
 async fn direct(client: &mut Client) {
     client.switch_to("vehicle.motion.direct").await;
+    // A switched scheme takes a neutral frame (zero rates at centre
+    // thrust) before the host passes any other direct demand.
+    client
+        .fly_intent(&body_rate_at(0.0, 0.5), Duration::from_millis(200), |_| {
+            false
+        })
+        .await;
     client
         .fly_intent(&body_rate(0.0), Duration::from_millis(500), |_| false)
         .await;

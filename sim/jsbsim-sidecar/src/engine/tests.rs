@@ -20,11 +20,18 @@ fn x500() -> ModelPaths {
 struct Flat(f64);
 
 impl GroundModel for Flat {
-    fn height(&self, _lat_rad: f64, _lon_rad: f64) -> Option<GroundAnswer> {
+    fn height(&self, lat_rad: f64, lon_rad: f64) -> Option<GroundAnswer> {
         Some(GroundAnswer {
             height_m: self.0,
             slope_north: 0.0,
             slope_east: 0.0,
+            normal_ecef: crate::ground::surface_normal_ecef(
+                lat_rad.to_degrees(),
+                lon_rad.to_degrees(),
+                self.0,
+                0.0,
+                0.0,
+            )?,
         })
     }
 }

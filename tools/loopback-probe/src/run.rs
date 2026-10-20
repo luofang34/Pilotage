@@ -204,6 +204,7 @@ async fn wait_for_rejection(
             }
             Ok(Some(ReceiverEvent::Telemetry(observation))) => {
                 metrics.telemetry_received = metrics.telemetry_received.saturating_add(1);
+                video.note_truth(&observation);
                 if let Some(writer) = capture {
                     writer.record(&observation);
                 }
@@ -211,7 +212,13 @@ async fn wait_for_rejection(
                     metrics.last_pose = observation.pose;
                 }
             }
-            Ok(Some(ReceiverEvent::VideoFrame { source_id, jpeg })) => {
+            Ok(Some(ReceiverEvent::VideoFrame {
+                source_id,
+                jpeg,
+                received_at,
+                capture,
+            })) => {
+                video.note_capture(source_id, capture, received_at);
                 fold_video_frame(source_id, &jpeg, video, &mut last_video_at);
             }
             Ok(Some(ReceiverEvent::Pong { .. } | ReceiverEvent::Authority)) | Err(_) => {}
@@ -234,6 +241,7 @@ fn drain_pending_events(
         match event {
             ReceiverEvent::Telemetry(observation) => {
                 metrics.telemetry_received = metrics.telemetry_received.wrapping_add(1);
+                video.note_truth(&observation);
                 if let Some(writer) = capture {
                     writer.record(&observation);
                 }
@@ -244,7 +252,13 @@ fn drain_pending_events(
             ReceiverEvent::FrameRejected(rejected) => {
                 metrics.note_rejection(&rejected.reason);
             }
-            ReceiverEvent::VideoFrame { source_id, jpeg } => {
+            ReceiverEvent::VideoFrame {
+                source_id,
+                jpeg,
+                received_at,
+                capture,
+            } => {
+                video.note_capture(source_id, capture, received_at);
                 fold_video_frame(source_id, &jpeg, video, &mut last_video_at);
             }
             ReceiverEvent::Pong { .. } | ReceiverEvent::Authority => {}

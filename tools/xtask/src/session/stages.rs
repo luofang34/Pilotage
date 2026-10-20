@@ -20,9 +20,22 @@ pub(crate) const MANIFEST_NAME: &str = "session.json";
 /// right one and then pass a different one — two correct halves and a
 /// wrong join, which no test of either half can see. With no such
 /// parameter there is nothing to get wrong at the call site.
-pub(crate) fn host_stage(ctx: &SessionContext, backend: &dyn SimBackend) -> Stage {
+pub(crate) fn host_stage(
+    ctx: &SessionContext,
+    backend: &dyn SimBackend,
+) -> Result<Stage, XtaskError> {
     let adapter = backend.host_adapter();
     let mut env = crate::backend::host_env_for(backend, ctx);
+    if ctx.sim_camera {
+        // The stage's camera settings replace the backend's own: one
+        // value per variable, so no reader depends on which write wins.
+        for (key, value) in crate::camera::host_env(crate::camera::port(ctx)?) {
+            match env.iter_mut().find(|(name, _)| *name == key) {
+                Some(slot) => slot.1 = value,
+                None => env.push((key, value)),
+            }
+        }
+    }
     env.push((
         "PILOTAGE_AVIATE_PROFILE".to_owned(),
         ctx.profile.as_env_value().to_owned(),
@@ -30,7 +43,7 @@ pub(crate) fn host_stage(ctx: &SessionContext, backend: &dyn SimBackend) -> Stag
     if std::env::var_os("RUST_LOG").is_none() {
         env.push(("RUST_LOG".to_owned(), "info".to_owned()));
     }
-    Stage {
+    Ok(Stage {
         spec: ProcessSpec {
             name: "session-host",
             program: ctx
@@ -50,7 +63,7 @@ pub(crate) fn host_stage(ctx: &SessionContext, backend: &dyn SimBackend) -> Stag
             log_path: stage_log(&ctx.log_dir, "session-host"),
         },
         readiness: Readiness::HostListening { timeout_s: 60 },
-    }
+    })
 }
 
 /// The static viewer: this xtask binary's `serve-viewer` subcommand

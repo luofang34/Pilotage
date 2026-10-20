@@ -162,13 +162,14 @@ jobs:
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
 
-      # The JSBSim sidecar links JSBSim's C++ library, an external
-      # checkout at the release xtask pins; the cache key follows the pin.
+      # The production lint guard lints the JSBSim sidecar, which links
+      # JSBSim's C++ library, an external checkout at the release the
+      # build script pins; the cache key follows the pin.
       - name: Cache the JSBSim build
         uses: actions/cache@v4
         with:
           path: ~/jsbsim
-          key: jsbsim-${{ runner.os }}-${{ hashFiles('tools/xtask/src/jsbsim.rs') }}
+          key: jsbsim-${{ runner.os }}-${{ hashFiles('scripts/build-jsbsim.sh') }}
 
       - name: Build JSBSim
         run: cargo run -p xtask --quiet -- build-jsbsim

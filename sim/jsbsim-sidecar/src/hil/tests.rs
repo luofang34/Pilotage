@@ -6,8 +6,8 @@
 use pilotage_mavlink::codec::{compute_crc, encode_frame_v2_from};
 
 use super::{
-    ActuatorControls, Encoder, FIELDS_IMU, FrameReader, HIL_ACTUATOR_CONTROLS, HIL_GPS, HIL_SENSOR,
-    HIL_STATE_QUATERNION,
+    ActuatorControls, Encoder, FIELDS_BARO, FIELDS_IMU, FrameReader, HIL_ACTUATOR_CONTROLS,
+    HIL_GPS, HIL_SENSOR, HIL_STATE_QUATERNION,
 };
 use crate::rotation::Euler;
 use crate::sensors::{GnssSample, InertialSample};
@@ -30,6 +30,15 @@ fn check_frame(frame: &[u8], (id, extra): (u32, u8), payload_len: usize) {
     assert_eq!(&frame[10 + payload_len..], &crc.to_le_bytes());
 }
 
+/// PX4's `SensorSource::BARO` (simulator_mavlink): a sample whose fields
+/// miss any of these bits never reaches PX4's barometer.
+const PX4_BARO_MASK: u32 = 0b1_1010_0000_0000;
+
+#[test]
+fn the_barometer_bits_are_the_ones_px4_requires() {
+    assert_eq!(FIELDS_BARO & PX4_BARO_MASK, PX4_BARO_MASK);
+}
+
 #[test]
 fn hil_sensor_carries_px4s_fields_in_wire_order() {
     let sample = InertialSample {
@@ -38,8 +47,8 @@ fn hil_sensor_carries_px4s_fields_in_wire_order() {
         gyro_frd: [0.01, 0.02, 0.03],
         mag_frd_gauss: [0.2, -0.04, 0.45],
         pressure_hpa: 1006.5,
-        pressure_altitude_m: 56.0,
         diff_pressure_hpa: 0.0,
+        pressure_altitude_m: 56.3,
         temperature_c: 14.6,
     };
     let frame = Encoder::default().hil_sensor(&sample, FIELDS_IMU);
@@ -51,6 +60,7 @@ fn hil_sensor_carries_px4s_fields_in_wire_order() {
     assert_eq!(f32_at(&frame, 16), -9.8);
     assert_eq!(f32_at(&frame, 32), 0.2);
     assert_eq!(f32_at(&frame, 44), 1006.5);
+    assert_eq!(f32_at(&frame, 52), 56.3);
     assert_eq!(
         u32::from_le_bytes(frame[10 + 60..10 + 64].try_into().unwrap()),
         FIELDS_IMU
@@ -94,8 +104,6 @@ fn hil_state_quaternion_carries_the_truth_attitude() {
         },
         rates_frd: [0.0; 3],
         specific_force_frd: [0.0, 0.0, -9.806_65],
-        pressure_pa: 101_325.0,
-        temperature_c: 15.0,
         dynamic_pressure_pa: 0.0,
         true_airspeed_mps: 0.0,
         calibrated_airspeed_mps: 0.0,

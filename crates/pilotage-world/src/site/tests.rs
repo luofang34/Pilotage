@@ -9,19 +9,14 @@ use super::{DEFAULT_SITE, Ground, N51, NAMED_SITES, Placement, Site, ZURICH};
 /// OpenStreetMap way as the threshold.
 const N51_RUNWAY_22_END: (f64, f64) = (40.584_335_2, -74.732_882_9);
 
-/// North and east metres from `from` to `to`, on WGS84 at their mean
-/// latitude.
+/// North and east metres from `from` to `to`, in the world model's local
+/// frame at `from`.
 fn north_east_m(from: (f64, f64), to: (f64, f64)) -> (f64, f64) {
-    let (a, f) = (6_378_137.0_f64, 1.0 / 298.257_223_563);
-    let e2 = f * (2.0 - f);
-    let phi = ((from.0 + to.0) / 2.0).to_radians();
-    let w = (1.0 - e2 * phi.sin().powi(2)).sqrt();
-    let meridian = a * (1.0 - e2) / w.powi(3);
-    let normal = a / w;
-    (
-        (to.0 - from.0).to_radians() * meridian,
-        (to.1 - from.1).to_radians() * normal * phi.cos(),
-    )
+    let plane = crate::local_plane(from.0, from.1, 0.0).expect("a well-formed site");
+    let offset = plane
+        .to_ned(crate::world_position(to.0, to.1, 0.0))
+        .expect("the same datum");
+    (offset.north_m, offset.east_m)
 }
 
 /// Where `point` is from the site's threshold: along the runway and to
@@ -63,17 +58,12 @@ fn named_sites_are_found_by_name() {
 
 #[test]
 fn a_runway_vehicle_starts_on_the_threshold_facing_down_the_runway() {
-    let plane = N51.placement(Ground::Runway, 0);
-    assert_eq!(
-        plane,
-        Placement {
-            latitude_deg: N51.latitude_deg,
-            longitude_deg: N51.longitude_deg,
-            elevation_m: 56.3,
-            heading_deg: 29.5,
-        }
-    );
-    let (along, left) = along_left_m(&N51, &N51.placement(Ground::Runway, 1));
+    let plane = N51.placement(Ground::Runway, 0).expect("placed");
+    // The threshold itself, to well under a millimetre.
+    assert!((plane.latitude_deg - N51.latitude_deg).abs() < 1e-9);
+    assert!((plane.longitude_deg - N51.longitude_deg).abs() < 1e-9);
+    assert_eq!((plane.elevation_m, plane.heading_deg), (56.3, 29.5));
+    let (along, left) = along_left_m(&N51, &N51.placement(Ground::Runway, 1).expect("placed"));
     assert!(
         (along - 60.0).abs() < 0.2 && left.abs() < 0.2,
         "{along} {left}"
@@ -86,7 +76,7 @@ fn a_runway_vehicle_starts_on_the_threshold_facing_down_the_runway() {
 #[test]
 fn field_vehicles_stand_in_a_row_on_the_grass_left_of_the_runway() {
     for index in 0..5 {
-        let point = N51.placement(Ground::Field, index);
+        let point = N51.placement(Ground::Field, index).expect("placed");
         let (along, left) = along_left_m(&N51, &point);
         let expected_along = 40.0 * (index as f64 + 1.0);
         assert!((along - expected_along).abs() < 0.2, "{index}: {along} m");

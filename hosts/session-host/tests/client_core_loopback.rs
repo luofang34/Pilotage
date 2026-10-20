@@ -232,6 +232,7 @@ async fn the_client_core_drives_admission_lease_and_an_applied_control_frame() {
         runtime::RuntimeOptions {
             legacy_compatibility: true,
             mission: None,
+            sim_camera_port: None,
         },
     )
     .await
@@ -311,6 +312,7 @@ async fn a_cooperative_handover_moves_control_between_two_engine_clients() {
         runtime::RuntimeOptions {
             legacy_compatibility: true,
             mission: None,
+            sim_camera_port: None,
         },
     )
     .await

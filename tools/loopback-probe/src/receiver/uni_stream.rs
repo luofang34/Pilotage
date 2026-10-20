@@ -14,7 +14,8 @@ use tokio::sync::mpsc;
 use tracing::warn;
 use wtransport::RecvStream;
 
-use super::{ReceiverEvent, drain_stream_frames, forward_event};
+use super::{ReceiverEvent, VideoCapture, drain_stream_frames, forward_event};
+use crate::control_source::elapsed_to_timestamp;
 
 /// Kind tag prefixing the host's authority-events uni stream (ADR-0005).
 const AUTHORITY_EVENTS_TAG: u8 = 0x01;
@@ -47,12 +48,14 @@ pub(super) async fn read_one_uni_stream(
         AUTHORITY_EVENTS_TAG => {
             read_authority_stream(stream, buf, chunk, start, events_tx, dropped_events).await;
         }
-        VIDEO_FRAME_TAG => read_video_stream(stream, buf, chunk, events_tx, dropped_events).await,
+        VIDEO_FRAME_TAG => {
+            read_video_stream(stream, buf, chunk, start, events_tx, dropped_events).await;
+        }
         VIDEO_FRAME_V2_TAG => {
-            read_video_v2_stream(stream, buf, chunk, events_tx, dropped_events).await;
+            read_video_v2_stream(stream, buf, chunk, start, events_tx, dropped_events).await;
         }
         VIDEO_STREAM_V3_TAG => {
-            read_video_record_stream(stream, buf, chunk, events_tx, dropped_events).await;
+            read_video_record_stream(stream, buf, chunk, start, events_tx, dropped_events).await;
         }
         other => warn!(
             tag = other,
@@ -118,6 +121,7 @@ async fn read_video_v2_stream(
     mut stream: RecvStream,
     mut buf: Vec<u8>,
     mut chunk: [u8; 64 * 1024],
+    start: Instant,
     events_tx: mpsc::Sender<ReceiverEvent>,
     dropped_events: Arc<AtomicU64>,
 ) {
@@ -125,7 +129,7 @@ async fn read_video_v2_stream(
         match stream.read(&mut chunk).await {
             Ok(Some(count)) => buf.extend_from_slice(&chunk[..count]),
             Ok(None) => {
-                forward_video_v2_body(&buf, &events_tx, &dropped_events);
+                forward_video_v2_body(&buf, start, &events_tx, &dropped_events);
                 return;
             }
             Err(source) => {
@@ -141,11 +145,12 @@ async fn read_video_record_stream(
     mut stream: RecvStream,
     mut buf: Vec<u8>,
     mut chunk: [u8; 64 * 1024],
+    start: Instant,
     events_tx: mpsc::Sender<ReceiverEvent>,
     dropped_events: Arc<AtomicU64>,
 ) {
     loop {
-        if let Err(declared) = drain_video_records(&mut buf, &events_tx, &dropped_events) {
+        if let Err(declared) = drain_video_records(&mut buf, start, &events_tx, &dropped_events) {
             warn!(
                 declared,
                 limit = MAX_VIDEO_RECORD_LEN,
@@ -175,6 +180,7 @@ async fn read_video_record_stream(
 /// Forwards every complete V3 record in `buf`, retaining only a partial tail.
 fn drain_video_records(
     buf: &mut Vec<u8>,
+    start: Instant,
     events_tx: &mpsc::Sender<ReceiverEvent>,
     dropped_events: &AtomicU64,
 ) -> Result<(), usize> {
@@ -192,6 +198,7 @@ fn drain_video_records(
         }
         forward_video_v2_body(
             &buf[VIDEO_RECORD_PREFIX_LEN..end],
+            start,
             events_tx,
             dropped_events,
         );
@@ -202,6 +209,7 @@ fn drain_video_records(
 /// Decodes and forwards one capture-identity video body.
 fn forward_video_v2_body(
     body: &[u8],
+    start: Instant,
     events_tx: &mpsc::Sender<ReceiverEvent>,
     dropped_events: &AtomicU64,
 ) {
@@ -225,6 +233,11 @@ fn forward_video_v2_body(
         ReceiverEvent::VideoFrame {
             source_id: frame.header.source_id,
             jpeg: frame.payload.to_vec(),
+            received_at: elapsed_to_timestamp(start.elapsed()),
+            capture: Some(VideoCapture {
+                clock: frame.header.capture_clock,
+                time_ns: frame.header.capture_time_ns,
+            }),
         },
     );
 }
@@ -239,6 +252,7 @@ async fn read_video_stream(
     mut stream: RecvStream,
     mut buf: Vec<u8>,
     mut chunk: [u8; 64 * 1024],
+    start: Instant,
     events_tx: mpsc::Sender<ReceiverEvent>,
     dropped_events: Arc<AtomicU64>,
 ) {
@@ -257,6 +271,8 @@ async fn read_video_stream(
                 ReceiverEvent::VideoFrame {
                     source_id,
                     jpeg: payload,
+                    received_at: elapsed_to_timestamp(start.elapsed()),
+                    capture: None,
                 },
             );
             return;
@@ -376,23 +392,41 @@ mod tests {
         let dropped = AtomicU64::new(0);
         let mut buf = wire[..split].to_vec();
 
-        drain_video_records(&mut buf, &events_tx, &dropped).expect("partial second record waits");
+        drain_video_records(&mut buf, std::time::Instant::now(), &events_tx, &dropped)
+            .expect("partial second record waits");
         match events_rx
             .try_recv()
             .expect("first record dispatches before close")
         {
-            ReceiverEvent::VideoFrame { source_id, jpeg } => {
+            ReceiverEvent::VideoFrame {
+                source_id,
+                jpeg,
+                capture,
+                ..
+            } => {
                 assert_eq!(source_id, 0);
                 assert_eq!(jpeg, vec![1, 2, 3]);
+                // The first record's header states capture time 1 on the
+                // simulation clock (code 2).
+                assert_eq!(
+                    capture,
+                    Some(crate::receiver::VideoCapture {
+                        clock: 2,
+                        time_ns: 1
+                    })
+                );
             }
             _ => panic!("expected the first video frame"),
         }
         assert!(events_rx.try_recv().is_err(), "partial record is retained");
 
         buf.extend_from_slice(&wire[split..]);
-        drain_video_records(&mut buf, &events_tx, &dropped).expect("second record completes");
+        drain_video_records(&mut buf, std::time::Instant::now(), &events_tx, &dropped)
+            .expect("second record completes");
         match events_rx.try_recv().expect("second record dispatches") {
-            ReceiverEvent::VideoFrame { source_id, jpeg } => {
+            ReceiverEvent::VideoFrame {
+                source_id, jpeg, ..
+            } => {
                 assert_eq!(source_id, 1);
                 assert_eq!(jpeg, vec![4, 5]);
             }
@@ -410,7 +444,7 @@ mod tests {
         let dropped = AtomicU64::new(0);
 
         assert_eq!(
-            drain_video_records(&mut buf, &events_tx, &dropped),
+            drain_video_records(&mut buf, std::time::Instant::now(), &events_tx, &dropped),
             Err(declared)
         );
         assert_eq!(buf.len(), VIDEO_RECORD_PREFIX_LEN);

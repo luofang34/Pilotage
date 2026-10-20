@@ -110,6 +110,16 @@ pub enum HostError {
         #[source]
         source: std::net::AddrParseError,
     },
+    /// A present Aviate setting was outside the values the adapter accepts.
+    #[error("invalid {variable} value {value:?} (expected {expected})")]
+    AviateSetting {
+        /// The environment variable being parsed.
+        variable: &'static str,
+        /// The rejected value.
+        value: String,
+        /// What the variable accepts.
+        expected: &'static str,
+    },
     /// A present PX4 setting was outside the values the adapter accepts.
     #[error("invalid {variable} value {value:?} (expected {expected})")]
     Px4Setting {
@@ -139,6 +149,34 @@ pub enum HostError {
         /// The requested adapter name.
         adapter: &'static str,
     },
+    /// `PILOTAGE_SIM_CAMERA_PORT` is not a port a producer can dial.
+    #[error("PILOTAGE_SIM_CAMERA_PORT {value:?} is not a port from 1 to 65535")]
+    SimCameraPort {
+        /// The refused value.
+        value: String,
+    },
+    /// The simulator camera port could not be bound on loopback.
+    #[error("failed to bind the sim camera port 127.0.0.1:{port}: {source}")]
+    SimCameraBind {
+        /// The configured port.
+        port: u16,
+        /// The bind failure.
+        #[source]
+        source: std::io::Error,
+    },
+    /// The adapter already produces video, and a second producer would
+    /// claim the same camera sources.
+    #[error(
+        "the {adapter} adapter already produces video; turn its camera off to attach the sim camera"
+    )]
+    SimCameraConflict {
+        /// The adapter that produces video.
+        adapter: &'static str,
+    },
+    /// The simulator camera was requested from a build without the sim
+    /// feature.
+    #[error("the sim camera is not in this build (built without the sim feature)")]
+    SimCameraNotInBuild,
     /// Starting the Aviate MAVLink telemetry link failed.
     #[error("failed to start the Aviate adapter: {0}")]
     AviateAdapter(#[source] pilotage_adapter_aviate::AviateAdapterError),
@@ -178,7 +216,7 @@ pub enum HostError {
     /// The Betaflight adapter's environment configuration is invalid.
     #[error(transparent)]
     BetaflightConfig(#[from] BetaflightConfigError),
-    /// A `PILOTAGE_MISSION_*` variable could not be decoded as UTF-8.
+    /// A host environment variable could not be decoded as UTF-8.
     #[error("{variable} is not valid UTF-8: {source}")]
     MissionVarEncoding {
         /// The environment variable being parsed.

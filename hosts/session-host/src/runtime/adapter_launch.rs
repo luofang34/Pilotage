@@ -1,14 +1,20 @@
 //! Per-adapter construction and runtime spawning: builds the selected
-//! vehicle adapter (and its media task when it exposes video frames) and
-//! spawns the shared `run_until_shutdown` lifecycle.
+//! vehicle adapter, chooses the session's video source (the adapter's own
+//! frames or the simulator camera attachment), and spawns the shared
+//! `run_until_shutdown` lifecycle.
 
+use pilotage_adapter_api::{RawVideoFrame, VehicleAdapter};
+use pilotage_session::SessionEngine;
 use tokio::sync::{mpsc, oneshot};
+use tokio::task::JoinHandle;
 use wtransport::Endpoint;
 
 use crate::cli::AdapterKind;
 use crate::error::HostError;
 
 use super::engine_actor::ToEngine;
+#[cfg(feature = "sim")]
+use super::sim_camera;
 use super::{
     HOST_VEHICLE, RuntimeOptions, ardupilot_config, aviate_profile, betaflight_config,
     build_engine, media, px4_config, run_until_shutdown, run_with_media_until_shutdown,
@@ -16,42 +22,56 @@ use super::{
 #[cfg(feature = "sim")]
 use super::{MAX_CONTROL_AGE, build_reference, gazebo_launch};
 
-/// Builds the chosen adapter (and, for Gazebo, its media task) and spawns the
-/// per-adapter `run_until_shutdown` task.
-pub(super) async fn spawn_adapter_runtime(
-    adapter: AdapterKind,
-    options: RuntimeOptions,
+/// The host side of a session runtime: what every adapter path hands to
+/// [`spawn_runtime`] besides the adapter itself.
+struct HostSide {
     endpoint: Endpoint<wtransport::endpoint::endpoint_side::Server>,
     engine_tx: mpsc::Sender<ToEngine>,
     engine_rx: mpsc::Receiver<ToEngine>,
     shutdown_rx: oneshot::Receiver<()>,
     start: tokio::time::Instant,
-) -> Result<tokio::task::JoinHandle<()>, HostError> {
+}
+
+/// The session's video: a frame source for the media task, and the task
+/// that feeds it when that is not the adapter.
+struct SessionVideo {
+    frames: Option<mpsc::Receiver<RawVideoFrame>>,
+    producer: Option<JoinHandle<()>>,
+}
+
+/// Builds the chosen adapter and spawns the per-adapter
+/// `run_until_shutdown` task.
+pub(super) async fn spawn_adapter_runtime(
+    adapter: AdapterKind,
+    mut options: RuntimeOptions,
+    endpoint: Endpoint<wtransport::endpoint::endpoint_side::Server>,
+    engine_tx: mpsc::Sender<ToEngine>,
+    engine_rx: mpsc::Receiver<ToEngine>,
+    shutdown_rx: oneshot::Receiver<()>,
+    start: tokio::time::Instant,
+) -> Result<JoinHandle<()>, HostError> {
+    let sim_camera_port = options.sim_camera_port.take();
+    let host = HostSide {
+        endpoint,
+        engine_tx,
+        engine_rx,
+        shutdown_rx,
+        start,
+    };
     match adapter {
         #[cfg(feature = "sim")]
-        AdapterKind::Reference => Ok(spawn_reference_runtime(
-            options,
-            endpoint,
-            (engine_tx, engine_rx),
-            shutdown_rx,
-            start,
-        )),
+        AdapterKind::Reference => {
+            let (engine, adapter) = build_reference(options);
+            let video = session_video("reference", None, sim_camera_port, &host.engine_tx).await?;
+            Ok(spawn_runtime(engine, adapter, video, host))
+        }
         #[cfg(feature = "sim")]
         AdapterKind::Gazebo => {
             let (engine, adapter, frames) =
                 gazebo_launch::build_gazebo(HOST_VEHICLE, MAX_CONTROL_AGE).await?;
-            let (media, media_task) = media::spawn_media_task(frames, start);
-            Ok(tokio::spawn(run_with_media_until_shutdown(
-                endpoint,
-                engine,
-                adapter,
-                media,
-                media_task,
-                engine_tx,
-                engine_rx,
-                shutdown_rx,
-                start,
-            )))
+            let video =
+                session_video("gazebo", Some(frames), sim_camera_port, &host.engine_tx).await?;
+            Ok(spawn_runtime(engine, adapter, video, host))
         }
         #[cfg(not(feature = "sim"))]
         AdapterKind::Reference => Err(HostError::AdapterNotInBuild {
@@ -60,25 +80,31 @@ pub(super) async fn spawn_adapter_runtime(
         #[cfg(not(feature = "sim"))]
         AdapterKind::Gazebo => Err(HostError::AdapterNotInBuild { adapter: "gazebo" }),
         AdapterKind::Aviate => {
-            spawn_aviate_runtime(endpoint, options, engine_tx, engine_rx, shutdown_rx, start).await
+            let mut adapter = start_aviate().await?;
+            let engine = build_engine(&adapter, options);
+            let frames = adapter.subscribe_frames();
+            let video = session_video("aviate", frames, sim_camera_port, &host.engine_tx).await?;
+            Ok(spawn_runtime(engine, adapter, video, host))
         }
         AdapterKind::Px4 => {
-            spawn_px4_runtime(endpoint, options, engine_tx, engine_rx, shutdown_rx, start).await
+            let config = px4_config::from_env()?;
+            let mut adapter = pilotage_adapter_px4::Px4Adapter::start(HOST_VEHICLE, config)
+                .await
+                .map_err(HostError::Px4Adapter)?;
+            let engine = build_engine(&adapter, options);
+            let frames = adapter.subscribe_frames();
+            let video = session_video("px4", frames, sim_camera_port, &host.engine_tx).await?;
+            Ok(spawn_runtime(engine, adapter, video, host))
         }
         AdapterKind::ArduPilot => {
-            // No video producer: an ArduPilot SITL has no camera sidecar.
+            // An ArduPilot SITL has no camera of its own.
             let config = ardupilot_config::from_env()?;
             let adapter = pilotage_adapter_ardupilot::ArduPilotAdapter::start(HOST_VEHICLE, config)
                 .await
                 .map_err(HostError::ArduPilotAdapter)?;
-            Ok(spawn_without_media(
-                adapter,
-                options,
-                endpoint,
-                (engine_tx, engine_rx),
-                shutdown_rx,
-                start,
-            ))
+            let engine = build_engine(&adapter, options);
+            let video = session_video("ardupilot", None, sim_camera_port, &host.engine_tx).await?;
+            Ok(spawn_runtime(engine, adapter, video, host))
         }
         AdapterKind::Betaflight => {
             // The adapter's link task connects and reconnects on its own, so
@@ -86,96 +112,76 @@ pub(super) async fn spawn_adapter_runtime(
             let config = betaflight_config::from_env()?;
             let adapter =
                 pilotage_adapter_betaflight::BetaflightAdapter::start(HOST_VEHICLE, config);
-            Ok(spawn_without_media(
-                adapter,
-                options,
-                endpoint,
-                (engine_tx, engine_rx),
-                shutdown_rx,
-                start,
-            ))
+            let engine = build_engine(&adapter, options);
+            let video = session_video("betaflight", None, sim_camera_port, &host.engine_tx).await?;
+            Ok(spawn_runtime(engine, adapter, video, host))
         }
     }
 }
 
-/// Spawns the deterministic reference adapter's runtime.
+/// Chooses the session's video. With a simulator camera port configured
+/// the attachment supplies it, and an adapter that already produces video
+/// is refused: two producers would claim the same camera sources.
+async fn session_video(
+    adapter: &'static str,
+    adapter_frames: Option<mpsc::Receiver<RawVideoFrame>>,
+    sim_camera_port: Option<u16>,
+    engine_tx: &mpsc::Sender<ToEngine>,
+) -> Result<SessionVideo, HostError> {
+    let Some(port) = sim_camera_port else {
+        return Ok(SessionVideo {
+            frames: adapter_frames,
+            producer: None,
+        });
+    };
+    if adapter_frames.is_some() {
+        return Err(HostError::SimCameraConflict { adapter });
+    }
+    attach_sim_camera(port, engine_tx).await
+}
+
 #[cfg(feature = "sim")]
-fn spawn_reference_runtime(
-    options: RuntimeOptions,
-    endpoint: Endpoint<wtransport::endpoint::endpoint_side::Server>,
-    (engine_tx, engine_rx): (mpsc::Sender<ToEngine>, mpsc::Receiver<ToEngine>),
-    shutdown_rx: oneshot::Receiver<()>,
-    start: tokio::time::Instant,
-) -> tokio::task::JoinHandle<()> {
-    let (engine, adapter) = build_reference(options);
-    tokio::spawn(run_until_shutdown(
-        endpoint,
-        engine,
-        adapter,
-        None,
-        engine_tx,
-        engine_rx,
-        shutdown_rx,
-        start,
-    ))
+async fn attach_sim_camera(
+    port: u16,
+    engine_tx: &mpsc::Sender<ToEngine>,
+) -> Result<SessionVideo, HostError> {
+    let listener = sim_camera::bind(port).await?;
+    tracing::info!(port, "sim camera attachment waiting for its producer");
+    let (frames, producer) = sim_camera::spawn(listener, engine_tx);
+    Ok(SessionVideo {
+        frames: Some(frames),
+        producer: Some(producer),
+    })
 }
 
-/// Spawns the runtime of an adapter with no video producer.
-fn spawn_without_media<A>(
+#[cfg(not(feature = "sim"))]
+async fn attach_sim_camera(
+    _port: u16,
+    _engine_tx: &mpsc::Sender<ToEngine>,
+) -> Result<SessionVideo, HostError> {
+    Err(HostError::SimCameraNotInBuild)
+}
+
+/// Spawns an adapter's runtime, wiring the media task only when the
+/// session has a video source.
+fn spawn_runtime<A>(
+    engine: SessionEngine,
     adapter: A,
-    options: RuntimeOptions,
-    endpoint: Endpoint<wtransport::endpoint::endpoint_side::Server>,
-    (engine_tx, engine_rx): (mpsc::Sender<ToEngine>, mpsc::Receiver<ToEngine>),
-    shutdown_rx: oneshot::Receiver<()>,
-    start: tokio::time::Instant,
-) -> tokio::task::JoinHandle<()>
+    video: SessionVideo,
+    host: HostSide,
+) -> JoinHandle<()>
 where
-    A: pilotage_adapter_api::VehicleAdapter + Send + 'static,
+    A: VehicleAdapter + Send + 'static,
 {
-    let engine = build_engine(&adapter, options);
-    tokio::spawn(run_until_shutdown(
+    let HostSide {
         endpoint,
-        engine,
-        adapter,
-        None,
         engine_tx,
         engine_rx,
         shutdown_rx,
         start,
-    ))
-}
-
-/// Builds the PX4 adapter and spawns its runtime, wiring the media task only
-/// when the adapter exposes a video frame source.
-async fn spawn_px4_runtime(
-    endpoint: Endpoint<wtransport::endpoint::endpoint_side::Server>,
-    options: RuntimeOptions,
-    engine_tx: mpsc::Sender<ToEngine>,
-    engine_rx: mpsc::Receiver<ToEngine>,
-    shutdown_rx: oneshot::Receiver<()>,
-    start: tokio::time::Instant,
-) -> Result<tokio::task::JoinHandle<()>, HostError> {
-    let config = px4_config::from_env()?;
-    let mut adapter = pilotage_adapter_px4::Px4Adapter::start(HOST_VEHICLE, config)
-        .await
-        .map_err(HostError::Px4Adapter)?;
-    let engine = build_engine(&adapter, options);
-    match adapter.subscribe_frames() {
-        Some(frames) => {
-            let (media, media_task) = media::spawn_media_task(frames, start);
-            Ok(tokio::spawn(run_with_media_until_shutdown(
-                endpoint,
-                engine,
-                adapter,
-                media,
-                media_task,
-                engine_tx,
-                engine_rx,
-                shutdown_rx,
-                start,
-            )))
-        }
-        None => Ok(tokio::spawn(run_until_shutdown(
+    } = host;
+    let Some(frames) = video.frames else {
+        return tokio::spawn(run_until_shutdown(
             endpoint,
             engine,
             adapter,
@@ -184,20 +190,33 @@ async fn spawn_px4_runtime(
             engine_rx,
             shutdown_rx,
             start,
-        ))),
-    }
+        ));
+    };
+    let (media, media_task) = media::spawn_media_task(frames, start);
+    // The media task ends once its frame source closes; a host-side
+    // producer closes it when the engine actor ends, so both are joined.
+    let media_task = match video.producer {
+        None => media_task,
+        Some(producer) => tokio::spawn(async move {
+            producer.await.ok();
+            media_task.await.ok();
+        }),
+    };
+    tokio::spawn(run_with_media_until_shutdown(
+        endpoint,
+        engine,
+        adapter,
+        media,
+        media_task,
+        engine_tx,
+        engine_rx,
+        shutdown_rx,
+        start,
+    ))
 }
 
-/// Builds the Aviate adapter and spawns its runtime, wiring the media task only
-/// when the adapter exposes a video frame source.
-async fn spawn_aviate_runtime(
-    endpoint: Endpoint<wtransport::endpoint::endpoint_side::Server>,
-    options: RuntimeOptions,
-    engine_tx: mpsc::Sender<ToEngine>,
-    engine_rx: mpsc::Receiver<ToEngine>,
-    shutdown_rx: oneshot::Receiver<()>,
-    start: tokio::time::Instant,
-) -> Result<tokio::task::JoinHandle<()>, HostError> {
+/// Builds the Aviate adapter from its environment.
+async fn start_aviate() -> Result<pilotage_adapter_aviate::AviateAdapter, HostError> {
     // PILOTAGE_AVIATE_PROFILE selects the session profile (LINK-04):
     // "physical" (FC estimate + FC state; no truth), the default
     // "simulation" (estimate + FC state, plus the truth oracle when the
@@ -209,39 +228,16 @@ async fn spawn_aviate_runtime(
         profile,
         std::env::var_os("PILOTAGE_AVIATE_CONTROL_FEEL_PROFILE"),
     )?;
-    let mut adapter = pilotage_adapter_aviate::AviateAdapter::start_with_control_feel(
+    pilotage_adapter_aviate::AviateAdapter::start_with_control_feel(
         HOST_VEHICLE,
         profile,
+        aviate_profile::truth_from_env(std::env::var("PILOTAGE_AVIATE_TRUTH"))?,
         aviate_profile::link_config_from_env(profile, std::env::var("PILOTAGE_AVIATE_ADDR"))?,
         control_feel,
     )
     .await
-    .map_err(HostError::AviateAdapter)?;
-    let engine = build_engine(&adapter, options);
-    match adapter.subscribe_frames() {
-        Some(frames) => {
-            let (media, media_task) = media::spawn_media_task(frames, start);
-            Ok(tokio::spawn(run_with_media_until_shutdown(
-                endpoint,
-                engine,
-                adapter,
-                media,
-                media_task,
-                engine_tx,
-                engine_rx,
-                shutdown_rx,
-                start,
-            )))
-        }
-        None => Ok(tokio::spawn(run_until_shutdown(
-            endpoint,
-            engine,
-            adapter,
-            None,
-            engine_tx,
-            engine_rx,
-            shutdown_rx,
-            start,
-        ))),
-    }
+    .map_err(HostError::AviateAdapter)
 }
+
+#[cfg(test)]
+mod tests;

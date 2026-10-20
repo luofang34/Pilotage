@@ -24,17 +24,22 @@ fn fleet(vehicles: &[&str]) -> FleetArgs {
         open: false,
         site: DEFAULT_SITE,
         ready_timeout_s: crate::backend::DEFAULT_READY_TIMEOUT_S,
+        sim_camera: false,
     }
 }
 
 /// Metres between two points on a sphere, flat at the default site's
 /// latitude: within half a metre over a layout.
 fn distance_m(a: &crate::backend::Placement, b: &crate::backend::Placement) -> f64 {
-    let north = (b.latitude_deg - a.latitude_deg) * 111_320.0;
-    let east = (b.longitude_deg - a.longitude_deg)
-        * 111_320.0
-        * DEFAULT_SITE.latitude_deg.to_radians().cos();
-    north.hypot(east)
+    let plane = pilotage_world::local_plane(a.latitude_deg, a.longitude_deg, 0.0).expect("placed");
+    let offset = plane
+        .to_ned(pilotage_world::world_position(
+            b.latitude_deg,
+            b.longitude_deg,
+            0.0,
+        ))
+        .expect("one datum");
+    offset.north_m.hypot(offset.east_m)
 }
 
 /// The plane takes the runway threshold wherever it is in the launch
@@ -57,12 +62,11 @@ fn the_plane_takes_the_threshold_and_the_quads_a_row_beside_the_runway() {
         grounds,
         [Ground::Field, Ground::Field, Ground::Runway, Ground::Field]
     );
-    let points = spawn_points(&DEFAULT_SITE, &grounds);
+    let points = spawn_points(&DEFAULT_SITE, &grounds).expect("placed");
     let plane = points[2];
-    assert_eq!(
-        (plane.latitude_deg, plane.longitude_deg),
-        (DEFAULT_SITE.latitude_deg, DEFAULT_SITE.longitude_deg)
-    );
+    // The threshold itself, to well under a millimetre.
+    assert!((plane.latitude_deg - DEFAULT_SITE.latitude_deg).abs() < 1e-9);
+    assert!((plane.longitude_deg - DEFAULT_SITE.longitude_deg).abs() < 1e-9);
     assert_eq!(plane.heading_deg, DEFAULT_SITE.heading_deg);
     for (first, second) in [(0, 1), (1, 3)] {
         let step = distance_m(&points[first], &points[second]);

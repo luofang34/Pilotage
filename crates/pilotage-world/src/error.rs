@@ -27,6 +27,18 @@ pub enum TerrainError {
 /// Why the world could not answer.
 #[derive(Debug, thiserror::Error)]
 pub enum WorldError {
+    /// A position is not well formed for the world model's geodesy.
+    #[error("position: {0}")]
+    Position(#[from] world_core::PositionError),
+    /// The atmosphere model refused the height.
+    #[error("atmosphere at {height_m} m: {source}")]
+    Atmosphere {
+        /// The height asked for, MSL.
+        height_m: f64,
+        /// The model's refusal.
+        #[source]
+        source: world_atmosphere::AtmosphereError,
+    },
     /// The terrain source failed.
     #[error("terrain: {0}")]
     Terrain(#[from] TerrainError),

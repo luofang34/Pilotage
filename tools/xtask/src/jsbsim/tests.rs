@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{JSBSIM_TAG, JsbsimInstall, build_plan, checkout_state, jsbsim_dir_from, pc_version};
+use super::{BUILD_SCRIPT, JSBSIM_TAG, JsbsimInstall, jsbsim_dir_from, pc_version};
 use crate::error::XtaskError;
 
 fn scratch(tag: &str) -> PathBuf {
@@ -104,67 +104,53 @@ fn the_pc_version_is_the_version_field() {
 }
 
 #[test]
-fn the_plan_clones_the_pinned_tag_only_when_absent() {
-    let root = Path::new("/home/u/jsbsim");
-    let fresh = build_plan(root, false, 8);
-    assert_eq!(fresh.len(), 3);
-    assert_eq!(fresh[0].program, "git");
-    let tag_at = fresh[0]
-        .args
-        .iter()
-        .position(|arg| arg == "--branch")
-        .unwrap();
-    assert_eq!(fresh[0].args[tag_at + 1], JSBSIM_TAG);
-    assert_eq!(fresh[0].args.last().unwrap(), "/home/u/jsbsim");
-    let cloned = build_plan(root, true, 8);
-    assert_eq!(cloned.len(), 2);
-    assert_eq!(cloned, fresh[1..]);
-}
-
-#[test]
-fn the_plan_builds_a_static_library_without_python_into_the_install_tree() {
-    let plan = build_plan(Path::new("/home/u/jsbsim"), true, 6);
-    let configure = &plan[0].args;
+fn the_build_script_builds_the_pinned_release() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let script = std::fs::read_to_string(repo_root.join(BUILD_SCRIPT)).unwrap();
+    assert!(
+        script.contains(&format!("JSBSIM_TAG=\"{JSBSIM_TAG}\"")),
+        "{BUILD_SCRIPT} must pin {JSBSIM_TAG}"
+    );
     for flag in [
         "-DBUILD_SHARED_LIBS=OFF",
         "-DBUILD_PYTHON_MODULE=OFF",
-        "-DBUILD_DOCS=OFF",
-        "-DCMAKE_BUILD_TYPE=Release",
-        "-DCMAKE_INSTALL_PREFIX=/home/u/jsbsim/install",
+        "-DCMAKE_INSTALL_PREFIX=$root/install",
     ] {
-        assert!(configure.iter().any(|arg| arg == flag), "missing {flag}");
+        assert!(script.contains(flag), "missing {flag}");
     }
-    assert_eq!(
-        plan[1].args,
-        [
-            "--build",
-            "/home/u/jsbsim/build",
-            "--target",
-            "install",
-            "--parallel",
-            "6"
-        ]
-    );
+}
+
+/// The world-model revs a manifest pins, one per `world-*` dependency.
+fn world_revs(manifest: &str) -> Vec<String> {
+    manifest
+        .lines()
+        .filter(|line| line.starts_with("world-"))
+        .map(|line| {
+            let rev = line.split("rev = \"").nth(1).unwrap();
+            rev.split('"').next().unwrap().to_owned()
+        })
+        .collect()
 }
 
 #[test]
-fn a_checkout_is_detected_and_a_foreign_directory_is_refused() {
-    let absent = scratch("absent").join("jsbsim");
-    assert!(!checkout_state(&absent).unwrap());
-    let empty = scratch("empty_dir");
-    assert!(!checkout_state(&empty).unwrap());
-    let checkout = scratch("checkout");
-    std::fs::create_dir_all(checkout.join("src")).unwrap();
-    std::fs::write(checkout.join("CMakeLists.txt"), "").unwrap();
-    std::fs::write(checkout.join("src/FGFDMExec.h"), "").unwrap();
-    assert!(checkout_state(&checkout).unwrap());
-    let foreign = scratch("foreign");
-    std::fs::write(foreign.join("Cargo.toml"), "").unwrap();
-    assert!(matches!(
-        checkout_state(&foreign),
-        Err(XtaskError::MissingArtifact {
-            what: "JSBSim checkout",
-            ..
-        })
-    ));
+fn the_sidecar_builds_alone_on_the_workspace_world_rev() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = std::fs::read_to_string(repo_root.join("Cargo.toml")).unwrap();
+    let sidecar = std::fs::read_to_string(repo_root.join("sim/jsbsim-sidecar/Cargo.toml")).unwrap();
+    assert!(
+        root.contains("exclude = [\"sim/jsbsim-sidecar\""),
+        "the sidecar must stay out of the workspace"
+    );
+    assert!(sidecar.contains("\n[workspace]\n"));
+    let workspace_revs = world_revs(&root);
+    assert!(!workspace_revs.is_empty());
+    let sidecar_revs = world_revs(&sidecar);
+    assert!(!sidecar_revs.is_empty());
+    for rev in workspace_revs.iter().chain(&sidecar_revs) {
+        assert_eq!(rev, &workspace_revs[0], "one world rev everywhere");
+    }
+    assert!(
+        !sidecar.contains("workspace = true"),
+        "the sidecar inherits nothing from the workspace"
+    );
 }

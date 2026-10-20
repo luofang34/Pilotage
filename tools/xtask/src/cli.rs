@@ -1,8 +1,11 @@
 //! Argument parsing for the xtask entry point: `sim`, `reset`,
 //! `handshake`, `affected`, `guards`, `serve-viewer`, `build-jsbsim`,
-//! `help`.
+//! `build-sim-terrain`, `help`.
 
 use crate::error::XtaskError;
+
+mod usage;
+pub use usage::USAGE;
 
 /// Which session profile the host runs (mirrors the host's fail-closed
 /// `PILOTAGE_AVIATE_PROFILE` vocabulary exactly).
@@ -63,6 +66,8 @@ pub struct SimArgs {
     /// How long each simulator and FC stage may take to come up, s
     /// (`--ready-timeout`).
     pub ready_timeout_s: u64,
+    /// Add the world-model camera stage (`--camera maplibre`).
+    pub sim_camera: bool,
 }
 
 /// Options for `cargo xtask fleet`.
@@ -89,6 +94,9 @@ pub struct FleetArgs {
     /// How long each simulator and FC stage may take to come up, s
     /// (`--ready-timeout`).
     pub ready_timeout_s: u64,
+    /// Add the world-model camera stage to every vehicle
+    /// (`--camera maplibre`).
+    pub sim_camera: bool,
 }
 
 /// A parsed xtask invocation.
@@ -118,6 +126,8 @@ pub enum Command {
     ServeViewer(crate::viewer_server::ServeViewerArgs),
     /// Clone, build, and install the pinned JSBSim release.
     BuildJsbsim,
+    /// Fetch and pack every site's simulator terrain.
+    BuildSimTerrain,
     /// Print usage.
     Help,
 }
@@ -141,34 +151,33 @@ pub fn parse_args(args: &[String]) -> Result<Command, XtaskError> {
             Ok(Command::Reset { fc, instance })
         }
         "handshake" => Ok(Command::Handshake(parse_handshake(rest)?)),
-        "guards" => {
-            if let Some(extra) = rest.first() {
-                return Err(XtaskError::Usage {
-                    message: format!("unknown guards argument {extra:?}"),
-                });
-            }
-            Ok(Command::Guards)
-        }
+        "guards" => without_arguments(rest, "guards", Command::Guards),
         "affected" => Ok(Command::Affected {
             base: parse_affected(rest)?,
         }),
         "serve-viewer" => Ok(Command::ServeViewer(crate::viewer_server::parse_args(
             rest,
         )?)),
-        "build-jsbsim" => {
-            if let Some(extra) = rest.first() {
-                return Err(XtaskError::Usage {
-                    message: format!("unknown build-jsbsim argument {extra:?}"),
-                });
-            }
-            Ok(Command::BuildJsbsim)
+        "build-jsbsim" => without_arguments(rest, "build-jsbsim", Command::BuildJsbsim),
+        "build-sim-terrain" => {
+            without_arguments(rest, "build-sim-terrain", Command::BuildSimTerrain)
         }
         "help" | "--help" | "-h" => Ok(Command::Help),
         other => Err(XtaskError::Usage {
             message: format!(
-                "unknown command {other:?} (expected sim, fleet, reset, handshake, affected, guards, serve-viewer, build-jsbsim, or help)"
+                "unknown command {other:?} (expected sim, fleet, reset, handshake, affected, guards, serve-viewer, build-jsbsim, build-sim-terrain, or help)"
             ),
         }),
+    }
+}
+
+/// A command that takes no arguments, refusing any.
+fn without_arguments(rest: &[String], name: &str, command: Command) -> Result<Command, XtaskError> {
+    match rest.first() {
+        Some(extra) => Err(XtaskError::Usage {
+            message: format!("unknown {name} argument {extra:?}"),
+        }),
+        None => Ok(command),
     }
 }
 
@@ -257,6 +266,7 @@ fn parse_sim(args: &[String]) -> Result<SimArgs, XtaskError> {
     let mut lan = false;
     let mut instance: u16 = 0;
     let mut ready_timeout_s = crate::backend::DEFAULT_READY_TIMEOUT_S;
+    let mut sim_camera = false;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
@@ -269,6 +279,9 @@ fn parse_sim(args: &[String]) -> Result<SimArgs, XtaskError> {
             "--no-open" => open = false,
             "--lan" => lan = true,
             "--ready-timeout" => ready_timeout_s = required_timeout(&mut iter)?,
+            "--camera" => {
+                sim_camera = crate::camera::parse_choice(&required_value(&mut iter, "--camera")?)?
+            }
             other => {
                 return Err(XtaskError::Usage {
                     message: format!("unknown sim flag {other:?}"),
@@ -285,6 +298,7 @@ fn parse_sim(args: &[String]) -> Result<SimArgs, XtaskError> {
         lan,
         instance,
         ready_timeout_s,
+        sim_camera,
     })
 }
 
@@ -298,6 +312,7 @@ fn parse_fleet(args: &[String]) -> Result<FleetArgs, XtaskError> {
         open: false,
         site: crate::site::DEFAULT_SITE,
         ready_timeout_s: crate::backend::DEFAULT_READY_TIMEOUT_S,
+        sim_camera: false,
     };
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
@@ -313,6 +328,10 @@ fn parse_fleet(args: &[String]) -> Result<FleetArgs, XtaskError> {
             }
             "--site" => fleet.site = crate::site::parse(&required_value(&mut iter, "--site")?)?,
             "--ready-timeout" => fleet.ready_timeout_s = required_timeout(&mut iter)?,
+            "--camera" => {
+                fleet.sim_camera =
+                    crate::camera::parse_choice(&required_value(&mut iter, "--camera")?)?;
+            }
             "--open" => fleet.open = true,
             "--no-open" => fleet.open = false,
             other => {
@@ -394,102 +413,6 @@ fn required_port(
     }
     Ok(port)
 }
-
-/// The `help` text.
-pub const USAGE: &str = "\
-cargo xtask <command> [options]
-
-commands:
-  sim [options]
-      Launch a full SITL session, print its ready URL, supervise it, and
-      tear it down on ctrl-c.
-
-      --fc <name>          FC backend: aviate-gz (alias aviate, default),
-                           px4-gz (alias px4), px4-jsbsim, px4-xplane,
-                           aviate-xplane, ardupilot-sitl (alias
-                           ardupilot), or betaflight-sitl (alias
-                           betaflight); px4-gz takes a vehicle model
-                           as px4-gz:<model>: x500_gimbal (default) or
-                           rc_cessna; px4-jsbsim as px4-jsbsim:<model>:
-                           quad (default) or plane
-      --profile <profile>  physical | simulation (default) | oracle-only
-      --port <port>        host WebTransport port (default: 4433)
-      --viewer-port <port> static viewer port (default: 8080)
-      --instance <n>       simulator instance (default: 0); another
-                           instance shifts the simulator and FC ports and
-                           runs beside instance 0 on other ports
-      --open               open the ready URL (default)
-      --no-open            do not open the ready URL
-      --lan                serve the session to the local network
-      --ready-timeout <s>  how long each simulator and flight-controller
-                           stage may take to come up (default: 180)
-
-  fleet --vehicle <backend>[:<model>] [--vehicle ...] [options]
-      Launch one session per vehicle, each with its own simulator,
-      host, and viewer, spawned on one airfield: a fixed-wing on the
-      runway threshold facing down the runway, every other vehicle on
-      the grass beside it, 40 m apart. Writes
-      target/xtask-fleet/fleet.json and serves the first vehicle's
-      clients/web/session.json; supervises every session and tears all
-      of them down on ctrl-c.
-
-      --vehicle <spec>     a backend with an optional model, as for
-                           sim --fc (repeat once per vehicle)
-      --profile <profile>  physical | simulation (default) | oracle-only
-      --port <port>        first host port (default: 4433); vehicle k
-                           gets port + k
-      --viewer-port <port> first viewer port (default: 8080); vehicle k
-                           gets viewer-port + k
-      --instance-base <n>  first simulator instance (default: 0);
-                           vehicle k gets instance-base + k
-      --site <site>        the airfield: n51 (default, Solberg-Hunterdon,
-                           runway 04), zurich (PX4's default home), or
-                           latitude_deg,longitude_deg,elevation_m,heading_deg
-                           for a threshold, its ground elevation (m
-                           MSL), and the runway's true course
-      --ready-timeout <s>  as for sim, per vehicle (default: 180)
-      --open               open every vehicle's viewer URL
-      --no-open            open none (default)
-
-  reset [options]
-      Reset the running simulation world and restart its FC.
-
-      --fc <name>          FC backend (default: aviate)
-      --instance <n>       simulator instance (default: 0); px4-gz
-                           resets only that instance, and only while an
-                           xtask supervisor runs it
-
-  handshake [options]
-      Produce the Alia X-Plane runtime handshake document and print its
-      path, without launching a session. For harnesses that run the
-      flight controller themselves; X-Plane must be running with the
-      trial plugin loaded.
-
-      --out-dir <dir>      directory to write into (default:
-                           target/xtask-sim)
-
-  affected --base <ref>
-      Classify which CI matrix halves the diff base...HEAD can reach,
-      printing one key=value line per answer with reason lines above.
-      Fails open: an unclassifiable change answers everything=true.
-
-  guards
-      Discover every scripts/check-<name>.sh with its
-      scripts/test-check-<name>.sh self-test, run each pair, and name
-      every failing guard.
-
-  serve-viewer --dir <dir> --port <port> [--bind <addr>]
-      Serve <dir> statically to the browser viewer with caching disabled,
-      on 127.0.0.1 unless --bind says otherwise; port 0 picks a free port
-      and prints it.
-
-  build-jsbsim
-      Clone JSBSim v1.3.3 into $JSBSIM_DIR (default: ~/jsbsim) when it
-      is absent, then build and install its static library into
-      $JSBSIM_DIR/install with CMake. The JSBSim sidecar links it.
-
-  help
-      Print this help text.";
 
 #[cfg(test)]
 mod tests;
