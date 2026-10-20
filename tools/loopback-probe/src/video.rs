@@ -83,6 +83,8 @@ pub struct VideoStats {
     /// The most recently decoded frame; at run end this is also the "last"
     /// frame for `--save-frames`.
     pub last_frame: Option<DecodedFrame>,
+    /// Client-side pose-to-frame latency of world-model camera frames.
+    pub pose_to_frame: crate::pose_frame::PoseToFrame,
     /// A frame decoded roughly at the run's midpoint, for `--save-frames`.
     /// Updated by the caller (which knows the run's time budget), not by this
     /// module, since `VideoStats` has no notion of run duration.
@@ -111,6 +113,7 @@ impl VideoStats {
             chase_first_frame: None,
             gimbal_last_frame: None,
             last_frame: None,
+            pose_to_frame: crate::pose_frame::PoseToFrame::default(),
             middle_frame: None,
         }
     }
@@ -170,6 +173,31 @@ impl VideoStats {
             self.middle_frame = Some(frame.clone());
         }
         self.last_frame = Some(frame);
+    }
+
+    /// Notes a telemetry sample's simulator-truth receipt, so frames rendered
+    /// from it can be timed against it.
+    pub fn note_truth(&mut self, observation: &crate::telemetry::TelemetryObservation) {
+        if let Some(truth) = &observation.sim_truth {
+            self.pose_to_frame.note_truth(
+                truth.provenance.clock,
+                truth.provenance.acquired_at_ns,
+                observation.received_at,
+            );
+        }
+    }
+
+    /// Notes a received frame's capture stamp for pose-to-frame timing.
+    pub fn note_capture(
+        &mut self,
+        source_id: u8,
+        capture: Option<crate::receiver::VideoCapture>,
+        received_at: pilotage_timing::MonoTimestamp,
+    ) {
+        if let Some(capture) = capture {
+            self.pose_to_frame
+                .note_frame(source_id, capture.clock, capture.time_ns, received_at);
+        }
     }
 
     /// Average frames-per-second over `elapsed`, or `None` if no frames
