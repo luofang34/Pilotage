@@ -149,6 +149,29 @@ impl Harness {
         Ok(())
     }
 
+    pub(super) fn select_profile(&mut self, profile: turret_dji::Mini3ControlProfile) {
+        let incarnation = SourceIncarnation::new([42; 16]);
+        let mode = self.adapter.control.mode();
+        let mut contract = profile.capabilities().unwrap();
+        super::super::capability::set_availability(
+            &mut contract,
+            Some(turret_core::UnavailableReason::MissingFeedback),
+        );
+        self.adapter.profile = profile;
+        self.adapter.connection = super::super::connection::Connection::new(
+            Box::new(self.recording.clone()),
+            Box::new(self.recording.clone()),
+            "injected-recording".into(),
+            profile,
+            contract,
+            incarnation,
+            self.adapter.origin,
+        );
+        self.adapter.observations =
+            super::super::observation::Observations::new(incarnation, profile);
+        self.adapter.control = super::super::control::ControlState::new(mode, profile);
+    }
+
     pub(super) fn feed(&mut self, bytes: &[u8]) -> io::Result<()> {
         self.recording.lock()?.input.extend(bytes);
         Ok(())

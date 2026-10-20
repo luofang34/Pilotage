@@ -7,7 +7,7 @@ use crate::{GimbalAngles, SerialError};
 /// The evidence used to permit bounded pitch commands.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum DjiControlMode {
-    /// Require fresh continuous gimbal reports within -5 through 0 degrees.
+    /// Require fresh continuous gimbal reports within -90 through 0 degrees.
     #[default]
     Observed,
     /// Use an initial horizontal target confirmed by the operator for this start.

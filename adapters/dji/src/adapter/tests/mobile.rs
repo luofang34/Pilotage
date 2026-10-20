@@ -83,7 +83,7 @@ fn mobile_control_uses_the_same_admission_and_actual_write_evidence() {
         (4, 0x14)
     );
     let payload = commands[1].payload();
-    assert!((-50..=0).contains(&i16::from_le_bytes([payload[4], payload[5]])));
+    assert_eq!(i16::from_le_bytes([payload[4], payload[5]]), -99);
 }
 
 #[test]
