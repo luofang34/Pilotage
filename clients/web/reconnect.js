@@ -10,6 +10,9 @@
 // `schedule`, and `cancel`, so its whole lifecycle runs under fake time and a
 // fake WebTransport in tests.
 
+import { classifyConnectFailure } from "./session-admission.js";
+export { classifyConnectFailure };
+
 /// The backoff before the next reconnect attempt: exponential in `attempts`,
 /// capped at `maxMs`, with symmetric bounded jitter so a fleet of viewers that
 /// dropped together does not resynchronize into a thundering herd. `attempts`
@@ -22,21 +25,6 @@ export function reconnectDelayMs(attempts, { baseMs, maxMs, jitterRatio = 0.25 }
   const spread = exponential * jitterRatio;
   const offset = (jitter * 2 - 1) * spread; // [0,1) -> [-spread, +spread)
   return Math.max(0, Math.round(exponential + offset));
-}
-
-/// Classifies a connect failure as retryable or not. A construction failure
-/// (a bad URL or certificate hash) and an explicit host rejection
-/// (authentication, protocol, or lease policy) cannot succeed on retry — they
-/// need the user to act — so they stop auto-recovery. Anything else is treated
-/// as a transient transport drop and retried. `failure.phase` is a structured
-/// tag from the connect flow, never a matched error string.
-export function classifyConnectFailure(failure) {
-  if (!failure) return { retryable: true, kind: "unknown" };
-  if (failure.phase === "construct") return { retryable: false, kind: "config" };
-  if (failure.phase === "rejected") {
-    return { retryable: false, kind: failure.kind || "rejected" };
-  }
-  return { retryable: true, kind: failure.kind || "transport" };
 }
 
 /// Creates a reconnect controller.
