@@ -33,11 +33,18 @@ pub(crate) struct FfiCrate {
 }
 
 /// Every crate that binds a foreign library.
-pub(crate) const FFI_CRATES: &[FfiCrate] = &[FfiCrate {
-    package: "pilotage-jsbsim-sidecar",
-    dir: "sim/jsbsim-sidecar",
-    unsafe_module: "src/engine/ffi.rs",
-}];
+pub(crate) const FFI_CRATES: &[FfiCrate] = &[
+    FfiCrate {
+        package: "pilotage-jsbsim-sidecar",
+        dir: "sim/jsbsim-sidecar",
+        unsafe_module: "src/engine/ffi.rs",
+    },
+    FfiCrate {
+        package: "pilotage-dji-usb",
+        dir: "adapters/dji-usb",
+        unsafe_module: "src/ffi.rs",
+    },
+];
 
 /// The panic-capable operations no production target may use.
 const PANIC_LINTS: [&str; 3] = [
@@ -81,7 +88,9 @@ pub(crate) fn clippy_invocations(ffi: &[FfiCrate]) -> Vec<Vec<String>> {
         }
         args
     };
-    let targets = ["--lib", "--bins", "--examples"].map(str::to_owned);
+    // Each workspace package is a primary target in one group. Dependency
+    // compilation must not apply another group's unsafe-code lint level.
+    let targets = ["--lib", "--bins", "--examples", "--no-deps"].map(str::to_owned);
     let mut workspace = vec!["clippy".to_owned(), "--workspace".to_owned()];
     workspace.extend(targets.clone());
     for krate in ffi {

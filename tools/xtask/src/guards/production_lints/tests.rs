@@ -1,9 +1,9 @@
 //! The production lint guard: the clippy plan, the unsafe-module scan,
 //! and a real clippy run that refuses a local exemption.
 
-#![allow(clippy::unwrap_used, clippy::panic)]
-
 use super::{FfiCrate, clippy_invocations, findings_in};
+
+mod ffi;
 
 const BINDING: FfiCrate = FfiCrate {
     package: "binding",
@@ -18,7 +18,7 @@ fn without_ffi_crates_the_workspace_forbids_unsafe_code() {
     let args = invocations[0].join(" ");
     assert_eq!(
         args,
-        "clippy --workspace --lib --bins --examples -- -D warnings -F unsafe_code \
+        "clippy --workspace --lib --bins --examples --no-deps -- -D warnings -F unsafe_code \
          -F clippy::unwrap_used -F clippy::expect_used -F clippy::panic"
     );
 }
@@ -28,10 +28,12 @@ fn an_ffi_crate_is_linted_apart_with_unsafe_code_denied() {
     let invocations = clippy_invocations(&[BINDING]);
     assert_eq!(invocations.len(), 2);
     let workspace = invocations[0].join(" ");
-    assert!(workspace.contains("--workspace --lib --bins --examples --exclude binding --"));
+    assert!(
+        workspace.contains("--workspace --lib --bins --examples --no-deps --exclude binding --")
+    );
     assert!(workspace.contains("-F unsafe_code"));
     let binding = invocations[1].join(" ");
-    assert!(binding.starts_with("clippy -p binding --lib --bins --examples --"));
+    assert!(binding.starts_with("clippy -p binding --lib --bins --examples --no-deps --"));
     assert!(binding.contains("-D unsafe_code"));
     for lint in [
         "clippy::unwrap_used",
