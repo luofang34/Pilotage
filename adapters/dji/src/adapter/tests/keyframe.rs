@@ -21,6 +21,7 @@ fn commands(harness: &Harness) -> Vec<crate::DumlFrame> {
 #[test]
 fn requests_coalesce_and_reserve_three_fresh_sequences_with_write_spacing() {
     let mut h = Harness::mobile();
+    h.feed_model(87, 0).unwrap();
     let video = h.adapter.subscribe_encoded_video().unwrap();
     assert!(h.adapter.capabilities().execution.render_capable);
     video.keyframe_request.store(true, Ordering::Release);
@@ -28,7 +29,7 @@ fn requests_coalesce_and_reserve_three_fresh_sequences_with_write_spacing() {
     assert_eq!(commands(&h).len(), 2);
     assert_eq!(
         h.deadlines().unwrap()[1].duration_since(h.adapter.origin),
-        std::time::Duration::from_millis(500)
+        std::time::Duration::from_millis(300)
     );
     h.step(49);
     assert_eq!(commands(&h).len(), 2);
@@ -45,10 +46,11 @@ fn requests_coalesce_and_reserve_three_fresh_sequences_with_write_spacing() {
         vec![2, 3, 4]
     );
     assert_eq!(h.recorded("tx").unwrap(), h.written().unwrap());
-    video.keyframe_request.store(true, Ordering::Release);
-    video.keyframe_request.store(true, Ordering::Release);
+    h.feed_model(87, 1).unwrap();
     h.step(999);
     assert_eq!(commands(&h).len(), 4);
+    video.keyframe_request.store(true, Ordering::Release);
+    video.keyframe_request.store(true, Ordering::Release);
     h.step(1000);
     assert_eq!(commands(&h).last().unwrap().sequence(), 5);
     h.step(1050);
@@ -60,6 +62,7 @@ fn requests_coalesce_and_reserve_three_fresh_sequences_with_write_spacing() {
 #[test]
 fn partial_keyframe_expires_without_replaying_or_interleaving_pitch() {
     let mut h = Harness::mobile();
+    h.feed_model(87, 0).unwrap();
     for (index, pose) in observed_poses().iter().enumerate() {
         h.feed(&crate::logiclink::encode_control(&packets(pose)[0]))
             .unwrap();
@@ -86,13 +89,14 @@ fn partial_keyframe_expires_without_replaying_or_interleaving_pitch() {
 #[test]
 fn write_completion_time_controls_spacing() {
     let mut h = Harness::mobile();
+    h.feed_model(87, 0).unwrap();
     h.step(0);
     let video = h.adapter.subscribe_encoded_video().unwrap();
     video.keyframe_request.store(true, Ordering::Release);
     let mut calls = 0_usize;
     h.adapter.step_with_time_blocking(|| {
         calls = calls.wrapping_add(1);
-        std::time::Duration::from_millis(if calls < 4 { 10 } else { 70 })
+        std::time::Duration::from_millis(if calls < 5 { 10 } else { 70 })
     });
     assert_eq!(commands(&h).len(), 2);
     h.step(119);
@@ -106,13 +110,14 @@ fn write_completion_time_controls_spacing() {
 #[test]
 fn write_completed_after_deadline_keeps_evidence_and_locks_the_connection() {
     let mut h = Harness::mobile();
+    h.feed_model(87, 0).unwrap();
     h.step(0);
     let video = h.adapter.subscribe_encoded_video().unwrap();
     video.keyframe_request.store(true, Ordering::Release);
     let mut calls = 0_usize;
     h.adapter.step_with_time_blocking(|| {
         calls = calls.wrapping_add(1);
-        std::time::Duration::from_millis(if calls < 4 { 10 } else { 510 })
+        std::time::Duration::from_millis(if calls < 5 { 10 } else { 510 })
     });
     assert!(h.adapter.status_cached().fault.is_some());
     let written = h.written().unwrap();

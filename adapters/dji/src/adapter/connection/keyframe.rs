@@ -67,11 +67,18 @@ impl Connection {
         &mut self,
         sequence: &mut u16,
         now: Duration,
+        model_until: Option<Duration>,
         clock: &mut impl FnMut() -> Duration,
     ) {
         if self.fault.is_some() || self.input.framing() != Framing::LogicLink {
             return;
         }
+        let Some(model_until) = model_until.filter(|until| now < *until) else {
+            if self.keyframes.active.is_some() {
+                self.invalidate_model();
+            }
+            return;
+        };
         if self.keyframes.active.is_none() {
             if self.pending.is_some()
                 || now < self.keyframes.next_request
@@ -88,7 +95,7 @@ impl Connection {
                 self.keyframes.session,
                 *sequence,
                 tick(now),
-                tick(now.saturating_add(REQUEST_BUDGET)),
+                tick(until),
             ) {
                 Ok(active) => {
                     self.keyframes.active = Some(InFlight {
@@ -104,10 +111,19 @@ impl Connection {
                 }
             }
         }
-        self.write_keyframe_blocking(clock);
+        self.write_keyframe_blocking(model_until, clock);
     }
 
-    fn write_keyframe_blocking(&mut self, clock: &mut impl FnMut() -> Duration) {
+    fn write_keyframe_blocking(
+        &mut self,
+        model_until: Duration,
+        clock: &mut impl FnMut() -> Duration,
+    ) {
+        let mut completed = clock();
+        if completed >= model_until {
+            self.invalidate_model();
+            return;
+        }
         let Some(active) = &mut self.keyframes.active else {
             return;
         };
@@ -115,12 +131,17 @@ impl Connection {
             return;
         };
         let mut written = Vec::new();
-        let mut completed = clock();
+        let send_before = self
+            .origin
+            .checked_add(model_until)
+            .map_or(active.send_before, |deadline| {
+                active.send_before.min(deadline)
+            });
         let result =
             active
                 .request
                 .write_available(self.keyframes.session, tick(completed), |bytes| {
-                    let count = match transport.write(bytes, active.send_before) {
+                    let count = match transport.write(bytes, send_before) {
                         Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
                         Ok(count) => count,
                         Err(error) if error.kind() == io::ErrorKind::WouldBlock => 0,
@@ -138,6 +159,12 @@ impl Connection {
         let state = active.request.state();
         self.written_bytes = self.written_bytes.wrapping_add(written.len() as u64);
         if !written.is_empty() && !self.record_blocking(completed, "tx", &written) {
+            return;
+        }
+        if completed >= model_until {
+            self.fail(DjiFault::Keyframe(
+                turret_dji::KeyframeAbort::DeadlineExpired,
+            ));
             return;
         }
         match result {

@@ -158,8 +158,7 @@ impl DjiAdapter {
 
     fn step_with_time_blocking(&mut self, mut clock: impl FnMut() -> Duration) {
         let io_started = clock();
-        self.connection
-            .read_available_blocking(io_started, &mut self.observations);
+        self.read_available_blocking(io_started);
         // Recording can take time. Recheck age at the command write boundary.
         let now = clock();
         let ready = self.movement_ready(now);
@@ -170,8 +169,20 @@ impl DjiAdapter {
         self.connection
             .write_pending_blocking(now, ready, &mut clock);
         let written = self.connection.take_written_pitch();
-        self.connection
-            .drive_keyframe_blocking(&mut self.control.sequence, now, &mut clock);
+        let keyframe_now = clock();
+        let model_until = if !self.connection.input_clear() {
+            None
+        } else if self.control.mode() == DjiControlMode::Observed {
+            self.observations.model_deadline(keyframe_now)
+        } else {
+            Some(Duration::MAX)
+        };
+        self.connection.drive_keyframe_blocking(
+            &mut self.control.sequence,
+            keyframe_now,
+            model_until,
+            &mut clock,
+        );
         let completed_at = clock();
         if let Some(bench) = &mut self.control.bench {
             bench.exclude_io(io_started, completed_at);
@@ -194,6 +205,21 @@ impl DjiAdapter {
         }
         self.record_observed_write(written, had_pending);
         self.refresh_contract(completed_at);
+    }
+
+    fn read_available_blocking(&mut self, now: Duration) {
+        let revision = self.observations.model_revision();
+        self.observations.expire_model(now);
+        self.connection
+            .read_available_blocking(now, &mut self.observations);
+        // A new report cannot restore commands queued under an expired or
+        // replaced model, including loss and recovery in one read batch.
+        if self.control.mode() == DjiControlMode::Observed
+            && revision != self.observations.model_revision()
+        {
+            self.control.cancel_observed();
+            self.connection.invalidate_model();
+        }
     }
 
     fn record_observed_write(

@@ -116,6 +116,11 @@ impl DjiAdapter {
             self.connection.cancel_movement();
             return Err(RejectReason::MeasurementUnavailable);
         }
+        let deadline = deadline.min(
+            self.observations
+                .model_deadline(now)
+                .ok_or(RejectReason::MeasurementUnavailable)?,
+        );
         let Some(pose) = self.observations.latest else {
             return Err(RejectReason::MeasurementUnavailable);
         };
@@ -248,8 +253,7 @@ impl DjiAdapter {
             }
         }
         // A cached pose cannot authorize a stop or clear a safety latch.
-        self.connection
-            .read_available_blocking(clock(), &mut self.observations);
+        self.read_available_blocking(clock());
         let now = clock();
         if !self.ready(now) {
             return Err(rejected("fresh continuous gimbal observations are absent"));
@@ -272,7 +276,11 @@ impl DjiAdapter {
             pitch,
             self.control.sequence,
             now,
-            now.saturating_add(turret_dji::MAX_INPUT_INTERVAL),
+            now.saturating_add(turret_dji::MAX_INPUT_INTERVAL).min(
+                self.observations
+                    .model_deadline(now)
+                    .ok_or_else(|| rejected("fresh Mini 3 identification is absent"))?,
+            ),
         ) {
             return Err(rejected("a DJI packet is still pending"));
         }

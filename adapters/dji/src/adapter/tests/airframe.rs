@@ -198,7 +198,11 @@ fn stale_or_future_body_observations_are_withheld() -> TestResult {
         harness.feed(&later)?;
         harness.step(250);
         assert!(harness.telemetry(301).samples.is_empty());
-        harness.feed(&reports[1])?;
+        let mut fresh = reports[1].clone();
+        let sequence = packets(&fresh)[0].sequence().wrapping_add(1);
+        fresh[6..8].copy_from_slice(&sequence.to_le_bytes());
+        seal_duml(&mut fresh);
+        harness.feed(&fresh)?;
         harness.step(310);
         assert!(harness.telemetry(309).samples.is_empty());
         let stamp = harness.telemetry(310).samples[0]

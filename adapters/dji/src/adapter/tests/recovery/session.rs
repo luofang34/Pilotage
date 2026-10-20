@@ -37,6 +37,7 @@ impl RecoverySession {
             session: SessionId::new(0),
             window: 0,
         };
+        test.io.feed_model(87, 0)?;
         for (index, pose) in observed_poses().into_iter().enumerate() {
             let at = index as u64 * 10;
             test.io.feed(&pose)?;
@@ -180,6 +181,7 @@ impl RecoverySession {
     }
 
     pub(super) fn pose(&mut self, offset: u16, at: u64) -> Result<()> {
+        self.io.feed_model(87, offset)?;
         let mut pose = observed_poses().remove(2);
         let sequence = u16::from_le_bytes([pose[6], pose[7]]).wrapping_add(offset);
         pose[6..8].copy_from_slice(&sequence.to_le_bytes());
