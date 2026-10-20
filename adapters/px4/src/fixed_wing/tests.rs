@@ -17,10 +17,15 @@ use pilotage_protocol::{ReferenceFrame, VelocityIntent};
 use super::params::PINNED;
 use super::sticks::{self, max_turn_rate_rps};
 use super::{ArmRefusal, FixedWingUplink, HANDOVER_HEIGHT_M, IntentDisposition};
+use crate::config::Px4Profile;
+use crate::pinning::ParamRefusal;
+
+mod physical;
 
 const SYSTEM: u8 = 7;
 const MANUAL_CONTROL: u32 = 69;
 const PARAM_SET: u32 = 23;
+const PARAM_REQUEST_READ: u32 = 20;
 const COMMAND_LONG: u32 = 76;
 /// MAV_CMD_USER_1: a command the uplink never sends, used as an in-order
 /// end marker on the uplink's own socket.
@@ -32,6 +37,7 @@ const READ_TIMEOUT: Duration = Duration::from_secs(2);
 enum Sent {
     Sticks(ManualControlSticks),
     ParamSet(String),
+    ParamRead(String),
     Mode { main: f32, sub: f32 },
     Arm(bool),
     Probe,
@@ -70,6 +76,11 @@ fn classify(frame: &[u8]) -> Sent {
                 .trim_end_matches('\0')
                 .to_owned(),
         ),
+        PARAM_REQUEST_READ => Sent::ParamRead(
+            String::from_utf8_lossy(&payload[4..20])
+                .trim_end_matches('\0')
+                .to_owned(),
+        ),
         COMMAND_LONG => match u16::from_le_bytes([payload[28], payload[29]]) {
             176 => Sent::Mode {
                 main: f32_at(payload, 4),
@@ -93,10 +104,14 @@ struct Harness {
 
 impl Harness {
     fn new() -> Self {
+        Self::with_profile(Px4Profile::Simulation)
+    }
+
+    fn with_profile(profile: Px4Profile) -> Self {
         let fc = UdpSocket::bind("127.0.0.1:0").expect("bind fake FC");
         fc.set_read_timeout(Some(READ_TIMEOUT)).expect("timeout");
         let addr = fc.local_addr().expect("addr");
-        let mut uplink = FixedWingUplink::new(addr, SYSTEM, 1).expect("uplink");
+        let mut uplink = FixedWingUplink::new(profile, addr, SYSTEM, 1).expect("uplink");
         uplink.use_manual_clock();
         Self {
             uplink,
@@ -222,10 +237,13 @@ fn every_pinned_parameter_is_written_and_arming_waits_for_their_echo() {
         .collect();
     let pinned: Vec<String> = PINNED.iter().map(|(name, _)| (*name).to_owned()).collect();
     assert_eq!(written, pinned);
-    assert_eq!(
+    assert!(matches!(
         harness.uplink.begin_arm(0.0),
-        Err(ArmRefusal::ParametersUnconfirmed)
-    );
+        Err(ArmRefusal::Parameter(ParamRefusal::Unconfirmed {
+            name: "COM_RC_IN_MODE",
+            ..
+        }))
+    ));
 
     // Every echo but one matches; the odd one reports another value (a
     // second writer, or a refused write), which does not pin.
@@ -243,10 +261,13 @@ fn every_pinned_parameter_is_written_and_arming_waits_for_their_echo() {
     ));
     let frames: Vec<&[u8]> = echoes.iter().map(|echo| echo.as_slice()).collect();
     harness.deliver(&frames, Some(0.0));
-    assert_eq!(
+    assert!(matches!(
         harness.uplink.begin_arm(0.0),
-        Err(ArmRefusal::ParametersUnconfirmed)
-    );
+        Err(ArmRefusal::Parameter(ParamRefusal::Unconfirmed {
+            name: "COM_RC_IN_MODE",
+            ..
+        }))
+    ));
 
     harness.tick(Duration::from_secs(1), Some(0.0));
     let resent = harness.sent();

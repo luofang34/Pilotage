@@ -16,6 +16,7 @@ use tokio::sync::{mpsc, watch};
 
 use super::{ConfigIssue, LinkCommand, LinkReport, Requests, run};
 use crate::adapter::ENVELOPE;
+use crate::config::BetaflightProfile;
 use crate::rc::{ARM_HIGH_US, required_mode_ranges};
 
 /// What the fake flight controller answers with.
@@ -110,13 +111,17 @@ struct Rig {
 }
 
 async fn rig(fc: FakeFc) -> Rig {
+    rig_with(fc, BetaflightProfile::Simulation).await
+}
+
+async fn rig_with(fc: FakeFc, profile: BetaflightProfile) -> Rig {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let endpoint = listener.local_addr().expect("addr");
     let (seen_tx, seen) = mpsc::unbounded_channel();
     tokio::spawn(serve(listener, fc, seen_tx));
     let (commands, command_rx) = watch::channel(LinkCommand::default());
     let (report_tx, reports) = watch::channel(LinkReport::default());
-    tokio::spawn(run(endpoint, ENVELOPE, command_rx, report_tx));
+    tokio::spawn(run(endpoint, profile, ENVELOPE, command_rx, report_tx));
     Rig {
         seen,
         commands,
@@ -167,6 +172,41 @@ fn first_connect_writes_the_missing_aux_ranges_and_saves_them() {
         next(&mut rig, command::MSP_EEPROM_WRITE).await;
         next(&mut rig, command::MSP_MULTIPLE_MSP).await;
         assert!(rig.reports.borrow().issue.is_none());
+    });
+}
+
+#[test]
+fn a_physical_flight_controller_is_never_written_and_a_differing_range_blocks_arming() {
+    runtime().block_on(async {
+        let mut rig = rig_with(GOOD, BetaflightProfile::Physical).await;
+        let mut before_poll = Vec::new();
+        loop {
+            let frame = tokio::time::timeout(Duration::from_secs(5), rig.seen.recv())
+                .await
+                .expect("request arrived")
+                .expect("fake fc alive");
+            if frame.command == command::MSP_MULTIPLE_MSP {
+                break;
+            }
+            before_poll.push(frame.command);
+        }
+        assert!(
+            !before_poll.contains(&command::MSP_SET_MODE_RANGE)
+                && !before_poll.contains(&command::MSP_EEPROM_WRITE),
+            "a physical flight controller got a write: {before_poll:?}"
+        );
+        let issue = rig.reports.borrow().issue;
+        let Some(ConfigIssue::ModeRange { slot, wanted, .. }) = issue else {
+            panic!("the differing range blocks flight: {issue:?}");
+        };
+        assert_eq!(slot, 0);
+        assert_eq!(Some(&wanted), required_mode_ranges().first());
+        assert!(
+            issue
+                .map(|issue| issue.to_string())
+                .is_some_and(|detail| detail.contains("aux mode range 0")),
+            "{issue:?}"
+        );
     });
 }
 
