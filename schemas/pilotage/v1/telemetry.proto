@@ -24,6 +24,81 @@ message Velocity2d {
   float angular_rad_s = 3;
 }
 
+// The monotonic clock domain used by a MeasurementStamp. Values in different
+// domains are not directly comparable without an explicit clock correlation.
+enum MeasurementClock {
+  MEASUREMENT_CLOCK_UNSPECIFIED = 0;
+  MEASUREMENT_CLOCK_VEHICLE_BOOT = 1;
+  MEASUREMENT_CLOCK_SIMULATION = 2;
+  // Monotonic time on the ground host that received the observation, for
+  // reports whose wire carries no source timestamp (an FC heartbeat).
+  // Receive time is not acquisition time: staleness reasoning only, never
+  // cross-domain correlation without an explicit mapping.
+  MEASUREMENT_CLOCK_HOST_MONOTONIC = 3;
+}
+
+// Explicit role of the source behind a measurement. Role travels in
+// provenance — never in id ranges — so a configured source id may collide
+// across roles without ambiguity; consumers gate on the role itself.
+enum SourceRole {
+  SOURCE_ROLE_UNSPECIFIED = 0;
+  // FC estimator output: the only role eligible for primary panels and
+  // operational command construction.
+  SOURCE_ROLE_OPERATIONAL_ESTIMATE = 1;
+  // Simulator ground truth: logging, assertions, and comparison in
+  // simulation profiles only.
+  SOURCE_ROLE_SIMULATION_TRUTH = 2;
+  // FC-owned vehicle state (arm/mode/failsafe) reports.
+  SOURCE_ROLE_FC_STATE = 3;
+  // Video capture identity for camera frames.
+  SOURCE_ROLE_VIDEO_CAPTURE = 4;
+  // Payload-device orientation/state (gimbal attitude) relayed over the
+  // FC link: not a vehicle estimate and never eligible for control
+  // validation. Carries the device's own boot clock, not host time.
+  SOURCE_ROLE_PAYLOAD_DEVICE = 5;
+  // The vehicle's navigation/guidance component's plan-relative output:
+  // display context only. Never an input to control validation, and never
+  // a fallback for a missing estimate.
+  SOURCE_ROLE_NAVIGATION_SOLUTION = 6;
+}
+
+// Integrity classification of the path that delivered an observation. The
+// end-to-end distinction that matters is authenticated source data versus
+// merely checksummed or unprotected observations.
+enum SourceIntegrity {
+  SOURCE_INTEGRITY_UNSPECIFIED = 0;
+  // Cryptographically authenticated end-to-end source data.
+  SOURCE_INTEGRITY_AUTHENTICATED = 1;
+  // Checksummed (CRC-style) but unauthenticated transport.
+  SOURCE_INTEGRITY_CHECKSUMMED_ONLY = 2;
+  // No integrity protection beyond the transport's own boundaries (a local
+  // shared-memory mapping relies on host process isolation).
+  SOURCE_INTEGRITY_UNPROTECTED = 3;
+}
+
+// Identity and acquisition stamp for one independently advancing measurement
+// group. Re-publishing a cached group preserves every field unchanged.
+message MeasurementStamp {
+  // Adapter-defined source identity, stable within one vehicle.
+  uint64 source_id = 1;
+  // Source boot/attachment generation. A reset changes this value.
+  uint32 source_epoch = 2;
+  // Wrapping group sequence, advanced only for a new measurement.
+  uint32 sequence = 3;
+  // Monotonic acquisition time in the declared clock domain.
+  uint64 acquired_at_ns = 4;
+  MeasurementClock clock = 5;
+  // Opaque 128-bit attachment/boot identity. Receivers compare this for
+  // equality and accept changes only at an authorized lifecycle boundary.
+  bytes source_incarnation = 6;
+  // Explicit source role; consumers gate on this, never on id ranges.
+  SourceRole role = 7;
+  // Integrity classification of the delivering path; carried by every
+  // role so authenticated, checksummed, and unprotected inputs stay
+  // distinguishable end to end.
+  SourceIntegrity integrity = 8;
+}
+
 // Raw avionics state estimate for flight vehicles (ADR-0018): attitude
 // quaternion (body FRD → world NED), body rates, NED position/velocity,
 // and the adapter's effective latched validity/quality authorization. Numeric
@@ -349,6 +424,39 @@ message NavGuidanceState {
   // 1 degraded, 2 unusable. Consumers remove the guidance display on
   // unusable rather than displaying it with a caution.
   uint32 solution_quality = 10;
+}
+
+message PayloadAxisObservation {
+  PayloadObservationSource source = 5;
+  MonoTimestamp sampled_at = 6;
+  MonoTimestamp received_at = 7;
+  uint64 connection_epoch = 8;
+  optional float angle_rad = 1;
+  optional float rate_rad_s = 2;
+  MeasurementStamp stamp = 3;
+  PayloadReferenceFrame frame = 4;
+}
+
+message PayloadZoomObservation {
+  PayloadObservationSource source = 4;
+  MonoTimestamp sampled_at = 5;
+  MonoTimestamp received_at = 6;
+  uint64 connection_epoch = 7;
+  ZoomUnit unit = 1;
+  double value = 2;
+  MeasurementStamp stamp = 3;
+}
+
+message PayloadState {
+  bytes connection_incarnation = 8;
+  uint64 connection_epoch = 9;
+  string endpoint_id = 1;
+  uint64 capability_revision = 2;
+  PayloadAxisObservation pitch = 3;
+  PayloadAxisObservation roll = 4;
+  PayloadAxisObservation yaw = 5;
+  PayloadZoomObservation zoom = 6;
+  PayloadCommandProgress command = 7;
 }
 
 // A single best-effort telemetry sample for one vehicle.
