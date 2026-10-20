@@ -26,6 +26,7 @@ struct NativeCandidate {
     reserved: u32,
 }
 
+// SAFETY: These declarations match native/logiclink.h and the linked native test entry points.
 unsafe extern "C" {
     fn dji_usb_discover(
         output: *mut NativeCandidate,
@@ -189,6 +190,30 @@ impl From<NativeError> for UsbError {
             status: error.status,
         }
     }
+}
+
+#[cfg(test)]
+fn profile_test() -> i32 {
+    // SAFETY: The native test only reads fixed in-process fixture arrays.
+    unsafe { dji_usb_profile_test() }
+}
+
+#[cfg(test)]
+fn lifecycle_test() -> i32 {
+    // SAFETY: The native test uses in-process fake vtables and byte arrays.
+    unsafe { dji_usb_lifecycle_test() }
+}
+
+#[cfg(test)]
+fn deadline_test() -> i32 {
+    // SAFETY: The native test uses an in-process fake write vtable and byte array.
+    unsafe { dji_usb_deadline_test() }
+}
+
+#[cfg(test)]
+fn discovery_test() -> i32 {
+    // SAFETY: The native test only evaluates in-process property dictionaries.
+    unsafe { dji_usb_discovery_test() }
 }
 
 #[cfg(test)]

@@ -195,7 +195,7 @@ impl Connection {
                     return;
                 }
                 Ok(count) => {
-                    read += count;
+                    read = read.wrapping_add(count);
                     self.received_bytes = self.received_bytes.wrapping_add(count as u64);
                     if !self.record_blocking(now, "rx", &buffer[..count]) {
                         return;
@@ -316,7 +316,7 @@ impl Connection {
             return;
         };
         let actual = pending.bytes[pending.offset..pending.offset + count].to_vec();
-        pending.offset += count;
+        pending.offset = pending.offset.wrapping_add(count);
         let complete = pending.offset == pending.bytes.len();
         let pitch = pending.pitch;
         let identity = pending.identity;

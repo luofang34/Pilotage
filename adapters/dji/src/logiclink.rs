@@ -105,7 +105,7 @@ impl LogicLinkParser {
                 let count = (HEADER_BYTES - self.header_length).min(bytes.len());
                 self.header[self.header_length..self.header_length + count]
                     .copy_from_slice(&bytes[..count]);
-                self.header_length += count;
+                self.header_length = self.header_length.wrapping_add(count);
                 bytes = &bytes[count..];
                 if self.header_length != HEADER_BYTES {
                     break;

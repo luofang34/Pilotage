@@ -111,7 +111,7 @@ impl MacUsb {
         self.status.check()?;
         let count = output.len().min(self.pending.len() - self.offset);
         output[..count].copy_from_slice(&self.pending[self.offset..self.offset + count]);
-        self.offset += count;
+        self.offset = self.offset.wrapping_add(count);
         Ok(count)
     }
 
