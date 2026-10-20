@@ -22,8 +22,8 @@ public final class SituationMapView: UIView, @preconcurrency MLNMapViewDelegate 
     /// the map fights them and then snaps back. Only a gesture counts: a move the client
     /// made itself is the following working.
     public var onMovedByReader: (() -> Void)?
-    /// Maps portable base-layer identities to base-style layer identities.
-    public var baseLayerIdentifiers: [String: String] = [:]
+    /// Maps each portable base-layer identity to the base-style layers it shows or hides.
+    public var baseLayerIdentifiers: [String: [String]] = [:]
 
     private let mapView: MLNMapView
     private let overlay = SituationOverlay()
@@ -270,8 +270,9 @@ public final class SituationMapView: UIView, @preconcurrency MLNMapViewDelegate 
         to style: MLNStyle
     ) {
         for layer in layers {
-            guard let identifier = baseLayerIdentifiers[layer.id] else { continue }
-            style.layer(withIdentifier: identifier)?.isVisible = layer.enabled
+            for identifier in baseLayerIdentifiers[layer.id] ?? [] {
+                style.layer(withIdentifier: identifier)?.isVisible = layer.enabled
+            }
         }
     }
 

@@ -124,7 +124,12 @@ struct SituationMap: UIViewRepresentable {
         view.initialZoomLevel = 9
         view.minimumZoomLevel = 0
         view.maximumZoomLevel = SituationStyleResource.maximumZoomLevel
-        view.baseLayerIdentifiers = ["terrain-base": "pilotage-terrain-hillshade"]
+        // The archive is drawn by more than one source, one per zoom range, so the
+        // reader's terrain switch has to reach the hillshade of each or part of the
+        // map keeps its shading after the reader turned it off.
+        view.baseLayerIdentifiers = [
+            "terrain-base": ["pilotage-terrain-hillshade", "pilotage-terrain-hillshade-detail"],
+        ]
         view.onFeatureTapped = onFeatureTapped
         view.onCameraChanged = onCameraChanged
         view.onStyleLoaded = { onAttributions($0.sourceAttributions) }
