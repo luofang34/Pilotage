@@ -24,7 +24,7 @@ impl LandedState {
     #[must_use]
     pub const fn to_wire(self) -> wire::LandedState {
         match self {
-            Self::Unknown => wire::LandedState::Unknown,
+            Self::Unknown => wire::LandedState::Unspecified,
             Self::OnGround => wire::LandedState::OnGround,
             Self::InAir => wire::LandedState::InAir,
             Self::TakingOff => wire::LandedState::TakingOff,
@@ -40,7 +40,7 @@ impl LandedState {
             Ok(wire::LandedState::InAir) => Self::InAir,
             Ok(wire::LandedState::TakingOff) => Self::TakingOff,
             Ok(wire::LandedState::Landing) => Self::Landing,
-            Ok(wire::LandedState::Unknown) | Err(_) => Self::Unknown,
+            Ok(wire::LandedState::Unspecified) | Err(_) => Self::Unknown,
         }
     }
 }

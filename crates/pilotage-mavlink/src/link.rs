@@ -23,7 +23,9 @@ mod gimbal;
 pub use gimbal::{GimbalManagerReport, GimbalReports};
 pub mod measurement;
 mod outbound;
-pub use fence::{CameraWriteRequirement, ManagerWriteRequirement, SendFence, TakeoffWriteRequirement};
+pub use fence::{
+    CameraWriteRequirement, ManagerWriteRequirement, SendFence, TakeoffWriteRequirement,
+};
 mod task;
 mod updates;
 pub use apply::apply_messages_at;

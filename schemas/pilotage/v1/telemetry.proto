@@ -316,7 +316,7 @@ message FcState {
 
 // A flight controller's report, not a command result or an altitude inference.
 enum LandedState {
-  LANDED_STATE_UNKNOWN = 0;
+  LANDED_STATE_UNSPECIFIED = 0;
   LANDED_STATE_ON_GROUND = 1;
   LANDED_STATE_IN_AIR = 2;
   LANDED_STATE_TAKING_OFF = 3;
