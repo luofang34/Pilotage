@@ -9,8 +9,8 @@ use pilotage_protocol::VehicleClass;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Px4Profile {
     /// PX4 SITL with the bounded simulator reset heuristic enabled. The
-    /// adapter writes the parameters its control model needs
-    /// ([`crate::pinning`]).
+    /// adapter writes the parameters its control model needs (the
+    /// `pinning` module).
     Simulation,
     /// A real vehicle: the conservative reset policy, and the adapter
     /// never writes a parameter. It reads the ones its control model
