@@ -1,6 +1,8 @@
 //! Revocation serializes with the final nonblocking transport write.
 use std::sync::{Arc, Mutex};
 
+use pilotage_adapter_api::SourceIncarnation;
+
 mod flight;
 use flight::FlightGuard;
 pub use flight::TakeoffWriteRequirement;
@@ -17,9 +19,24 @@ pub struct SendFence {
 #[derive(Debug, Clone)]
 struct CameraGuard {
     state: Arc<Mutex<super::LinkState>>,
-    key: (u8, u8),
-    epoch: u64,
-    revision: u64,
+    requirement: CameraWriteRequirement,
+}
+
+/// Camera discovery and source identity captured when a command is admitted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CameraWriteRequirement {
+    /// Camera component and device identifiers.
+    pub key: (u8, u8),
+    /// Camera discovery epoch.
+    pub epoch: u64,
+    /// Revision of the camera operations and feedback support.
+    pub revision: u64,
+    /// Selected link source identifier.
+    pub source_id: u64,
+    /// Selected link lifetime.
+    pub source_incarnation: SourceIncarnation,
+    /// Selected source acquisition epoch.
+    pub source_epoch: u32,
 }
 
 impl CameraGuard {
@@ -28,7 +45,14 @@ impl CameraGuard {
             .state
             .lock()
             .map_err(|_| std::io::Error::other("camera state lock poisoned"))?;
-        let Some(report) = state.fc_reports.cameras.get(&self.key) else {
+        let expected = self.requirement;
+        if state.source_id != expected.source_id
+            || state.source_incarnation != expected.source_incarnation
+            || state.source_epoch != expected.source_epoch
+        {
+            return Ok(false);
+        }
+        let Some(report) = state.fc_reports.cameras.get(&expected.key) else {
             return Ok(false);
         };
         let fresh = report
@@ -36,8 +60,8 @@ impl CameraGuard {
             .and_then(|received| std::time::Instant::now().checked_duration_since(received))
             .is_some_and(|age| age < std::time::Duration::from_secs(6));
         if !report.available
-            || report.epoch != self.epoch
-            || report.capability_revision != self.revision
+            || report.epoch != expected.epoch
+            || report.capability_revision != expected.revision
             || !fresh
         {
             return Ok(false);
@@ -152,19 +176,12 @@ impl SendFence {
     pub fn for_camera(
         &self,
         state: Arc<Mutex<super::LinkState>>,
-        key: (u8, u8),
-        epoch: u64,
-        revision: u64,
+        requirement: CameraWriteRequirement,
     ) -> Self {
         Self {
             valid: self.valid.clone(),
             manager: None,
-            camera: Some(CameraGuard {
-                state,
-                key,
-                epoch,
-                revision,
-            }),
+            camera: Some(CameraGuard { state, requirement }),
             flight: None,
         }
     }

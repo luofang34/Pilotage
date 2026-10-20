@@ -12,13 +12,14 @@ use pilotage_adapter_api::{
     TelemetryBatch, VehicleAdapter, VideoSource,
 };
 use pilotage_mavlink::ardupilot::ArduCopterMode;
+use pilotage_mavlink::camera_endpoint;
 use pilotage_mavlink::codec::MAV_CMD_COMPONENT_ARM_DISARM;
 use pilotage_mavlink::gimbal_endpoint::{self, GimbalStamp};
 use pilotage_mavlink::sampling::{
     ArmTracker, OperationalPose, VehicleReports, battery_sample, estimate_batch, fc_state_sample,
     landed_state_sample, operational_pose, report_only_sample,
 };
-use pilotage_mavlink::{LinkState, ManagerControl, MavlinkLink, command_outcome};
+use pilotage_mavlink::{CameraEndpoints, LinkState, ManagerControl, MavlinkLink, command_outcome};
 use pilotage_protocol::{ActionKind, ScopeId, ScopedControlFrame, VehicleId};
 use pilotage_timing::SimTick;
 use tracing::{info, warn};
@@ -28,6 +29,8 @@ use crate::error::ArduPilotAdapterError;
 use crate::uplink::ArduPilotUplink;
 
 mod advertisement;
+#[cfg(test)]
+mod camera_socket_tests;
 mod control;
 mod declination;
 #[cfg(test)]
@@ -76,6 +79,7 @@ pub struct ArduPilotAdapter {
     direct: Option<params::DirectParams>,
     gimbal: Option<ManagerControl>,
     gimbal_stamp: GimbalStamp,
+    camera: Option<CameraEndpoints>,
     declination: declination::DeclinationParams,
     arm: ArmTracker,
     incarnation: SourceIncarnation,
@@ -141,7 +145,20 @@ impl ArduPilotAdapter {
             declination,
         );
         adapter.gimbal = gimbal;
+        adapter.attach_camera(link_config.system_id);
         Ok(adapter)
+    }
+
+    fn attach_camera(&mut self, system_id: u8) {
+        self.camera = self._link.as_ref().map(|link| {
+            CameraEndpoints::new(
+                self.vehicle,
+                self.state.clone(),
+                link.command_sender(),
+                system_id,
+                self.started_at,
+            )
+        });
     }
 
     fn assemble(
@@ -164,6 +181,7 @@ impl ArduPilotAdapter {
             uplink,
             gimbal: None,
             gimbal_stamp: GimbalStamp::new(SourceIncarnation::new(rand_incarnation())),
+            camera: None,
             arm: ArmTracker::default(),
             incarnation: SourceIncarnation::new(rand_incarnation()),
             started_at: Instant::now(),
@@ -292,6 +310,9 @@ fn rand_incarnation() -> [u8; 16] {
 
 impl VehicleAdapter for ArduPilotAdapter {
     fn invalidate_pending_commands(&mut self, vehicle: VehicleId, scope: &ScopeId) {
+        if let Some(camera) = self.camera.as_mut() {
+            camera.invalidate_pending_commands(vehicle, scope);
+        }
         if vehicle == self.vehicle
             && matches!(scope.as_str(), FLIGHT_SCOPE | DIRECT_SCOPE)
             && let Some(uplink) = self.uplink.as_mut()
@@ -314,6 +335,16 @@ impl VehicleAdapter for ArduPilotAdapter {
         let tick = self.step(StepBudget { ticks: 0 }).now;
         if pilotage_adapter_api::link_loss_latch_engaged(&self.link_loss_policy, &frame.scope) {
             return ApplyOutcome::new(tick, Disposition::Rejected(RejectReason::LinkLossEngaged));
+        }
+        if frame
+            .scope
+            .as_str()
+            .starts_with(camera_endpoint::SCOPE_PREFIX)
+        {
+            return match self.camera.as_mut() {
+                Some(camera) => camera.apply_control(frame, tick),
+                None => ApplyOutcome::new(tick, Disposition::Rejected(RejectReason::UnknownScope)),
+            };
         }
         if frame.scope.as_str() == GIMBAL_SCOPE {
             return match self.gimbal.as_mut() {
@@ -375,6 +406,9 @@ impl VehicleAdapter for ArduPilotAdapter {
             }
         }
         self.attach_flight_procedure(&mut batch);
+        if let Some(camera) = self.camera.as_mut() {
+            camera.sample_telemetry(&mut batch);
+        }
         batch
     }
 

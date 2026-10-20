@@ -49,6 +49,9 @@ impl ArduPilotAdapter {
                             &self.gimbal_stamp,
                         ));
                     }
+                    if let Some(camera) = self.camera.as_ref() {
+                        scopes.extend(camera.scopes());
+                    }
                     scopes
                 },
                 link_loss_actions: if flying {

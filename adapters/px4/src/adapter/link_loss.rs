@@ -42,7 +42,7 @@ impl Px4Adapter {
         // and neither reaches the other.
         self.link_loss_policy.insert(scope.clone(), policy);
         if let Some(camera) = self.camera_control.as_mut() {
-            camera.invalidate(scope.as_str());
+            camera.invalidate_pending_commands(vehicle, scope);
         }
         match scope.as_str() {
             FLIGHT_SCOPE | DIRECT_SCOPE => {

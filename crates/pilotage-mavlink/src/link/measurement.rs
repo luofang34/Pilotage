@@ -64,6 +64,7 @@ fn begin_source_epoch(latest: &mut LinkState, time_boot_ms: u32) {
     latest.gnss_fix = None;
     latest.fc_reports.landed_state = None;
     latest.fc_reports.relative_altitude = None;
+    latest.invalidate_camera_reports();
     // An armed state or mode received before the reset cannot authorize
     // a procedure in the new source epoch.
     latest.last_heartbeat = None;

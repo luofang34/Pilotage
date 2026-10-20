@@ -146,7 +146,7 @@ fn self_release_accepts_unowned_status_but_never_releases_a_new_owner() {
 fn camera_report(
     state: &Arc<Mutex<super::super::LinkState>>,
     received: std::time::Instant,
-) -> (u64, u64) {
+) -> CameraWriteRequirement {
     let mut payload = [0_u8; 237];
     payload[..4].copy_from_slice(&100_u32.to_le_bytes());
     payload[20..24].copy_from_slice(&64_u32.to_le_bytes());
@@ -159,14 +159,21 @@ fn camera_report(
     super::super::apply_messages_at(state, &messages, 0, 0, received);
     let state = state.lock().unwrap();
     let report = state.fc_reports.cameras.get(&(100, 0)).unwrap();
-    (report.epoch, report.capability_revision)
+    CameraWriteRequirement {
+        key: (100, 0),
+        epoch: report.epoch,
+        revision: report.capability_revision,
+        source_id: state.source_id,
+        source_incarnation: state.source_incarnation,
+        source_epoch: state.source_epoch,
+    }
 }
 
 #[test]
 fn camera_writer_requires_exact_discovery_binding_and_holds_receive_lock() {
     let state = Arc::new(Mutex::new(super::super::LinkState::default()));
-    let (epoch, revision) = camera_report(&state, std::time::Instant::now());
-    let fence = SendFence::default().for_camera(state.clone(), (100, 0), epoch, revision);
+    let requirement = camera_report(&state, std::time::Instant::now());
+    let fence = SendFence::default().for_camera(state.clone(), requirement);
     assert!(
         fence
             .with_valid_write(|| {
@@ -178,13 +185,33 @@ fn camera_writer_requires_exact_discovery_binding_and_holds_receive_lock() {
             })
             .unwrap()
     );
-    for (key, expected_epoch, expected_revision) in [
-        ((101, 0), epoch, revision),
-        ((100, 0), epoch.wrapping_add(1), revision),
-        ((100, 0), epoch, revision.wrapping_add(1)),
+    for expected in [
+        CameraWriteRequirement {
+            key: (101, 0),
+            ..requirement
+        },
+        CameraWriteRequirement {
+            epoch: requirement.epoch.wrapping_add(1),
+            ..requirement
+        },
+        CameraWriteRequirement {
+            revision: requirement.revision.wrapping_add(1),
+            ..requirement
+        },
+        CameraWriteRequirement {
+            source_id: requirement.source_id.wrapping_add(1),
+            ..requirement
+        },
+        CameraWriteRequirement {
+            source_incarnation: SourceIncarnation::new([9; 16]),
+            ..requirement
+        },
+        CameraWriteRequirement {
+            source_epoch: requirement.source_epoch.wrapping_add(1),
+            ..requirement
+        },
     ] {
-        let invalid =
-            SendFence::default().for_camera(state.clone(), key, expected_epoch, expected_revision);
+        let invalid = SendFence::default().for_camera(state.clone(), expected);
         assert!(
             !invalid
                 .with_valid_write(|| panic!(
@@ -198,7 +225,7 @@ fn camera_writer_requires_exact_discovery_binding_and_holds_receive_lock() {
 #[test]
 fn camera_discovery_ttl_fences_write_without_adapter_expiry_poll() {
     let state = Arc::new(Mutex::new(super::super::LinkState::default()));
-    let (epoch, revision) = camera_report(
+    let requirement = camera_report(
         &state,
         std::time::Instant::now() - std::time::Duration::from_secs(7),
     );
@@ -212,7 +239,7 @@ fn camera_discovery_ttl_fences_write_without_adapter_expiry_poll() {
             .unwrap()
             .available
     );
-    let fence = SendFence::default().for_camera(state, (100, 0), epoch, revision);
+    let fence = SendFence::default().for_camera(state, requirement);
     assert!(
         !fence
             .with_valid_write(|| panic!("raw cache availability does not extend discovery TTL"))

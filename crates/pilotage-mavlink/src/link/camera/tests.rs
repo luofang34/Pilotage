@@ -3,6 +3,8 @@ use crate::{FcMessage, FrameSource};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+mod reset;
+
 fn report(time: u32, system: u8) -> (FrameSource, FcMessage) {
     (
         FrameSource {

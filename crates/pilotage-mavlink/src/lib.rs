@@ -11,11 +11,13 @@
 //! stamps. Adapters sample the cache; they never touch the socket.
 
 pub mod ardupilot;
+pub mod camera_endpoint;
 pub mod codec;
 mod command_result;
 pub mod gimbal_control;
 pub mod gimbal_endpoint;
 mod gimbal_flags;
+pub use camera_endpoint::CameraEndpoints;
 pub use gimbal_control::ManagerControl;
 pub mod link;
 mod payload_execution;
@@ -30,9 +32,9 @@ pub use command_result::command_outcome;
 pub use gimbal_flags::gimbal_reference;
 pub use link::{
     AttitudeThrustDemand, AttitudeUpdate, AuthorizationSource, BatteryReport, BodyVelocityDemand,
-    CameraReport, CommandAckReport, CommandTarget, FcReports, GimbalDeviceAttitude,
-    GimbalManagerReport, GimbalRateDemand, GimbalReports, KinematicsUpdate, LandedStateReport,
-    LinkConfig, LinkError, LinkState, ManagerWriteRequirement, MavlinkLink, OffboardSetpoint,
-    OutboundCommand, OutboundParam, ParamRequest, RelativeAltitudeReport, ResetPolicy, SendFence,
-    StatusTextReport, TakeoffWriteRequirement,
+    CameraReport, CameraWriteRequirement, CommandAckReport, CommandTarget, FcReports,
+    GimbalDeviceAttitude, GimbalManagerReport, GimbalRateDemand, GimbalReports, KinematicsUpdate,
+    LandedStateReport, LinkConfig, LinkError, LinkState, ManagerWriteRequirement, MavlinkLink,
+    OffboardSetpoint, OutboundCommand, OutboundParam, ParamRequest, RelativeAltitudeReport,
+    ResetPolicy, SendFence, StatusTextReport, TakeoffWriteRequirement,
 };

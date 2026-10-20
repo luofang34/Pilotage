@@ -16,7 +16,7 @@ pub struct CameraReport {
     pub gimbal_id: u8,
     /// Last camera device boot timestamp admitted.
     pub time_boot_ms: u32,
-    /// Reboot/wrap generation; timestamps are ordered within this epoch.
+    /// Discovery generation, invalidated when the selected source enters a new epoch.
     pub epoch: u64,
     /// Actual lens travel fraction, never a commanded target.
     pub travel_fraction: Option<f32>,
@@ -107,6 +107,18 @@ pub(super) fn apply(latest: &mut LinkState, component: u8, message: CameraMessag
 }
 
 impl LinkState {
+    pub(super) fn invalidate_camera_reports(&mut self) {
+        for report in self.fc_reports.cameras.values_mut() {
+            report.available = false;
+            report.epoch = report.epoch.wrapping_add(1).max(1);
+            report.capability_revision = report.capability_revision.wrapping_add(1);
+            report.information_received_at = None;
+            report.travel_fraction = None;
+            report.settings_received_at = None;
+            // Keep device time limits: an FC reset does not prove that a camera rebooted.
+        }
+    }
+
     /// Expire discovery without deleting known operations or resetting their identities.
     pub fn expire_camera_reports(&mut self, now: Instant) {
         for report in self.fc_reports.cameras.values_mut() {
