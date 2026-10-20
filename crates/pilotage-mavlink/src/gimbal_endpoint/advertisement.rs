@@ -26,7 +26,7 @@ pub fn scope_descriptor(control: &ManagerControl, stamp: &GimbalStamp) -> ScopeD
         pilotage_adapter_api::payload_capabilities_to_wire(ENDPOINT, &capabilities, &[SCOPE]);
     payload.connection_role = wire::PayloadConnectionRole::MavlinkManager as i32;
     payload.connection_incarnation = stamp.incarnation.into_bytes().to_vec();
-    payload.connection_epoch = 1;
+    payload.connection_epoch = control.connection_epoch();
     ScopeDescriptor {
         payload: Some(payload),
         authority_group: None,

@@ -67,18 +67,22 @@ fn payload_state(
     device: Option<GimbalDeviceAttitude>,
     attitude: Option<&GimbalAttitudeSample>,
 ) -> Option<wire::PayloadState> {
+    let epoch = control.connection_epoch();
     let mut state = wire::PayloadState {
         endpoint_id: super::ENDPOINT.to_owned(),
         capability_revision: control.capabilities().revision,
         connection_incarnation: stamp.incarnation.into_bytes().to_vec(),
-        connection_epoch: 1,
-        command: control.snapshot_cached().map(|snapshot| {
-            pilotage_adapter_api::payload_progress_to_wire(
-                &snapshot.progress,
-                Some(&snapshot.command),
-                snapshot.updated_at,
-            )
-        }),
+        connection_epoch: epoch,
+        command: control
+            .snapshot_cached()
+            .filter(|snapshot| snapshot.command.identity.epoch == epoch)
+            .map(|snapshot| {
+                pilotage_adapter_api::payload_progress_to_wire(
+                    &snapshot.progress,
+                    Some(&snapshot.command),
+                    snapshot.updated_at,
+                )
+            }),
         ..Default::default()
     };
     if let Some(device) = device {
@@ -101,7 +105,7 @@ fn payload_state(
                 source: wire::PayloadObservationSource::Transformed as i32,
                 sampled_at: None,
                 received_at,
-                connection_epoch: 1,
+                connection_epoch: epoch,
             })
         };
         state.pitch = axis(angles.map(|[_, pitch, _]| pitch), pitch_rate);

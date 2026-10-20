@@ -14,15 +14,17 @@ const MAX_GIMBALS: usize = 16;
 /// Discovery and ownership for one manager component and managed device.
 #[derive(Debug, Clone, Copy)]
 pub struct GimbalManagerReport {
-    /// Manager-declared operations; absent until discovery or after a clock wrap.
+    /// Manager-declared operations; absent until fresh discovery.
     pub information: Option<(GimbalManagerInformation, Instant)>,
     /// Latest independently advancing ownership report.
     pub status: Option<(GimbalManagerStatus, Instant)>,
-    /// Manager boot-clock wrap generation.
+    /// Discovery generation, invalidated by manager wrap or selected-source reset.
     pub epoch: u64,
-    /// Changes whenever the declared contract changes or the clock wraps.
+    /// Changes with the declared contract or discovery generation.
     pub capability_revision: u64,
     clock: BootClock,
+    information_time: Option<u32>,
+    status_time: Option<u32>,
 }
 
 impl Default for GimbalManagerReport {
@@ -33,6 +35,8 @@ impl Default for GimbalManagerReport {
             epoch: 1,
             capability_revision: 1,
             clock: BootClock::default(),
+            information_time: None,
+            status_time: None,
         }
     }
 }
@@ -58,6 +62,21 @@ pub struct GimbalReports {
 }
 
 impl GimbalReports {
+    pub(super) fn invalidate_source(&mut self) {
+        // A source reset does not prove that an independent payload clock reset.
+        // Keep each stream's time limit so delayed reports cannot restore ownership.
+        for report in self.managers.values_mut() {
+            report.information = None;
+            report.status = None;
+            report.epoch = report.epoch.wrapping_add(1);
+            report.capability_revision = report.capability_revision.wrapping_add(1);
+        }
+        for report in self.devices.values_mut() {
+            report.sample = None;
+        }
+        self.configure_acks.clear();
+    }
+
     /// Feedback for the device bound by this manager's discovery declaration.
     #[must_use]
     pub fn device_for_manager_cached(
@@ -88,7 +107,7 @@ impl GimbalReports {
         if wrapped {
             report.information = None;
             report.status = None;
-            report.epoch = report.clock.epoch;
+            report.epoch = report.epoch.wrapping_add(1);
             report.capability_revision = report.capability_revision.wrapping_add(1);
             if let Some(device) = self.devices.get_mut(&device_key(key.0, key.1)) {
                 device.sample = None;
@@ -104,9 +123,10 @@ impl GimbalReports {
         else {
             return;
         };
-        if report.information.is_some_and(|(previous, _)| {
-            !clock::advances(information.time_boot_ms, previous.time_boot_ms)
-        }) {
+        if report
+            .information_time
+            .is_some_and(|previous| !clock::advances(information.time_boot_ms, previous))
+        {
             return;
         }
         if report
@@ -115,6 +135,7 @@ impl GimbalReports {
         {
             report.capability_revision = report.capability_revision.wrapping_add(1);
         }
+        report.information_time = Some(information.time_boot_ms);
         report.information = Some((information, now));
     }
 
@@ -124,9 +145,10 @@ impl GimbalReports {
             return;
         };
         if report
-            .status
-            .is_none_or(|(previous, _)| clock::advances(status.time_boot_ms, previous.time_boot_ms))
+            .status_time
+            .is_none_or(|previous| clock::advances(status.time_boot_ms, previous))
         {
+            report.status_time = Some(status.time_boot_ms);
             report.status = Some((status, now));
         }
     }
