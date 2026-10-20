@@ -4111,9 +4111,12 @@ dependencies = [
 name = "xtask"
 version = "0.1.0"
 dependencies = [
+ "pilotage-terrain-query",
  "pilotage-trial",
  "pilotage-world",
  "pilotage-xplane-trial",
+ "png",
+ "rusqlite",
  "serde",
  "serde_json",
  "sha2 0.10.9",
