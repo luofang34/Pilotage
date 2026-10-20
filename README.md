@@ -52,6 +52,45 @@ You provide the pieces git does not vendor:
   Gazebo dev libraries (camera sidecar, optional). Each build script prints its
   own install hint on failure.
 
+## DJI USB bench connection on macOS
+
+Select the RC-N1 USB CDC callout path and a new capture file. The capture
+directory must exist. The host refuses to overwrite a capture.
+The DJI host listens on the local loopback interface.
+
+```sh
+PILOTAGE_DJI_SERIAL=/dev/cu.usbmodemDEVICE \
+PILOTAGE_DJI_CAPTURE=/tmp/dji-session-01.jsonl \
+cargo run --release -p pilotage-session-host --no-default-features -- --adapter dji
+```
+
+This adapter exposes a DJI Mini 3 bench object with gimbal control. Flight,
+positioning, and video are not implemented. Keep the propellers removed.
+The default `observed` control mode requires fresh gimbal observations before
+it sends a pitch command. Pitch targets are limited to -5 through 0 degrees.
+The adapter ignores horizontal gimbal input because yaw control is not
+implemented.
+An RC version response alone does not establish the aircraft route.
+
+The bottom RC-N1 CDC interface can forward pitch commands without aircraft
+pose feedback. For this bench connection, set
+`PILOTAGE_DJI_CONTROL_MODE=bench-initial-horizontal`. Before you start the
+host, confirm that the camera is horizontal. This mode uses that initial
+target without reporting it as a measured pose. Pitch targets are limited
+to -90 through 0 degrees. Target changes are limited to 5 degrees per second.
+Recenter moves the target toward zero at the same limit. It does not send
+an immediate zero target. A pending command expires after 100 milliseconds.
+
+The one-way mode cannot confirm physical motion or a physical stop. Neutral
+input stops changes to the target. It cannot cancel a command that was sent.
+A control-session loss prevents further commands until the host is restarted.
+The adapter reports that a physical link-loss action is not available.
+Before each restart, confirm that the camera is horizontal again.
+
+The capture contains received and transmitted bytes with host monotonic times.
+A lost connection or a capture failure stops control. Restart the host to open
+a new connection and capture. The adapter does not reconnect automatically.
+
 ## What the architecture protects
 
 - **Portable sans-IO core.** All protocol, authority, input, timing, and replay logic

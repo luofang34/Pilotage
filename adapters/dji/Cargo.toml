@@ -1,0 +1,40 @@
+[package]
+name = "pilotage-adapter-dji"
+description = "DJI DUML framing and bounded gimbal command encoding"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[dependencies]
+thiserror.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+pilotage-adapter-api.workspace = true
+pilotage-protocol.workspace = true
+pilotage-timing.workspace = true
+rustix = { workspace = true, features = ["termios"] }
+tracing.workspace = true
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+pilotage-client-session.workspace = true
+rustix = { workspace = true, features = ["pty", "event"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "deny"
+
+[lints.clippy]
+unwrap_used = "forbid"
+expect_used = "forbid"
+panic = "forbid"
+todo = "forbid"
+unimplemented = "forbid"
+unreachable = "forbid"
+exit = "forbid"
+mem_forget = "forbid"
+get_unwrap = "forbid"
+let_underscore_must_use = "deny"
+let_underscore_future = "deny"
+await_holding_lock = "deny"
+disallowed_types = "deny"
+disallowed_macros = "deny"

@@ -41,6 +41,9 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 prost.workspace = true
 jpeg-encoder = "0.7.0"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+pilotage-adapter-dji.workspace = true
+
 [features]
 default = ["sim"]
 # Simulation-only surface: the simulator adapters, the sidecar video

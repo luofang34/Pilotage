@@ -97,7 +97,6 @@ pub(super) async fn spawn_adapter_runtime(
             Ok(spawn_runtime(engine, adapter, video, host))
         }
         AdapterKind::ArduPilot => {
-            // An ArduPilot SITL has no camera of its own.
             let config = ardupilot_config::from_env()?;
             let adapter = pilotage_adapter_ardupilot::ArduPilotAdapter::start(HOST_VEHICLE, config)
                 .await
@@ -116,7 +115,29 @@ pub(super) async fn spawn_adapter_runtime(
             let video = session_video("betaflight", None, sim_camera_port, &host.engine_tx).await?;
             Ok(spawn_runtime(engine, adapter, video, host))
         }
+        #[cfg(target_os = "macos")]
+        AdapterKind::Dji => spawn_dji_runtime_blocking(options, sim_camera_port, host),
+        #[cfg(not(target_os = "macos"))]
+        AdapterKind::Dji => Err(HostError::AdapterNotInBuild { adapter: "dji" }),
     }
+}
+
+#[cfg(target_os = "macos")]
+fn spawn_dji_runtime_blocking(
+    options: RuntimeOptions,
+    sim_camera_port: Option<u16>,
+    host: HostSide,
+) -> Result<JoinHandle<()>, HostError> {
+    if sim_camera_port.is_some() {
+        return Err(HostError::SimCameraConflict { adapter: "dji" });
+    }
+    let adapter = super::dji::start_blocking(HOST_VEHICLE)?;
+    let engine = build_engine(&adapter, options);
+    let video = SessionVideo {
+        frames: None,
+        producer: None,
+    };
+    Ok(spawn_runtime(engine, adapter, video, host))
 }
 
 /// Chooses the session's video. With a simulator camera port configured
