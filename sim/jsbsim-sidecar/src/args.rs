@@ -38,7 +38,9 @@ pub struct Args {
     pub epoch_unix_s: Option<i64>,
     /// The sensor noise seed.
     pub seed: u64,
-    /// Simulation seconds per wall second; 0 runs unpaced.
+    /// Simulation seconds per wall second; 0 runs unpaced, for CI: each
+    /// step then follows PX4's lockstep answer at once, so PX4 sets the
+    /// pace (the sidecar alone steps many times faster than real time).
     pub realtime_factor: f64,
     /// How long to wait for PX4's answer to a step.
     pub lockstep_timeout: Duration,

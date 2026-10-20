@@ -55,8 +55,11 @@ pub(crate) fn truth_port(instance: u16) -> u16 {
     TRUTH_PORT_BASE + instance
 }
 
+/// The sidecar's own manifest: it builds outside the workspace.
+const SIDECAR_MANIFEST: &str = "sim/jsbsim-sidecar/Cargo.toml";
+
 fn sidecar_binary(repo_root: &Path) -> PathBuf {
-    repo_root.join("target/release/pilotage-jsbsim-sidecar")
+    repo_root.join("sim/jsbsim-sidecar/target/release/pilotage-jsbsim-sidecar")
 }
 
 impl SimBackend for Px4Jsbsim {
@@ -84,7 +87,7 @@ impl SimBackend for Px4Jsbsim {
 
     fn prepare(&self, ctx: &SessionContext) -> Result<(), XtaskError> {
         let status = std::process::Command::new("cargo")
-            .args(["build", "--release", "-p", "pilotage-jsbsim-sidecar"])
+            .args(["build", "--release", "--manifest-path", SIDECAR_MANIFEST])
             .current_dir(&ctx.repo_root)
             .status()
             .map_err(|source| XtaskError::Io {
@@ -95,7 +98,7 @@ impl SimBackend for Px4Jsbsim {
             Ok(())
         } else {
             Err(XtaskError::CommandFailed {
-                context: "cargo build --release -p pilotage-jsbsim-sidecar",
+                context: "cargo build --release --manifest-path sim/jsbsim-sidecar/Cargo.toml",
                 status: status.to_string(),
             })
         }

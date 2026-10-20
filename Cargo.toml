@@ -13,7 +13,6 @@ members = [
     "crates/pilotage-mavlink",
     "crates/pilotage-msp",
     "sim/multirotor-fdm",
-    "sim/jsbsim-sidecar",
     "crates/pilotage-conformance",
     "crates/pilotage-situation-view",
     "crates/pilotage-airspace-view",
@@ -64,7 +63,7 @@ members = [
 ]
 # The world-model camera links the maplibre-rs fork and its GPU stack; it
 # builds on its own so the workspace does not compile a renderer.
-exclude = ["sim/maplibre-camera"]
+exclude = ["sim/jsbsim-sidecar", "sim/maplibre-camera"]
 
 [workspace.package]
 edition = "2024"
