@@ -380,3 +380,81 @@ fn px4s_gimbal_outputs_point_the_gimbal() {
     }
     assert!((simulation.gimbal_angles_deg().unwrap()[1] + 45.0).abs() < 0.1);
 }
+
+/// Ground rising 8 m per 100 m north in DEM-pixel steps, like the land
+/// around N51 in its archive.
+struct Hill;
+
+impl pilotage_world::TerrainSource for Hill {
+    fn id(&self) -> pilotage_geo::TerrainRefId {
+        pilotage_geo::TerrainRefId(9)
+    }
+
+    fn sample_blocking(
+        &mut self,
+        latitude_deg: f64,
+        longitude_deg: f64,
+    ) -> Result<Option<pilotage_world::TerrainSample>, pilotage_world::TerrainError> {
+        let plane = pilotage_world::local_plane(N51.latitude_deg, N51.longitude_deg, 0.0).unwrap();
+        let north_m = plane
+            .to_ned(pilotage_world::world_position(
+                latitude_deg,
+                longitude_deg,
+                0.0,
+            ))
+            .unwrap()
+            .north_m;
+        // In 3.6 m steps, as a z15 Terrarium pixel quantizes it. The
+        // start stands mid-step, so rounding in the frame conversion
+        // cannot move it onto the step below.
+        let mut flat = UniformTerrain {
+            elevation_m: 56.0 + 0.08 * ((north_m + 1.8) / 3.6).floor() * 3.6,
+        };
+        let mut sample =
+            pilotage_world::TerrainSource::sample_blocking(&mut flat, latitude_deg, longitude_deg)?;
+        if let Some(sample) = sample.as_mut() {
+            sample.resolution_m = 10.0;
+        }
+        Ok(sample)
+    }
+}
+
+#[test]
+fn the_x500_settles_on_sloped_terrain() {
+    let mut world = World::new(N51, Hill, MagneticEpoch::from_decimal_year(2026.8));
+    let paths = ModelPaths {
+        root: PathBuf::from(env!("PILOTAGE_JSBSIM_ROOT")),
+        aircraft_dir: Aircraft::X500.bundled_dir(),
+        model: "x500".to_owned(),
+    };
+    let start = Start {
+        latitude_deg: N51.latitude_deg,
+        longitude_deg: N51.longitude_deg,
+        heading_deg: N51.heading_deg,
+    };
+    let mut simulation =
+        Simulation::new(&vehicle(Aircraft::X500, paths, start, None, 4), &mut world).unwrap();
+    let mut encoder = Encoder::default();
+    for _ in 0..2_500 {
+        simulation.step(None, &mut world, &mut encoder).unwrap();
+    }
+    let truth = simulation.truth();
+    // On the slope the legs rest unevenly: the CG stands about 0.12 m
+    // above the ground under it, and the vehicle pitches with the hill.
+    assert!(
+        (truth.altitude_m - 56.0 - 0.12).abs() < 0.05,
+        "{}",
+        truth.altitude_m
+    );
+    assert!(
+        truth.velocity_ned.iter().all(|v| v.abs() < 0.01),
+        "{:?}",
+        truth.velocity_ned
+    );
+    // JSBSim's contact friction lets a vehicle on a slope creep, slowly.
+    assert!(
+        truth.rates_frd.iter().all(|r| r.abs() < 1e-2),
+        "{:?}",
+        truth.rates_frd
+    );
+}

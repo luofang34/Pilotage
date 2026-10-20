@@ -99,5 +99,9 @@ commands:
       is absent, then build and install its static library into
       $JSBSIM_DIR/install with CMake. The JSBSim sidecar links it.
 
+  build-sim-terrain
+      Fetch AWS Terrain Tiles around N51 into target/sim-terrain/n51.mbtiles,
+      the ground px4-jsbsim sessions stand their vehicles on.
+
   help
       Print this help text.";

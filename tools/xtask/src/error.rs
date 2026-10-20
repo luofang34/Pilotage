@@ -176,6 +176,14 @@ pub enum XtaskError {
         #[source]
         source: pilotage_world::PositionError,
     },
+    /// The simulator terrain could not be fetched or packed.
+    #[error("{context}: {detail}")]
+    SimTerrain {
+        /// What was being done.
+        context: &'static str,
+        /// What went wrong.
+        detail: String,
+    },
     /// An I/O operation outside process management failed.
     #[error("I/O failure during {context}: {source}")]
     Io {

@@ -245,6 +245,17 @@ fn sidecar_stage(
         "--truth-addr".to_owned(),
         format!("127.0.0.1:{}", truth_port(ctx.instance)),
     ];
+    // The site's terrain archive when it is built; elsewhere, and without
+    // it, the world stands on the site's stated elevation.
+    let terrain = crate::sim_terrain::archive_path(&ctx.repo_root, crate::site::DEFAULT_SITE.name);
+    if terrain.is_file() {
+        args.extend(["--terrain".to_owned(), terrain.display().to_string()]);
+    } else {
+        tracing::info!(
+            archive = %terrain.display(),
+            "no simulator terrain (cargo xtask build-sim-terrain); standing on the stated elevation"
+        );
+    }
     if let Some(travel) = model.gimbal() {
         args.extend([
             "--gimbal".to_owned(),

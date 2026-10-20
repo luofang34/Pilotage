@@ -123,6 +123,21 @@ fn the_quad_plans_the_sidecar_then_px4_on_the_instance_port() {
 }
 
 #[test]
+fn the_sidecar_stands_on_the_site_terrain_once_it_is_built() {
+    let (root, px4, jsbsim) = scaffold("terrain");
+    let stages = plan_with_dirs(&context(&root, 0), &px4, &jsbsim, JsbsimModel::Quad).unwrap();
+    assert_eq!(arg(&stages[0].spec.args, "--terrain"), None);
+    let archive = crate::sim_terrain::archive_path(&root, "n51");
+    std::fs::create_dir_all(archive.parent().unwrap()).unwrap();
+    std::fs::write(&archive, "").unwrap();
+    let stages = plan_with_dirs(&context(&root, 0), &px4, &jsbsim, JsbsimModel::Quad).unwrap();
+    assert_eq!(
+        arg(&stages[0].spec.args, "--terrain"),
+        Some(archive.to_str().unwrap())
+    );
+}
+
+#[test]
 fn the_plane_flies_the_rascal_with_airframe_1033() {
     let (root, px4, jsbsim) = scaffold("plane");
     let stages = plan_with_dirs(&context(&root, 0), &px4, &jsbsim, JsbsimModel::Plane).unwrap();

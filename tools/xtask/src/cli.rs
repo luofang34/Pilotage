@@ -1,6 +1,6 @@
 //! Argument parsing for the xtask entry point: `sim`, `reset`,
 //! `handshake`, `affected`, `guards`, `serve-viewer`, `build-jsbsim`,
-//! `help`.
+//! `build-sim-terrain`, `help`.
 
 use crate::error::XtaskError;
 
@@ -126,6 +126,8 @@ pub enum Command {
     ServeViewer(crate::viewer_server::ServeViewerArgs),
     /// Clone, build, and install the pinned JSBSim release.
     BuildJsbsim,
+    /// Fetch and pack every site's simulator terrain.
+    BuildSimTerrain,
     /// Print usage.
     Help,
 }
@@ -157,10 +159,13 @@ pub fn parse_args(args: &[String]) -> Result<Command, XtaskError> {
             rest,
         )?)),
         "build-jsbsim" => without_arguments(rest, "build-jsbsim", Command::BuildJsbsim),
+        "build-sim-terrain" => {
+            without_arguments(rest, "build-sim-terrain", Command::BuildSimTerrain)
+        }
         "help" | "--help" | "-h" => Ok(Command::Help),
         other => Err(XtaskError::Usage {
             message: format!(
-                "unknown command {other:?} (expected sim, fleet, reset, handshake, affected, guards, serve-viewer, build-jsbsim, or help)"
+                "unknown command {other:?} (expected sim, fleet, reset, handshake, affected, guards, serve-viewer, build-jsbsim, build-sim-terrain, or help)"
             ),
         }),
     }
