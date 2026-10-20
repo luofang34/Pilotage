@@ -22,7 +22,7 @@ pub enum AdapterKind {
     /// The Betaflight adapter over MSP: telemetry plus a host-side velocity
     /// loop flying ANGLE mode.
     Betaflight,
-    /// The DJI USB CDC bench adapter. Flight and positioning are not implemented.
+    /// The DJI USB bench adapter. Flight and positioning are not implemented.
     Dji,
 }
 

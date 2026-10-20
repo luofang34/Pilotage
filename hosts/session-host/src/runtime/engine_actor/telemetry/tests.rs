@@ -52,9 +52,9 @@ fn publication_time_and_source_acquisition_stamps_stay_distinct() {
     let avionics = AvionicsSample {
         geodetic: None,
         baro: None,
-        attitude: Some(AvionicsAttitudeSample {
+        attitude: Some(AvionicsAttitudeSample::Canonical {
             quat_wxyz: [1.0, 0.0, 0.0, 0.0],
-            rates_rps: [0.0; 3],
+            rates_rps: Some([0.0; 3]),
             stamp: attitude,
         }),
         kinematics: Some(AvionicsKinematicsSample {
@@ -187,9 +187,9 @@ fn attitude_only_omits_planar_projection_while_group_flows() {
         avionics: Some(AvionicsSample {
             geodetic: None,
             baro: None,
-            attitude: Some(AvionicsAttitudeSample {
+            attitude: Some(AvionicsAttitudeSample::Canonical {
                 quat_wxyz: [0.7, 0.0, 0.0, 0.7],
-                rates_rps: [0.1, 0.2, 0.3],
+                rates_rps: Some([0.1, 0.2, 0.3]),
                 stamp: simulation_stamp(9),
             }),
             kinematics: None,

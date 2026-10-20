@@ -1,16 +1,22 @@
 use super::GIMBAL_SCOPE;
 mod acknowledgement;
+mod airframe;
+mod battery;
 mod bench;
 mod contract;
 mod harness;
+mod keyframe;
 mod mapping;
+mod mobile;
+mod profile;
+mod recovery;
 
 use std::time::Duration;
 
 use pilotage_adapter_api::{Disposition, LinkLossPolicy, RejectReason, VehicleAdapter};
 use pilotage_protocol::{ControlAction, ControlIntent, GimbalRateIntent, ScopeId};
 
-use super::{DjiFault, capability::MAX_PITCH_RATE};
+use super::{DjiFault, HOST_PITCH_RATE_LIMIT_RPS};
 use harness::{Harness, frame, observed_poses, packets};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -28,7 +34,7 @@ fn recorded_cdc_traffic_does_not_authorize_any_control() -> TestResult {
     );
     assert!(capability.execution.physically_embodied);
     assert!(!capability.execution.render_capable);
-    let rejected = h.apply(frame(-MAX_PITCH_RATE), 0);
+    let rejected = h.apply(frame(-HOST_PITCH_RATE_LIMIT_RPS), 0);
     assert_eq!(
         rejected.disposition,
         Disposition::Rejected(RejectReason::MeasurementUnavailable)
@@ -83,7 +89,7 @@ fn recorded_poses_publish_payload_only_and_bound_pitch_commands() -> TestResult 
     assert!((pitch.angle_rad.ok_or("missing angle")?.to_degrees() + 4.9).abs() < 0.001);
     assert!(h.telemetry(20).samples.is_empty());
     assert_eq!(
-        h.apply(frame(-MAX_PITCH_RATE), 20).disposition,
+        h.apply(frame(-HOST_PITCH_RATE_LIMIT_RPS), 20).disposition,
         Disposition::Transformed
     );
     h.step(30);
@@ -135,7 +141,7 @@ fn unsupported_commands_never_reach_the_serial_writer() -> TestResult {
     let mut yaw = frame(0.0);
     yaw.intent = Some(ControlIntent::GimbalRate(GimbalRateIntent {
         pitch_rate: 0.0,
-        yaw_rate: MAX_PITCH_RATE * 2.0,
+        yaw_rate: HOST_PITCH_RATE_LIMIT_RPS * 2.0,
     }));
     let mut arm = frame(0.0);
     arm.actions.push(ControlAction::Arm);
@@ -146,7 +152,7 @@ fn unsupported_commands_never_reach_the_serial_writer() -> TestResult {
         arm,
         flight,
         frame(f32::NAN),
-        frame(MAX_PITCH_RATE * 2.0),
+        frame(HOST_PITCH_RATE_LIMIT_RPS * 2.0),
     ] {
         assert!(matches!(
             h.apply(request, 20).disposition,
@@ -184,13 +190,13 @@ fn short_writes_keep_one_packet_and_record_only_actual_bytes() -> TestResult {
     h.prime()?;
     h.set_write_limit(3)?;
     assert_eq!(
-        h.apply(frame(-MAX_PITCH_RATE), 20).disposition,
+        h.apply(frame(-HOST_PITCH_RATE_LIMIT_RPS), 20).disposition,
         Disposition::Transformed
     );
     h.step(30);
     assert_eq!(h.adapter.status_cached().pending_bytes, 18);
     assert!(matches!(
-        h.apply(frame(MAX_PITCH_RATE), 30).disposition,
+        h.apply(frame(HOST_PITCH_RATE_LIMIT_RPS), 30).disposition,
         Disposition::Rejected(_)
     ));
     for ms in [40, 50, 60, 70, 80, 90] {
@@ -208,7 +214,7 @@ fn link_loss_closes_a_partial_packet_and_never_reconnects() -> TestResult {
     let mut h = Harness::new();
     h.prime()?;
     h.set_write_limit(3)?;
-    h.apply(frame(-MAX_PITCH_RATE), 20);
+    h.apply(frame(-HOST_PITCH_RATE_LIMIT_RPS), 20);
     h.step(30);
     let written = h.written()?;
     assert!(h.link_loss(Some(LinkLossPolicy::Neutralize), 30).is_err());
@@ -273,19 +279,19 @@ fn bad_crc_disconnect_and_recording_errors_close_control() -> TestResult {
     h.step(30);
     assert!(matches!(
         h.adapter.status_cached().fault,
-        Some(DjiFault::Serial { .. })
+        Some(DjiFault::Transport { .. })
     ));
     let mut h = Harness::new();
     h.prime()?;
     h.fail_capture()?;
-    h.apply(frame(-MAX_PITCH_RATE), 20);
+    h.apply(frame(-HOST_PITCH_RATE_LIMIT_RPS), 20);
     h.step(30);
     assert!(matches!(
         h.adapter.status_cached().fault,
         Some(DjiFault::Recording { .. })
     ));
     let written = h.written()?;
-    h.apply(frame(MAX_PITCH_RATE), 30);
+    h.apply(frame(HOST_PITCH_RATE_LIMIT_RPS), 30);
     h.step(40);
     assert_eq!(h.written()?, written);
     Ok(())
@@ -425,7 +431,7 @@ fn time_spent_reading_and_recording_cannot_extend_command_freshness() -> TestRes
     h.prime()?;
     let before = h.written()?;
     assert_eq!(
-        h.apply(frame(-MAX_PITCH_RATE), 20).disposition,
+        h.apply(frame(-HOST_PITCH_RATE_LIMIT_RPS), 20).disposition,
         Disposition::Transformed
     );
     let mut now = Duration::from_millis(30);

@@ -13,23 +13,25 @@ use pilotage_protocol::{
 };
 use pilotage_timing::MonoTimestamp;
 
-use super::super::{DjiAdapter, connection::Transport};
+use super::super::{DjiAdapter, connection::Transport, input::Framing};
 use crate::{DumlFrame, DumlParser};
 
 #[derive(Default)]
 struct Wire {
     input: VecDeque<u8>,
     output: Vec<u8>,
+    deadlines: Vec<std::time::Instant>,
     capture: Vec<u8>,
     write_limit: usize,
     read_limit: usize,
     reads_before_interrupt: Option<usize>,
     disconnected: bool,
     capture_failed: bool,
+    write_failed_after_accept: bool,
 }
 
 #[derive(Clone)]
-struct Recording(Arc<Mutex<Wire>>);
+struct Recording(Arc<Mutex<Wire>>, Framing);
 
 impl Recording {
     fn lock(&self) -> io::Result<MutexGuard<'_, Wire>> {
@@ -40,6 +42,10 @@ impl Recording {
 }
 
 impl Transport for Recording {
+    fn framing(&self) -> Framing {
+        self.1
+    }
+
     fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
         let mut wire = self.lock()?;
         if wire.disconnected {
@@ -62,13 +68,17 @@ impl Transport for Recording {
         Ok(count)
     }
 
-    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+    fn write(&mut self, bytes: &[u8], send_before: std::time::Instant) -> io::Result<usize> {
         let mut wire = self.lock()?;
         if wire.write_limit == 0 {
             return Err(io::ErrorKind::WouldBlock.into());
         }
         let count = wire.write_limit.min(bytes.len());
+        wire.deadlines.push(send_before);
         wire.output.extend(&bytes[..count]);
+        if wire.write_failed_after_accept {
+            return Err(io::ErrorKind::TimedOut.into());
+        }
         Ok(count)
     }
 }
@@ -102,12 +112,23 @@ impl Harness {
         Self::with_mode(super::super::DjiControlMode::BenchInitialHorizontal)
     }
 
+    pub(super) fn mobile() -> Self {
+        Self::with_framing(super::super::DjiControlMode::Observed, Framing::LogicLink)
+    }
+
     fn with_mode(control_mode: super::super::DjiControlMode) -> Self {
-        let recording = Recording(Arc::new(Mutex::new(Wire {
-            write_limit: usize::MAX,
-            read_limit: usize::MAX,
-            ..Wire::default()
-        })));
+        Self::with_framing(control_mode, Framing::Duml)
+    }
+
+    fn with_framing(control_mode: super::super::DjiControlMode, framing: Framing) -> Self {
+        let recording = Recording(
+            Arc::new(Mutex::new(Wire {
+                write_limit: usize::MAX,
+                read_limit: usize::MAX,
+                ..Wire::default()
+            })),
+            framing,
+        );
         let adapter = DjiAdapter::from_connection(
             VehicleId::new(1),
             Box::new(recording.clone()),
@@ -164,6 +185,10 @@ impl Harness {
         )
     }
 
+    pub(super) fn deadlines(&self) -> io::Result<Vec<std::time::Instant>> {
+        Ok(self.recording.lock()?.deadlines.clone())
+    }
+
     pub(super) fn written(&self) -> io::Result<Vec<u8>> {
         Ok(self.recording.lock()?.output.clone())
     }
@@ -185,6 +210,11 @@ impl Harness {
 
     pub(super) fn disconnect(&mut self) -> io::Result<()> {
         self.recording.lock()?.disconnected = true;
+        Ok(())
+    }
+
+    pub(super) fn lose_write_receipt(&mut self) -> io::Result<()> {
+        self.recording.lock()?.write_failed_after_accept = true;
         Ok(())
     }
 
@@ -226,6 +256,29 @@ pub(super) fn observed_poses() -> Vec<Vec<u8>> {
     .into_iter()
     .map(|frame| frame.raw().to_vec())
     .collect()
+}
+
+pub(super) fn captured_hex_frames(text: &str) -> Vec<Vec<u8>> {
+    text.lines()
+        .map(|line| {
+            let (pairs, tail) = line.as_bytes().as_chunks::<2>();
+            assert!(tail.is_empty());
+            pairs
+                .iter()
+                .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+                .collect()
+        })
+        .collect()
+}
+
+pub(super) fn seal_duml(bytes: &mut [u8]) {
+    let length = bytes.len();
+    let size = (length as u16).to_le_bytes();
+    bytes[1] = size[0];
+    bytes[2] = (bytes[2] & 0xfc) | size[1];
+    bytes[3] = turret_dji::header_checksum(&bytes[..3]);
+    let crc = turret_dji::frame_checksum(&bytes[..length - 2]).to_le_bytes();
+    bytes[length - 2..].copy_from_slice(&crc);
 }
 
 pub(super) fn frame(pitch_rate: f32) -> ScopedControlFrame {

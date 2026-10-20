@@ -16,10 +16,15 @@ pilotage-protocol.workspace = true
 pilotage-timing.workspace = true
 rustix = { workspace = true, features = ["termios"] }
 tracing.workspace = true
+tokio = { workspace = true, features = ["sync"] }
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dev-dependencies]
 pilotage-client-session.workspace = true
+pilotage-session.workspace = true
 rustix = { workspace = true, features = ["pty", "event"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+pilotage-dji-usb = { path = "../dji-usb" }
 
 [lints.rust]
 unsafe_code = "forbid"

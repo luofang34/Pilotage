@@ -1919,10 +1919,13 @@ version = "0.1.0"
 dependencies = [
  "pilotage-adapter-api",
  "pilotage-client-session",
+ "pilotage-dji-usb",
  "pilotage-protocol",
+ "pilotage-session",
  "pilotage-timing",
  "rustix",
  "thiserror",
+ "tokio",
  "tracing",
  "turret-core",
  "turret-dji",
@@ -2094,6 +2097,14 @@ dependencies = [
  "pilotage-control",
  "pilotage-input",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "pilotage-dji-usb"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+ "tracing",
 ]
 
 [[package]]
@@ -2351,6 +2362,7 @@ dependencies = [
  "pilotage-authority",
  "pilotage-client-session",
  "pilotage-control-feel",
+ "pilotage-dji-usb",
  "pilotage-geo",
  "pilotage-mavlink",
  "pilotage-mission",
@@ -3598,7 +3610,7 @@ dependencies = [
 [[package]]
 name = "turret-core"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Turret?rev=90f6da6282bfcd9c5a8da8359c2fa9af2cc427bd#90f6da6282bfcd9c5a8da8359c2fa9af2cc427bd"
+source = "git+https://github.com/luofang34/Turret?rev=ebf050f8c6086ae5117d3f05998ec3effc96bb88#ebf050f8c6086ae5117d3f05998ec3effc96bb88"
 dependencies = [
  "thiserror",
 ]
@@ -3606,7 +3618,7 @@ dependencies = [
 [[package]]
 name = "turret-dji"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Turret?rev=90f6da6282bfcd9c5a8da8359c2fa9af2cc427bd#90f6da6282bfcd9c5a8da8359c2fa9af2cc427bd"
+source = "git+https://github.com/luofang34/Turret?rev=ebf050f8c6086ae5117d3f05998ec3effc96bb88#ebf050f8c6086ae5117d3f05998ec3effc96bb88"
 dependencies = [
  "thiserror",
  "turret-core",
@@ -3615,7 +3627,7 @@ dependencies = [
 [[package]]
 name = "turret-mavlink"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Turret?rev=90f6da6282bfcd9c5a8da8359c2fa9af2cc427bd#90f6da6282bfcd9c5a8da8359c2fa9af2cc427bd"
+source = "git+https://github.com/luofang34/Turret?rev=ebf050f8c6086ae5117d3f05998ec3effc96bb88#ebf050f8c6086ae5117d3f05998ec3effc96bb88"
 dependencies = [
  "turret-core",
 ]

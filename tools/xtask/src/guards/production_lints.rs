@@ -4,8 +4,8 @@
 //! `allow` cannot exempt one.
 //!
 //! A crate that binds a C or C++ library cannot call it without unsafe
-//! code. Such a crate builds outside the workspace, with its own
-//! manifest, and is named in [`FFI_CRATES`] with the one module
+//! code. Such a crate is named in [`FFI_CRATES`] and is checked through
+//! its manifest. Its registration names the one module
 //! that may hold its unsafe code. Clippy denies `unsafe_code` in it
 //! instead of forbidding it, so that module's `allow` stands, and this
 //! guard keeps the exemption small: an `unsafe` anywhere else in the
@@ -24,6 +24,8 @@ mod tests;
 /// A crate that binds a foreign library.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct FfiCrate {
+    /// Workspace package to exclude from the ordinary lint group, if a member.
+    pub(crate) workspace_package: Option<&'static str>,
     /// Its directory, relative to the repository root.
     pub(crate) dir: &'static str,
     /// The one source file, relative to [`Self::dir`], that may hold
@@ -32,10 +34,18 @@ pub(crate) struct FfiCrate {
 }
 
 /// Every crate that binds a foreign library.
-pub(crate) const FFI_CRATES: &[FfiCrate] = &[FfiCrate {
-    dir: "sim/jsbsim-sidecar",
-    unsafe_module: "src/engine/ffi.rs",
-}];
+pub(crate) const FFI_CRATES: &[FfiCrate] = &[
+    FfiCrate {
+        workspace_package: None,
+        dir: "sim/jsbsim-sidecar",
+        unsafe_module: "src/engine/ffi.rs",
+    },
+    FfiCrate {
+        workspace_package: Some("pilotage-dji-usb"),
+        dir: "adapters/dji-usb",
+        unsafe_module: "src/ffi.rs",
+    },
+];
 
 /// The panic-capable operations no production target may use.
 const PANIC_LINTS: [&str; 3] = [
@@ -79,9 +89,16 @@ pub(crate) fn clippy_invocations(ffi: &[FfiCrate]) -> Vec<Vec<String>> {
         }
         args
     };
-    let targets = ["--lib", "--bins", "--examples"].map(str::to_owned);
+    // Each workspace package is a primary target in one group. Dependency
+    // compilation must not apply another group's unsafe-code lint level.
+    let targets = ["--lib", "--bins", "--examples", "--no-deps"].map(str::to_owned);
     let mut workspace = vec!["clippy".to_owned(), "--workspace".to_owned()];
     workspace.extend(targets.clone());
+    for krate in ffi {
+        if let Some(package) = krate.workspace_package {
+            workspace.extend(["--exclude".to_owned(), package.to_owned()]);
+        }
+    }
     workspace.extend(lint_args("-F"));
     let mut invocations = vec![workspace];
     for krate in ffi {

@@ -5,7 +5,7 @@ use super::{
     TestResult,
     harness::{Harness, frame, packets},
 };
-use crate::adapter::capability::MAX_PITCH_RATE;
+use crate::adapter::HOST_PITCH_RATE_LIMIT_RPS;
 
 type Ready = Result<(Harness, Vec<u8>), Box<dyn std::error::Error>>;
 
@@ -13,7 +13,7 @@ fn ready() -> Ready {
     let mut harness = Harness::bench();
     harness.step(0);
     harness.apply(frame(0.0), 0);
-    harness.apply(frame(-MAX_PITCH_RATE), 20);
+    harness.apply(frame(-HOST_PITCH_RATE_LIMIT_RPS), 20);
     harness.step(20);
     let sent = packets(&harness.written()?);
     let command = sent.last().ok_or("missing pitch command")?;
@@ -87,7 +87,7 @@ fn stale_wrong_route_sequence_and_unverified_codes_do_not_acknowledge() -> TestR
 fn a_response_before_full_write_cannot_acknowledge_pending_bytes() -> TestResult {
     let (mut harness, mut response) = ready()?;
     harness.set_write_limit(0)?;
-    harness.apply(frame(-MAX_PITCH_RATE), 40);
+    harness.apply(frame(-HOST_PITCH_RATE_LIMIT_RPS), 40);
     response[6] = response[6].wrapping_add(1);
     checksum(&mut response);
     harness.feed(&response)?;

@@ -3,8 +3,11 @@ use std::time::Duration;
 use pilotage_adapter_api::{SourceIncarnation, TelemetryBatch, TelemetrySample};
 use pilotage_protocol::{VehicleId, wire};
 use pilotage_timing::SimTick;
+use turret_dji::Mini3ControlProfile;
 
 use crate::{DumlFrame, GimbalAngles, RouteAddress};
+
+use super::{airframe::AirframeObservations, battery::BatteryObservations};
 
 const MAX_AGE: Duration = Duration::from_millis(300);
 
@@ -18,9 +21,12 @@ pub(super) struct Pose {
 pub(super) struct Observations {
     pub(super) latest: Option<Pose>,
     pub(super) consecutive: u8,
+    profile: Mini3ControlProfile,
     incarnation: SourceIncarnation,
     sequence: u32,
     published_sequence: u32,
+    battery: BatteryObservations,
+    airframe: AirframeObservations,
 }
 
 impl Observations {
@@ -55,17 +61,22 @@ impl Observations {
         }
     }
 
-    pub(super) fn new(incarnation: SourceIncarnation) -> Self {
+    pub(super) fn new(incarnation: SourceIncarnation, profile: Mini3ControlProfile) -> Self {
         Self {
             latest: None,
             consecutive: 0,
+            profile,
             incarnation,
             sequence: 0,
             published_sequence: 0,
+            battery: BatteryObservations::default(),
+            airframe: AirframeObservations::default(),
         }
     }
 
     pub(super) fn receive(&mut self, frame: &DumlFrame, now: Duration) {
+        self.battery.receive(frame, now);
+        self.airframe.receive(frame, now);
         let angles = GimbalAngles::from_push(frame, RouteAddress(2))
             .or_else(|| GimbalAngles::from_push(frame, RouteAddress(10)));
         let Some(angles) = angles else {
@@ -88,8 +99,9 @@ impl Observations {
         }
         let yaw_follow = frame.payload().get(6).is_some_and(|mode| mode >> 6 == 2);
         let continuous = self.age(now).is_some_and(|age| age <= MAX_AGE)
-            && self.latest.is_some_and(Pose::qualifies);
-        self.consecutive = if !yaw_follow || !(-50..=0).contains(&angles.pitch_tenths) {
+            && self.latest.is_some_and(|pose| pose.qualifies(self.profile));
+        self.consecutive = if !yaw_follow || self.profile.pitch_target(angles.pitch_tenths).is_err()
+        {
             0
         } else if !continuous {
             1
@@ -118,7 +130,7 @@ impl Observations {
     pub(super) fn ready(&self, now: Duration) -> bool {
         self.consecutive >= 3
             && self.age(now).is_some_and(|age| age <= MAX_AGE)
-            && self.latest.is_some_and(Pose::qualifies)
+            && self.latest.is_some_and(|pose| pose.qualifies(self.profile))
     }
 
     pub(super) fn sample(
@@ -128,23 +140,41 @@ impl Observations {
         now: Duration,
         connection_valid: bool,
     ) -> TelemetryBatch {
+        let payload = self.sample_payload(now, connection_valid);
+        let battery = self.battery.sample(now, connection_valid, self.incarnation);
+        let avionics = self
+            .airframe
+            .sample(now, connection_valid, self.incarnation);
+        if payload.is_none() && battery.is_none() && avionics.is_none() {
+            return TelemetryBatch::default();
+        }
+        TelemetryBatch {
+            samples: vec![TelemetrySample {
+                battery,
+                avionics,
+                ..telemetry(vehicle, tick, payload)
+            }],
+        }
+    }
+
+    fn sample_payload(
+        &mut self,
+        now: Duration,
+        connection_valid: bool,
+    ) -> Option<wire::PayloadState> {
         if !connection_valid
             || self.sequence == self.published_sequence
             || !self.age(now).is_some_and(|age| age <= MAX_AGE)
         {
-            return TelemetryBatch::default();
+            return None;
         }
-        let Some(pose) = self.latest.filter(|pose| pose.yaw_follow) else {
-            return TelemetryBatch::default();
-        };
+        let pose = self.latest.filter(|pose| pose.yaw_follow)?;
         self.published_sequence = self.sequence;
         match self.payload_observation(pose) {
-            Ok(payload) => TelemetryBatch {
-                samples: vec![telemetry(vehicle, tick, payload)],
-            },
+            Ok(payload) => Some(payload),
             Err(error) => {
                 tracing::error!(%error, "DJI angle observation rejected");
-                TelemetryBatch::default()
+                None
             }
         }
     }
@@ -197,20 +227,20 @@ impl Observations {
 }
 
 impl Pose {
-    fn qualifies(self) -> bool {
-        self.yaw_follow && (-50..=0).contains(&self.angles.pitch_tenths)
+    fn qualifies(self, profile: Mini3ControlProfile) -> bool {
+        self.yaw_follow && profile.pitch_target(self.angles.pitch_tenths).is_ok()
     }
 }
 
 pub(super) fn telemetry(
     vehicle: VehicleId,
     tick: SimTick,
-    payload: wire::PayloadState,
+    payload: Option<wire::PayloadState>,
 ) -> TelemetrySample {
     TelemetrySample {
         vehicle,
         tick,
-        payload: Some(payload),
+        payload,
         pose: None,
         speed: None,
         avionics: None,

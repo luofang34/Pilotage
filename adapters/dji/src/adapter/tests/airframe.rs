@@ -1,0 +1,250 @@
+use pilotage_adapter_api::{
+    AvionicsAttitudeSample, Disposition, MeasurementClock, SourceIncarnation, SourceIntegrity,
+    SourceRole, VehicleAdapter,
+};
+
+use super::{
+    TestResult,
+    harness::{Harness, captured_hex_frames, frame, observed_poses, packets, seal_duml},
+};
+use crate::adapter::HOST_PITCH_RATE_LIMIT_RPS;
+
+fn captured_reports() -> Vec<Vec<u8>> {
+    captured_hex_frames(include_str!(
+        "../airframe/fixtures/mini3-reported-attitude.hex"
+    ))
+}
+
+#[test]
+fn captured_body_angles_are_reported_euler_without_navigation_or_authorization() -> TestResult {
+    let mut harness = Harness::mobile();
+    for (index, bytes) in captured_reports().iter().enumerate() {
+        let parsed = packets(bytes);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].raw(), bytes);
+        harness.feed(&crate::logiclink::encode_control(&parsed[0]))?;
+        let millis = 100 * index as u64;
+        harness.step(millis);
+        let batch = harness.telemetry(millis);
+        assert_eq!(batch.samples.len(), 1);
+        let sample = &batch.samples[0];
+        assert!(sample.payload.is_none() && sample.gimbal.is_none() && sample.battery.is_none());
+        assert!(sample.fc_state.is_none() && sample.sim_truth.is_none());
+        assert!(sample.pose.is_none() && sample.speed.is_none());
+        let avionics = sample.avionics.unwrap();
+        assert!(avionics.kinematics.is_none() && avionics.baro.is_none());
+        assert!(avionics.geodetic.is_none() && avionics.magnetic_variation.is_none());
+        assert!(avionics.estimator_status_stamp.is_none());
+        assert_eq!(avionics.valid_flags, 0);
+        assert_eq!(avionics.quality, 2);
+        let AvionicsAttitudeSample::ReportedEuler {
+            pitch_rad,
+            roll_rad,
+            yaw_rad,
+            stamp,
+        } = avionics.attitude.unwrap()
+        else {
+            panic!("reported angles must not become canonical");
+        };
+        assert!((pitch_rad - (-4.9_f32).to_radians()).abs() < 1e-6);
+        assert!((roll_rad - 1.7_f32.to_radians()).abs() < 1e-6);
+        assert!((yaw_rad - (-67.6_f32).to_radians()).abs() < 1e-6);
+        assert_eq!(stamp.role, SourceRole::OperationalEstimate);
+        assert_eq!(stamp.source_id, 0x0e_03_43);
+        assert_eq!(stamp.source_incarnation, SourceIncarnation::new([42; 16]));
+        assert_eq!(stamp.source_epoch, 0);
+        assert_eq!(stamp.integrity, SourceIntegrity::ChecksummedOnly);
+        assert_eq!(stamp.clock, MeasurementClock::HostMonotonic);
+        assert_eq!(stamp.sequence, index as u32 + 1);
+        assert_eq!(stamp.acquired_at_ns, millis * 1_000_000);
+        assert!(harness.telemetry(millis).samples.is_empty());
+        assert!(matches!(
+            harness.apply(frame(0.0), millis).disposition,
+            Disposition::Rejected(_)
+        ));
+    }
+    Ok(())
+}
+
+#[test]
+fn wrong_body_routes_versions_lengths_and_angles_do_not_publish() -> TestResult {
+    for case in 0..16 {
+        let mut bytes = captured_reports().remove(0);
+        match case {
+            0 => bytes[4] = 3,
+            1 => bytes[5] = 10,
+            2 => bytes[8] = 0x80,
+            3 => bytes[9] = 4,
+            4 => bytes[10] = 0x44,
+            5 => bytes[2] = 8,
+            6 => {
+                bytes.remove(80);
+            }
+            7 => bytes.insert(80, 0),
+            8 => bytes.truncate(63),
+            9 => bytes.truncate(68),
+            _ => {
+                let offset = 35 + 2 * ((case - 10) / 2);
+                let angle: i16 = if case % 2 == 0 { 1_801 } else { -1_801 };
+                bytes[offset..offset + 2].copy_from_slice(&angle.to_le_bytes());
+            }
+        }
+        seal_duml(&mut bytes);
+        let mut harness = Harness::new();
+        harness.feed(&bytes)?;
+        harness.step(0);
+        assert!(harness.telemetry(0).samples.is_empty(), "case {case}");
+    }
+    Ok(())
+}
+
+#[test]
+fn repeated_or_backwards_body_sequences_do_not_publish_or_renew_age() -> TestResult {
+    let reports = captured_reports();
+    let mut harness = Harness::new();
+    harness.feed(&reports[0])?;
+    harness.step(0);
+    assert_eq!(
+        harness.telemetry(0).samples[0]
+            .avionics
+            .unwrap()
+            .attitude
+            .unwrap()
+            .stamp()
+            .sequence,
+        1
+    );
+    let mut backwards = reports[0].clone();
+    let sequence = packets(&reports[0])[0].sequence();
+    backwards[6..8].copy_from_slice(&sequence.wrapping_sub(1).to_le_bytes());
+    seal_duml(&mut backwards);
+    for bytes in [&reports[0], &backwards] {
+        harness.feed(bytes)?;
+        harness.step(200);
+        assert!(harness.telemetry(200).samples.is_empty());
+    }
+    harness.feed(&reports[1])?;
+    harness.step(350);
+    let stamp = harness.telemetry(350).samples[0]
+        .avionics
+        .unwrap()
+        .attitude
+        .unwrap()
+        .stamp();
+    assert_eq!(stamp.sequence, 2);
+    assert_eq!(stamp.acquired_at_ns, 350_000_000);
+    Ok(())
+}
+
+#[test]
+fn stale_or_future_body_observations_are_withheld() -> TestResult {
+    let reports = captured_reports();
+    for malformed in [false, true] {
+        let mut harness = Harness::new();
+        harness.feed(&reports[0])?;
+        harness.step(0);
+        let mut later = reports[usize::from(malformed)].clone();
+        if malformed {
+            later[35..37].copy_from_slice(&i16::MAX.to_le_bytes());
+            seal_duml(&mut later);
+        }
+        harness.feed(&later)?;
+        harness.step(250);
+        assert!(harness.telemetry(301).samples.is_empty());
+        harness.feed(&reports[1])?;
+        harness.step(310);
+        assert!(harness.telemetry(309).samples.is_empty());
+        let stamp = harness.telemetry(310).samples[0]
+            .avionics
+            .unwrap()
+            .attitude
+            .unwrap()
+            .stamp();
+        assert_eq!(stamp.sequence, 2);
+        assert_eq!(stamp.acquired_at_ns, 310_000_000);
+    }
+    let mut harness = Harness::new();
+    harness.feed(&reports[0])?;
+    harness.step(0);
+    assert_eq!(harness.telemetry(300).samples.len(), 1);
+    Ok(())
+}
+
+#[test]
+fn body_battery_and_gimbal_have_independent_freshness_and_sequences() -> TestResult {
+    let reports = captured_reports();
+    let battery = captured_hex_frames(include_str!("../battery/fixtures/mini3-battery-status.hex"));
+    let mut harness = Harness::new();
+    harness.feed(&reports[0])?;
+    harness.feed(&battery[0])?;
+    harness.feed(&observed_poses()[0])?;
+    harness.step(0);
+    let stale_body = harness.telemetry(301);
+    assert!(stale_body.samples[0].avionics.is_none());
+    assert!(stale_body.samples[0].payload.is_none());
+    assert_eq!(stale_body.samples[0].battery.unwrap().stamp.sequence, 1);
+    harness.feed(&reports[1])?;
+    harness.step(310);
+    let body = harness.telemetry(310);
+    assert!(body.samples[0].battery.is_none() && body.samples[0].payload.is_none());
+    let stamp = body.samples[0].avionics.unwrap().attitude.unwrap().stamp();
+    assert_eq!(stamp.sequence, 2);
+    harness.feed(&observed_poses()[1])?;
+    harness.step(320);
+    let gimbal = harness.telemetry(320);
+    assert!(gimbal.samples[0].payload.is_some());
+    assert!(gimbal.samples[0].avionics.is_none() && gimbal.samples[0].battery.is_none());
+    harness.feed(&battery[1])?;
+    harness.step(330);
+    let battery = harness.telemetry(330);
+    assert!(battery.samples[0].avionics.is_none() && battery.samples[0].payload.is_none());
+    assert_eq!(battery.samples[0].battery.unwrap().stamp.sequence, 2);
+    Ok(())
+}
+
+#[test]
+fn bad_crc_or_disconnect_withholds_pending_body_data_and_cannot_resume() -> TestResult {
+    let reports = captured_reports();
+    for corrupt in [false, true] {
+        let mut harness = Harness::new();
+        harness.feed(&reports[0])?;
+        harness.step(0);
+        if corrupt {
+            let mut damaged = reports[1].clone();
+            damaged[35] ^= 1;
+            harness.feed(&damaged)?;
+        } else {
+            harness.disconnect()?;
+        }
+        harness.step(10);
+        assert!(harness.adapter.status_cached().fault.is_some());
+        assert!(harness.telemetry(10).samples.is_empty());
+        harness.feed(&reports[2])?;
+        harness.step(20);
+        assert!(harness.telemetry(20).samples.is_empty());
+    }
+    Ok(())
+}
+
+#[test]
+fn an_airframe_only_sample_preserves_command_progress_without_payload_angles() -> TestResult {
+    let mut harness = Harness::bench();
+    harness.feed(&captured_reports()[0])?;
+    harness.step(0);
+    harness.apply(frame(0.0), 0);
+    harness.apply(frame(-HOST_PITCH_RATE_LIMIT_RPS), 20);
+    harness.step(20);
+    let batch = harness.adapter.sample_telemetry();
+    let sample = &batch.samples[0];
+    assert!(sample.avionics.is_some() && sample.battery.is_none());
+    let payload = sample.payload.as_ref().unwrap();
+    assert!(payload.pitch.is_none() && payload.roll.is_none() && payload.yaw.is_none());
+    let progress = payload.command.as_ref().unwrap();
+    assert_eq!(
+        progress.stage,
+        pilotage_protocol::wire::PayloadCommandStage::Sent as i32
+    );
+    assert!(progress.sent_at.is_some());
+    assert!(progress.acknowledged_at.is_none() && progress.observed_complete_at.is_none());
+    Ok(())
+}

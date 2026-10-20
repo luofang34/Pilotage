@@ -53,6 +53,7 @@ fn full_avionics() -> wire::AvionicsState {
         estimator_status_stamp: Some(stamp(9, vec![0xEF; 16])),
         magnetic_variation: None,
         magnetic_variation_stamp: None,
+        reported_euler: None,
     }
 }
 

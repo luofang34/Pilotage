@@ -87,8 +87,15 @@ fn read(sample: &TelemetrySample) -> Option<Reading> {
     let avionics = sample.avionics?;
     let kinematics = avionics.kinematics?;
     let pose = sample.pose?;
-    let attitude = avionics.attitude?;
-    let [w, x, y, z] = attitude.quat_wxyz.map(f64::from);
+    let pilotage_adapter_api::AvionicsAttitudeSample::Canonical {
+        quat_wxyz,
+        rates_rps: Some(rates_rps),
+        ..
+    } = avionics.attitude?
+    else {
+        return None;
+    };
+    let [w, x, y, z] = quat_wxyz.map(f64::from);
     // The angle between body down and world down.
     let tilt_deg = (1.0 - 2.0 * (x * x + y * y))
         .clamp(-1.0, 1.0)
@@ -104,7 +111,7 @@ fn read(sample: &TelemetrySample) -> Option<Reading> {
         roll_deg: (2.0 * (w * x + y * z))
             .atan2(1.0 - 2.0 * (x * x + y * y))
             .to_degrees(),
-        rates: attitude.rates_rps.map(f64::from),
+        rates: rates_rps.map(f64::from),
     })
 }
 

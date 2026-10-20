@@ -153,9 +153,13 @@ pub fn estimate_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -> Tele
             .filter(|fix| fix.received_at.elapsed() <= WITHHOLD_AFTER)
             .as_ref()
             .and_then(|fix| estimate_geodetic_fix(fix, &latest)),
-        attitude: attitude.map(|att| AvionicsAttitudeSample {
+        attitude: attitude.map(|att| AvionicsAttitudeSample::Canonical {
             quat_wxyz: att.quat_wxyz,
-            rates_rps: att.rates_rps,
+            rates_rps: att
+                .rates_rps
+                .iter()
+                .all(|rate| rate.is_finite())
+                .then_some(att.rates_rps),
             stamp: att.stamp,
         }),
         kinematics: kinematics.map(|kin| AvionicsKinematicsSample {

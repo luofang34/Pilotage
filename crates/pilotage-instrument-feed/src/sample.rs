@@ -9,6 +9,9 @@ use indicate_instrument_feeder::RawStamp;
 use indicate_instrument_feeder::avionics::{AttitudeGroup, AvionicsSample, KinematicsGroup};
 use pilotage_protocol::wire;
 
+#[cfg(test)]
+mod tests;
+
 /// Converts one wire measurement stamp. `None` in, `None` out: a missing
 /// stamp means the group was not supplied, and inventing one would turn
 /// absence into a measurement.

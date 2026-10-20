@@ -61,9 +61,9 @@ impl BetaflightAdapter {
                 0
             };
         let avionics = AvionicsSample {
-            attitude: Some(AvionicsAttitudeSample {
+            attitude: Some(AvionicsAttitudeSample::Canonical {
                 quat_wxyz: snapshot.quaternion().map(|q| q as f32),
-                rates_rps: snapshot.rates_frd.map(|r| r as f32),
+                rates_rps: Some(snapshot.rates_frd.map(|r| r as f32)),
                 stamp: estimate_stamp,
             }),
             kinematics,

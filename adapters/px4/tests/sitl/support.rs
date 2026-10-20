@@ -36,12 +36,19 @@ pub(crate) fn observe(batch: &TelemetryBatch) -> Option<Observed> {
     batch.samples.iter().find_map(|sample| {
         let avionics = sample.avionics.as_ref()?;
         let kinematics = avionics.kinematics.as_ref()?;
-        let attitude = avionics.attitude.as_ref()?;
+        let pilotage_adapter_api::AvionicsAttitudeSample::Canonical {
+            quat_wxyz,
+            rates_rps: Some(rates_rps),
+            ..
+        } = avionics.attitude?
+        else {
+            return None;
+        };
         Some(Observed {
             down_m: kinematics.pos_ned_m[2],
             heading_rad: sample.pose?.heading,
-            quat_wxyz: attitude.quat_wxyz,
-            rates_rps: attitude.rates_rps,
+            quat_wxyz,
+            rates_rps,
         })
     })
 }

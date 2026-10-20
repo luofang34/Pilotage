@@ -51,6 +51,13 @@ fn observe(sample: Option<&TelemetrySample>) -> Option<Observed> {
     let sample = sample?;
     let pose = sample.pose?;
     let down = sample.avionics?.kinematics?.pos_ned_m[2];
+    let pilotage_adapter_api::AvionicsAttitudeSample::Canonical {
+        rates_rps: Some(rates),
+        ..
+    } = sample.avionics?.attitude?
+    else {
+        return None;
+    };
     Some(Observed {
         north: pose.x,
         east: pose.y,
@@ -62,7 +69,7 @@ fn observe(sample: Option<&TelemetrySample>) -> Option<Observed> {
             .geodetic
             .map(|fix| (fix.position.latitude_deg, fix.position.longitude_deg)),
         battery: sample.battery.and_then(|battery| battery.voltage_v),
-        rates: sample.avionics?.attitude?.rates_rps,
+        rates,
         climb: -f64::from(sample.avionics?.kinematics?.vel_ned_mps[2]),
     })
 }
