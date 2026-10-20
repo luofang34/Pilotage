@@ -25,6 +25,9 @@ impl ArduPilotAdapter {
             return Ok(());
         };
         self.link_loss_policy.insert(scope.clone(), policy);
+        if let Some(camera) = self.camera.as_mut() {
+            camera.invalidate_pending_commands(vehicle, scope);
+        }
         if scope.as_str() == GIMBAL_SCOPE {
             let Some(gimbal) = self.gimbal.as_mut() else {
                 return Err(LinkLossEnactError::NoActuationChannel);

@@ -1,4 +1,4 @@
-use pilotage_mavlink::CameraReport;
+use crate::CameraReport;
 use pilotage_protocol::wire;
 use std::time::Instant;
 
@@ -9,7 +9,7 @@ pub(super) fn camera_observation(
     started: Instant,
 ) -> Option<wire::PayloadZoomObservation> {
     let received = report.settings_received_at?;
-    if received.elapsed() > pilotage_mavlink::sampling::WITHHOLD_AFTER {
+    if received.elapsed() > crate::sampling::WITHHOLD_AFTER {
         return None;
     }
     let time = report.settings_time_boot_ms?;

@@ -1,6 +1,6 @@
 use super::*;
-use pilotage_adapter_api::{SourceIncarnation, VehicleAdapter};
-use pilotage_mavlink::{FcMessage, FrameSource, LinkState, codec::CameraMessage};
+use crate::{FcMessage, FrameSource, LinkState, codec::CameraMessage};
+use pilotage_adapter_api::SourceIncarnation;
 use pilotage_protocol::{
     ControlPayload, Generation, ScopeId, SequenceNum, SessionId, VehicleId, ZoomCommand, ZoomUnit,
 };
@@ -9,11 +9,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 mod transport;
-
-fn requirement(state: &Arc<Mutex<LinkState>>) -> CameraWriteRequirement {
-    let state = state.lock().unwrap();
-    camera_requirement(&state, (100, 0), &state.fc_reports.cameras[&(100, 0)])
-}
 
 fn frame(command: ZoomCommand) -> ScopedControlFrame {
     ScopedControlFrame {
@@ -35,12 +30,16 @@ fn frame(command: ZoomCommand) -> ScopedControlFrame {
 }
 
 fn report(state: &Arc<Mutex<LinkState>>, now: Instant) {
+    report_camera(state, (100, 0), 0.25, now);
+}
+
+fn report_camera(state: &Arc<Mutex<LinkState>>, key: (u8, u8), zoom: f32, now: Instant) {
     let source = FrameSource {
         system_id: 1,
-        component_id: 100,
+        component_id: key.0,
         frame_sequence: 0,
     };
-    pilotage_mavlink::link::apply_messages_at(
+    crate::link::apply_messages_at(
         state,
         &[
             (
@@ -48,7 +47,7 @@ fn report(state: &Arc<Mutex<LinkState>>, now: Instant) {
                 FcMessage::Camera(CameraMessage::Information {
                     time_boot_ms: 100,
                     flags: 64,
-                    device_id: 0,
+                    device_id: key.1,
                     gimbal_id: 0,
                 }),
             ),
@@ -56,14 +55,35 @@ fn report(state: &Arc<Mutex<LinkState>>, now: Instant) {
                 source,
                 FcMessage::Camera(CameraMessage::Settings {
                     time_boot_ms: 101,
-                    device_id: 0,
-                    travel_fraction: Some(0.25),
+                    device_id: key.1,
+                    travel_fraction: Some(zoom),
                 }),
             ),
         ],
         0,
         0,
         now,
+    );
+}
+
+fn setting(state: &Arc<Mutex<LinkState>>, time: u32, zoom: f32) {
+    crate::link::apply_messages_at(
+        state,
+        &[(
+            FrameSource {
+                system_id: 1,
+                component_id: 100,
+                frame_sequence: 1,
+            },
+            FcMessage::Camera(CameraMessage::Settings {
+                time_boot_ms: time,
+                device_id: 0,
+                travel_fraction: Some(zoom),
+            }),
+        )],
+        0,
+        0,
+        Instant::now(),
     );
 }
 
@@ -74,11 +94,11 @@ fn discovered_camera_has_own_identity_scope_and_typed_command_route() {
         ..Default::default()
     }));
     let (sender, mut receiver) = tokio::sync::mpsc::channel(8);
-    let mut adapter = Px4Adapter::from_state(VehicleId::new(1), state.clone());
-    adapter.camera_control = Some(CameraControl::new(sender, 1));
-    assert!(adapter.camera_scopes().is_empty());
+    let mut endpoint =
+        CameraEndpoints::new(VehicleId::new(1), state.clone(), sender, 1, Instant::now());
+    assert!(endpoint.scopes().is_empty());
     report(&state, Instant::now());
-    let scopes = adapter.camera_scopes();
+    let scopes = endpoint.scopes();
     let payload = scopes[0].payload.as_ref().unwrap();
     assert_eq!(payload.resource_scopes, ["vehicle.camera.100.0"]);
     assert_eq!(payload.connection_incarnation, vec![4; 16]);
@@ -91,30 +111,20 @@ fn discovered_camera_has_own_identity_scope_and_typed_command_route() {
         unit: ZoomUnit::TravelFraction,
         value_micros: 750_000,
     });
-    let result = adapter.apply_control(&command);
+    let result = endpoint.apply_control(&command, SimTick::new(0));
     assert_eq!(result.disposition, Disposition::Accepted);
     let queued = receiver.try_recv().unwrap();
     assert_eq!(queued.command, 531);
     assert_eq!(queued.target_component, 100);
     assert_eq!(queued.params[..3], [2.0, 75.0, 100.0]);
     assert!(queued.payload_write.is_some());
-    let progress = adapter
-        .camera_control
-        .as_ref()
-        .unwrap()
-        .progress_cached(requirement(&state))
-        .unwrap();
+    let progress = progress_cached(&endpoint, (100, 0)).unwrap();
     assert!(progress.sent_at.is_none());
     assert_eq!(progress.zoom_target.unwrap().value_micros, 750_000);
-    adapter.invalidate_pending_commands(VehicleId::new(1), &command.scope);
-    let progress = adapter
-        .camera_control
-        .as_ref()
-        .unwrap()
-        .progress_cached(requirement(&state))
-        .unwrap();
+    endpoint.invalidate_pending_commands(VehicleId::new(1), &command.scope);
+    let progress = progress_cached(&endpoint, (100, 0)).unwrap();
     assert_eq!(progress.stage, wire::PayloadCommandStage::Cancelled as i32);
-    let batch = adapter.sample_telemetry();
+    let batch = sample(&mut endpoint);
     let measured = batch
         .samples
         .iter()
@@ -134,12 +144,12 @@ fn discovered_camera_has_own_identity_scope_and_typed_command_route() {
 fn expired_discovery_refuses_controls_and_advertises_unavailability() {
     let state = Arc::new(Mutex::new(LinkState::default()));
     let (sender, mut receiver) = tokio::sync::mpsc::channel(8);
-    let mut adapter = Px4Adapter::from_state(VehicleId::new(1), state.clone());
-    adapter.camera_control = Some(CameraControl::new(sender, 1));
+    let mut endpoint =
+        CameraEndpoints::new(VehicleId::new(1), state.clone(), sender, 1, Instant::now());
     report(&state, Instant::now() - Duration::from_secs(7));
-    adapter.apply_control(&frame(ZoomCommand::Step(1)));
+    endpoint.apply_control(&frame(ZoomCommand::Step(1)), SimTick::new(0));
     assert!(receiver.try_recv().is_err());
-    let payload = adapter.camera_scopes().remove(0).payload.unwrap();
+    let payload = endpoint.scopes().remove(0).payload.unwrap();
     assert_eq!(
         payload.zoom.unwrap().support,
         wire::PayloadSupportState::Unavailable as i32
@@ -150,8 +160,8 @@ fn expired_discovery_refuses_controls_and_advertises_unavailability() {
 fn undeclared_zoom_operations_never_enter_command_queue() {
     let state = Arc::new(Mutex::new(LinkState::default()));
     let (sender, mut receiver) = tokio::sync::mpsc::channel(8);
-    let mut adapter = Px4Adapter::from_state(VehicleId::new(1), state.clone());
-    adapter.camera_control = Some(CameraControl::new(sender, 1));
+    let mut endpoint =
+        CameraEndpoints::new(VehicleId::new(1), state.clone(), sender, 1, Instant::now());
     report(&state, Instant::now());
     for command in [
         ZoomCommand::Absolute {
@@ -174,26 +184,24 @@ fn undeclared_zoom_operations_never_enter_command_queue() {
         ZoomCommand::Step(2),
         ZoomCommand::Step(0),
     ] {
-        let outcome = adapter.apply_control(&frame(command));
+        let outcome = endpoint.apply_control(&frame(command), SimTick::new(0));
         assert!(!outcome.action_results[0].accepted, "{command:?}");
     }
     assert!(receiver.try_recv().is_err());
-    assert!(
-        adapter
-            .camera_control
-            .as_ref()
-            .unwrap()
-            .progress_cached(requirement(&state))
-            .is_none()
-    );
+    assert!(progress_cached(&endpoint, (100, 0)).is_none());
 }
 
 #[test]
 fn exhausted_send_budget_and_full_queue_do_not_claim_command_admission() {
     let state = Arc::new(Mutex::new(LinkState::default()));
     let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
-    let mut adapter = Px4Adapter::from_state(VehicleId::new(1), state.clone());
-    adapter.camera_control = Some(CameraControl::new(sender.clone(), 1));
+    let mut endpoint = CameraEndpoints::new(
+        VehicleId::new(1),
+        state.clone(),
+        sender.clone(),
+        1,
+        Instant::now(),
+    );
     report(&state, Instant::now());
     let mut expired = frame(ZoomCommand::Step(1));
     expired.admitted_timing = Some(pilotage_protocol::AdmittedTiming {
@@ -203,22 +211,78 @@ fn exhausted_send_budget_and_full_queue_do_not_claim_command_admission() {
         completion_timeout: None,
         window_bounded: true,
     });
-    assert!(!adapter.apply_control(&expired).action_results[0].accepted);
-    assert!(receiver.try_recv().is_err());
-    let permit = sender.try_reserve().unwrap();
     assert!(
-        !adapter
-            .apply_control(&frame(ZoomCommand::Step(1)))
+        !endpoint
+            .apply_control(&expired, SimTick::new(0))
             .action_results[0]
             .accepted
     );
+    assert!(receiver.try_recv().is_err());
+    let permit = sender.try_reserve().unwrap();
     assert!(
-        adapter
-            .camera_control
-            .as_ref()
-            .unwrap()
-            .progress_cached(requirement(&state))
-            .is_none()
+        !endpoint
+            .apply_control(&frame(ZoomCommand::Step(1)), SimTick::new(0))
+            .action_results[0]
+            .accepted
     );
+    assert!(progress_cached(&endpoint, (100, 0)).is_none());
     drop(permit);
+}
+
+fn sample(endpoint: &mut CameraEndpoints) -> TelemetryBatch {
+    let mut batch = TelemetryBatch::default();
+    endpoint.sample_telemetry(&mut batch);
+    batch
+}
+
+fn requirement(endpoint: &CameraEndpoints, key: (u8, u8)) -> CameraWriteRequirement {
+    let state = endpoint.state.lock().unwrap();
+    camera_requirement(&state, key, state.fc_reports.cameras.get(&key).unwrap())
+}
+
+fn progress_cached(
+    endpoint: &CameraEndpoints,
+    key: (u8, u8),
+) -> Option<wire::PayloadCommandProgress> {
+    endpoint.control.progress_cached(requirement(endpoint, key))
+}
+
+#[test]
+fn camera_scope_aliases_cannot_admit_or_revoke_commands() {
+    let state = Arc::new(Mutex::new(LinkState::default()));
+    let (sender, mut receiver) = tokio::sync::mpsc::channel(8);
+    let mut endpoint =
+        CameraEndpoints::new(VehicleId::new(1), state.clone(), sender, 1, Instant::now());
+    report(&state, Instant::now());
+    let canonical = frame(ZoomCommand::Step(1));
+    assert!(
+        endpoint
+            .apply_control(&canonical, SimTick::new(0))
+            .action_results[0]
+            .accepted
+    );
+    receiver.try_recv().unwrap();
+    let before = progress_cached(&endpoint, (100, 0)).unwrap();
+    for alias in [
+        "vehicle.camera.0100.0",
+        "vehicle.camera.+100.0",
+        "vehicle.camera.100.00",
+    ] {
+        let mut command = canonical.clone();
+        command.scope = ScopeId::new(alias);
+        assert!(matches!(
+            endpoint
+                .apply_control(&command, SimTick::new(0))
+                .disposition,
+            Disposition::Rejected(_),
+        ));
+        endpoint.invalidate_pending_commands(VehicleId::new(1), &command.scope);
+        assert_eq!(progress_cached(&endpoint, (100, 0)).unwrap(), before);
+    }
+    assert!(receiver.try_recv().is_err());
+    endpoint.invalidate_pending_commands(VehicleId::new(1), &canonical.scope);
+    assert_eq!(
+        progress_cached(&endpoint, (100, 0)).unwrap().stage,
+        wire::PayloadCommandStage::Cancelled as i32,
+    );
 }

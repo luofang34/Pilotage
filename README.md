@@ -58,6 +58,14 @@ and start the session host with `--adapter ardupilot`. Set
 `127.0.0.1:14550`. To enable MAVLink gimbal discovery, set
 `PILOTAGE_ARDUPILOT_GIMBAL=1`. Discovery does not claim gimbal control.
 The device reports which axes and actions it supports.
+PX4 and ArduPilot also discover MAVLink cameras on the same link.
+Each camera has an independent `vehicle.camera.<component>.<device>` scope.
+Zoom controls require a current camera capability report. Zoom targets do
+not replace the reported zoom setting. A sent command does not confirm
+that the camera reached its target.
+After a camera restarts or its boot clock wraps, restart the session host
+to establish a new connection. Lower camera timestamps do not establish
+a new camera identity.
 For native takeoff, send `Takeoff` on `vehicle.motion` after the FC reports
 armed, GUIDED mode, and on-ground state with valid position data. The target
 is 2.5 m above the measured starting altitude. A climb input does not start

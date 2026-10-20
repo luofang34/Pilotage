@@ -1,5 +1,5 @@
 use super::catalog::{camera_key, core_capabilities};
-use pilotage_mavlink::{
+use crate::{
     CameraReport, CameraWriteRequirement, LinkState, OutboundCommand, PayloadChannel,
     PayloadTiming, SendFence,
 };
@@ -17,7 +17,7 @@ pub(super) enum CameraCommandError {
     #[error("camera command unsupported: {0}")]
     Contract(#[from] turret_core::Error),
     #[error("camera execution refused: {0}")]
-    Execution(#[from] pilotage_mavlink::PayloadExecutionError),
+    Execution(#[from] crate::PayloadExecutionError),
     #[error("camera command queue unavailable: {0}")]
     Queue(#[from] tokio::sync::mpsc::error::TrySendError<()>),
 }
@@ -31,7 +31,7 @@ struct Endpoint {
 }
 
 #[derive(Debug)]
-pub(in crate::adapter) struct CameraControl {
+pub(super) struct CameraControl {
     commands: tokio::sync::mpsc::Sender<OutboundCommand>,
     system_id: u8,
     next_probe: Instant,
@@ -39,10 +39,7 @@ pub(in crate::adapter) struct CameraControl {
 }
 
 impl CameraControl {
-    pub(in crate::adapter) fn new(
-        commands: tokio::sync::mpsc::Sender<OutboundCommand>,
-        system_id: u8,
-    ) -> Self {
+    pub(super) fn new(commands: tokio::sync::mpsc::Sender<OutboundCommand>, system_id: u8) -> Self {
         Self {
             commands,
             system_id,
@@ -51,7 +48,7 @@ impl CameraControl {
         }
     }
 
-    pub(in crate::adapter) fn probe(&mut self, now: Instant) {
+    pub(super) fn probe(&mut self, now: Instant) {
         if now < self.next_probe {
             return;
         }
@@ -160,7 +157,7 @@ impl CameraControl {
         Ok(())
     }
 
-    pub(in crate::adapter) fn invalidate(&mut self, scope: &str) {
+    pub(super) fn invalidate(&mut self, scope: &str) {
         if let Some(endpoint) = camera_key(scope).and_then(|key| self.endpoints.get(&key)) {
             revoke(&endpoint.channel);
         }

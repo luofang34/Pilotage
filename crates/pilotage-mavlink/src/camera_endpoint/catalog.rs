@@ -1,15 +1,16 @@
+use crate::CameraReport;
 use pilotage_adapter_api::{ActionCapability, ScopeDescriptor, payload_capabilities_to_wire};
-use pilotage_mavlink::CameraReport;
 use pilotage_protocol::{ActionKind, ScopeId, wire};
 use turret_core::{Capability, PayloadCapabilities, UnavailableReason};
 
 pub(super) fn camera_scope((component, device): (u8, u8)) -> String {
-    format!("vehicle.camera.{component}.{device}")
+    format!("{}{component}.{device}", super::SCOPE_PREFIX)
 }
 
 pub(super) fn camera_key(scope: &str) -> Option<(u8, u8)> {
-    let (component, device) = scope.strip_prefix("vehicle.camera.")?.split_once('.')?;
-    Some((component.parse().ok()?, device.parse().ok()?))
+    let (component, device) = scope.strip_prefix(super::SCOPE_PREFIX)?.split_once('.')?;
+    let key = (component.parse().ok()?, device.parse().ok()?);
+    (scope == camera_scope(key)).then_some(key)
 }
 
 pub(super) fn core_capabilities(

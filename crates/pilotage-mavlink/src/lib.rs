@@ -11,11 +11,13 @@
 //! stamps. Adapters sample the cache; they never touch the socket.
 
 pub mod ardupilot;
+pub mod camera_endpoint;
 pub mod codec;
 mod command_result;
 pub mod gimbal_control;
 pub mod gimbal_endpoint;
 mod gimbal_flags;
+pub use camera_endpoint::CameraEndpoints;
 pub use gimbal_control::ManagerControl;
 pub mod link;
 mod payload_execution;
