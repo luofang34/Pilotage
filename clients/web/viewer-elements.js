@@ -4,6 +4,7 @@ export function resolveViewerElements(document) {
     host: document.getElementById("host"),
     port: document.getElementById("port"),
     certHash: document.getElementById("certHash"),
+    joinCode: document.getElementById("joinCode"),
     connectBtn: document.getElementById("connectBtn"),
     resumeBtn: document.getElementById("resumeBtn"),
     status: document.getElementById("status"),

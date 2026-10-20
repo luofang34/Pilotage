@@ -25,6 +25,7 @@ use super::{MAX_CONTROL_AGE, build_reference, gazebo_launch};
 /// The host side of a session runtime: what every adapter path hands to
 /// [`spawn_runtime`] besides the adapter itself.
 struct HostSide {
+    join_token: Option<pilotage_protocol::JoinToken>,
     endpoint: Endpoint<wtransport::endpoint::endpoint_side::Server>,
     engine_tx: mpsc::Sender<ToEngine>,
     engine_rx: mpsc::Receiver<ToEngine>,
@@ -52,6 +53,7 @@ pub(super) async fn spawn_adapter_runtime(
 ) -> Result<JoinHandle<()>, HostError> {
     let sim_camera_port = options.sim_camera_port.take();
     let host = HostSide {
+        join_token: options.network.join_token.clone(),
         endpoint,
         engine_tx,
         engine_rx,
@@ -208,6 +210,7 @@ where
     A: VehicleAdapter + Send + 'static,
 {
     let HostSide {
+        join_token,
         endpoint,
         engine_tx,
         engine_rx,
@@ -224,6 +227,7 @@ where
             engine_rx,
             shutdown_rx,
             start,
+            join_token,
         ));
     };
     let (media, media_task) = media::spawn_media_task(frames, start);
@@ -240,6 +244,7 @@ where
         engine_rx,
         shutdown_rx,
         start,
+        join_token,
     ))
 }
 

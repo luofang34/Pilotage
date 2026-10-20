@@ -5,6 +5,7 @@
 //! cannot drift: a divergence reddens exactly one of them.
 
 mod action_request;
+mod admission;
 mod catalog;
 mod groups;
 mod lanes;
@@ -26,6 +27,7 @@ const TYPED_FRAME_FIXTURE: &str =
 
 pub(super) fn engine() -> ClientEngine {
     ClientEngine::new(ClientConfig {
+        join_token: None,
         client_name: "test-client".into(),
         reconnect: ReconnectPolicy::default(),
     })

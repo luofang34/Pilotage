@@ -1,6 +1,7 @@
-//! Minimal argument parsing for the session-host binary: `--port <PORT>` and
-//! `--adapter reference|gazebo|aviate|px4|ardupilot|betaflight|dji`, defaulting to
-//! port `0` (ephemeral, loopback-only bind) and the reference adapter.
+//! Session-host arguments. Remote binds require an explicit admission secret.
+
+use std::net::{IpAddr, Ipv4Addr};
+use std::path::PathBuf;
 
 /// Which vehicle adapter the host embeds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -27,10 +28,14 @@ pub enum AdapterKind {
 }
 
 /// Parsed command-line configuration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CliArgs {
-    /// Port to bind on `127.0.0.1`. `0` asks the OS for an ephemeral port.
+    /// Port to bind. `0` asks the OS for an ephemeral port.
     pub port: u16,
+    /// Interface address. Defaults to `127.0.0.1`.
+    pub bind_ip: IpAddr,
+    /// Absolute path to a hexadecimal admission secret.
+    pub join_token_file: Option<PathBuf>,
     /// Which vehicle adapter to embed.
     pub adapter: AdapterKind,
 }
@@ -38,6 +43,12 @@ pub struct CliArgs {
 /// An error parsing command-line arguments.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum CliError {
+    /// A network option has no following value.
+    #[error("{0} requires a value")]
+    MissingNetworkValue(String),
+    /// The bind address is not an IP address.
+    #[error("invalid --bind address: {0}")]
+    InvalidBind(#[source] std::net::AddrParseError),
     /// `--port` was given a value that does not parse as a `u16`.
     #[error("invalid --port value {value:?}: {source}")]
     InvalidPort {
@@ -67,13 +78,27 @@ pub enum CliError {
 ///
 /// # Errors
 ///
-/// Returns [`CliError`] for a malformed or unrecognized `--port` argument.
+/// Returns [`CliError`] for a malformed, missing, or unrecognized argument.
 pub fn parse_args(args: &[String]) -> Result<CliArgs, CliError> {
     let mut port: u16 = 0;
     let mut adapter = AdapterKind::default();
+    let mut bind_ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
+    let mut join_token_file = None;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
+            "--bind" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| CliError::MissingNetworkValue(arg.clone()))?;
+                bind_ip = value.parse().map_err(CliError::InvalidBind)?;
+            }
+            "--join-token-file" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| CliError::MissingNetworkValue(arg.clone()))?;
+                join_token_file = Some(PathBuf::from(value));
+            }
             "--port" => {
                 let value = iter.next().ok_or(CliError::MissingPortValue)?;
                 port = value.parse().map_err(|source| CliError::InvalidPort {
@@ -97,7 +122,12 @@ pub fn parse_args(args: &[String]) -> Result<CliArgs, CliError> {
             other => return Err(CliError::Unrecognized(other.to_owned())),
         }
     }
-    Ok(CliArgs { port, adapter })
+    Ok(CliArgs {
+        port,
+        bind_ip,
+        join_token_file,
+        adapter,
+    })
 }
 
 #[cfg(test)]

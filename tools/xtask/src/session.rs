@@ -127,6 +127,7 @@ fn sim_context(
         log_dir: run_dir.clone(),
         web_root: stages::viewer_source(repo_root),
         lan: args.lan,
+        join_token_file: args.join_token_file.clone(),
         instance: args.instance,
         ready_timeout_s: args.ready_timeout_s,
         sim_camera: args.sim_camera,

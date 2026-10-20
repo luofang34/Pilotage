@@ -20,8 +20,8 @@
  * telemetry, but NOT a rejection signal: an untyped stream end is
  * retryable wherever it lands, because the host's close carries no wire
  * payload and a pre-welcome EOF is indistinguishable from an early
- * network blip. Only a future typed protocol rejection may classify as
- * non-retryable (#146).
+ * network blip. The transport owner uses the session close code to classify
+ * admission rejection as non-retryable.
  *
  * @param {object} deps
  * @param {{ read: () => Promise<{value?: Uint8Array, done: boolean}> }} deps.reader

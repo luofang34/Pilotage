@@ -44,6 +44,7 @@ impl Session {
     pub(crate) async fn open(url: &str, cert_sha256: [u8; 32]) -> Result<Self, PilotError> {
         let (link, events) = Link::connect(url, cert_sha256).await?;
         let mut engine = ClientEngine::new(ClientConfig {
+            join_token: None,
             client_name: "intent-pilot".to_owned(),
             reconnect: ReconnectPolicy::default(),
         });

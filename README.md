@@ -72,11 +72,43 @@ is 2.5 m above the measured starting altitude. A climb input does not start
 takeoff. The `flight_procedure` telemetry field reports progress separately
 from action acceptance. A timeout does not confirm that vehicle motion stopped.
 
+## Remote session access
+
+The session host listens on `127.0.0.1` by default for all adapters.
+Run the host on the computer connected to the device. To accept remote
+clients, set `--bind` to a network interface address and supply
+`--join-token-file` with an absolute path. The file must contain a shared
+secret with 64 hexadecimal digits. Generate one on the host:
+
+```sh
+umask 077
+openssl rand -hex 32 > "$HOME/pilotage-join-token"
+cargo run --release -p pilotage-session-host -- \
+  --adapter reference --bind 0.0.0.0 --port 4433 \
+  --join-token-file "$HOME/pilotage-join-token"
+```
+
+Provide the secret to each operator through a trusted channel. Keep it out
+of the public session file and URL. Clients must also verify the host's
+certificate SHA-256 from its `LISTENING` line. In the browser viewer, enter
+the secret in **Join code**, then select **Connect**. For the simulator
+launcher, use `cargo xtask sim --lan --join-token-file /absolute/token-file`.
+Sokoly-App accepts a local token file for each named session. The Apple
+client and command-line probe do not accept a token and cannot join a
+protected host.
+
+The host checks the first client message before it sends capabilities,
+telemetry, or video. A missing or invalid secret closes the connection.
+The client stops automatic connection attempts after admission is rejected.
+Admission does not grant a control lease. Connection recovery restores
+observation only; the operator must request control again. Network delay
+does not extend command deadlines.
+
 ## DJI USB bench connection on macOS
 
 Select one RC-N1 attachment and a new capture file. The capture directory
 must exist. The host refuses to overwrite a capture.
-The DJI host listens on the local loopback interface.
+The host uses the session access settings above.
 
 For the upper USB port, set `PILOTAGE_DJI_USB=auto` to select the only matching
 DJI C5 device in the macOS I/O Registry. The device must already expose the

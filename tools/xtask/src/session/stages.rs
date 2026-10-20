@@ -51,12 +51,7 @@ pub(crate) fn host_stage(
                 .join("target/release/pilotage-session-host")
                 .display()
                 .to_string(),
-            args: vec![
-                "--port".to_owned(),
-                ctx.host_port.to_string(),
-                "--adapter".to_owned(),
-                adapter.to_owned(),
-            ],
+            args: host_arguments(ctx, adapter)?,
             cwd: Some(ctx.repo_root.clone()),
             env,
             remove_env: vec![],
@@ -64,6 +59,31 @@ pub(crate) fn host_stage(
         },
         readiness: Readiness::HostListening { timeout_s: 60 },
     })
+}
+
+fn host_arguments(ctx: &SessionContext, adapter: &str) -> Result<Vec<String>, XtaskError> {
+    if ctx.lan && ctx.join_token_file.is_none() {
+        return Err(XtaskError::Usage {
+            message: "--lan requires --join-token-file with an absolute local path".to_owned(),
+        });
+    }
+    let mut args = vec![
+        "--port".to_owned(),
+        ctx.host_port.to_string(),
+        "--adapter".to_owned(),
+        adapter.to_owned(),
+        "--bind".to_owned(),
+        if ctx.lan { "0.0.0.0" } else { "127.0.0.1" }.to_owned(),
+    ];
+    if let Some(path) = &ctx.join_token_file {
+        if !path.is_absolute() {
+            return Err(XtaskError::Usage {
+                message: "--join-token-file requires an absolute local path".to_owned(),
+            });
+        }
+        args.extend(["--join-token-file".to_owned(), path.display().to_string()]);
+    }
+    Ok(args)
 }
 
 /// The static viewer: this xtask binary's `serve-viewer` subcommand
