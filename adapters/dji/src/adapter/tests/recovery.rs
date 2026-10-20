@@ -9,6 +9,30 @@ mod session;
 use session::RecoverySession;
 
 #[test]
+fn a_horizontal_measurement_overshoot_keeps_the_lease_and_raw_feedback() -> TestResult {
+    let mut test = RecoverySession::ready()?;
+    let generation = test.lease(22)?;
+    let initial = test.frame(generation, 1, 0.0, 23);
+    assert_eq!(test.enact(initial, 23)?, [Disposition::Accepted]);
+    let contract = test.io.adapter.capabilities();
+    for (offset, pitch, at) in [(1, 0, 40), (2, 1, 50), (3, 0, 60)] {
+        test.pose_with_pitch(offset, Some(pitch), at)?;
+        assert_eq!(test.io.adapter.capabilities(), contract);
+        assert!(test.refresh(at).actions.is_empty());
+        assert_eq!(test.lease(at)?, generation);
+        let sample = test.io.telemetry(at).samples.remove(0);
+        let angle = sample.payload.unwrap().pitch.unwrap().angle_rad.unwrap();
+        assert!((angle.to_degrees() - f32::from(pitch) / 10.0).abs() < 0.00001);
+        let neutral = test.frame(generation, u32::from(offset) + 1, 0.0, at + 1);
+        assert_eq!(test.enact(neutral, at + 1)?, [Disposition::Accepted]);
+    }
+    let released = test.release(70);
+    test.enact(released, 70)?;
+    assert!(test.io.adapter.status_cached().control_locked);
+    Ok(())
+}
+
+#[test]
 fn release_and_neutral_recovery_keep_a_usable_lease_and_fence_old_frames() -> TestResult {
     let mut test = RecoverySession::ready()?;
     let original = test.lease(22)?;
