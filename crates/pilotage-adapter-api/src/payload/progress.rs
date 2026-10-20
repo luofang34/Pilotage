@@ -18,6 +18,7 @@ pub fn payload_progress_to_wire(
         prepared_at: value.prepared_at.and_then(super::timestamp),
         sent_at: value.sent_at.and_then(super::timestamp),
         acknowledged_at: value.acknowledged_at.and_then(super::timestamp),
+        rejected_at: value.rejected_at.and_then(super::timestamp),
         acknowledgement_timed_out: value.acknowledgement_timed_out,
         observed_complete_at: value.observed_complete_at.and_then(super::timestamp),
         end_reason: value
@@ -55,6 +56,9 @@ fn target(wire: &mut wire::PayloadCommandProgress, payload: PayloadCommand) {
 
 fn stage(value: &CommandProgress) -> wire::PayloadCommandStage {
     use wire::PayloadCommandStage as Stage;
+    if value.rejected_at.is_some() {
+        return Stage::Rejected;
+    }
     match value.ended {
         Some(EndReason::ObservedComplete) => Stage::ObservedComplete,
         Some(EndReason::ExpiredBeforeSend | EndReason::ValidityExpired) => Stage::Expired,
