@@ -149,10 +149,14 @@ fn unsupported_commands_never_reach_the_serial_writer() -> TestResult {
     arm.actions.push(ControlAction::Arm);
     let mut flight = frame(0.0);
     flight.scope = ScopeId::new("vehicle.motion");
+    let mut land = flight.clone();
+    land.intent = None;
+    land.actions = vec![ControlAction::Land];
     for request in [
         yaw,
         arm,
         flight,
+        land,
         frame(f32::NAN),
         frame(HOST_PITCH_RATE_LIMIT_RPS * 2.0),
     ] {

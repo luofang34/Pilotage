@@ -1,4 +1,4 @@
-use pilotage_adapter_api::{Disposition, FlightProcedurePhase, VehicleAdapter};
+use pilotage_adapter_api::{Disposition, FlightProcedurePhase, RejectReason, VehicleAdapter};
 use pilotage_mavlink::LandedState;
 use pilotage_mavlink::codec::{FcMessage, MAV_CMD_NAV_TAKEOFF};
 use pilotage_protocol::{ActionKind, ControlAction, ScopeId, VehicleId};
@@ -77,6 +77,21 @@ fn an_unobserved_ground_state_refuses_takeoff_without_writes() {
     assert!(matches!(outcome.disposition, Disposition::Rejected(_)));
     assert!(!outcome.action_results[0].accepted);
     assert!(harness.commands.try_recv().is_err());
+}
+
+#[test]
+fn unimplemented_land_is_rejected_without_disarm_or_command_writes() {
+    let mut harness = Harness::new();
+    ready(&mut harness);
+    let outcome = harness
+        .adapter
+        .apply_control(&frame(None, vec![ControlAction::Land]));
+    assert!(matches!(
+        outcome.disposition,
+        Disposition::Rejected(RejectReason::Other(ref detail)) if detail.contains("unsupported")
+    ));
+    assert!(harness.commands.try_recv().is_err());
+    assert!(harness.velocity.borrow().is_none());
 }
 
 #[test]
