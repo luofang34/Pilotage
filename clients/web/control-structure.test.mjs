@@ -48,6 +48,7 @@ const SIZE_CAPS = {
   "nav-display.js": 68,
   "reconnect.js": 150,
   "resume-control.js": 59,
+  "session-admission.js": 130,
   "session-discovery.js": 68,
   "session-bootstrap.js": 152,
   "session-transport.js": 285,
