@@ -5,6 +5,12 @@
 //! The shim catches every C++ exception and bounds-checks every property
 //! index, so its functions are total over the values this module passes:
 //! a live engine pointer and NUL-terminated strings.
+//!
+//! JSBSim is not safe to use from several threads at once, even on
+//! separate engines: it keeps process-wide state that loading and running
+//! a model write (the XML unit-conversion table `Element::convert`, filled
+//! lazily by the first `Element` built, and the magnetic-variation
+//! tables). Every call into the shim therefore holds [`jsbsim`]'s lock.
 
 // SAFETY: this module is the crate's one FFI boundary; every unsafe
 // block below states why its call is sound.
@@ -12,6 +18,7 @@
 
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
 use std::ptr::NonNull;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use crate::ground::GroundModel;
 
@@ -19,6 +26,21 @@ use crate::ground::GroundModel;
 #[repr(C)]
 struct PjsEngine {
     _private: [u8; 0],
+}
+
+/// Serialises every call into JSBSim across the process.
+///
+/// Process-wide by necessity, not convenience: the state it guards is
+/// JSBSim's own and process-wide (see the module documentation), so a
+/// lock per engine would not cover it. Engines on different threads
+/// built and stepped at once corrupt `Element::convert` (a `std::map`
+/// filled without synchronisation), which crashes or hangs the process.
+static JSBSIM: Mutex<()> = Mutex::new(());
+
+/// Holds the JSBSim lock. A panic while it was held left no Rust state
+/// behind it to repair, so a poisoned lock is taken as it is.
+fn jsbsim() -> MutexGuard<'static, ()> {
+    JSBSIM.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 type GroundFn = extern "C" fn(
@@ -104,6 +126,7 @@ impl RawEngine {
     /// Creates and loads an engine, or returns the shim's message.
     pub(super) fn create(args: &CreateArgs) -> Result<Self, String> {
         let mut err = [0 as c_char; 512];
+        let _jsbsim = jsbsim();
         // SAFETY: every string is a live NUL-terminated `CString`, and the
         // error buffer's length is passed with it.
         let engine = unsafe {
@@ -133,6 +156,7 @@ impl RawEngine {
     /// Installs `ground` as the engine's terrain, replacing any before.
     pub(super) fn set_ground(&mut self, ground: GroundSlot) -> bool {
         let slot = NonNull::from(Box::leak(Box::new(ground)));
+        let jsbsim_held = jsbsim();
         // SAFETY: the engine is live; the slot outlives every call JSBSim
         // makes through it (it is freed only after a replacement is
         // installed, or after the engine is destroyed).
@@ -143,6 +167,7 @@ impl RawEngine {
                 slot.as_ptr().cast(),
             )
         };
+        drop(jsbsim_held);
         if installed == 0 {
             // SAFETY: the slot was leaked above and never handed over.
             drop(unsafe { Box::from_raw(slot.as_ptr()) });
@@ -166,32 +191,40 @@ impl RawEngine {
     /// The table index of a property, or `None` when it does not exist.
     pub(super) fn property(&mut self, name: &CStr, create: bool) -> Option<c_int> {
         let create = c_int::from(create);
+        let _jsbsim = jsbsim();
         // SAFETY: the engine is live and `name` is NUL-terminated.
         let index = unsafe { pjs_property(self.engine.as_ptr(), name.as_ptr(), create) };
         (index >= 0).then_some(index)
     }
 
     pub(super) fn get(&self, index: c_int) -> f64 {
+        let _jsbsim = jsbsim();
         // SAFETY: the engine is live; the shim bounds-checks the index.
         unsafe { pjs_get(self.engine.as_ptr(), index) }
     }
 
     pub(super) fn set(&mut self, index: c_int, value: f64) -> bool {
+        let _jsbsim = jsbsim();
         // SAFETY: the engine is live; the shim bounds-checks the index.
         unsafe { pjs_set(self.engine.as_ptr(), index, value) != 0 }
     }
 
     pub(super) fn run_ic(&mut self) -> bool {
+        let _jsbsim = jsbsim();
         // SAFETY: the engine is live.
         unsafe { pjs_run_ic(self.engine.as_ptr()) != 0 }
     }
 
     pub(super) fn run(&mut self) -> bool {
+        // The ground trampoline runs inside this call and never calls
+        // back into JSBSim, so it never needs the lock held here.
+        let _jsbsim = jsbsim();
         // SAFETY: the engine is live.
         unsafe { pjs_run(self.engine.as_ptr()) != 0 }
     }
 
     pub(super) fn sim_time_s(&self) -> f64 {
+        let _jsbsim = jsbsim();
         // SAFETY: the engine is live.
         unsafe { pjs_sim_time(self.engine.as_ptr()) }
     }
@@ -199,8 +232,10 @@ impl RawEngine {
 
 impl Drop for RawEngine {
     fn drop(&mut self) {
+        let jsbsim_held = jsbsim();
         // SAFETY: the engine is live and destroyed exactly once, here.
         unsafe { pjs_destroy(self.engine.as_ptr()) };
+        drop(jsbsim_held);
         if let Some(slot) = self.ground.take() {
             // SAFETY: the engine that called through the slot is gone.
             drop(unsafe { Box::from_raw(slot.as_ptr()) });

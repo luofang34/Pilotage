@@ -116,3 +116,32 @@ fn replacing_the_ground_moves_the_resting_height() {
         engine.get(altitude)
     );
 }
+
+/// JSBSim keeps process-wide state that loading a model writes: the
+/// first `Element` built fills the unit-conversion table while other
+/// threads already read it. Engines loaded and flown on many threads at
+/// once must not race on it. Without the engine's own serialisation a run
+/// of this test crashes (SIGSEGV) or hangs in a few percent of processes,
+/// since the race is on the process's first model load.
+#[test]
+fn engines_load_and_fly_on_many_threads_at_once() {
+    const THREADS: usize = 8;
+    const ROUNDS: usize = 4;
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(THREADS));
+    let workers: Vec<_> = (0..THREADS)
+        .map(|_| {
+            let barrier = std::sync::Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                for _ in 0..ROUNDS {
+                    barrier.wait();
+                    let mut engine = Engine::load(&x500(), 0.004).expect("the x500 loads");
+                    start(&mut engine, 10.0);
+                    settle(&mut engine, 0.2);
+                }
+            })
+        })
+        .collect();
+    for worker in workers {
+        worker.join().expect("an engine thread finished");
+    }
+}
