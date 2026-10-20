@@ -56,7 +56,9 @@ fn the_sidecar_runs_the_sitl_with_the_repository_config_and_waits_for_flight() {
     let args = &stage.spec.args;
     assert!(value_after(args, "--betaflight").ends_with("obj/main/betaflight_SITL.elf"));
     assert!(value_after(args, "--betaflight-config").ends_with("sim/betaflight/sitl.cli"));
-    let home = crate::site::ZURICH.placement(crate::site::Ground::Field, 1);
+    let home = crate::site::ZURICH
+        .placement(crate::site::Ground::Field, 1)
+        .expect("placed");
     assert_eq!(
         value_after(args, "--origin-lat"),
         format!("{:.7}", home.latitude_deg)

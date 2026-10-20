@@ -55,8 +55,11 @@ pub(crate) fn truth_port(instance: u16) -> u16 {
     TRUTH_PORT_BASE + instance
 }
 
+/// The sidecar's own manifest: it builds outside the workspace.
+const SIDECAR_MANIFEST: &str = "sim/jsbsim-sidecar/Cargo.toml";
+
 fn sidecar_binary(repo_root: &Path) -> PathBuf {
-    repo_root.join("target/release/pilotage-jsbsim-sidecar")
+    repo_root.join("sim/jsbsim-sidecar/target/release/pilotage-jsbsim-sidecar")
 }
 
 impl SimBackend for Px4Jsbsim {
@@ -84,7 +87,7 @@ impl SimBackend for Px4Jsbsim {
 
     fn prepare(&self, ctx: &SessionContext) -> Result<(), XtaskError> {
         let status = std::process::Command::new("cargo")
-            .args(["build", "--release", "-p", "pilotage-jsbsim-sidecar"])
+            .args(["build", "--release", "--manifest-path", SIDECAR_MANIFEST])
             .current_dir(&ctx.repo_root)
             .status()
             .map_err(|source| XtaskError::Io {
@@ -95,7 +98,7 @@ impl SimBackend for Px4Jsbsim {
             Ok(())
         } else {
             Err(XtaskError::CommandFailed {
-                context: "cargo build --release -p pilotage-jsbsim-sidecar",
+                context: "cargo build --release --manifest-path sim/jsbsim-sidecar/Cargo.toml",
                 status: status.to_string(),
             })
         }
@@ -222,12 +225,16 @@ fn plan_with_dirs(
     }
     let install = JsbsimInstall::validate(jsbsim)?;
     Ok(vec![
-        sidecar_stage(ctx, &install, model),
+        sidecar_stage(ctx, &install, model)?,
         px4_stage(ctx, px4, &binary, model)?,
     ])
 }
 
-fn sidecar_stage(ctx: &SessionContext, install: &JsbsimInstall, model: JsbsimModel) -> Stage {
+fn sidecar_stage(
+    ctx: &SessionContext,
+    install: &JsbsimInstall,
+    model: JsbsimModel,
+) -> Result<Stage, XtaskError> {
     let mut args = vec![
         "--port".to_owned(),
         simulator_port(ctx.instance).to_string(),
@@ -262,11 +269,11 @@ fn sidecar_stage(ctx: &SessionContext, install: &JsbsimInstall, model: JsbsimMod
         ]);
     }
     // A plain `sim` session stands on the default site; a fleet moves it.
-    let start = crate::site::DEFAULT_SITE.placement(model.ground(), 0);
+    let start = crate::site::place(&crate::site::DEFAULT_SITE, model.ground(), 0)?;
     for (flag, value) in placement_args(&start) {
         args.extend([flag.to_owned(), value]);
     }
-    Stage {
+    Ok(Stage {
         spec: ProcessSpec {
             name: SIDECAR_STAGE,
             program: sidecar_binary(&ctx.repo_root).display().to_string(),
@@ -280,7 +287,7 @@ fn sidecar_stage(ctx: &SessionContext, install: &JsbsimInstall, model: JsbsimMod
             needle: SIDECAR_READY,
             timeout_s: ctx.ready_timeout_s,
         },
-    }
+    })
 }
 
 fn px4_stage(

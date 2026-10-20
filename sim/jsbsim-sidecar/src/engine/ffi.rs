@@ -26,8 +26,7 @@ type GroundFn = extern "C" fn(
     lat_rad: f64,
     lon_rad: f64,
     height_m: *mut f64,
-    slope_north: *mut f64,
-    slope_east: *mut f64,
+    normal_ecef: *mut f64,
 ) -> c_int;
 
 // SAFETY: these declarations match `shim/jsbsim_shim.cpp` exactly: the
@@ -79,8 +78,7 @@ extern "C" fn ground_trampoline(
     lat_rad: f64,
     lon_rad: f64,
     height_m: *mut f64,
-    slope_north: *mut f64,
-    slope_east: *mut f64,
+    normal_ecef: *mut f64,
 ) -> c_int {
     // SAFETY: `ctx` is the `GroundSlot` pointer `set_ground` installed;
     // it stays valid until the engine is destroyed or the slot replaced,
@@ -90,11 +88,14 @@ extern "C" fn ground_trampoline(
     let Some(answer) = ground.height(lat_rad, lon_rad) else {
         return 0;
     };
-    // SAFETY: the shim passes three valid, aligned, writable doubles.
+    // SAFETY: the shim passes a valid, aligned, writable double and an
+    // array of three of them.
     unsafe {
         *height_m = answer.height_m;
-        *slope_north = answer.slope_north;
-        *slope_east = answer.slope_east;
+        let [x, y, z] = answer.normal_ecef;
+        *normal_ecef = x;
+        *normal_ecef.add(1) = y;
+        *normal_ecef.add(2) = z;
     }
     1
 }

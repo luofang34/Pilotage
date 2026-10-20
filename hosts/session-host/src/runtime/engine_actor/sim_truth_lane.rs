@@ -45,7 +45,8 @@ pub(super) struct TruthTracker {
     epoch: u32,
     sequence: u32,
     last_time_usec: Option<u64>,
-    origin: Option<(f64, f64, f64)>,
+    /// The world model's frame at the first fix of this epoch.
+    origin: Option<pilotage_world::LocalTangentPlane>,
     latest: Option<(SimTruthSample, Instant)>,
 }
 
@@ -78,11 +79,21 @@ impl TruthTracker {
         let latitude_deg = f64::from(lat_e7) * 1e-7;
         let longitude_deg = f64::from(lon_e7) * 1e-7;
         let altitude_m = f64::from(alt_mm) * 1e-3;
-        let (lat0, lon0, alt0) =
-            *self
-                .origin
-                .get_or_insert((latitude_deg, longitude_deg, altitude_m));
-        let (per_lat, per_lon) = pilotage_world::metres_per_degree(lat0);
+        let plane = match self.origin {
+            Some(plane) => plane,
+            None => match pilotage_world::local_plane(latitude_deg, longitude_deg, altitude_m) {
+                Ok(plane) => *self.origin.insert(plane),
+                // A position the world model refuses carries no truth.
+                Err(_) => return,
+            },
+        };
+        let Ok(offset) = plane.to_ned(pilotage_world::world_position(
+            latitude_deg,
+            longitude_deg,
+            altitude_m,
+        )) else {
+            return;
+        };
         let stamp = MeasurementStamp {
             role: SourceRole::SimulationTruth,
             // CRC-checked MAVLink on loopback, not authenticated.
@@ -97,9 +108,9 @@ impl TruthTracker {
         let sample = SimTruthSample {
             quat_wxyz: message.quat_wxyz,
             pos_ned_m: [
-                ((latitude_deg - lat0) * per_lat) as f32,
-                ((longitude_deg - lon0) * per_lon) as f32,
-                (alt0 - altitude_m) as f32,
+                offset.north_m as f32,
+                offset.east_m as f32,
+                offset.down_m as f32,
             ],
             vel_ned_mps: message.vel_ned_mps,
             valid_flags: TRUTH_VALID_FLAGS,

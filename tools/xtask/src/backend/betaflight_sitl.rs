@@ -151,8 +151,8 @@ impl SimBackend for BetaflightSitl {
 /// A plain `sim` session's spawn point: the second place on the grass
 /// of Zurich, apart from a vehicle at the origin and an ArduPilot one at
 /// the first place.
-fn default_spawn() -> Placement {
-    crate::site::ZURICH.placement(crate::site::Ground::Field, 1)
+fn default_spawn() -> Result<Placement, XtaskError> {
+    crate::site::place(&crate::site::ZURICH, crate::site::Ground::Field, 1)
 }
 
 /// The sidecar options that put the model at `point`. Its local frame is
@@ -221,7 +221,7 @@ fn plan_with_betaflight_dir(
     ]
     .map(str::to_owned)
     .to_vec();
-    for (flag, value) in origin_args(&default_spawn()) {
+    for (flag, value) in origin_args(&default_spawn()?) {
         args.extend([flag.to_owned(), value]);
     }
     Ok(vec![Stage {

@@ -1,6 +1,7 @@
 //! One simulated world for every simulator and flight controller of a
 //! session: the site vehicles stand on, the terrain under it, and the
-//! magnetic field over it.
+//! magnetic field and the air over it, from the shared world model
+//! (`world-core`, `world-geomag`, `world-atmosphere`).
 //!
 //! A dynamics model takes its ground from [`World::elevation_blocking`],
 //! a sensor model its magnetic field from [`World::magnetic_field`], and
@@ -17,16 +18,17 @@ mod error;
 #[cfg(all(test, feature = "archive"))]
 mod fixture;
 mod geomag;
+mod position;
 mod site;
 mod terrain;
 mod world;
 
 pub use error::{TerrainError, WorldError};
 pub use geomag::{GeomagModel, MagneticEpoch, MagneticField, WMM2025};
-pub use site::{
-    DEFAULT_SITE, Ground, N51, NAMED_SITES, Placement, Site, ZURICH, metres_per_degree,
-};
+pub use position::{LocalTangentPlane, Ned, PositionError, local_plane, world_position};
+pub use site::{DEFAULT_SITE, Ground, N51, NAMED_SITES, Placement, Site, ZURICH};
 #[cfg(feature = "archive")]
 pub use terrain::ArchiveTerrain;
 pub use terrain::{TerrainSample, TerrainSource, UNIFORM_TERRAIN_ID, UniformTerrain, WORLD_GEOID};
 pub use world::{ElevationOrigin, SiteElevation, World, WorldSources};
+pub use world_atmosphere::{AtmosphereModel, AtmosphereState, Isa};

@@ -95,6 +95,23 @@ fn n51_has_a_westerly_declination_and_a_steep_dip() {
     assert!((64.0..=68.0).contains(&field.inclination_deg), "{field:?}");
 }
 
+/// The world's air is the shared standard atmosphere at the world's MSL
+/// height.
+#[test]
+fn the_air_is_the_standard_atmosphere() {
+    let world = World::new(N51, UniformTerrain { elevation_m: 56.3 }, epoch());
+    let air = world
+        .atmosphere(N51.latitude_deg, N51.longitude_deg, 56.3)
+        .expect("inside the model");
+    let isa = world_atmosphere::Isa
+        .at(world_atmosphere::Altitude::GeometricMsl(56.3))
+        .expect("inside the model");
+    assert_eq!(air, isa);
+    // About 100.65 kPa at N51's field elevation.
+    assert!((air.pressure_pa - 100_650.0).abs() < 30.0, "{air:?}");
+    assert!(world.atmosphere(0.0, 0.0, 200_000.0).is_err());
+}
+
 #[test]
 fn an_epoch_outside_the_model_is_refused() {
     let world = World::new(
@@ -118,7 +135,7 @@ fn a_uniform_world_puts_every_site_on_its_height() {
         .placement_blocking(Ground::Field, 2)
         .expect("placement");
     assert_eq!(placement.elevation_m, 3.0);
-    let site_placement = N51.placement(Ground::Field, 2);
+    let site_placement = N51.placement(Ground::Field, 2).expect("placed");
     assert_eq!(placement.latitude_deg, site_placement.latitude_deg);
     assert_eq!(placement.longitude_deg, site_placement.longitude_deg);
 }

@@ -87,7 +87,7 @@ fn the_quad_plans_the_sidecar_then_px4_on_the_instance_port() {
     assert!(
         sidecar
             .program
-            .ends_with("target/release/pilotage-jsbsim-sidecar")
+            .ends_with("sim/jsbsim-sidecar/target/release/pilotage-jsbsim-sidecar")
     );
     assert_eq!(arg(&sidecar.args, "--port"), Some("4581"));
     assert_eq!(arg(&sidecar.args, "--aircraft"), Some("x500"));
