@@ -88,6 +88,9 @@ enum TakeoffStartState {
   TAKEOFF_START_STATE_UNSPECIFIED = 0;
   TAKEOFF_START_STATE_ARMED_ON_GROUND = 1;
   TAKEOFF_START_STATE_MOTORS_STOPPED_ON_GROUND = 2;
+  // Requires a fresh FC report of stopped motors. The FC checks the other
+  // start conditions; this does not assert a measured ground state.
+  TAKEOFF_START_STATE_MOTORS_STOPPED = 3;
 }
 
 // One typed discrete action a scope accepts, with the mode targets it admits
@@ -108,6 +111,10 @@ message ActionCapability {
 // A single independently assignable control scope published by a host for
 // a vehicle (ADR-0006).
 message ScopeDescriptor {
+  // True only when every scope in this authority group has no continuous
+  // intents, legacy translation, or routed axes. False is not proof of a
+  // continuous control capability. The host still enforces the lease.
+  bool command_only = 8;
   PayloadCapabilities payload = 7;
   ScopeId scope = 1;
   string display_name = 2;

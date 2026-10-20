@@ -149,8 +149,9 @@ Set only one of `PILOTAGE_DJI_SERIAL`, `PILOTAGE_DJI_USB_REGISTRY_ID`, or
 An invalid attachment or an unsupported platform fails startup. The host
 does not select another device or transport.
 
-This adapter exposes a DJI Mini 3 bench object with gimbal control. Flight
-and positioning control are not implemented. Keep the propellers removed.
+This adapter exposes a DJI Mini 3 experimental object with gimbal control.
+Continuous flight and positioning control are not implemented.
+Keep the propellers removed for bench tests.
 The default `observed` control mode requires fresh gimbal observations before
 it sends a pitch command. Pitch targets are limited to -90 through 0 degrees.
 The host limits target planning to 30 degrees per second. This is not a
@@ -160,6 +161,19 @@ a full write.
 The adapter ignores horizontal gimbal input because yaw control is not
 implemented.
 An RC version response alone does not establish the aircraft route.
+
+Set `PILOTAGE_DJI_EXPERIMENTAL_FLIGHT=1` to enable Takeoff and Land on the
+upper USB interface in `observed` mode. The default disables these actions.
+The adapter requires a verified Mini 3 and fresh aircraft reports. Takeoff
+also requires stopped motors, no reported flight, and at least 25 percent
+battery charge. Land does not require that battery threshold.
+The App needs a control lease and a valid command window for each action.
+The aircraft checks its other start conditions. Device acceptance and motor
+reports do not prove completed takeoff or landing. An uncertain outcome does
+not cause an automatic retry. Use the original remote controller for flight
+control. Verify remote takeover and disconnect behavior before a flight test.
+After a Takeoff write, another Takeoff requires an explicit adapter restart.
+A restart does not stop an aircraft procedure.
 
 The bottom RC-N1 CDC interface can forward pitch commands without aircraft
 pose feedback. For this bench connection, set

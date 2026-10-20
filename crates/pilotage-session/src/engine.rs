@@ -106,15 +106,7 @@ impl SessionEngine {
                     |name| pilotage_protocol::ScopeId::new(name.clone()),
                 );
                 groups.insert((vehicle.id, descriptor.scope.clone()), group.clone());
-                let continuous = !descriptor.intents.is_empty()
-                    || descriptor.legacy.is_some()
-                    || !descriptor.axes.is_empty();
-                if continuous {
-                    // Any continuous-control member (typed intents, a
-                    // legacy translation, or routed axes) makes the whole
-                    // group a continuous authority.
-                    command_only.remove(&(vehicle.id, group.clone()));
-                } else if !registered.contains(&(vehicle.id, group.clone())) {
+                if vehicle.is_command_only_group(&group) {
                     command_only.insert((vehicle.id, group.clone()));
                 }
                 if !registered.insert((vehicle.id, group.clone())) {

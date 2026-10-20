@@ -4,6 +4,7 @@ mod airframe;
 mod battery;
 mod bench;
 mod contract;
+mod flight;
 mod harness;
 mod keyframe;
 mod mapping;

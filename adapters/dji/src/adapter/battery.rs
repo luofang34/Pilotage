@@ -50,24 +50,49 @@ impl BatteryReport {
 #[derive(Default)]
 pub(super) struct BatteryObservations {
     latest: Option<(BatteryReport, Duration)>,
+    last_sequence: Option<u16>,
+    model_revision: Option<u64>,
     sequence: u32,
     published_sequence: u32,
 }
 
 impl BatteryObservations {
-    pub(super) fn receive(&mut self, frame: &DumlFrame, now: Duration) {
+    pub(super) fn takeoff_deadline(&self, now: Duration, model_revision: u64) -> Option<Duration> {
+        let (report, received) = self.latest?;
+        let until = received.checked_add(MAX_AGE)?;
+        // This is the host's experimental takeoff policy, not an FC limit.
+        (self.model_revision == Some(model_revision)
+            && report.remaining_percent >= 25
+            && now >= received
+            && now < until)
+            .then_some(until)
+    }
+
+    pub(super) fn receive(
+        &mut self,
+        frame: &DumlFrame,
+        now: Duration,
+        model_revision: Option<u64>,
+    ) {
         let Some(report) = BatteryReport::from_push(frame) else {
             return;
         };
-        if let Some((previous, _)) = self.latest {
-            let delta = report.sequence.wrapping_sub(previous.sequence);
+        if let Some(previous) = self.last_sequence {
+            let delta = report.sequence.wrapping_sub(previous);
             // A repeat or backwards packet cannot renew the receive time.
             if delta == 0 || delta >= 0x8000 {
                 return;
             }
         }
         self.sequence = self.sequence.wrapping_add(1);
+        self.last_sequence = Some(report.sequence);
+        self.model_revision = model_revision;
         self.latest = Some((report, now));
+    }
+
+    pub(super) fn invalidate_model(&mut self) {
+        self.latest = None;
+        self.model_revision = None;
     }
 
     pub(super) fn sample(

@@ -215,6 +215,31 @@ pub struct VehicleDescriptor {
     pub link_loss_actions: Vec<LinkLossPolicy>,
 }
 
+impl VehicleDescriptor {
+    /// Whether every member of a declared authority group has no continuous input.
+    ///
+    /// Unknown groups are not command-only. Legacy translation and routed axes
+    /// require the same stream-silence handling as typed intents.
+    #[must_use]
+    pub fn is_command_only_group(&self, group: &ScopeId) -> bool {
+        let mut found = false;
+        for scope in &self.scopes {
+            let candidate = scope
+                .authority_group
+                .as_deref()
+                .unwrap_or(scope.scope.as_str());
+            if candidate != group.as_str() {
+                continue;
+            }
+            found = true;
+            if !scope.intents.is_empty() || scope.legacy.is_some() || !scope.axes.is_empty() {
+                return false;
+            }
+        }
+        found
+    }
+}
+
 /// One supported control-feel mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ControlFeelMode {

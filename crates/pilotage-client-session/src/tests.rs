@@ -7,6 +7,7 @@
 mod action_request;
 mod admission;
 mod catalog;
+mod control_window;
 mod groups;
 mod lanes;
 mod stream_bounds;

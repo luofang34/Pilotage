@@ -49,6 +49,9 @@ impl ControlState {
 
 impl DjiAdapter {
     pub(super) fn apply_at(&mut self, frame: &ScopedControlFrame, now: Duration) -> ApplyOutcome {
+        if frame.scope.as_str() == super::FLIGHT_SCOPE {
+            return self.apply_flight(frame, now);
+        }
         let result = self.validate_and_queue(frame, now);
         if result.is_err()
             && let Some(bench) = &mut self.control.bench
@@ -287,7 +290,7 @@ impl DjiAdapter {
         self.control.sequence = self.control.sequence.wrapping_add(1);
         self.control.cancel_observed();
         self.connection
-            .write_pending_blocking(now, true, &mut clock);
+            .write_pending_blocking(now, true, &self.observations, &mut clock);
         if self.connection.fault.is_some() || self.connection.pending_bytes() != 0 {
             return Err(rejected(
                 "the DJI hold command did not reach the complete transport write",
@@ -325,7 +328,7 @@ fn demand(
         None => 0.0,
         _ => {
             return Err(RejectReason::Other(
-                "only bounded DJI pitch is implemented; yaw and flight control are unavailable"
+                "only bounded DJI pitch is implemented in this scope; yaw and continuous flight control are unavailable"
                     .to_owned(),
             ));
         }

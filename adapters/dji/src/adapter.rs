@@ -9,6 +9,7 @@ mod config;
 mod connection;
 mod control;
 mod execution;
+mod flight;
 mod input;
 mod observation;
 mod recording;
@@ -38,17 +39,18 @@ use observation::Observations;
 pub use video::EncodedVideoStream;
 
 const GIMBAL_SCOPE: &str = "vehicle.gimbal";
+const FLIGHT_SCOPE: &str = "vehicle.motion";
 // This host policy bounds synthesized commands, not the hardware's maximum speed.
 const HOST_PITCH_RATE_LIMIT_RPS: f32 = core::f32::consts::PI / 6.0;
 const BENCH_PITCH_RATE_LIMIT_RPS: f32 = core::f32::consts::PI / 36.0;
 
 pub use config::{DjiAdapterError, DjiConfig, DjiControlMode, DjiFault, DjiStatus};
 
-/// A DJI Mini 3 gimbal connection with no flight or motor command path.
+/// A DJI Mini 3 connection with bounded gimbal and opt-in discrete flight control.
 ///
-/// The caller drives I/O with `step` at 10 ms intervals. Only a fixed RC
-/// version request, bounded APP-to-gimbal pitch commands, and the verified
-/// upper-interface keyframe request can be sent.
+/// The caller drives I/O with `step` at 10 ms intervals. Discrete Takeoff and
+/// Land require explicit configuration on the upper USB interface. Continuous
+/// flight control is not implemented.
 /// The default mode requires valid reports. The explicit bench mode tracks
 /// command targets only. Neither mode infers physical completion.
 pub struct DjiAdapter {
@@ -59,6 +61,7 @@ pub struct DjiAdapter {
     observations: Observations,
     control: ControlState,
     video_subscribed: bool,
+    experimental_flight: bool,
 }
 
 impl DjiAdapter {
@@ -91,6 +94,7 @@ impl DjiAdapter {
             config.capture_path,
             SourceIncarnation::new(identity),
             config.control_mode,
+            config.experimental_flight,
         )
     }
 
@@ -101,6 +105,7 @@ impl DjiAdapter {
         capture_path: PathBuf,
         incarnation: SourceIncarnation,
         control_mode: DjiControlMode,
+        experimental_flight: bool,
     ) -> Result<Self, DjiAdapterError> {
         let rate = match control_mode {
             DjiControlMode::Observed => HOST_PITCH_RATE_LIMIT_RPS,
@@ -129,6 +134,7 @@ impl DjiAdapter {
             observations: Observations::new(incarnation, profile),
             control: ControlState::new(control_mode, profile),
             video_subscribed: false,
+            experimental_flight: experimental_flight && control_mode == DjiControlMode::Observed,
         })
     }
 
@@ -167,7 +173,7 @@ impl DjiAdapter {
         }
         let had_pending = self.connection.pending_pitch().is_some();
         self.connection
-            .write_pending_blocking(now, ready, &mut clock);
+            .write_pending_blocking(now, ready, &self.observations, &mut clock);
         let written = self.connection.take_written_pitch();
         let keyframe_now = clock();
         let model_until = if !self.connection.input_clear() {
@@ -219,6 +225,10 @@ impl DjiAdapter {
         {
             self.control.cancel_observed();
             self.connection.invalidate_model();
+            self.connection.invalidate_flight(
+                pilotage_adapter_api::FlightProcedureReason::SourceChanged,
+                now,
+            );
         }
     }
 
@@ -292,6 +302,7 @@ impl VehicleAdapter for DjiAdapter {
             self.profile,
             self.connection.execution.capabilities(),
             self.observations.incarnation(),
+            self.flight_enabled(),
         );
         capabilities.execution.render_capable = self.video_subscribed;
         capabilities
@@ -299,6 +310,10 @@ impl VehicleAdapter for DjiAdapter {
 
     fn apply_control(&mut self, frame: &ScopedControlFrame) -> ApplyOutcome {
         self.apply_at(frame, self.origin.elapsed())
+    }
+
+    fn invalidate_pending_commands(&mut self, vehicle: VehicleId, scope: &ScopeId) {
+        self.invalidate_scope(vehicle, scope, self.origin.elapsed());
     }
 
     fn sample_telemetry(&mut self) -> TelemetryBatch {
@@ -328,6 +343,7 @@ impl VehicleAdapter for DjiAdapter {
                 Some(state),
             ));
         }
+        self.attach_flight_progress(&mut batch);
         batch
     }
 

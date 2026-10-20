@@ -152,3 +152,63 @@ fn each_scope_carries_its_authority_group_to_the_wire() {
         .collect();
     assert_eq!(groups, vec!["vehicle.motion", "vehicle.motion", ""]);
 }
+
+#[test]
+fn command_only_applies_to_the_whole_group_and_checks_each_input_form() {
+    use pilotage_adapter_api::{LegacyCommandMap, ScopeDescriptor};
+    use pilotage_protocol::{LogicalAxisId, ScopeId};
+    let scope = |name: &str, group: Option<&str>| ScopeDescriptor {
+        scope: ScopeId::new(name),
+        authority_group: group.map(str::to_owned),
+        payload: None,
+        axes: vec![],
+        intents: vec![],
+        actions: vec![],
+        legacy: None,
+    };
+    let mut adapter = caps(VehicleClass::Multicopter, "camera aircraft", true);
+    adapter.vehicles[0].scopes = vec![
+        scope("vehicle.motion", None),
+        scope("vehicle.motion.direct", Some("vehicle.motion")),
+        scope("vehicle.camera", None),
+    ];
+    assert!(!adapter.vehicles[0].is_command_only_group(&ScopeId::new("unknown")));
+    assert!(
+        host_capabilities(&adapter, "test").vehicles[0]
+            .scopes
+            .iter()
+            .all(|s| s.command_only)
+    );
+    for form in 0..3 {
+        let mut mixed = adapter.clone();
+        let member = &mut mixed.vehicles[0].scopes[1];
+        match form {
+            0 => member.axes.push(LogicalAxisId::new(1)),
+            1 => {
+                member.legacy = Some(LegacyCommandMap::GimbalRate {
+                    pitch: None,
+                    yaw: None,
+                    recenter_button: None,
+                })
+            }
+            _ => member.intents.push(pilotage_adapter_api::IntentCapability {
+                family: pilotage_protocol::IntentFamily::Velocity,
+                frames: vec![],
+                max_linear: 1.0,
+                max_vertical: 1.0,
+                max_angular: 1.0,
+                max_yaw_rate: 1.0,
+            }),
+        }
+        for reverse in [false, true] {
+            if reverse {
+                mixed.vehicles[0].scopes.reverse();
+            }
+            let wire = host_capabilities(&mixed, "test");
+            for descriptor in &wire.vehicles[0].scopes {
+                let camera = descriptor.scope.as_ref().unwrap().value == "vehicle.camera";
+                assert_eq!(descriptor.command_only, camera);
+            }
+        }
+    }
+}

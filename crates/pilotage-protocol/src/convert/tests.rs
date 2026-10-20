@@ -188,6 +188,7 @@ fn envelope_roundtrips_for_host_capabilities_arm() {
             vehicle: Some(wire::VehicleId { value: 2 }),
             display_name: "rover-1".to_owned(),
             scopes: vec![wire::ScopeDescriptor {
+                command_only: false,
                 payload: None,
                 scope: Some(wire::ScopeId {
                     value: "vehicle.motion".to_owned(),

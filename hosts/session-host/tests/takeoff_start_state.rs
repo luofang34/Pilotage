@@ -108,6 +108,7 @@ fn the_published_start_requirement_reaches_the_client_catalog() {
         None,
         Some(TakeoffStartState::ArmedOnGround),
         Some(TakeoffStartState::MotorsStoppedOnGround),
+        Some(TakeoffStartState::MotorsStopped),
     ] {
         let actions = client_actions(welcome(state));
         assert_eq!(actions.len(), 2);

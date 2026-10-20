@@ -17,6 +17,7 @@ const USB: &str = "PILOTAGE_DJI_USB";
 const CAPTURE: &str = "PILOTAGE_DJI_CAPTURE";
 const CONTROL_MODE: &str = "PILOTAGE_DJI_CONTROL_MODE";
 const FFMPEG: &str = "PILOTAGE_DJI_FFMPEG";
+const EXPERIMENTAL_FLIGHT: &str = "PILOTAGE_DJI_EXPERIMENTAL_FLIGHT";
 
 mod attachment;
 use attachment::{AttachmentSelection, parse_attachment};
@@ -97,6 +98,12 @@ pub enum DjiHostError {
         /// The rejected configuration value.
         value: OsString,
     },
+    /// The flight opt-in is not the exact supported value.
+    #[error("{EXPERIMENTAL_FLIGHT} must be absent or 1, got {value:?}")]
+    ExperimentalFlight {
+        /// The rejected configuration value.
+        value: OsString,
+    },
     /// The decoder command is empty or a relative path.
     #[error("{FFMPEG} must be a command name or an absolute file path, got {path:?}")]
     DecoderPath {
@@ -122,6 +129,7 @@ struct DjiHostConfig {
     capture_path: PathBuf,
     control_mode: DjiControlMode,
     ffmpeg: PathBuf,
+    experimental_flight: bool,
 }
 
 pub(super) fn start_blocking(vehicle: VehicleId) -> Result<DjiRuntime, DjiHostError> {
@@ -132,16 +140,19 @@ pub(super) fn start_blocking(vehicle: VehicleId) -> Result<DjiRuntime, DjiHostEr
         std::env::var_os(CAPTURE),
         std::env::var_os(CONTROL_MODE),
         std::env::var_os(FFMPEG),
+        std::env::var_os(EXPERIMENTAL_FLIGHT),
     )?;
     let adapter_config = DjiConfig {
         attachment: config.attachment.resolve_blocking()?,
         capture_path: config.capture_path,
         control_mode: config.control_mode,
+        experimental_flight: config.experimental_flight,
     };
     tracing::info!(attachment = ?adapter_config.attachment,
         capture = %adapter_config.capture_path.display(),
         control_mode = ?adapter_config.control_mode,
-        "DJI bench object: flight and positioning control are not implemented");
+        experimental_flight = adapter_config.experimental_flight,
+        "DJI experimental adapter configured; continuous flight control is unavailable");
     if adapter_config.control_mode == DjiControlMode::BenchInitialHorizontal {
         tracing::warn!(
             "DJI one-way bench control starts from an operator-confirmed horizontal target; physical pose and stop are not confirmed"
@@ -182,6 +193,7 @@ fn config_from_values(
     capture: Option<OsString>,
     control_mode: Option<OsString>,
     ffmpeg: Option<OsString>,
+    experimental_flight: Option<OsString>,
 ) -> Result<DjiHostConfig, DjiHostError> {
     let attachment = parse_attachment(serial, usb_registry_id, usb)?;
     let capture_path = required_path(capture, CAPTURE)?;
@@ -196,7 +208,16 @@ fn config_from_values(
         capture_path,
         control_mode: parse_control_mode(control_mode)?,
         ffmpeg: parse_decoder(ffmpeg)?,
+        experimental_flight: parse_experimental_flight(experimental_flight)?,
     })
+}
+
+fn parse_experimental_flight(value: Option<OsString>) -> Result<bool, DjiHostError> {
+    match value {
+        None => Ok(false),
+        Some(value) if value == "1" => Ok(true),
+        Some(value) => Err(DjiHostError::ExperimentalFlight { value }),
+    }
 }
 
 fn parse_control_mode(value: Option<OsString>) -> Result<DjiControlMode, DjiHostError> {

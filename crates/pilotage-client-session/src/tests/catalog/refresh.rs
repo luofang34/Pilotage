@@ -86,3 +86,30 @@ fn old_pending_lease_and_transfer_cannot_reopen_replaced_contract() {
     grant_scope(&mut engine, "vehicle.camera.100.0", 4);
     assert!(engine.holds(1, "vehicle.camera.100.0"));
 }
+
+#[test]
+fn a_command_only_contract_change_closes_the_held_lane() {
+    let mut engine = engine();
+    admit(&mut engine, 7, 42);
+    assert!(!engine.admission().unwrap().vehicles[0].scopes[0].command_only);
+    engine.request_lease(1, "vehicle.motion");
+    grant_scope(&mut engine, "vehicle.motion", 4);
+    assert!(engine.holds(1, "vehicle.motion"));
+    let mut changed = catalog(1);
+    changed.vehicles[0].scopes[0].command_only = true;
+    let envelope = wire::Envelope {
+        schema_version: pilotage_protocol::SCHEMA_VERSION,
+        payload: Some(wire::envelope::Payload::HostCapabilities(changed)),
+    };
+    engine.handle(
+        TransportEvent::BootstrapReceived(pilotage_protocol::encode_envelope_length_delimited(
+            &envelope,
+        )),
+        1,
+    );
+    assert!(engine.admission().unwrap().vehicles[0].scopes[0].command_only);
+    assert!(!engine.holds(1, "vehicle.motion"));
+    engine.request_lease(1, "vehicle.motion");
+    grant_scope(&mut engine, "vehicle.motion", 6);
+    assert!(engine.holds(1, "vehicle.motion"));
+}
