@@ -29,9 +29,13 @@ fn main() -> ExitCode {
 /// Returns [`HostError`] if argument parsing or startup fails.
 fn run(args: &[String]) -> Result<(), HostError> {
     let cli_args = cli::parse_args(args).map_err(HostError::Cli)?;
+    let network = runtime::NetworkOptions::from_token_file_blocking(
+        cli_args.bind_ip,
+        cli_args.join_token_file.as_deref(),
+    )?;
     let runtime = tokio::runtime::Runtime::new().map_err(HostError::Runtime)?;
     runtime.block_on(async move {
-        let host = runtime::start(cli_args.port, cli_args.adapter).await?;
+        let host = runtime::start_with_network(cli_args.port, cli_args.adapter, network).await?;
         if let Err(error) = tokio::signal::ctrl_c().await {
             tracing::error!(%error, "failed to listen for ctrl_c");
         }

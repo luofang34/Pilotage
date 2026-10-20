@@ -26,7 +26,8 @@ commands:
                            runs beside instance 0 on other ports
       --open               open the ready URL (default)
       --no-open            do not open the ready URL
-      --lan                serve the session to the local network
+      --lan                serve the session to the local network; requires a join code
+      --join-token-file <path> absolute path to the host's local join-code file
       --ready-timeout <s>  how long each simulator and flight-controller
                            stage may take to come up (default: 180)
       --camera <camera>    none (default) | maplibre: render the vehicle's

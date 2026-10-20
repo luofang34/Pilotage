@@ -164,6 +164,7 @@ pub(crate) async fn run(
     mut commands: mpsc::UnboundedReceiver<LinkCommand>,
 ) {
     let mut engine = ClientEngine::new(ClientConfig {
+        join_token: None,
         client_name: config.client_name.clone(),
         reconnect: ReconnectPolicy::default(),
     });

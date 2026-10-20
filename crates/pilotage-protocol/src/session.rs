@@ -15,15 +15,25 @@ pub const SESSION_PROTOCOL_VERSION: u32 = 2;
 
 /// The first message a client sends after the WebTransport session is
 /// established (ADR-0005).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct ClientHello {
     /// Highest session capability version the client can interpret.
     pub protocol_version: u32,
     /// Human-readable client identification, for diagnostics only.
     pub client_name: String,
-    /// Opaque join token proving prior admission; interpreted only by the
-    /// issuing admission service, never by this crate.
+    /// Secret checked at the host transport admission boundary.
     pub join_token: Vec<u8>,
+}
+
+impl core::fmt::Debug for ClientHello {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("ClientHello")
+            .field("protocol_version", &self.protocol_version)
+            .field("client_name", &self.client_name)
+            .field("join_token", &"[redacted]")
+            .finish()
+    }
 }
 
 /// A single (vehicle, scope) pair's current holder and fencing generation,

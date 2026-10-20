@@ -22,6 +22,7 @@ fn sim_defaults_are_the_documented_ones() {
     assert!(sim.open, "the browser opens by default");
     assert_eq!(sim.instance, 0, "one session per machine is the default");
     assert!(!sim.lan, "the session serves loopback only by default");
+    assert_eq!(sim.join_token_file, None);
     assert!(!sim.sim_camera, "the backend's own camera by default");
 }
 
@@ -121,12 +122,44 @@ fn handshake_out_dir_parses_and_malformed_flags_fail_closed() {
 
 #[test]
 fn no_open_suppresses_the_browser() {
-    let Command::Sim(sim) = parse_args(&args(&["sim", "--no-open", "--lan"])).expect("parses")
-    else {
+    let Command::Sim(sim) = parse_args(&args(&[
+        "sim",
+        "--no-open",
+        "--lan",
+        "--join-token-file",
+        "/private/join-code",
+    ]))
+    .expect("parses") else {
         panic!("expected sim");
     };
     assert!(!sim.open);
     assert!(sim.lan, "--lan is honored");
+}
+
+#[test]
+fn lan_requires_an_explicit_absolute_join_code_file() {
+    for flags in [
+        args(&["sim", "--lan"]),
+        args(&["sim", "--lan", "--join-token-file"]),
+        args(&["sim", "--lan", "--join-token-file", "join-code"]),
+        args(&["sim", "--join-token-file", ""]),
+    ] {
+        assert!(matches!(parse_args(&flags), Err(XtaskError::Usage { .. })));
+    }
+    let Command::Sim(sim) = parse_args(&args(&[
+        "sim",
+        "--join-token-file",
+        "/private/operator-code",
+        "--lan",
+    ]))
+    .expect("explicit LAN admission") else {
+        panic!("expected sim");
+    };
+    assert_eq!(
+        sim.join_token_file,
+        Some(std::path::PathBuf::from("/private/operator-code"))
+    );
+    assert!(USAGE.contains("--join-token-file <path>"));
 }
 
 #[test]

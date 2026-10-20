@@ -2,6 +2,12 @@ import { runBootstrapReader } from "./bootstrap.js";
 import { negotiateSessionAuthority } from "./connect-authority.js";
 import { createReconnectController } from "./reconnect.js";
 import {
+  createJoinCredentials,
+  failureAfterClose,
+  pilotageSessionUrl,
+  transportCloseFailure,
+} from "./session-admission.js";
+import {
   applySessionConfig,
   launcherSessionOver,
   validSessionConfig,
@@ -24,6 +30,8 @@ export function createSessionTransport({
   bootstrap,
   control,
 }) {
+  const credentials = createJoinCredentials();
+  let latestToken = null;
   const discovery = {
     launcherPinned: new URLSearchParams(window.location.search).get("autoconnect") === "1",
     manifestSeen: false,
@@ -97,14 +105,24 @@ export function createSessionTransport({
       log("certificate hash must be exactly 64 hexadecimal characters (SHA-256)");
       return { ok: false, failure: { phase: "construct" } };
     }
-    const url = `https://${host}:${port}/pilotage`;
     const certHash = hexToBytes(certHashHex);
+    let url;
+    let joinToken;
+    try {
+      url = pilotageSessionUrl(host, port);
+      joinToken = credentials.forConnection(
+        `${url}#${certHashHex.toLowerCase()}`, els.joinCode.value, manual,
+      );
+    } catch (error) {
+      log(error.message);
+      return { ok: false, failure: { phase: "construct" } };
+    }
     const session = await negotiateSessionAuthority({
       manual,
       gate: controlGate,
       releases: releaseTracker,
       openAndBootstrap: (leaseProbe) =>
-        openTransportSession({ url, certHash, certHashHex, manual, leaseProbe }),
+        openTransportSession({ url, certHash, certHashHex, joinToken, manual, leaseProbe }),
       startControl: ({ transport, token }) => control.startControlLoop(transport, token),
       controlUnavailable: ({ token }) => {
         transportSessions.runIfActive(token, () => {
@@ -139,7 +157,7 @@ export function createSessionTransport({
     return session.result;
   }
 
-  async function openTransportSession({ url, certHash, certHashHex, manual, leaseProbe }) {
+  async function openTransportSession({ url, certHash, certHashHex, joinToken, manual, leaseProbe }) {
     let transport;
     try {
       transport = new WebTransport(url, {
@@ -150,6 +168,7 @@ export function createSessionTransport({
       return { completed: false, result: { ok: false, failure: { phase: "construct" } } };
     }
     const token = transportSessions.begin(transport);
+    latestToken = token;
     transportSessions.runIfActive(token, () => {
       state.transport = transport;
       state.sessionWriter = null;
@@ -175,9 +194,15 @@ export function createSessionTransport({
       log(`connecting to ${url} (${mode}) pinned to cert hash ${certHashHex.slice(0, 16)}...`);
     });
 
-    transport.closed.then(
-      () => handleTransportClosed(token, null),
-      (error) => handleTransportClosed(token, error),
+    const closed = transport.closed.then(
+      (info) => {
+        handleTransportClosed(token, null, info);
+        return transportCloseFailure(info);
+      },
+      (error) => {
+        handleTransportClosed(token, error);
+        return transportCloseFailure(error);
+      },
     );
 
     try {
@@ -194,7 +219,7 @@ export function createSessionTransport({
       if (!transportSessions.trackReader(token, reader)) {
         return { completed: false, result: SUPERSEDED };
       }
-      if (!(await bootstrap.sendClientHello(writer, token))) {
+      if (!(await bootstrap.sendClientHello(writer, token, joinToken))) {
         return { completed: false, result: SUPERSEDED };
       }
       const bootstrapResult = await runBootstrapReader({
@@ -238,19 +263,27 @@ export function createSessionTransport({
         result: { ok: true },
       };
     } catch (error) {
-      if (!transportSessions.isActive(token)) return { completed: false, result: SUPERSEDED };
+      if (latestToken !== token) return { completed: false, result: SUPERSEDED };
+      const failure = await failureAfterClose(closed, transportCloseFailure(error));
+      if (latestToken !== token) return { completed: false, result: SUPERSEDED };
       state.connected = false;
       state.transport = null;
       readout.retireSessionPresentation("failed");
-      log(`connect failed: ${error}`);
+      log(failure.kind === "admission"
+        ? "Join code was rejected. Check the code and press Connect."
+        : `connect failed: ${error}`);
       transportSessions.close(token);
-      const phase = error && error.bootstrapRejected ? "rejected" : "transport";
-      return { completed: false, result: { ok: false, failure: { phase } } };
+      return { completed: false, result: { ok: false, failure } };
     }
   }
 
-  function handleTransportClosed(token, error) {
-    if (!transportSessions.isActive(token)) return;
+  function handleTransportClosed(token, error, info = null) {
+    if (latestToken !== token) return;
+    const failure = transportCloseFailure(info ?? error);
+    if (!transportSessions.isActive(token)) {
+      if (failure.phase === "rejected") reconnect.notifyDropped(failure);
+      return;
+    }
     state.connected = false;
     state.transport = null;
     state.sessionWriter = null;
@@ -259,10 +292,12 @@ export function createSessionTransport({
     els.resumeBtn.hidden = true;
     releaseTracker.abandon();
     readout.retireSessionPresentation(error === null ? "disconnected" : "failed");
-    log(error === null ? "WebTransport session closed" : `WebTransport session errored: ${error}`);
+    log(failure.phase === "rejected"
+      ? "Join code was rejected. Check the code and press Connect."
+      : error === null ? "WebTransport session closed" : `WebTransport session errored: ${error}`);
     transportSessions.retire(token);
     void refreshSessionConfig();
-    reconnect.notifyDropped({ phase: "transport" });
+    reconnect.notifyDropped(failure);
   }
 
   const reconnect = createReconnectController({

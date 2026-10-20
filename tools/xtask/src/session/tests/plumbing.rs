@@ -118,6 +118,7 @@ fn viewer_stage_runs_the_xtask_static_server() {
         profile: Profile::Simulation,
         log_dir: repo_root.clone(),
         lan: false,
+        join_token_file: None,
         web_root: web.clone(),
         instance: 0,
         ready_timeout_s: crate::backend::DEFAULT_READY_TIMEOUT_S,

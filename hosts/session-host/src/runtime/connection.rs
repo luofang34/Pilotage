@@ -14,6 +14,7 @@
 
 use pilotage_session::{ClientKey, DomainEnvelope};
 use pilotage_timing::MonoTimestamp;
+use std::ops::ControlFlow;
 use tokio::sync::{mpsc, watch};
 use tokio::time::Instant;
 use tracing::{debug, error, warn};
@@ -29,6 +30,7 @@ use crate::runtime::wire_codec::{
     decode_control_datagram, decode_ping_datagram, encode_video_delivery_state,
 };
 
+mod admission;
 mod send_blocked;
 
 const CONTROL_STREAM_PRIORITY: i32 = 10;
@@ -83,9 +85,9 @@ pub enum ToConnection {
     Close,
 }
 
-/// Drives one accepted WebTransport connection until it closes or the engine
-/// asks it to close: opens the reliable session-events uni stream, then
-/// runs the reader half (bootstrap-stream reads and datagrams) and the
+/// Verifies the first Hello before opening the reliable session-events stream.
+/// Drives the admitted connection until it closes or the engine asks it to close.
+/// Runs the reader half (bootstrap-stream reads and datagrams) and the
 /// writer half (bootstrap-stream and authority-stream writes plus datagram
 /// sends) concurrently until either exits.
 pub async fn run_connection(
@@ -94,13 +96,16 @@ pub async fn run_connection(
     start: Instant,
     to_engine: mpsc::Sender<ToEngine>,
     media: Option<MediaHandle>,
+    join_token: Option<pilotage_protocol::JoinToken>,
 ) {
-    let (send, recv) = match connection.accept_bi().await {
-        Ok(streams) => streams,
-        Err(error) => {
-            warn!(%error, "client did not open the bootstrap bidirectional stream");
-            return;
-        }
+    let Some(admission::AdmittedBootstrap {
+        send,
+        recv,
+        hello,
+        pending,
+    }) = admission::admit(&connection, join_token.as_ref()).await
+    else {
+        return;
     };
     let mut event_send = match connection.open_uni().await {
         Ok(opening) => match opening.await {
@@ -139,9 +144,10 @@ pub async fn run_connection(
         }
         return;
     }
+    forward(&to_engine, client, DomainEnvelope::Hello(hello), start).await;
 
     tokio::select! {
-        () = run_reader(&connection, recv, client, start, &to_engine, media.as_ref()) => {}
+        () = run_reader(&connection, recv, pending, client, start, &to_engine, media.as_ref()) => {}
         () = run_writer(
             &connection,
             client,
@@ -170,20 +176,26 @@ pub async fn run_connection(
 async fn run_reader(
     connection: &Connection,
     mut recv: RecvStream,
+    mut pending: Vec<u8>,
     client: ClientKey,
     start: Instant,
     to_engine: &mpsc::Sender<ToEngine>,
     media: Option<&MediaHandle>,
 ) {
     let mut read_buf = vec![0u8; 64 * 1024];
-    let mut pending = Vec::new();
+    if !matches!(
+        drain_bootstrap_frames(&mut pending, client, start, to_engine, media, connection).await,
+        Ok(ControlFlow::Continue(()))
+    ) {
+        return;
+    }
     loop {
         tokio::select! {
             read = recv.read(&mut read_buf) => {
                 match read {
                     Ok(Some(count)) => {
                         pending.extend_from_slice(&read_buf[..count]);
-                        if let Err(error) =
+                        match
                             drain_bootstrap_frames(
                                 &mut pending,
                                 client,
@@ -193,8 +205,12 @@ async fn run_reader(
                                 connection,
                             ).await
                         {
-                            warn!(%error, "closing connection: oversized bootstrap frame");
-                            break;
+                            Ok(ControlFlow::Continue(())) => {}
+                            Ok(ControlFlow::Break(())) => break,
+                            Err(error) => {
+                                warn!(%error, "closing connection: oversized bootstrap frame");
+                                break;
+                            }
                         }
                     }
                     Ok(None) => break,
@@ -394,14 +410,24 @@ async fn drain_bootstrap_frames(
     to_engine: &mpsc::Sender<ToEngine>,
     media: Option<&MediaHandle>,
     connection: &Connection,
-) -> Result<(), OversizedFrame> {
+) -> Result<ControlFlow<()>, OversizedFrame> {
     loop {
         let frame_len = match complete_frame_len(pending)? {
             Some(frame_len) => frame_len,
-            None => return Ok(()),
+            None => return Ok(ControlFlow::Continue(())),
         };
         match decode_bootstrap_message(&pending[..frame_len]) {
             Ok((InboundBootstrap::Engine(message), _rest)) => {
+                if matches!(*message, DomainEnvelope::Hello(_)) {
+                    connection.close(
+                        wtransport::VarInt::from_u32(
+                            pilotage_protocol::ADMISSION_REJECTED_CLOSE_CODE,
+                        ),
+                        b"admission rejected",
+                    );
+                    pending.clear();
+                    return Ok(ControlFlow::Break(()));
+                }
                 forward(to_engine, client, *message, start).await;
             }
             Ok((InboundBootstrap::MediaAttach, _rest)) => {

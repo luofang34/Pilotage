@@ -11,6 +11,7 @@ workspace = true
 pilotage-timing = { workspace = true }
 thiserror = { workspace = true }
 prost = { workspace = true }
+subtle = "2.6.1"
 
 [build-dependencies]
 prost-build = { workspace = true }
