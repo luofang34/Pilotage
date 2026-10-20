@@ -1,6 +1,6 @@
 use super::harness::{Harness, frame, observed_poses, packets};
 use crate::logiclink::{CONTROL_CHANNEL, LogicLinkParser};
-use pilotage_adapter_api::{Disposition, VehicleAdapter};
+use pilotage_adapter_api::{AvionicsAttitudeSample, Disposition, VehicleAdapter};
 use std::time::Duration;
 
 #[test]
@@ -16,7 +16,10 @@ fn upper_capture_reaches_real_payload_state_without_faking_vehicle_pose() {
     assert!(harness.adapter.status_cached().fault.is_none());
     let samples = harness.telemetry(10).samples;
     assert_eq!(samples.len(), 1);
-    assert!(samples[0].avionics.is_none());
+    assert!(matches!(
+        samples[0].avionics.and_then(|avionics| avionics.attitude),
+        Some(AvionicsAttitudeSample::ReportedEuler { .. })
+    ));
     assert!(samples[0].pose.is_none());
     assert!(samples[0].speed.is_none());
     let state = samples[0].payload.as_ref().unwrap();

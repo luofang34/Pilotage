@@ -4,32 +4,12 @@ use pilotage_adapter_api::{
 
 use super::{
     TestResult,
-    harness::{Harness, frame, observed_poses, packets},
+    harness::{Harness, captured_hex_frames, frame, observed_poses, packets, seal_duml as seal},
 };
 use crate::adapter::HOST_PITCH_RATE_LIMIT_RPS;
 
 fn captured_reports() -> Vec<Vec<u8>> {
-    include_str!("../battery/fixtures/mini3-battery-status.hex")
-        .lines()
-        .map(|line| {
-            line.as_bytes()
-                .as_chunks::<2>()
-                .0
-                .iter()
-                .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
-                .collect()
-        })
-        .collect()
-}
-
-fn seal(bytes: &mut [u8]) {
-    let length = bytes.len();
-    let size = (length as u16).to_le_bytes();
-    bytes[1] = size[0];
-    bytes[2] = (bytes[2] & 0xfc) | size[1];
-    bytes[3] = turret_dji::header_checksum(&bytes[..3]);
-    let crc = turret_dji::frame_checksum(&bytes[..length - 2]).to_le_bytes();
-    bytes[length - 2..].copy_from_slice(&crc);
+    captured_hex_frames(include_str!("../battery/fixtures/mini3-battery-status.hex"))
 }
 
 #[test]

@@ -7,7 +7,7 @@ use turret_dji::Mini3ControlProfile;
 
 use crate::{DumlFrame, GimbalAngles, RouteAddress};
 
-use super::battery::BatteryObservations;
+use super::{airframe::AirframeObservations, battery::BatteryObservations};
 
 const MAX_AGE: Duration = Duration::from_millis(300);
 
@@ -26,6 +26,7 @@ pub(super) struct Observations {
     sequence: u32,
     published_sequence: u32,
     battery: BatteryObservations,
+    airframe: AirframeObservations,
 }
 
 impl Observations {
@@ -69,11 +70,13 @@ impl Observations {
             sequence: 0,
             published_sequence: 0,
             battery: BatteryObservations::default(),
+            airframe: AirframeObservations::default(),
         }
     }
 
     pub(super) fn receive(&mut self, frame: &DumlFrame, now: Duration) {
         self.battery.receive(frame, now);
+        self.airframe.receive(frame, now);
         let angles = GimbalAngles::from_push(frame, RouteAddress(2))
             .or_else(|| GimbalAngles::from_push(frame, RouteAddress(10)));
         let Some(angles) = angles else {
@@ -139,12 +142,16 @@ impl Observations {
     ) -> TelemetryBatch {
         let payload = self.sample_payload(now, connection_valid);
         let battery = self.battery.sample(now, connection_valid, self.incarnation);
-        if payload.is_none() && battery.is_none() {
+        let avionics = self
+            .airframe
+            .sample(now, connection_valid, self.incarnation);
+        if payload.is_none() && battery.is_none() && avionics.is_none() {
             return TelemetryBatch::default();
         }
         TelemetryBatch {
             samples: vec![TelemetrySample {
                 battery,
+                avionics,
                 ..telemetry(vehicle, tick, payload)
             }],
         }

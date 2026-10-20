@@ -1,5 +1,6 @@
 //! A single-writer connection with a bounded gimbal command envelope.
 
+mod airframe;
 mod attachment;
 mod battery;
 mod bench;

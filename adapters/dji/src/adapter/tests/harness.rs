@@ -258,6 +258,29 @@ pub(super) fn observed_poses() -> Vec<Vec<u8>> {
     .collect()
 }
 
+pub(super) fn captured_hex_frames(text: &str) -> Vec<Vec<u8>> {
+    text.lines()
+        .map(|line| {
+            let (pairs, tail) = line.as_bytes().as_chunks::<2>();
+            assert!(tail.is_empty());
+            pairs
+                .iter()
+                .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+                .collect()
+        })
+        .collect()
+}
+
+pub(super) fn seal_duml(bytes: &mut [u8]) {
+    let length = bytes.len();
+    let size = (length as u16).to_le_bytes();
+    bytes[1] = size[0];
+    bytes[2] = (bytes[2] & 0xfc) | size[1];
+    bytes[3] = turret_dji::header_checksum(&bytes[..3]);
+    let crc = turret_dji::frame_checksum(&bytes[..length - 2]).to_le_bytes();
+    bytes[length - 2..].copy_from_slice(&crc);
+}
+
 pub(super) fn frame(pitch_rate: f32) -> ScopedControlFrame {
     ScopedControlFrame {
         session: SessionId::new(1),
