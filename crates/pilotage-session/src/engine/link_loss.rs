@@ -267,6 +267,8 @@ impl SessionEngine {
                 vehicle,
                 scope,
                 generation,
+                // Capability discovery can fence an unused scope without a holder to lose.
+                previous_holder: Some(_),
                 ..
             }
             | AuthorityEffect::HolderLinkLost {
