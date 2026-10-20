@@ -1,6 +1,5 @@
 //! The live flight's client: the portable client-session core over a
 //! WebTransport connection to the host, and the telemetry it decodes.
-#![allow(dead_code)]
 // Each live test is its own crate and uses a different subset of this
 // module.
 #![allow(dead_code)]
