@@ -4,7 +4,7 @@
 //! Every frame rides the link's own socket through its typed lanes: an
 //! ArduPilot SITL serial port answers only the address it sends to.
 //!
-//! The flight phase exists because ArduCopter does not take off from a
+//! The takeoff procedure exists because ArduCopter does not take off from a
 //! velocity setpoint in GUIDED: a landed, armed copter needs
 //! MAV_CMD_NAV_TAKEOFF, and a velocity setpoint sent while that takeoff
 //! runs switches the guided sub-mode and aborts it. So setpoints wait
@@ -26,8 +26,7 @@ pub const MAX_HORIZONTAL_MPS: f32 = 3.0;
 pub const MAX_VERTICAL_MPS: f32 = 1.5;
 /// Full-envelope yaw rate demand (~52°/s).
 pub const MAX_YAW_RATE_RPS: f32 = 0.9;
-/// Height above the arm point the takeoff climbs to before velocity
-/// control starts.
+/// Takeoff target height above the measured altitude at the Takeoff request.
 pub const TAKEOFF_ALTITUDE_M: f32 = 2.5;
 /// MAV_MODE_FLAG_CUSTOM_MODE_ENABLED: param 1 of MAV_CMD_DO_SET_MODE.
 const BASE_MODE_CUSTOM: f32 = 1.0;
@@ -50,7 +49,7 @@ pub(crate) enum VelocityOutcome {
     /// A setpoint was published; `constrained` when the demand was clamped
     /// to the envelope.
     Streamed { constrained: bool },
-    /// A takeoff is climbing; the intent waits.
+    /// A takeoff procedure is pending; the intent waits.
     TakeoffInProgress,
     /// A failed or revoked procedure still blocks motion.
     TakeoffBlocked,

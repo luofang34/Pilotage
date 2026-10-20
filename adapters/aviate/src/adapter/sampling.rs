@@ -240,6 +240,18 @@ fn sim_truth_sample(latest: &LinkState) -> Option<pilotage_adapter_api::SimTruth
         })
 }
 
+fn avionics_attitude(attitude: AttitudeUpdate) -> AvionicsAttitudeSample {
+    AvionicsAttitudeSample::Canonical {
+        quat_wxyz: attitude.quat_wxyz,
+        rates_rps: attitude
+            .rates_rps
+            .iter()
+            .all(|rate| rate.is_finite())
+            .then_some(attitude.rates_rps),
+        stamp: attitude.stamp,
+    }
+}
+
 pub(crate) fn mavlink_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -> TelemetryBatch {
     let Ok(latest) = state.lock() else {
         return TelemetryBatch::default();
@@ -271,15 +283,7 @@ pub(crate) fn mavlink_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -
             .filter(|fix| fix.received_at.elapsed() <= WITHHOLD_AFTER)
             .as_ref()
             .and_then(|fix| estimate_geodetic_fix(fix, &latest)),
-        attitude: attitude.map(|att| AvionicsAttitudeSample::Canonical {
-            quat_wxyz: att.quat_wxyz,
-            rates_rps: att
-                .rates_rps
-                .iter()
-                .all(|rate| rate.is_finite())
-                .then_some(att.rates_rps),
-            stamp: att.stamp,
-        }),
+        attitude: attitude.map(avionics_attitude),
         kinematics: kinematics.map(|kin| AvionicsKinematicsSample {
             pos_ned_m: kin.pos_ned_m,
             vel_ned_mps: kin.vel_ned_mps,

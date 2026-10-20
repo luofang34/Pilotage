@@ -70,14 +70,16 @@ fn note_command_ack(command: u16, result: u8) {
 /// Acks for another endpoint prove nothing about our commands; zero
 /// targets mean the sender omitted the v2 extension fields (accepted as
 /// unaddressed).
-fn apply_command_ack(
-    latest: &mut LinkState,
-    command: u16,
-    result: u8,
-    target_system: u8,
-    target_component: u8,
-    now: Instant,
-) {
+fn apply_command_ack(latest: &mut LinkState, message: FcMessage, now: Instant) {
+    let FcMessage::CommandAck {
+        command,
+        result,
+        target_system,
+        target_component,
+    } = message
+    else {
+        return;
+    };
     let addressed_to_us = (target_system == 0 && target_component == 0)
         || (target_system == crate::codec::GCS_SYSTEM_ID
             && target_component == crate::codec::GCS_COMPONENT_ID);
@@ -348,19 +350,7 @@ fn apply_message(latest: &mut LinkState, message: FcMessage, now: Instant) {
         FcMessage::StatusText { severity, text } => {
             latest.fc_reports.push_status_text(severity, &text, now);
         }
-        FcMessage::CommandAck {
-            command,
-            result,
-            target_system,
-            target_component,
-        } => apply_command_ack(
-            latest,
-            command,
-            result,
-            target_system,
-            target_component,
-            now,
-        ),
+        FcMessage::CommandAck { .. } => apply_command_ack(latest, message, now),
         FcMessage::EstimatorStatus { time_usec, flags } => {
             apply_standard_status(latest, time_usec, flags, now);
         }
