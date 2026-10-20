@@ -12,7 +12,13 @@ use pilotage_mavlink::{AuthorizationSource, CommandTarget, LinkConfig};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArduPilotProfile {
     /// ArduPilot SITL with the bounded simulator reset heuristic enabled.
+    /// The adapter sets the parameter bits direct flight needs
+    /// (`adapter/params.rs`).
     Simulation,
+    /// A real vehicle: the conservative reset policy, and the adapter
+    /// never writes a parameter. It reads the ones direct flight needs and
+    /// refuses direct flight while one is wrong.
+    Physical,
 }
 
 /// All policy and network configuration required to start the adapter.
@@ -43,9 +49,16 @@ impl ArduPilotConfig {
         }
     }
 
+    /// The operating profile.
+    #[must_use]
+    pub(crate) fn profile(self) -> ArduPilotProfile {
+        self.profile
+    }
+
     pub(crate) fn link_config(self) -> LinkConfig {
         let mut config = match self.profile {
             ArduPilotProfile::Simulation => LinkConfig::simulator(),
+            ArduPilotProfile::Physical => LinkConfig::physical(),
         };
         config.endpoint = self.endpoint;
         config.system_id = self.system_id;

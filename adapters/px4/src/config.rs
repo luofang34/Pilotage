@@ -8,8 +8,14 @@ use pilotage_protocol::VehicleClass;
 /// PX4 operating profiles supported by this adapter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Px4Profile {
-    /// PX4 SITL with the bounded simulator reset heuristic enabled.
+    /// PX4 SITL with the bounded simulator reset heuristic enabled. The
+    /// adapter writes the parameters its control model needs (the
+    /// `pinning` module).
     Simulation,
+    /// A real vehicle: the conservative reset policy, and the adapter
+    /// never writes a parameter. It reads the ones its control model
+    /// needs and refuses to arm while one differs.
+    Physical,
 }
 
 /// The airframe class PX4 flies, which decides how the adapter turns the
@@ -102,6 +108,12 @@ impl Px4Config {
         self
     }
 
+    /// The operating profile.
+    #[must_use]
+    pub(crate) fn profile(&self) -> Px4Profile {
+        self.profile
+    }
+
     /// Whether the gimbal link-loss stop is dropped (Simulation-only fault
     /// injection). Always `false` outside `Simulation`.
     #[must_use]
@@ -112,6 +124,7 @@ impl Px4Config {
     pub(crate) fn link_config(self) -> LinkConfig {
         let mut config = match self.profile {
             Px4Profile::Simulation => LinkConfig::simulator(),
+            Px4Profile::Physical => LinkConfig::physical(),
         };
         config.endpoint = self.telemetry_endpoint;
         config.system_id = self.system_id;
@@ -189,5 +202,16 @@ mod tests {
     fn simulation_profile_enables_only_the_simulator_reset_policy() {
         let config = Px4Config::new(Px4Profile::Simulation).link_config();
         assert_eq!(config.reset_policy, ResetPolicy::SimulatorHeuristic);
+    }
+
+    #[test]
+    fn physical_profile_keeps_the_conservative_reset_policy() {
+        let config = Px4Config::new(Px4Profile::Physical).link_config();
+        assert_eq!(config.reset_policy, ResetPolicy::Conservative);
+        assert!(
+            !Px4Config::new(Px4Profile::Physical)
+                .with_gimbal_stop_dropped(true)
+                .drop_gimbal_link_loss_stop()
+        );
     }
 }
