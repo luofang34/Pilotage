@@ -89,6 +89,8 @@ fn motion_frame(
     steering: f32,
 ) -> ScopedControlFrame {
     ScopedControlFrame {
+        timing: None,
+        admitted_timing: None,
         action_ids: vec![],
         session: SESSION,
         vehicle: VEHICLE,
@@ -144,7 +146,7 @@ pub fn increment_zero_script() -> Script {
             to: OPERATOR_B,
         }),
         // A drives motion at gen 1: forward and to port, then step 10 ticks.
-        ScriptStep::Frame(motion_frame(1, 1, 1.0, 0.5)),
+        ScriptStep::Frame(Box::new(motion_frame(1, 1, 1.0, 0.5))),
         ScriptStep::Step(10),
         // Normal handover A -> B: offer, accept (atomic commit, gen -> 2),
         // then the three-call confirmations.
@@ -172,9 +174,9 @@ pub fn increment_zero_script() -> Script {
             by: OPERATOR_A,
         }),
         // A's old-generation frame after the transition is fenced out.
-        ScriptStep::Frame(motion_frame(1, 2, 1.0, 0.0)),
+        ScriptStep::Frame(Box::new(motion_frame(1, 2, 1.0, 0.0))),
         // B drives motion at gen 2: forward and to starboard, then step.
-        ScriptStep::Frame(motion_frame(2, 3, 0.8, -0.5)),
+        ScriptStep::Frame(Box::new(motion_frame(2, 3, 0.8, -0.5))),
         ScriptStep::Step(10),
         // Emergency override by C (gen -> 3).
         ScriptStep::Command(AuthorityCommand::EmergencyOverride {
@@ -185,9 +187,9 @@ pub fn increment_zero_script() -> Script {
             reason: OverrideReason::new("range safety takeover"),
         }),
         // A frame at the pre-override generation is fenced out.
-        ScriptStep::Frame(motion_frame(2, 4, 1.0, 0.0)),
+        ScriptStep::Frame(Box::new(motion_frame(2, 4, 1.0, 0.0))),
         // C drives motion at gen 3: full throttle straight, then step.
-        ScriptStep::Frame(motion_frame(3, 5, 1.0, 0.0)),
+        ScriptStep::Frame(Box::new(motion_frame(3, 5, 1.0, 0.0))),
         ScriptStep::Step(10),
         // Link loss on the effective holder C: authority releases the scope
         // (gen -> 4) and the adapter neutralizes, decaying speed under drag.

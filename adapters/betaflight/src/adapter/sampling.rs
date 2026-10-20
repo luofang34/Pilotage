@@ -89,6 +89,7 @@ impl BetaflightAdapter {
             .map(|fix| fix.velocity_ne[0].hypot(fix.velocity_ne[1]));
         TelemetryBatch {
             samples: vec![TelemetrySample {
+                payload: None,
                 vehicle: self.vehicle,
                 tick: self.tick_of(snapshot.received_at),
                 pose,

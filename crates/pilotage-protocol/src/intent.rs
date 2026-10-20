@@ -60,6 +60,12 @@ pub enum ControlAction {
     Arm,
     /// Disarm the vehicle.
     Disarm,
+    /// Request the vehicle's native takeoff procedure.
+    ///
+    /// The scope must advertise takeoff support separately from arm and mode
+    /// support. Acceptance does not confirm flight. The adapter checks the
+    /// procedure's conditions and reports the vehicle's observed state.
+    Takeoff,
     /// Request a flight-mode change to an explicit typed target.
     ModeRequest {
         /// The mode being requested.
@@ -74,6 +80,11 @@ pub enum ControlAction {
     CameraZoomIn,
     /// Step the camera one detent toward a wider field of view.
     CameraZoomOut,
+    /// Apply an explicit camera zoom operation.
+    CameraZoom {
+        /// Operation and unit understood by the camera.
+        command: crate::ZoomCommand,
+    },
     /// Reset the simulation (SIM-01 lifecycle, not a flight intent):
     /// advertised only by simulation adapters, never by a physical-vehicle
     /// gateway.
@@ -93,6 +104,8 @@ pub enum ActionKind {
     Arm,
     /// Disarm the vehicle.
     Disarm,
+    /// Request the vehicle's native takeoff procedure.
+    Takeoff,
     /// Request a flight-mode change.
     ModeRequest,
     /// Recenter the gimbal.
@@ -101,6 +114,8 @@ pub enum ActionKind {
     CameraZoomIn,
     /// Step the camera one detent toward a wider field of view.
     CameraZoomOut,
+    /// Apply an explicit camera zoom operation.
+    CameraZoom,
     /// Reset the simulation.
     SimReset,
     /// Request a control-feel change.
@@ -114,10 +129,12 @@ impl ControlAction {
         match self {
             Self::Arm => ActionKind::Arm,
             Self::Disarm => ActionKind::Disarm,
+            Self::Takeoff => ActionKind::Takeoff,
             Self::ModeRequest { .. } => ActionKind::ModeRequest,
             Self::GimbalRecenter => ActionKind::GimbalRecenter,
             Self::CameraZoomIn => ActionKind::CameraZoomIn,
             Self::CameraZoomOut => ActionKind::CameraZoomOut,
+            Self::CameraZoom { .. } => ActionKind::CameraZoom,
             Self::SimReset => ActionKind::SimReset,
             Self::FeelModeRequest { .. } => ActionKind::FeelModeRequest,
         }
@@ -126,16 +143,20 @@ impl ControlAction {
 
 /// Whether a frame's action set is self-contradictory: any action kind
 /// repeated (two mode requests with different targets are still one kind —
-/// ambiguous, not a sequence), or `Arm` together with `Disarm`. A frame
-/// carrying such a set is rejected whole, executing none of it.
+/// ambiguous, not a sequence), `Arm` with `Disarm`, or `Takeoff` with an
+/// arm, disarm or mode request. A conflicting set executes none of its actions.
 #[must_use]
 pub fn actions_conflict(actions: &[ControlAction]) -> bool {
     let mut arm = false;
     let mut disarm = false;
+    let mut takeoff = false;
+    let mut mode = false;
     for (index, action) in actions.iter().enumerate() {
         match action.kind() {
             ActionKind::Arm => arm = true,
             ActionKind::Disarm => disarm = true,
+            ActionKind::Takeoff => takeoff = true,
+            ActionKind::ModeRequest => mode = true,
             _ => {}
         }
         if actions[index + 1..]
@@ -145,7 +166,7 @@ pub fn actions_conflict(actions: &[ControlAction]) -> bool {
             return true;
         }
     }
-    arm && disarm
+    (arm && disarm) || (takeoff && (arm || disarm || mode))
 }
 
 /// Linear velocity (metres per second) plus yaw rate (radians per second) in a
@@ -277,6 +298,10 @@ impl ControlIntent {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "intent/takeoff_tests.rs"]
+mod takeoff_tests;
 
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]

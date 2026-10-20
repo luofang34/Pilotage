@@ -52,6 +52,8 @@ fn scoped(
     actions: Vec<ControlAction>,
 ) -> ScopedControlFrame {
     ScopedControlFrame {
+        timing: None,
+        admitted_timing: None,
         action_ids: vec![],
         session: SessionId::new(1),
         vehicle: VehicleId::new(1),

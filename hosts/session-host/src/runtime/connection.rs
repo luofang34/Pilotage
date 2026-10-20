@@ -177,15 +177,6 @@ async fn run_reader(
 ) {
     let mut read_buf = vec![0u8; 64 * 1024];
     let mut pending = Vec::new();
-    // Reconciles the client's `sampled_at` epoch with this host's `host_time`
-    // (ADR-0009): the two processes each count nanoseconds from their own
-    // arbitrary monotonic origin, so a raw `now - sampled_at` measures the gap
-    // between those origins, not frame age. The first control frame defines
-    // the offset; every later frame's age then reflects true in-session drift.
-    // The proper networked path replaces this with RTT/offset estimation
-    // (`pilotage_timing::estimated_age`); this is the loopback shortcut the
-    // sans-IO engine's staleness check assumes.
-    let mut clock = ClientClock::default();
     loop {
         tokio::select! {
             read = recv.read(&mut read_buf) => {
@@ -216,7 +207,7 @@ async fn run_reader(
             datagram = connection.receive_datagram() => {
                 match datagram {
                     Ok(datagram) => {
-                        handle_datagram(&datagram, client, start, &mut clock, to_engine).await;
+                        handle_datagram(&datagram, client, start, to_engine).await;
                     }
                     Err(error) => {
                         debug!(%error, "connection closed while awaiting datagram");
@@ -225,32 +216,6 @@ async fn run_reader(
                 }
             }
         }
-    }
-}
-
-/// Per-connection reconciliation of a client's control-frame `sampled_at`
-/// epoch into this host's `host_time` domain (ADR-0009's loopback shortcut).
-///
-/// The client and host each stamp monotonic nanoseconds from an independent,
-/// arbitrary origin. `offset_nanos` is `host_now - sampled_at` captured from
-/// the first control frame; adding it to every subsequent frame's `sampled_at`
-/// expresses the sample time in host nanoseconds, so the engine's
-/// `now - sampled_at` staleness check sees true in-session age instead of the
-/// fixed gap between the two origins.
-#[derive(Debug, Default)]
-struct ClientClock {
-    offset_nanos: Option<i128>,
-}
-
-impl ClientClock {
-    /// Returns `sampled` shifted into host time, establishing the offset from
-    /// the first frame seen so that frame reads as age zero.
-    fn rebase(&mut self, now: MonoTimestamp, sampled: MonoTimestamp) -> MonoTimestamp {
-        let offset = *self
-            .offset_nanos
-            .get_or_insert_with(|| i128::from(now.as_nanos()) - i128::from(sampled.as_nanos()));
-        let shifted = i128::from(sampled.as_nanos()).saturating_add(offset).max(0);
-        MonoTimestamp::from_nanos(u64::try_from(shifted).unwrap_or(u64::MAX))
     }
 }
 
@@ -405,7 +370,7 @@ async fn forward_at(
     to_engine
         .send(ToEngine::ClientMessage {
             client,
-            message,
+            message: Box::new(message),
             now,
         })
         .await
@@ -437,7 +402,7 @@ async fn drain_bootstrap_frames(
         };
         match decode_bootstrap_message(&pending[..frame_len]) {
             Ok((InboundBootstrap::Engine(message), _rest)) => {
-                forward(to_engine, client, message, start).await;
+                forward(to_engine, client, *message, start).await;
             }
             Ok((InboundBootstrap::MediaAttach, _rest)) => {
                 if let Some(media) = media {
@@ -464,12 +429,10 @@ async fn handle_datagram(
     payload: &[u8],
     client: ClientKey,
     start: Instant,
-    clock: &mut ClientClock,
     to_engine: &mpsc::Sender<ToEngine>,
 ) {
-    if let Ok(mut frame) = decode_control_datagram(payload) {
+    if let Ok(frame) = decode_control_datagram(payload) {
         let now = now_from(start);
-        frame.sampled_at = clock.rebase(now, frame.sampled_at);
         forward_at(to_engine, client, DomainEnvelope::Frame(frame), now).await;
         return;
     }

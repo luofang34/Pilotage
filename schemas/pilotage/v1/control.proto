@@ -5,6 +5,7 @@ syntax = "proto3";
 package pilotage.v1;
 
 import "pilotage/v1/common.proto";
+import "pilotage/v1/payload.proto";
 
 // A button state transition delivered as an explicit edge event rather than
 // a sampled level, per ADR-0009's one-shot consumption semantics.
@@ -81,6 +82,11 @@ enum ControlAction {
   // there, and the two are advertised and requested separately so neither can
   // be mistaken for the other.
   CONTROL_ACTION_FEEL_MODE_REQUEST = 8;
+  CONTROL_ACTION_CAMERA_ZOOM = 9;
+  // Request the vehicle's native takeoff procedure. Advertise only when the
+  // adapter implements that procedure. Arm or mode support does not imply
+  // takeoff support. Command acceptance does not prove that the vehicle flew.
+  CONTROL_ACTION_TAKEOFF = 10;
 }
 
 // The explicit target of a FEEL_MODE_REQUEST action. Targets are typed
@@ -119,6 +125,7 @@ enum ModeTarget {
 // meaningful only for `CONTROL_ACTION_MODE_REQUEST` (required there,
 // rejected as unspecified otherwise-populated).
 message ControlActionRequest {
+  ZoomCommand zoom = 5;
   ControlAction action = 1;
   ModeTarget mode_target = 2;
   // Sender-assigned correlation identity for reliable delivery over the
@@ -199,6 +206,7 @@ message ControlIntent {
 // carrying the fencing metadata the session host uses to accept or reject
 // it (ADR-0006, ADR-0009).
 message ControlFrame {
+  CommandTiming timing = 12;
   SessionId session = 1;
   VehicleId vehicle = 2;
   ScopeId scope = 3;
@@ -214,8 +222,8 @@ message ControlFrame {
   // family the vehicle advertises for `scope`.
   ControlIntent intent = 9;
   // Typed discrete actions carried by this frame, as one-shot events. No
-  // action may repeat within a frame, and conflicting actions (ARM together
-  // with DISARM) are rejected whole.
+  // action may repeat within a frame. ARM with DISARM, or TAKEOFF with ARM,
+  // DISARM or MODE_REQUEST, is rejected whole. An action set is not a sequence.
   repeated ControlActionRequest actions = 10;
   // The sender's monotonic profile ACTIVATION revision (advances on every
   // profile install), binding each frame to the exact activation announced
@@ -232,6 +240,8 @@ message ControlFrame {
 // and the sender's announced activation revision — and the host validates
 // every field against its own records before the adapter sees the action.
 message ControlActionCommand {
+  MonoTimestamp sampled_at = 7;
+  CommandTiming timing = 8;
   SessionId session = 1;
   VehicleId vehicle = 2;
   ScopeId scope = 3;
@@ -263,4 +273,14 @@ message ProfileActivation {
   uint32 device_profile_revision = 7;
   // SHA-256 content digest of the exact device-profile bytes.
   bytes device_digest = 8;
+}
+
+// A deadline budget. Relative delay does not prove source acquisition age.
+message CommandTiming {
+  uint32 max_delay_ms = 1;
+  uint32 active_for_ms = 2;
+  uint32 completion_timeout_ms = 3;
+  uint64 control_window_id = 4;
+  // Require a host-issued window bound to this session and fresh input.
+  bool require_control_window = 5;
 }

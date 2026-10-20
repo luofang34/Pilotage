@@ -85,9 +85,16 @@ impl Px4Adapter {
                         // NOT advertise the lifecycle scope (SIM-01).
                         scopes.push(pilotage_adapter_api::sim_lifecycle_descriptor());
                     }
-                    if self.gimbal.is_some() {
-                        scopes.push(gimbal_scope_descriptor());
+                    if let Some(gimbal) = self.gimbal.as_ref() {
+                        let mut descriptor = gimbal_scope_descriptor(gimbal.capabilities());
+                        if let Some(payload) = descriptor.payload.as_mut() {
+                            let (incarnation, _) = self.gimbal_stamp.identity();
+                            payload.connection_incarnation = incarnation.into_bytes().to_vec();
+                            payload.connection_epoch = 1;
+                        }
+                        scopes.push(descriptor);
                     }
+                    scopes.extend(self.camera_scopes());
                     scopes
                 },
                 link_loss_actions: if self.has_flight_uplink() {
@@ -121,6 +128,7 @@ fn display_name(class: VehicleClass) -> String {
 /// routes no axis there.
 fn flight_scope_descriptor(envelope: FlightEnvelope, lateral: bool) -> ScopeDescriptor {
     ScopeDescriptor {
+        payload: None,
         // One FC, one authority: velocity and direct flight are never held
         // at once. A fixed wing has no direct scope; the group is harmless.
         authority_group: Some(FLIGHT_SCOPE.to_owned()),
@@ -167,8 +175,9 @@ fn flight_scope_descriptor(envelope: FlightEnvelope, lateral: bool) -> ScopeDesc
     }
 }
 
-fn gimbal_scope_descriptor() -> ScopeDescriptor {
+fn gimbal_scope_descriptor(capabilities: turret_core::PayloadCapabilities) -> ScopeDescriptor {
     ScopeDescriptor {
+        payload: Some(super::payload::gimbal_capabilities(&capabilities)),
         authority_group: None,
         scope: ScopeId::new(GIMBAL_SCOPE),
         axes: vec![LogicalAxisId::new(PITCH_AXIS), LogicalAxisId::new(YAW_AXIS)],
@@ -221,6 +230,7 @@ fn flight_actions() -> Vec<ActionCapability> {
 /// yaw envelope.
 fn direct_scope_descriptor() -> ScopeDescriptor {
     ScopeDescriptor {
+        payload: None,
         authority_group: Some(FLIGHT_SCOPE.to_owned()),
         scope: ScopeId::new(DIRECT_SCOPE),
         axes: vec![],

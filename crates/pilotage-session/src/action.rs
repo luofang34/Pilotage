@@ -48,6 +48,13 @@ pub struct SessionOutcome {
 /// [`SessionEngine::on_lease`]: crate::SessionEngine
 #[derive(Debug, Clone, PartialEq)]
 pub enum SessionAction {
+    /// Revoke eligibility of queued commands without engaging a continuous-control latch.
+    InvalidatePendingCommands {
+        /// Vehicle owning the command queue.
+        vehicle: VehicleId,
+        /// Authority scope whose pending commands must not reach the transport.
+        scope: ScopeId,
+    },
     /// Send a message to exactly one client (unicast).
     SendToClient {
         /// Recipient connection.

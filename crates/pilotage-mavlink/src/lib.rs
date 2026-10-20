@@ -15,14 +15,20 @@ pub mod codec;
 mod command_result;
 mod gimbal_flags;
 pub mod link;
+mod payload_execution;
 pub mod sampling;
+pub use payload_execution::{
+    PayloadChannel, PayloadExecutionError, PayloadSnapshot, PayloadTiming, PayloadWrite,
+    WriteReceipt,
+};
 
 pub use codec::{FcMessage, FrameSource, ParseStats, parse_datagram};
 pub use command_result::command_outcome;
 pub use gimbal_flags::gimbal_reference;
 pub use link::{
     AttitudeThrustDemand, AttitudeUpdate, AuthorizationSource, BatteryReport, BodyVelocityDemand,
-    CommandAckReport, CommandTarget, FcReports, GimbalDeviceAttitude, GimbalRateDemand,
-    KinematicsUpdate, LinkConfig, LinkError, LinkState, MavlinkLink, OffboardSetpoint,
-    OutboundCommand, OutboundParam, ParamRequest, ResetPolicy, StatusTextReport,
+    CameraReport, CameraWriteRequirement, CommandAckReport, CommandTarget, FcReports,
+    GimbalDeviceAttitude, GimbalRateDemand, KinematicsUpdate, LinkConfig, LinkError, LinkState,
+    ManagerWriteRequirement, MavlinkLink, OffboardSetpoint, OutboundCommand, OutboundParam,
+    ParamRequest, ResetPolicy, SendFence, StatusTextReport,
 };

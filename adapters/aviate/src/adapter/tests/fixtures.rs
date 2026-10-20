@@ -130,6 +130,8 @@ pub(super) fn flight_frame(
         })
         .collect();
     pilotage_protocol::ScopedControlFrame {
+        timing: None,
+        admitted_timing: None,
         action_ids: vec![],
         session: pilotage_protocol::SessionId::new(1),
         vehicle: VehicleId::new(1),
@@ -166,6 +168,8 @@ pub(super) fn direct_frame(
         thrust,
     };
     pilotage_protocol::ScopedControlFrame {
+        timing: None,
+        admitted_timing: None,
         action_ids: vec![],
         session: pilotage_protocol::SessionId::new(1),
         vehicle: VehicleId::new(1),
@@ -185,6 +189,8 @@ pub(super) fn direct_frame(
 /// the ONLY place a reset can arrive from.
 pub(super) fn lifecycle_reset_frame() -> pilotage_protocol::ScopedControlFrame {
     pilotage_protocol::ScopedControlFrame {
+        timing: None,
+        admitted_timing: None,
         action_ids: vec![1],
         session: pilotage_protocol::SessionId::new(1),
         vehicle: VehicleId::new(1),

@@ -242,6 +242,8 @@ pub struct BatterySample {
 /// A single vehicle's telemetry at one simulation tick.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TelemetrySample {
+    /// Independent payload observations and command progress.
+    pub payload: Option<pilotage_protocol::wire::PayloadState>,
     /// Vehicle this sample describes.
     pub vehicle: VehicleId,
     /// Simulation tick this sample was taken at.
@@ -301,6 +303,7 @@ mod tests {
     #[test]
     fn telemetry_sample_holds_pose_and_speed() {
         let sample = TelemetrySample {
+            payload: None,
             vehicle: VehicleId::new(1),
             tick: SimTick::new(2),
             pose: Some(Pose2d {

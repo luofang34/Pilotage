@@ -42,6 +42,7 @@ fn multicopter_engine() -> SessionEngine {
 
 fn multicopter_engine_capabilities() -> AdapterCapabilities {
     let scope = |name: &str, intents: Vec<IntentCapability>| ScopeDescriptor {
+        payload: None,
         authority_group: Some(MOTION.to_owned()),
         scope: ScopeId::new(name),
         axes: vec![],
@@ -133,6 +134,8 @@ fn body_rate_frame(
     intent: BodyRateIntent,
 ) -> ScopedControlFrame {
     ScopedControlFrame {
+        timing: None,
+        admitted_timing: None,
         session,
         vehicle: VEHICLE,
         scope: ScopeId::new(DIRECT),

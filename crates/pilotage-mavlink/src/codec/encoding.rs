@@ -2,8 +2,8 @@
 //! offboard setpoints, and gimbal-manager demands.
 
 use super::{
-    COMMAND_ACK_ID, COMMAND_LONG_ID, GIMBAL_MANAGER_SET_ATTITUDE_ID, HEARTBEAT_ID, MAGIC_V2,
-    MANUAL_CONTROL_ID, SET_POSITION_TARGET_ID, compute_crc,
+    COMMAND_ACK_ID, COMMAND_LONG_ID, GIMBAL_MANAGER_SET_ATTITUDE_ID, HEARTBEAT_ID,
+    MANUAL_CONTROL_ID, SET_POSITION_TARGET_ID, encode_frame_v2_from,
 };
 
 /// MAVLink system id stamped on every frame this codec encodes (the
@@ -32,41 +32,6 @@ pub(super) fn encode_frame_v2(
         GCS_COMPONENT_ID,
         out,
     )
-}
-
-/// Writes a MAVLink 2.0 frame under an explicit SOURCE identity — the
-/// encoder for messages another party originates (an autopilot, a fake
-/// FC in a test, a gateway loopback, a simulator). `out` must hold
-/// `10 + payload.len() + 2` bytes; a too-small buffer returns 0.
-#[allow(clippy::too_many_arguments)]
-pub fn encode_frame_v2_from(
-    seq: u8,
-    msg_id: u32,
-    payload: &[u8],
-    extra: u8,
-    system_id: u8,
-    component_id: u8,
-    out: &mut [u8],
-) -> usize {
-    let total = 10 + payload.len() + 2;
-    if out.len() < total || payload.len() > 255 {
-        return 0;
-    }
-    out[0] = MAGIC_V2;
-    out[1] = payload.len() as u8;
-    out[2] = 0;
-    out[3] = 0;
-    out[4] = seq;
-    out[5] = system_id;
-    out[6] = component_id;
-    out[7] = (msg_id & 0xff) as u8;
-    out[8] = ((msg_id >> 8) & 0xff) as u8;
-    out[9] = ((msg_id >> 16) & 0xff) as u8;
-    out[10..10 + payload.len()].copy_from_slice(payload);
-    let crc = compute_crc(&out[1..10 + payload.len()], extra);
-    out[10 + payload.len()] = (crc & 0xff) as u8;
-    out[10 + payload.len() + 1] = (crc >> 8) as u8;
-    total
 }
 
 /// Serializes an FC-sourced COMMAND_ACK frame addressed to the GCS
@@ -274,9 +239,7 @@ pub const GIMBAL_FLAGS_HORIZON_YAW_FOLLOW: u32 = 4 | 8;
 /// velocity demand in rad/s under [`GIMBAL_FLAGS_HORIZON_YAW_FOLLOW`].
 ///
 /// PX4 silently drops this message unless the sender holds gimbal
-/// primary control, so a streaming caller must pair it with periodic
-/// DO_GIMBAL_MANAGER_CONFIGURE claims naming
-/// [`GCS_SYSTEM_ID`]/[`GCS_COMPONENT_ID`].
+/// primary control. The caller must confirm ownership from manager status.
 ///
 /// Wire order (35 bytes): flags u32 @0, q\[4\] @4..20, angular_velocity
 /// x/y/z @20..32, target_system @32, target_component @33,
@@ -287,6 +250,7 @@ pub fn encode_gimbal_rate_setpoint(
     yaw_rate_rps: f32,
     target_system: u8,
     target_component: u8,
+    gimbal_device_id: u8,
 ) -> [u8; 47] {
     let mut payload = [0u8; 35];
     payload[0..4].copy_from_slice(&GIMBAL_FLAGS_HORIZON_YAW_FOLLOW.to_le_bytes());
@@ -299,6 +263,7 @@ pub fn encode_gimbal_rate_setpoint(
     payload[28..32].copy_from_slice(&yaw_rate_rps.to_le_bytes());
     payload[32] = target_system;
     payload[33] = target_component;
+    payload[34] = gimbal_device_id;
     let mut frame = [0u8; 47];
     encode_frame_v2(
         seq,

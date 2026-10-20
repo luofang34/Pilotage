@@ -9,6 +9,7 @@
 
 mod action_command;
 mod authority_group;
+mod catalog;
 mod deadline;
 mod direct_recovery;
 mod disconnect;
@@ -61,6 +62,7 @@ pub(crate) fn capabilities() -> AdapterCapabilities {
             class: pilotage_protocol::VehicleClass::GroundRover,
             display_name: "test rover".to_owned(),
             scopes: vec![ScopeDescriptor {
+                payload: None,
                 authority_group: None,
                 scope: motion(),
                 axes: vec![LogicalAxisId::new(0)],
@@ -149,6 +151,8 @@ pub(crate) fn frame(
     sampled_at: MonoTimestamp,
 ) -> ScopedControlFrame {
     ScopedControlFrame {
+        timing: None,
+        admitted_timing: None,
         action_ids: vec![],
         session,
         vehicle: VEHICLE,

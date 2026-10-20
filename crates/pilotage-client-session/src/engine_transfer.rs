@@ -211,7 +211,11 @@ impl ClientEngine {
             .unwrap_or_default();
         let generation = committed.generation.as_ref().map_or(0, |g| g.value);
         if to == Some(principal_id) {
-            if self.admission.is_some() {
+            let requested = self
+                .pending_takeover
+                .as_ref()
+                .is_some_and(|(v, s)| *v == vehicle && *s == scope);
+            if self.admission.is_some() && requested {
                 self.pending_takeover = None;
                 actions = self.open_lane(vehicle, scope.clone(), generation);
                 actions.push(ClientAction::Emit(ModuleEvent::Lease(

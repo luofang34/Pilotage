@@ -270,6 +270,8 @@ impl MissionTask {
         };
         self.sequence = self.sequence.wrapping_add(1);
         let frame = ScopedControlFrame {
+            timing: None,
+            admitted_timing: None,
             session,
             vehicle: HOST_VEHICLE,
             scope: ScopeId::new(MISSION_SCOPE),
@@ -309,6 +311,8 @@ impl MissionTask {
         self.pending_actions.insert(wire_id, action.action_id);
         info!(action = ?action.action, action_id = wire_id, "mission action command");
         let command = ControlActionCommand {
+            sampled_at: pilotage_timing::MonoTimestamp::from_nanos(0),
+            timing: None,
             session,
             vehicle: HOST_VEHICLE,
             scope: ScopeId::new(MISSION_SCOPE),
@@ -383,7 +387,7 @@ impl MissionTask {
     async fn send_message_at(&self, message: DomainEnvelope, now: MonoTimestamp) -> bool {
         self.send_command(ToEngine::ClientMessage {
             client: MISSION_CLIENT,
-            message,
+            message: Box::new(message),
             now,
         })
         .await

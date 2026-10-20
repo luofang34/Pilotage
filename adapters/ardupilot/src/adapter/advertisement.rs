@@ -72,6 +72,7 @@ fn action(action: ActionKind) -> ActionCapability {
 /// client slews its heading at the velocity scope's yaw rate.
 fn direct_scope_descriptor() -> ScopeDescriptor {
     ScopeDescriptor {
+        payload: None,
         authority_group: Some(FLIGHT_SCOPE.to_owned()),
         scope: ScopeId::new(DIRECT_SCOPE),
         axes: vec![],
@@ -100,6 +101,7 @@ fn direct_scope_descriptor() -> ScopeDescriptor {
 
 fn flight_scope_descriptor() -> ScopeDescriptor {
     ScopeDescriptor {
+        payload: None,
         authority_group: Some(FLIGHT_SCOPE.to_owned()),
         scope: ScopeId::new(FLIGHT_SCOPE),
         axes: [ROLL_AXIS, PITCH_AXIS, THROTTLE_AXIS, YAW_AXIS]

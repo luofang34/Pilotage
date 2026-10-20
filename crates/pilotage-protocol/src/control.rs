@@ -73,6 +73,10 @@ pub struct ControlPayload {
 /// it (ADR-0006, ADR-0009).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScopedControlFrame {
+    /// Sender validity, absent for compatibility clients.
+    pub timing: Option<crate::CommandTiming>,
+    /// Budgets admitted by the host; never accepted from the wire.
+    pub admitted_timing: Option<crate::AdmittedTiming>,
     /// Session the frame was sampled under.
     pub session: SessionId,
     /// Vehicle the frame targets.
@@ -147,6 +151,8 @@ mod tests {
             edges: vec![(LogicalButtonId::new(1), ButtonEdge::Pressed)],
         };
         let frame = ScopedControlFrame {
+            timing: None,
+            admitted_timing: None,
             session: SessionId::new(1),
             vehicle: VehicleId::new(2),
             scope: ScopeId::new("vehicle.motion"),

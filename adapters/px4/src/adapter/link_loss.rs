@@ -41,6 +41,9 @@ impl Px4Adapter {
         // neutralizing motion brakes the FC, stopping the gimbal ends the slew,
         // and neither reaches the other.
         self.link_loss_policy.insert(scope.clone(), policy);
+        if let Some(camera) = self.camera_control.as_mut() {
+            camera.invalidate(scope.as_str());
+        }
         match scope.as_str() {
             FLIGHT_SCOPE | DIRECT_SCOPE => {
                 let refused = if let Some(fixed_wing) = self.fixed_wing.as_mut() {

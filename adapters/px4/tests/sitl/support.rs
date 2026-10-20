@@ -104,6 +104,8 @@ impl Operator {
     ) -> ScopedControlFrame {
         self.sequence = self.sequence.wrapping_add(1);
         ScopedControlFrame {
+            timing: None,
+            admitted_timing: None,
             session: SessionId::new(1),
             vehicle: VEHICLE,
             scope: ScopeId::new(demand.scope),

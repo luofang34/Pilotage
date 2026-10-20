@@ -71,14 +71,11 @@ fn explicit_mode_has_no_startup_motion_fake_pose_or_neutralize_claim() -> TestRe
 }
 
 #[test]
-fn mapped_yaw_is_ignored_and_diagonal_pitch_remains_bounded() -> TestResult {
+fn capability_mapping_removes_yaw_and_preserves_diagonal_pitch() -> TestResult {
     let mut h = initialized()?;
     for millis in [100, 200] {
         let request = mapped_frame(&h, 0.0, 1.0)?;
-        assert_eq!(
-            h.apply(request, millis).disposition,
-            Disposition::Transformed
-        );
+        assert_eq!(h.apply(request, millis).disposition, Disposition::Accepted);
         h.step(millis);
     }
     assert!(targets(&h)?.is_empty());
@@ -87,7 +84,7 @@ fn mapped_yaw_is_ignored_and_diagonal_pitch_remains_bounded() -> TestResult {
     h.step(300);
     assert_eq!(targets(&h)?, [-5]);
     let request = mapped_frame(&h, 0.0, -1.0)?;
-    assert_eq!(h.apply(request, 400).disposition, Disposition::Transformed);
+    assert_eq!(h.apply(request, 400).disposition, Disposition::Accepted);
     h.step(400);
     assert_eq!(targets(&h)?, [-5]);
     assert!(h.telemetry(400).samples.is_empty());
@@ -320,10 +317,13 @@ fn successful_write_commits_only_after_record_and_excludes_record_delay() -> Tes
     let mut h = initialized()?;
     h.apply(frame(-MAX_PITCH_RATE), 100);
     assert_eq!(h.adapter.status_cached().commanded_pitch_tenths, Some(0));
-    let mut clock = [100, 100, 180].into_iter();
+    let mut clock = [100, 100, 130, 180].into_iter();
     h.adapter
         .step_with_time_blocking(|| Duration::from_millis(clock.next().unwrap()));
     assert_eq!(h.adapter.status_cached().commanded_pitch_tenths, Some(-5));
+    let progress = h.adapter.connection.execution.wire_progress().unwrap();
+    assert_eq!(progress.prepared_at.unwrap().nanos, 100_000_000);
+    assert_eq!(progress.sent_at.unwrap().nanos, 130_000_000);
     h.apply(frame(-MAX_PITCH_RATE), 200);
     h.step(200);
     assert_eq!(targets(&h)?, [-5, -6]);

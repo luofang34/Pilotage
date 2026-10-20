@@ -11,7 +11,7 @@ use super::{
     AttitudeUpdate, AuthorizationSource, BatteryReport, CommandAckReport, GimbalDeviceAttitude,
     KinematicsUpdate, LinkState, estimator,
 };
-use crate::codec::{FcMessage, FrameSource};
+use crate::codec::{FcMessage, FrameSource, GimbalManagerStatus};
 
 /// Folds decoded messages into the shared cache. Kept synchronous and
 /// lock-scoped: the lock is never held across an await.
@@ -115,6 +115,14 @@ pub fn apply_messages_at(
     latest.crc_failures = latest.crc_failures.wrapping_add(u64::from(crc_failures));
     latest.unknown_ids = latest.unknown_ids.wrapping_add(u64::from(unknown_ids));
     for &(source, message) in messages {
+        if let FcMessage::Camera(report) = message {
+            if source.system_id == latest.system_id {
+                super::camera::apply(&mut latest, source.component_id, report, now);
+            } else {
+                latest.wrong_sources = latest.wrong_sources.wrapping_add(1);
+            }
+            continue;
+        }
         if source.system_id != latest.system_id || source.component_id != latest.component_id {
             latest.wrong_sources = latest.wrong_sources.wrapping_add(1);
             continue;
@@ -313,10 +321,21 @@ fn apply_kinematics(
     }
 }
 
+fn apply_gimbal_manager_status(latest: &mut LinkState, report: GimbalManagerStatus, now: Instant) {
+    if latest
+        .fc_reports
+        .gimbal_manager
+        .is_none_or(|(previous, _)| report.time_boot_ms > previous.time_boot_ms)
+    {
+        latest.fc_reports.gimbal_manager = Some((report, now));
+    }
+}
+
 /// Applies one source-matched decoded message to the cache.
 fn apply_message(latest: &mut LinkState, message: FcMessage, now: Instant) {
     match message {
-        FcMessage::InvalidAviateEstimatorStatus => {}
+        FcMessage::Camera(_) | FcMessage::InvalidAviateEstimatorStatus => {}
+        FcMessage::GimbalManagerStatus(report) => apply_gimbal_manager_status(latest, report, now),
         FcMessage::Heartbeat {
             armed,
             custom_mode,

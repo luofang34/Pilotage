@@ -6,16 +6,18 @@ edition.workspace = true
 publish = false
 
 [dependencies]
+turret-dji.workspace = true
+turret-core.workspace = true
 thiserror.workspace = true
 
-[target.'cfg(target_os = "macos")'.dependencies]
+[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 pilotage-adapter-api.workspace = true
 pilotage-protocol.workspace = true
 pilotage-timing.workspace = true
 rustix = { workspace = true, features = ["termios"] }
 tracing.workspace = true
 
-[target.'cfg(target_os = "macos")'.dev-dependencies]
+[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dev-dependencies]
 pilotage-client-session.workspace = true
 rustix = { workspace = true, features = ["pty", "event"] }
 

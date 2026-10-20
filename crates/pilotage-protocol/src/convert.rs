@@ -211,6 +211,7 @@ fn payload_from_wire(payload: wire::ControlPayload) -> Result<ControlPayload, Co
 impl From<&ScopedControlFrame> for wire::ControlFrame {
     fn from(frame: &ScopedControlFrame) -> Self {
         wire::ControlFrame {
+            timing: frame.timing.map(Into::into),
             session: Some(wire::SessionId {
                 value: frame.session.as_u64(),
             }),
@@ -284,6 +285,8 @@ impl TryFrom<wire::ControlFrame> for ScopedControlFrame {
         }
 
         Ok(ScopedControlFrame {
+            timing: frame.timing.map(TryInto::try_into).transpose()?,
+            admitted_timing: None,
             session: SessionId::new(session.value),
             vehicle: VehicleId::new(vehicle.value),
             scope: ScopeId::new(scope.value),

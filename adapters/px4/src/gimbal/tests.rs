@@ -1,186 +1,173 @@
-//! `Px4GimbalControl` unit tests: the primary-control claim discipline,
-//! stick-rate streaming, the stale-demand cutoff, the neutral reset, and the
-//! link-loss stop (including the dropped-stop fault injection).
-#![allow(clippy::expect_used, clippy::panic)]
+use super::*;
+use pilotage_mavlink::codec::{GCS_COMPONENT_ID, GCS_SYSTEM_ID, GimbalManagerStatus};
+use tokio::sync::mpsc;
 
-use std::time::Duration;
-
-use pilotage_mavlink::{GimbalRateDemand, OutboundCommand};
-use tokio::sync::{mpsc, watch};
-
-use super::Px4GimbalControl;
-
-struct Lanes {
-    commands: mpsc::Receiver<OutboundCommand>,
-    rates: watch::Receiver<Option<GimbalRateDemand>>,
-}
-
-fn control() -> (Px4GimbalControl, Lanes) {
-    let (command_tx, command_rx) = mpsc::channel(16);
-    let (rate_tx, rate_rx) = watch::channel(None);
-    let mut control = Px4GimbalControl::new(command_tx, rate_tx, 1, 1);
-    control.use_manual_clock();
+fn control() -> (
+    Px4GimbalControl,
+    mpsc::Receiver<OutboundCommand>,
+    watch::Receiver<Option<GimbalRateDemand>>,
+) {
+    let (commands, receiver) = mpsc::channel(16);
+    let (rates, observer) = watch::channel(None);
     (
-        control,
-        Lanes {
-            commands: command_rx,
-            rates: rate_rx,
-        },
+        Px4GimbalControl::new(commands, rates, 1, 1)
+            .unwrap()
+            .with_manager_state(std::sync::Arc::new(std::sync::Mutex::new(
+                pilotage_mavlink::LinkState::default(),
+            ))),
+        receiver,
+        observer,
     )
 }
-
-fn next_command(lanes: &mut Lanes) -> u16 {
-    lanes.commands.try_recv().expect("queued command").command
+fn status(time: u32, device: u8, owner: (u8, u8)) -> GimbalManagerStatus {
+    GimbalManagerStatus {
+        time_boot_ms: time,
+        flags: 0,
+        device_id: device,
+        primary_system: owner.0,
+        primary_component: owner.1,
+    }
 }
-
-fn latest_rate(lanes: &mut Lanes) -> Option<GimbalRateDemand> {
-    *lanes.rates.borrow_and_update()
-}
-
-#[test]
-fn a_dropped_link_loss_stop_sends_nothing_so_px4_is_the_sole_failsafe() {
-    let (control, mut lanes) = control();
-    let mut control = control.with_dropped_link_loss_stop(true);
-    // Prime a nonzero slew: the claim and a nonzero rate reach the lanes.
-    assert!(control.rate_demand(0.5, 0.0));
-    while lanes.commands.try_recv().is_ok() {} // drain the claim(s)
-    let primed = latest_rate(&mut lanes).expect("a nonzero rate was streaming");
-    assert!(primed.pitch_rps != 0.0);
-
-    // Link loss with the stop DROPPED: nothing leaves the host, so PX4's own
-    // setpoint-timeout is the only thing that will stop the slew. The drop is
-    // reported as a failed enactment (`false`) so the host counts the fault
-    // and keeps the scope latched; the gimbal keeps its last rate.
-    assert!(!control.queue_link_loss_stop());
-    assert!(
-        lanes.commands.try_recv().is_err(),
-        "a dropped stop sends no claim command"
+fn observe(control: &mut Px4GimbalControl, report: GimbalManagerStatus) {
+    let received = Instant::now();
+    pilotage_mavlink::link::apply_messages_at(
+        control.manager_state.as_ref().unwrap(),
+        &[(
+            pilotage_mavlink::codec::FrameSource {
+                system_id: 1,
+                component_id: 1,
+                frame_sequence: 1,
+            },
+            pilotage_mavlink::codec::FcMessage::GimbalManagerStatus(report),
+        )],
+        0,
+        0,
+        received,
     );
-    assert!(
-        !lanes.rates.has_changed().expect("rate lane open"),
-        "a dropped stop publishes no zero-rate; the gimbal keeps its last rate until PX4 times out"
-    );
+    control.observe_manager(report, received);
 }
-
+fn owned(control: &mut Px4GimbalControl) {
+    observe(control, status(1, 2, (GCS_SYSTEM_ID, GCS_COMPONENT_ID)));
+}
 #[test]
-fn first_demand_claims_before_streaming() {
-    let (mut control, mut lanes) = control();
+fn unknown_owner_requests_status_without_control_or_claim() {
+    let (mut control, mut commands, rates) = control();
+    assert!(!control.rate_demand(0.5, 0.0));
+    assert_eq!(commands.try_recv().unwrap().command, 512);
+    assert!(commands.try_recv().is_err());
+    assert!(rates.borrow().is_none());
+}
+#[test]
+fn free_manager_can_be_claimed_but_queueing_does_not_authorize_motion() {
+    let (mut control, mut commands, rates) = control();
+    observe(&mut control, status(1, 2, (0, 0)));
+    assert!(!control.rate_demand(0.5, 0.0));
+    assert_eq!(commands.try_recv().unwrap().command, 512);
+    let claim = commands.try_recv().unwrap();
+    assert_eq!(claim.command, 1001);
+    assert_eq!(claim.params[6], 2.0);
+    assert!(rates.borrow().is_none());
+    observe(
+        &mut control,
+        status(2, 2, (GCS_SYSTEM_ID, GCS_COMPONENT_ID)),
+    );
     assert!(control.rate_demand(0.5, -0.25));
-    assert_eq!(next_command(&mut lanes), super::CMD_GIMBAL_CONFIGURE);
-    let rate = latest_rate(&mut lanes).expect("rate published");
-    assert!(rate.pitch_rps > 0.0 && rate.yaw_rps < 0.0);
-    assert!(control.streaming());
-}
-
-#[test]
-fn claim_reasserts_only_after_its_period() {
-    let (mut control, mut lanes) = control();
-    control.rate_demand(0.1, 0.0);
-    assert_eq!(next_command(&mut lanes), super::CMD_GIMBAL_CONFIGURE);
-    // Within the period: demands stream without a fresh claim.
-    control.advance_clock(Duration::from_millis(400));
-    control.rate_demand(0.2, 0.0);
+    let demand = rates.borrow().clone().unwrap();
+    assert_eq!(demand.gimbal_device_id, 2);
+    assert_eq!((demand.pitch_rps, demand.yaw_rps), (0.4, -0.2));
+    assert!(demand.payload_write.is_some());
     assert!(
-        lanes.commands.try_recv().is_err(),
-        "no re-claim within period"
+        control
+            .snapshot_cached()
+            .unwrap()
+            .progress
+            .sent_at
+            .is_none()
     );
-    // Past the period: the claim re-heals with the next demand.
-    control.advance_clock(Duration::from_millis(700));
-    control.rate_demand(0.3, 0.0);
-    assert_eq!(next_command(&mut lanes), super::CMD_GIMBAL_CONFIGURE);
 }
-
 #[test]
-fn stale_demand_stream_cuts_off_with_one_zero_rate() {
-    let (mut control, mut lanes) = control();
-    control.rate_demand(1.0, 1.0);
-    assert_eq!(next_command(&mut lanes), super::CMD_GIMBAL_CONFIGURE);
-    latest_rate(&mut lanes);
-    // Fresh demands keep the stream open.
-    control.advance_clock(Duration::from_millis(100));
-    control.maintain();
-    assert!(
-        !lanes.rates.has_changed().unwrap_or(false),
-        "no cutoff while fresh"
+fn another_owner_or_another_device_never_grants_authority() {
+    let (mut control, mut commands, rates) = control();
+    observe(&mut control, status(1, 2, (42, 190)));
+    observe(
+        &mut control,
+        status(2, 3, (GCS_SYSTEM_ID, GCS_COMPONENT_ID)),
     );
-    // Silence past the cutoff closes the stream with zero rates.
-    control.advance_clock(Duration::from_millis(400));
-    control.maintain();
-    let rate = latest_rate(&mut lanes).expect("cutoff demand");
-    assert_eq!((rate.pitch_rps, rate.yaw_rps), (0.0, 0.0));
-    assert!(!control.streaming());
+    assert!(!control.rate_demand(1.0, 0.0));
+    assert_eq!(commands.try_recv().unwrap().command, 512);
+    assert!(commands.try_recv().is_err());
+    assert!(rates.borrow().is_none());
 }
-
 #[test]
-fn neutral_sends_the_pitchyaw_command_and_clears_rates() {
-    let (mut control, mut lanes) = control();
-    control.rate_demand(0.5, 0.0);
-    assert_eq!(next_command(&mut lanes), super::CMD_GIMBAL_CONFIGURE);
-    latest_rate(&mut lanes);
-    assert!(control.neutral());
-    assert_eq!(next_command(&mut lanes), super::CMD_GIMBAL_PITCHYAW);
+fn manager_ownership_loss_fences_queued_motion() {
+    let (mut control, _commands, rates) = control();
+    owned(&mut control);
+    assert!(control.rate_demand(1.0, 0.0));
+    let demand = rates.borrow().clone().unwrap();
+    observe(&mut control, status(2, 2, (42, 190)));
+    assert!(!demand.fence.unwrap().is_valid());
     assert_eq!(
-        latest_rate(&mut lanes),
-        None,
-        "rate lane cleared for the recenter"
+        control.snapshot_cached().unwrap().progress.ended,
+        Some(turret_core::EndReason::Revoked)
     );
+}
+#[test]
+fn recenter_is_not_a_continuous_action_and_idle_does_not_replace_it() {
+    let (mut control, mut commands, rates) = control();
+    owned(&mut control);
+    control.bind_timing(None);
+    assert!(control.neutral());
+    assert_eq!(commands.try_recv().unwrap().command, 512);
+    let command = commands.try_recv().unwrap();
+    assert_eq!(command.command, 1000);
+    let snapshot = control.snapshot_cached().unwrap();
+    assert!(snapshot.command.timing.valid_until.is_none());
+    assert!(control.rate_demand(0.0, 0.0));
+    assert!(rates.borrow().is_none());
+    assert_eq!(
+        control.snapshot_cached().unwrap().command.identity,
+        snapshot.command.identity
+    );
+}
+#[test]
+fn link_loss_fences_previous_generation_and_queues_stop_without_stealing_authority() {
+    let (mut control, mut commands, rates) = control();
+    owned(&mut control);
+    assert!(control.rate_demand(1.0, 0.0));
+    let prior = rates.borrow().clone().unwrap();
+    assert_eq!(commands.try_recv().unwrap().command, 512);
+    assert!(control.queue_link_loss_stop());
+    assert!(!prior.fence.unwrap().is_valid());
+    let stop = rates.borrow().clone().unwrap();
+    assert_eq!((stop.pitch_rps, stop.yaw_rps), (0.0, 0.0));
+    assert!(commands.try_recv().is_err());
 }
 
 #[test]
-fn neutral_settle_window_holds_off_idle_keepalives() {
-    let (mut control, mut lanes) = control();
-    control.neutral();
-    assert_eq!(next_command(&mut lanes), super::CMD_GIMBAL_CONFIGURE);
-    assert_eq!(next_command(&mut lanes), super::CMD_GIMBAL_PITCHYAW);
-    latest_rate(&mut lanes);
-    // Idle keepalives inside the window do not repopulate the lane.
-    control.rate_demand(0.0, 0.0);
-    control.advance_clock(Duration::from_millis(400));
-    control.rate_demand(0.0, 0.0);
-    assert!(
-        !lanes.rates.has_changed().unwrap_or(false),
-        "the settle window must keep the rate lane quiet"
-    );
-    // Past the window the keepalive stream resumes.
-    control.advance_clock(Duration::from_millis(500));
-    control.rate_demand(0.0, 0.0);
-    assert!(lanes.rates.has_changed().unwrap_or(false));
-}
-
-#[test]
-fn real_demand_breaks_through_the_settle_window() {
-    let (mut control, mut lanes) = control();
-    control.neutral();
-    assert_eq!(next_command(&mut lanes), super::CMD_GIMBAL_CONFIGURE);
-    assert_eq!(next_command(&mut lanes), super::CMD_GIMBAL_PITCHYAW);
-    latest_rate(&mut lanes);
-    control.advance_clock(Duration::from_millis(100));
-    assert!(control.rate_demand(0.5, 0.0));
-    let rate = latest_rate(&mut lanes).expect("deliberate demand steers immediately");
-    assert!(rate.pitch_rps > 0.0);
-}
-
-#[test]
-fn a_closed_command_lane_reports_a_dropped_send() {
-    let (command_tx, command_rx) = mpsc::channel(1);
-    let (rate_tx, _rate_rx) = watch::channel(None);
-    let mut control = Px4GimbalControl::new(command_tx, rate_tx, 1, 1);
-    control.use_manual_clock();
-    // Closing the lane (receiver dropped) makes the due claim's
-    // try_send fail, so the recenter cannot be reported as applied.
-    drop(command_rx);
-    assert!(
-        !control.neutral(),
-        "a command that never reached the wire is not applied"
-    );
-    assert!(control.dropped_sends() >= 1);
+fn rejected_replacement_does_not_cancel_pending_stop_responsibility() {
+    let (mut control, _commands, rates) = control();
+    owned(&mut control);
+    assert!(control.rate_demand(1.0, 0.0));
+    assert!(control.queue_link_loss_stop());
+    let stop = rates.borrow().clone().unwrap();
+    control.timing = Some(PayloadTiming {
+        send_before: Instant::now(),
+        valid_until: None,
+        ack_before: None,
+        completion_before: None,
+    });
+    assert!(!control.rate_demand(f32::NAN, 0.0));
+    assert!(stop.fence.unwrap().is_valid());
+    assert!(control.release_after_stop.is_some());
+    assert_eq!(rates.borrow().as_ref().unwrap().pitch_rps, 0.0);
 }
 
 #[test]
 fn a_stick_demand_reaches_the_wire_as_the_advertised_rate_in_radians_per_second() {
-    let (mut control, mut lanes) = control();
+    let (mut control, _commands, rates) = control();
+    owned(&mut control);
     assert!(control.rate_demand(-0.5, 0.25));
-    let rate = latest_rate(&mut lanes).expect("rate published");
+    let rate = rates.borrow().clone().expect("rate published");
     // The rate the scope advertises is the rate PX4 is asked for, unscaled:
     // GIMBAL_MANAGER_SET_ATTITUDE carries rad/s, and the live gimbal rate
     // test holds PX4 to moving at it.

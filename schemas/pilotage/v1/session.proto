@@ -7,6 +7,7 @@ package pilotage.v1;
 
 import "pilotage/v1/capability.proto";
 import "pilotage/v1/common.proto";
+import "pilotage/v1/payload.proto";
 import "pilotage/v1/control.proto";
 
 // Requests that the host register this live session with the media fan-out.
@@ -195,6 +196,8 @@ message ScopeTransferAccept {
 // never be compared raw against `echoed_sender_sent_at`; both feed
 // `pilotage-timing`'s estimator, never a direct subtraction.
 message Pong {
+  uint64 control_window_id = 4;
+  uint32 control_window_ms = 5;
   uint64 nonce = 1;
   MonoTimestamp echoed_sender_sent_at = 2;
   MonoTimestamp responder_sent_at = 3;
@@ -228,8 +231,8 @@ enum FrameRejectionReason {
   FRAME_REJECTION_REASON_UNSUPPORTED_ACTION = 8;
   // A typed intent component exceeds the scope's advertised magnitude limit.
   FRAME_REJECTION_REASON_LIMIT_EXCEEDED = 9;
-  // The frame's actions repeat or conflict (ARM together with DISARM); the
-  // frame is rejected whole, executing neither.
+  // The frame contains duplicate or conflicting actions. The whole frame is
+  // rejected, and no action is executed.
   FRAME_REJECTION_REASON_CONFLICTING_ACTIONS = 10;
   // A legacy payload omitted an axis its scope's translation routes. The
   // typed translation is structurally total, so a partial payload would
@@ -281,6 +284,7 @@ message FrameRejected {
 // every accepted frame's action gets exactly one result, so an operator can
 // distinguish "arm honored" from "arm silently dropped" (CTRL-01).
 message ControlActionResult {
+  ZoomCommand zoom = 11;
   VehicleId vehicle = 1;
   ScopeId scope = 2;
   // The fencing generation and sequence of the frame that carried the

@@ -138,6 +138,10 @@ impl ArduPilotUplink {
 
     fn command(&mut self, command: u16, params: [f32; 7]) {
         let outbound = OutboundCommand {
+            payload_write: None,
+            receipt: None,
+            fence: None,
+            send_before: None,
             command,
             params,
             target_system: self.system_id,

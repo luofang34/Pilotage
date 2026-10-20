@@ -108,3 +108,35 @@ pub fn intent_capability<'a>(
         .iter()
         .find(|intent| intent.family == family as i32)
 }
+
+/// Build rates from per-axis payload capability; absent declarations use the
+/// scope's existing shared-rate advertisement.
+#[must_use]
+pub fn payload_gimbal_rate_intent(
+    pitch: f32,
+    yaw: f32,
+    scope: Option<&crate::ScopeCatalog>,
+) -> Option<wire::ControlIntent> {
+    let scope = scope?;
+    let capability = scope
+        .intents
+        .iter()
+        .find(|item| item.family == wire::IntentFamily::GimbalRate as i32)?;
+    let Some(payload) = &scope.payload else {
+        return gimbal_rate_intent(pitch, yaw, Some(capability));
+    };
+    let gimbal = payload.gimbal.as_ref()?;
+    if !pitch.is_finite() || !yaw.is_finite() {
+        return None;
+    }
+    let pitch_limit = pilotage_protocol::payload_rate_limit(gimbal.pitch.as_ref()).unwrap_or(0.0);
+    let yaw_limit = pilotage_protocol::payload_rate_limit(gimbal.yaw.as_ref()).unwrap_or(0.0);
+    Some(wire::ControlIntent {
+        family: Some(wire::control_intent::Family::GimbalRate(
+            wire::GimbalRateIntent {
+                pitch_rate: pitch.clamp(-1.0, 1.0) * pitch_limit,
+                yaw_rate: yaw.clamp(-1.0, 1.0) * yaw_limit,
+            },
+        )),
+    })
+}

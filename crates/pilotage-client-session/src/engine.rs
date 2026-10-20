@@ -1,5 +1,8 @@
 //! The client-session state machine.
 
+mod catalog;
+mod commands;
+
 use std::collections::BTreeMap;
 
 use pilotage_protocol::wire;
@@ -54,6 +57,10 @@ pub struct ClientEngine {
     /// one would reuse an id the host already saw with different
     /// content, and the second press dies as a replay.
     next_action_id: u32,
+    control_window_id: u64,
+    window_received_at_ns: u64,
+    window_probe_at: Option<u64>,
+    last_control_at: u64,
     reconnect: ReconnectState,
 }
 
@@ -85,6 +92,10 @@ impl ClientEngine {
             activation_announced: false,
             profile: bootstrap::ProfileIdentity::default(),
             next_action_id: 0,
+            control_window_id: 0,
+            window_received_at_ns: 0,
+            window_probe_at: None,
+            last_control_at: 0,
             reconnect: ReconnectState::default(),
         }
     }
@@ -124,6 +135,21 @@ impl ClientEngine {
     #[must_use]
     pub fn holds(&self, vehicle_id: u64, scope: &str) -> bool {
         self.lanes.contains_key(&(vehicle_id, scope.to_owned()))
+    }
+
+    /// The generation of the open lane for this exact vehicle and scope.
+    #[must_use]
+    pub fn control_generation(&self, vehicle_id: u64, scope: &str) -> Option<u64> {
+        self.lanes
+            .get(&(vehicle_id, scope.to_owned()))
+            .map(ControlLane::generation)
+    }
+
+    /// Whether a lease request still awaits its response for this exact scope.
+    #[must_use]
+    pub fn lease_pending(&self, vehicle_id: u64, scope: &str) -> bool {
+        self.pending_leases
+            .contains_key(&(vehicle_id, scope.to_owned()))
     }
 
     /// The (vehicle, scope) of the first open lane — the whole story for
@@ -174,7 +200,7 @@ impl ClientEngine {
                 self.streams.closed(stream);
                 Vec::new()
             }
-            TransportEvent::DatagramReceived(bytes) => self.on_datagram(&bytes),
+            TransportEvent::DatagramReceived(bytes) => self.on_datagram(&bytes, now_ms),
             TransportEvent::TransportLost { .. } => self.on_lost(now_ms),
         }
     }
@@ -259,44 +285,11 @@ impl ClientEngine {
         ))]
     }
 
-    /// Builds the next fenced control-frame datagram on the named lane,
-    /// or nothing when that lease is not held — a shell cannot send
-    /// unfenced input, and a frame must never ride a sibling's fencing.
-    pub fn control_frame(
-        &mut self,
-        vehicle_id: u64,
-        scope: &str,
-        command: ControlCommand,
-        sampled_at_nanos: u64,
-    ) -> Vec<ClientAction> {
-        match self.lanes.get_mut(&(vehicle_id, scope.to_owned())) {
-            Some(lane) => vec![ClientAction::SendDatagram(
-                lane.frame(command, sampled_at_nanos),
-            )],
-            None => Vec::new(),
-        }
-    }
-
-    /// Builds a reliable discrete-action command under the named lease,
-    /// correlated in the client's one id space regardless of lane.
-    pub fn control_action(
-        &mut self,
-        vehicle_id: u64,
-        scope: &str,
-        request: wire::ControlActionRequest,
-    ) -> Vec<ClientAction> {
-        let Some(lane) = self.lanes.get_mut(&(vehicle_id, scope.to_owned())) else {
-            return Vec::new();
-        };
-        let mut request = request;
-        if request.action_id == 0 {
-            self.next_action_id = self.next_action_id.wrapping_add(1);
-            request.action_id = self.next_action_id;
-        }
-        vec![ClientAction::SendBootstrap(lane.action_command(request))]
-    }
-
     fn on_connected(&mut self) -> Vec<ClientAction> {
+        self.control_window_id = 0;
+        self.window_received_at_ns = 0;
+        self.window_probe_at = None;
+        self.last_control_at = 0;
         self.phase = ClientPhase::AwaitingWelcome;
         self.bootstrap_pending.clear();
         self.streams.reset();
@@ -324,6 +317,9 @@ impl ClientEngine {
         }
         match envelope.payload {
             Some(wire::envelope::Payload::ServerWelcome(welcome)) => self.on_welcome(&welcome),
+            Some(wire::envelope::Payload::HostCapabilities(capabilities)) => {
+                self.on_capabilities(capabilities)
+            }
             Some(wire::envelope::Payload::LeaseResponse(response)) => self.on_lease(response),
             Some(wire::envelope::Payload::LeaseReleased(released)) => {
                 vec![ClientAction::Emit(ModuleEvent::LeaseReleased(released))]
@@ -430,7 +426,7 @@ impl ClientEngine {
         }
     }
 
-    fn on_datagram(&mut self, bytes: &[u8]) -> Vec<ClientAction> {
+    fn on_datagram(&mut self, bytes: &[u8], now_ms: u64) -> Vec<ClientAction> {
         use prost::Message;
         let Ok(envelope) = wire::Envelope::decode(bytes) else {
             // One malformed datagram proves nothing about the next one.
@@ -441,6 +437,11 @@ impl ClientEngine {
                 vec![ClientAction::Emit(ModuleEvent::Telemetry(Box::new(sample)))]
             }
             Some(wire::envelope::Payload::Pong(pong)) => {
+                let advance = pong.control_window_id.wrapping_sub(self.control_window_id);
+                if pong.control_window_id != 0 && advance != 0 && advance < (1_u64 << 63) {
+                    self.control_window_id = pong.control_window_id;
+                    self.window_received_at_ns = now_ms.saturating_mul(1_000_000);
+                }
                 vec![ClientAction::Emit(ModuleEvent::Pong(pong))]
             }
             Some(wire::envelope::Payload::FrameRejected(rejected)) => {

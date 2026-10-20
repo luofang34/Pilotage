@@ -394,6 +394,8 @@ fn control_frames_are_rejected_at_the_boundary() {
     );
 
     let frame = pilotage_protocol::ScopedControlFrame {
+        timing: None,
+        admitted_timing: None,
         action_ids: vec![],
         session: pilotage_protocol::SessionId::new(1),
         vehicle: VehicleId::new(1),
@@ -420,3 +422,4 @@ fn control_frames_are_rejected_at_the_boundary() {
 mod estimator_authorization;
 mod link_loss_enact;
 mod reset_latch;
+mod takeoff;

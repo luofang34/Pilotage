@@ -8,7 +8,8 @@
 //! can never fire under authority it no longer holds.
 
 use pilotage_protocol::{
-    ControlActionCommand, ControlActionResult, ControlPayload, ScopedControlFrame, SequenceNum,
+    AdmittedTiming, ControlActionCommand, ControlActionResult, ControlPayload, ScopedControlFrame,
+    SequenceNum,
 };
 use pilotage_timing::MonoTimestamp;
 
@@ -48,16 +49,70 @@ impl SessionEngine {
             actions.send(client, rejected_result(&command, detail));
             return;
         }
+        if self.capabilities.execution.physically_embodied
+            && !command
+                .timing
+                .is_some_and(|timing| timing.require_control_window)
+        {
+            actions.send(
+                client,
+                rejected_result(
+                    &command,
+                    "physical control needs a host-issued validity window",
+                ),
+            );
+            return;
+        }
+        let admitted_timing = if let Some(timing) = command.timing {
+            let Some(admitted) = self.admit_timing(client, command.sampled_at, timing, now) else {
+                actions.send(
+                    client,
+                    rejected_result(
+                        &command,
+                        "command timing expired or control window unavailable",
+                    ),
+                );
+                return;
+            };
+            Some(admitted)
+        } else {
+            None
+        };
+        if matches!(command.action, pilotage_protocol::ControlAction::CameraZoom {
+            command: pilotage_protocol::ZoomCommand::Continuous(rate),
+        } if rate != 0)
+            && admitted_timing
+                .and_then(|timing| timing.active_remaining)
+                .is_none()
+        {
+            actions.send(
+                client,
+                rejected_result(&command, "continuous zoom needs a bounded active lifetime"),
+            );
+            return;
+        }
+        let frame = self.action_command_frame(client, command, admitted_timing);
+        actions.push(SessionAction::ApplyToAdapter { client, frame });
+    }
+
+    fn action_command_frame(
+        &self,
+        client: ClientKey,
+        command: ControlActionCommand,
+        admitted_timing: Option<AdmittedTiming>,
+    ) -> ScopedControlFrame {
         // Deliver as an actions-only typed frame so the adapter boundary,
         // per-action results, and the actor's exactly-once bookkeeping stay
         // on the single existing path.
-        let frame = ScopedControlFrame {
+        ScopedControlFrame {
+            timing: command.timing,
+            admitted_timing,
             session: command.session,
             vehicle: command.vehicle,
             scope: command.scope.clone(),
             generation: command.generation,
             sequence: SequenceNum::new(0),
-            sampled_at: now,
+            sampled_at: command.sampled_at,
             profile_revision: self
                 .clients
                 .active_profile(client)
@@ -67,8 +122,7 @@ impl SessionEngine {
             intent: None,
             actions: vec![command.action],
             action_ids: vec![command.action_id],
-        };
-        actions.push(SessionAction::ApplyToAdapter { client, frame });
+        }
     }
 
     /// Every binding check between a command and this engine's own records.

@@ -54,6 +54,7 @@ fn wire_sample(sequence: u32, yaw_rad: f64) -> wire::TelemetrySample {
         magnetic_variation_stamp: None,
     };
     wire::TelemetrySample {
+        payload: None,
         vehicle: Some(wire::VehicleId { value: 1 }),
         avionics: Some(avionics),
         ..Default::default()
@@ -108,6 +109,7 @@ fn absence_of_avionics_feeds_nothing() {
         sim_accept_unseen: true,
     });
     let empty = wire::TelemetrySample {
+        payload: None,
         vehicle: Some(wire::VehicleId { value: 1 }),
         ..Default::default()
     };

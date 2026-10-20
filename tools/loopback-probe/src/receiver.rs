@@ -332,6 +332,7 @@ mod tests {
     fn routes_telemetry_arm() {
         let bytes = encode(wire::envelope::Payload::TelemetrySample(
             wire::TelemetrySample {
+                payload: None,
                 vehicle: Some(wire::VehicleId { value: 1 }),
                 tick: Some(wire::SimTick { value: 0 }),
                 observed_at: Some(wire::MonoTimestamp { nanos: 0 }),
@@ -377,6 +378,7 @@ mod tests {
         };
         let bytes = encode(wire::envelope::Payload::TelemetrySample(
             wire::TelemetrySample {
+                payload: None,
                 vehicle: Some(wire::VehicleId { value: 1 }),
                 tick: Some(wire::SimTick { value: 1_000_000 }),
                 observed_at: Some(wire::MonoTimestamp { nanos: 5 }),
@@ -427,6 +429,8 @@ mod tests {
     #[test]
     fn routes_pong_arm() {
         let bytes = encode(wire::envelope::Payload::Pong(wire::Pong {
+            control_window_id: 0,
+            control_window_ms: 0,
             nonce: 7,
             echoed_sender_sent_at: Some(wire::MonoTimestamp { nanos: 1 }),
             responder_sent_at: Some(wire::MonoTimestamp { nanos: 2 }),

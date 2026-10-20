@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use pilotage_adapter_api::{Disposition, LinkLossPolicy, RejectReason};
+use pilotage_protocol::ControlAction;
 
 use super::super::{
     TestResult,
@@ -8,6 +9,30 @@ use super::super::{
 };
 use super::{initialized, targets};
 use crate::adapter::{DjiFault, capability::MAX_PITCH_RATE};
+
+#[test]
+fn neutral_input_after_a_gap_cannot_resume_a_recenter() -> TestResult {
+    let mut h = initialized()?;
+    for millis in [100, 200, 300] {
+        h.apply(frame(-MAX_PITCH_RATE), millis);
+        h.step(millis);
+    }
+    let mut recenter = frame(0.0);
+    recenter.actions.push(ControlAction::GimbalRecenter);
+    h.apply(recenter.clone(), 400);
+    h.step(400);
+    assert_eq!(h.adapter.status_cached().commanded_pitch_tenths, Some(-10));
+    let written = h.written()?;
+    for millis in [600, 700] {
+        h.apply(frame(0.0), millis);
+        h.step(millis);
+    }
+    assert_eq!(h.written()?, written);
+    h.apply(recenter, 800);
+    h.step(800);
+    assert_eq!(h.adapter.status_cached().commanded_pitch_tenths, Some(-5));
+    Ok(())
+}
 
 #[test]
 fn pending_pitch_is_writable_before_but_not_at_its_deadline() -> TestResult {

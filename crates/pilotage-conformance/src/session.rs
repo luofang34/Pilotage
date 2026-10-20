@@ -31,7 +31,7 @@ pub enum ScriptStep {
     AdvanceClock(Duration),
     /// Route a control frame through authority; if accepted, apply it to the
     /// adapter. Records one [`SessionEvent::Frame`].
-    Frame(ScopedControlFrame),
+    Frame(Box<ScopedControlFrame>),
     /// Advance the adapter by a tick budget.
     Step(u32),
     /// Set or clear the adapter's link-loss policy for a vehicle.

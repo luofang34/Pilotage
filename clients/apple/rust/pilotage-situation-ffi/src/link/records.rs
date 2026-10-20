@@ -109,6 +109,11 @@ pub enum LinkEvent {
         /// What the session offers.
         catalog: LinkCatalog,
     },
+    /// The active session's available vehicles or controls changed.
+    CapabilitiesChanged {
+        /// The replacement catalog, with the same session identity.
+        catalog: LinkCatalog,
+    },
     /// The lease outcome for a requested scope.
     LeaseChanged {
         /// Whether control is held now.

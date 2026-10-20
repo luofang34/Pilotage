@@ -79,6 +79,8 @@ fn lease_lifecycle(engine: &mut SessionEngine, client: ClientKey, now: u64) -> G
 
 fn reset_command(session: SessionId, generation: Generation, action_id: u32) -> DomainEnvelope {
     DomainEnvelope::ActionCommand(ControlActionCommand {
+        sampled_at: pilotage_timing::MonoTimestamp::from_nanos(0),
+        timing: None,
         session,
         vehicle: VEHICLE,
         scope: lifecycle_scope(),

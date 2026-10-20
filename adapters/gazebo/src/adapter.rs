@@ -214,6 +214,7 @@ fn clamp_axis(value: f64) -> (f64, bool) {
 /// Builds a `TelemetrySample` from a bridge odometry reading.
 fn telemetry_from_odometry(vehicle: VehicleId, odom: &BridgeOdometry) -> TelemetrySample {
     TelemetrySample {
+        payload: None,
         vehicle,
         tick: SimTick::new(odom.sim_time_ns),
         pose: Some(Pose2d {

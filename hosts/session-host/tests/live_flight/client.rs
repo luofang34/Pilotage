@@ -165,6 +165,7 @@ impl Client {
     pub(crate) async fn action(&mut self, kind: u32) -> (bool, String) {
         let (vehicle, scope) = self.engine.control_target().expect("holds control");
         let request = wire::ControlActionRequest {
+            zoom: None,
             action: i32::try_from(kind).expect("small"),
             mode_target: 0,
             action_id: 0,

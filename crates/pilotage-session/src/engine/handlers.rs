@@ -278,6 +278,10 @@ impl SessionEngine {
             return;
         }
         let pong = Pong {
+            control_window_id: self
+                .clients
+                .issue_control_window(client, now, ping.sender_sent_at),
+            control_window_ms: 250,
             nonce: ping.nonce,
             echoed_sender_sent_at: ping.sender_sent_at,
             responder_sent_at: now,

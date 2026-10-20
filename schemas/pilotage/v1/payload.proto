@@ -1,0 +1,182 @@
+// Payload capabilities, observations, and command progress.
+syntax = "proto3";
+package pilotage.v1;
+import "pilotage/v1/common.proto";
+
+enum PayloadSupportState {
+  PAYLOAD_SUPPORT_STATE_UNSPECIFIED = 0;
+  PAYLOAD_SUPPORT_STATE_UNSUPPORTED = 1;
+  PAYLOAD_SUPPORT_STATE_AVAILABLE = 2;
+  PAYLOAD_SUPPORT_STATE_UNAVAILABLE = 3;
+}
+enum PayloadImplementation {
+  PAYLOAD_IMPLEMENTATION_UNSPECIFIED = 0;
+  PAYLOAD_IMPLEMENTATION_NATIVE = 1;
+  PAYLOAD_IMPLEMENTATION_SYNTHESIZED = 2;
+}
+enum PayloadStopGuarantee {
+  PAYLOAD_STOP_GUARANTEE_UNSPECIFIED = 0;
+  PAYLOAD_STOP_GUARANTEE_BEST_EFFORT = 1;
+  PAYLOAD_STOP_GUARANTEE_FINITE_MOTION = 2;
+  PAYLOAD_STOP_GUARANTEE_DEVICE_WATCHDOG = 3;
+}
+enum PayloadReferenceFrame {
+  PAYLOAD_REFERENCE_FRAME_UNSPECIFIED = 0;
+  PAYLOAD_REFERENCE_FRAME_MOUNT = 1;
+  PAYLOAD_REFERENCE_FRAME_BODY_FRD = 2;
+  PAYLOAD_REFERENCE_FRAME_LOCAL_NED = 3;
+  PAYLOAD_REFERENCE_FRAME_HORIZON_VEHICLE_YAW = 4;
+}
+message PayloadPositionCapability {
+  PayloadSupportState support = 1;
+  PayloadImplementation implementation = 2;
+  string unavailable_reason = 3;
+  optional float minimum_rad = 4;
+  optional float maximum_rad = 5;
+  optional float max_rate_rad_s = 6;
+  repeated PayloadReferenceFrame frames = 7;
+}
+message PayloadRateCapability {
+  PayloadSupportState support = 1;
+  PayloadImplementation implementation = 2;
+  string unavailable_reason = 3;
+  optional float max_rate_rad_s = 4;
+  repeated PayloadReferenceFrame frames = 5;
+}
+message PayloadAxisCapabilities {
+  PayloadPositionCapability position = 1;
+  PayloadRateCapability rate = 2;
+  PayloadSupportState angle_feedback = 3;
+  PayloadSupportState rate_feedback = 4;
+  string angle_feedback_unavailable_reason = 5;
+  string rate_feedback_unavailable_reason = 6;
+}
+message PayloadGimbalCapabilities {
+  PayloadRecenterCapability recenter = 6;
+  PayloadAxisCapabilities pitch = 1;
+  PayloadAxisCapabilities roll = 2;
+  PayloadAxisCapabilities yaw = 3;
+  PayloadStopGuarantee stop_guarantee = 4;
+  optional uint32 stop_bound_ms = 5;
+}
+enum ZoomUnit {
+  ZOOM_UNIT_UNSPECIFIED = 0;
+  ZOOM_UNIT_RATIO = 1;
+  ZOOM_UNIT_TRAVEL_FRACTION = 2;
+  ZOOM_UNIT_FOCAL_LENGTH_MM = 3;
+  ZOOM_UNIT_HORIZONTAL_FOV_RADIANS = 4;
+}
+message ZoomAbsoluteCapability {
+  ZoomUnit unit = 1;
+  PayloadSupportState support = 2;
+  PayloadImplementation implementation = 3;
+  string unavailable_reason = 4;
+  optional double minimum = 5;
+  optional double maximum = 6;
+}
+message PayloadZoomCapabilities {
+  PayloadSupportState support = 7;
+  string unavailable_reason = 8;
+  repeated ZoomAbsoluteCapability feedback_units = 9;
+  optional uint32 step_maximum_steps = 10;
+  PayloadImplementation step_implementation = 11;
+  string step_unavailable_reason = 12;
+  PayloadImplementation continuous_implementation = 13;
+  string continuous_unavailable_reason = 14;
+  repeated ZoomAbsoluteCapability absolute = 1;
+  PayloadSupportState step = 2;
+  PayloadSupportState continuous = 3;
+  PayloadSupportState feedback = 4;
+  PayloadStopGuarantee stop_guarantee = 5;
+  optional uint32 stop_bound_ms = 6;
+}
+message PayloadCapabilities {
+  bytes connection_incarnation = 7;
+  uint64 connection_epoch = 8;
+  PayloadConnectionRole connection_role = 6;
+  string endpoint_id = 1;
+  uint64 revision = 2;
+  PayloadGimbalCapabilities gimbal = 3;
+  PayloadZoomCapabilities zoom = 4;
+  repeated string resource_scopes = 5;
+}
+message ZoomCommand {
+  oneof operation {
+    ZoomAbsoluteTarget absolute = 1;
+    sint32 step = 2;
+    // Normalized direction and speed in millionths, from -1000000 to 1000000.
+    sint32 continuous_millionths = 3;
+  }
+}
+message ZoomAbsoluteTarget {
+  ZoomUnit unit = 1;
+  // Millionths of the named unit; conversions require device calibration.
+  sint64 value_micros = 2;
+}
+enum PayloadCommandStage {
+  PAYLOAD_COMMAND_STAGE_UNSPECIFIED = 0;
+  PAYLOAD_COMMAND_STAGE_ADMITTED = 1;
+  PAYLOAD_COMMAND_STAGE_QUEUED = 2;
+  PAYLOAD_COMMAND_STAGE_SENT = 3;
+  PAYLOAD_COMMAND_STAGE_DEVICE_ACCEPTED = 4;
+  PAYLOAD_COMMAND_STAGE_OBSERVED_COMPLETE = 5;
+  PAYLOAD_COMMAND_STAGE_REJECTED = 6;
+  PAYLOAD_COMMAND_STAGE_EXPIRED = 7;
+  PAYLOAD_COMMAND_STAGE_CANCELLED = 8;
+  PAYLOAD_COMMAND_STAGE_OUTCOME_UNKNOWN = 9;
+}
+message PayloadCommandProgress {
+  uint64 generation = 12;
+  MonoTimestamp admitted_at = 13;
+  MonoTimestamp prepared_at = 14;
+  MonoTimestamp sent_at = 15;
+  MonoTimestamp acknowledged_at = 16;
+  MonoTimestamp observed_complete_at = 17;
+  bool acknowledgement_timed_out = 18;
+  PayloadEndReason end_reason = 19;
+  PayloadReferenceFrame frame = 11;
+  uint64 connection_epoch = 8;
+  uint64 sequence = 9;
+  MonoTimestamp updated_at = 10;
+  uint64 command_id = 1;
+  PayloadCommandStage stage = 2;
+  string detail = 3;
+  optional float pitch_target_rad = 4;
+  optional float roll_target_rad = 5;
+  optional float yaw_target_rad = 6;
+  ZoomAbsoluteTarget zoom_target = 7;
+}
+enum PayloadConnectionRole {
+  PAYLOAD_CONNECTION_ROLE_UNSPECIFIED = 0;
+  PAYLOAD_CONNECTION_ROLE_DIRECT_DEVICE = 1;
+  PAYLOAD_CONNECTION_ROLE_MAVLINK_MANAGER = 2;
+  PAYLOAD_CONNECTION_ROLE_MAVLINK_DEVICE = 3;
+}
+message PayloadRecenterCapability {
+  PayloadSupportState support = 1;
+  PayloadImplementation implementation = 2;
+  string unavailable_reason = 3;
+  PayloadReferenceFrame frame = 4;
+  optional float pitch_rad = 5;
+  optional float roll_rad = 6;
+  optional float yaw_rad = 7;
+}
+enum PayloadObservationSource {
+  PAYLOAD_OBSERVATION_SOURCE_UNSPECIFIED = 0;
+  PAYLOAD_OBSERVATION_SOURCE_MEASURED = 1;
+  PAYLOAD_OBSERVATION_SOURCE_TRANSFORMED = 2;
+  PAYLOAD_OBSERVATION_SOURCE_ESTIMATED = 3;
+  PAYLOAD_OBSERVATION_SOURCE_OPERATOR_ASSUMED = 4;
+}
+enum PayloadEndReason {
+  PAYLOAD_END_REASON_UNSPECIFIED = 0;
+  PAYLOAD_END_REASON_EXPIRED_BEFORE_SEND = 1;
+  PAYLOAD_END_REASON_VALIDITY_EXPIRED = 2;
+  PAYLOAD_END_REASON_COMPLETION_TIMEOUT = 3;
+  PAYLOAD_END_REASON_REVOKED = 4;
+  PAYLOAD_END_REASON_RECONNECTED = 5;
+  PAYLOAD_END_REASON_SUPERSEDED = 6;
+  PAYLOAD_END_REASON_DEVICE_REJECTED = 7;
+  PAYLOAD_END_REASON_OBSERVED_COMPLETE = 8;
+  PAYLOAD_END_REASON_TRANSPORT_FAILURE = 9;
+}

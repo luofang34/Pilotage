@@ -66,6 +66,8 @@ fn command(
     action_id: u32,
 ) -> DomainEnvelope {
     DomainEnvelope::ActionCommand(ControlActionCommand {
+        sampled_at: pilotage_timing::MonoTimestamp::from_nanos(0),
+        timing: None,
         session,
         vehicle: VEHICLE,
         scope: motion(),
@@ -245,6 +247,8 @@ fn a_datagram_frame_carrying_typed_actions_is_rejected_whole() {
     };
     let (mut engine, client, session, generation) = bound_engine();
     let frame = ScopedControlFrame {
+        timing: None,
+        admitted_timing: None,
         session,
         vehicle: VEHICLE,
         scope: motion(),
@@ -302,20 +306,9 @@ fn a_sim_reset_needs_the_lifecycle_scopes_own_lease() {
 
     // Holding flight authority alone does not admit it on the lifecycle
     // scope either — that scope's own lease is required.
-    let lifecycle = |generation, id| {
-        DomainEnvelope::ActionCommand(ControlActionCommand {
-            session,
-            vehicle: VEHICLE,
-            scope: pilotage_protocol::ScopeId::new(SIM_LIFECYCLE_SCOPE),
-            generation,
-            activation_revision: 1,
-            action: ControlAction::SimReset,
-            action_id: id,
-        })
-    };
     let unleased = engine.handle_client_message(
         client,
-        lifecycle(Generation::new(0), 9),
+        lifecycle_command(session, Generation::new(0), 9),
         MonoTimestamp::from_nanos(11),
     );
     assert!(rejected_detail(&unleased).contains("hold"));
@@ -342,7 +335,7 @@ fn a_sim_reset_needs_the_lifecycle_scopes_own_lease() {
         .expect("lifecycle lease granted");
     let delivered = engine.handle_client_message(
         client,
-        lifecycle(generation, 10),
+        lifecycle_command(session, generation, 10),
         MonoTimestamp::from_nanos(13),
     );
     assert!(
@@ -353,6 +346,20 @@ fn a_sim_reset_needs_the_lifecycle_scopes_own_lease() {
         "got {:?}",
         delivered.actions
     );
+}
+
+fn lifecycle_command(session: SessionId, generation: Generation, action_id: u32) -> DomainEnvelope {
+    DomainEnvelope::ActionCommand(ControlActionCommand {
+        sampled_at: pilotage_timing::MonoTimestamp::from_nanos(0),
+        timing: None,
+        session,
+        vehicle: VEHICLE,
+        scope: pilotage_protocol::ScopeId::new(pilotage_adapter_api::SIM_LIFECYCLE_SCOPE),
+        generation,
+        activation_revision: 1,
+        action: ControlAction::SimReset,
+        action_id,
+    })
 }
 
 /// A host whose adapter does not advertise the lifecycle scope (a
@@ -369,6 +376,8 @@ fn an_unadvertised_lifecycle_scope_is_structurally_absent() {
     let outcome = engine.handle_client_message(
         client,
         DomainEnvelope::ActionCommand(ControlActionCommand {
+            sampled_at: pilotage_timing::MonoTimestamp::from_nanos(0),
+            timing: None,
             session,
             vehicle: VEHICLE,
             scope: pilotage_protocol::ScopeId::new(SIM_LIFECYCLE_SCOPE),
@@ -381,3 +390,6 @@ fn an_unadvertised_lifecycle_scope_is_structurally_absent() {
     );
     assert!(rejected_detail(&outcome).contains("unknown scope"));
 }
+
+mod freshness;
+mod takeoff;

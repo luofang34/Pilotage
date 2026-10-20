@@ -64,8 +64,20 @@ pub(super) struct GimbalLanes {
 pub(super) fn gimbal_control() -> (crate::gimbal::Px4GimbalControl, GimbalLanes) {
     let (command_tx, command_rx) = tokio::sync::mpsc::channel(16);
     let (rate_tx, rate_rx) = tokio::sync::watch::channel(None);
+    let mut control =
+        crate::gimbal::Px4GimbalControl::new(command_tx, rate_tx, 1, 1).expect("manager profile");
+    control.observe_manager(
+        pilotage_mavlink::codec::GimbalManagerStatus {
+            time_boot_ms: 1,
+            flags: 0,
+            device_id: 2,
+            primary_system: pilotage_mavlink::codec::GCS_SYSTEM_ID,
+            primary_component: pilotage_mavlink::codec::GCS_COMPONENT_ID,
+        },
+        Instant::now(),
+    );
     (
-        crate::gimbal::Px4GimbalControl::new(command_tx, rate_tx, 1, 1),
+        control,
         GimbalLanes {
             commands: command_rx,
             rates: rate_rx,
@@ -159,10 +171,10 @@ fn gimbal_demands_flow_even_where_flight_control_cannot() {
     assert_eq!(outcome.disposition, Disposition::Accepted);
     assert_eq!(
         next_command(&mut lanes),
-        1001,
-        "primary-control claim first"
+        512,
+        "request manager status without stealing confirmed ownership"
     );
-    let rate = *lanes.rates.borrow_and_update();
+    let rate = lanes.rates.borrow_and_update().clone();
     assert!(
         rate.is_some(),
         "then the rate demand on the latest-value lane"
@@ -183,8 +195,8 @@ fn gimbal_neutral_button_recentres() {
     assert_eq!(outcome.disposition, Disposition::Accepted);
     assert_eq!(
         next_command(&mut lanes),
-        1001,
-        "primary-control claim first"
+        512,
+        "request manager status without stealing confirmed ownership"
     );
     assert_eq!(
         next_command(&mut lanes),
@@ -466,3 +478,5 @@ fn a_gimbal_reboot_opens_a_new_epoch_instead_of_regressing_time() {
         "re-observing the same boot time keeps the epoch"
     );
 }
+
+mod identity;

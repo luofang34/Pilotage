@@ -16,8 +16,10 @@ mod config;
 mod error;
 pub mod estimator;
 mod fc_reports;
+mod fence;
 pub mod measurement;
 mod outbound;
+pub use fence::{CameraWriteRequirement, ManagerWriteRequirement, SendFence};
 mod task;
 mod updates;
 pub use apply::apply_messages_at;
@@ -134,6 +136,8 @@ pub struct LinkState {
     pub fc_reports: FcReports,
 }
 
+mod camera;
+pub use camera::CameraReport;
 mod defaults;
 mod estimate_fix;
 mod magnetic_variation;

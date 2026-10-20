@@ -4,6 +4,7 @@ mod bench;
 mod capability;
 mod connection;
 mod control;
+mod execution;
 mod observation;
 mod recording;
 #[cfg(test)]
@@ -71,6 +72,9 @@ pub enum DjiAdapterError {
     /// A fresh attachment identity could not be obtained.
     #[error("cannot obtain DJI attachment identity: {0}")]
     Identity(#[source] io::Error),
+    /// The experimental payload contract could not be constructed.
+    #[error("invalid DJI payload contract: {0}")]
+    Payload(#[from] turret_core::Error),
 }
 
 /// A latched failure. A new explicit start is required to recover.
@@ -100,6 +104,13 @@ pub enum DjiFault {
     /// A partial command could not safely be completed.
     #[error("DJI partial command was invalidated; the connection is closed")]
     PartialCommand,
+    /// Device-side lifecycle checks failed.
+    #[error("DJI payload execution failed: {source}")]
+    Execution {
+        /// The failed lifecycle check.
+        #[source]
+        source: turret_core::Error,
+    },
 }
 
 /// Observed transport state. It does not certify physical gimbal movement.
@@ -167,14 +178,14 @@ impl DjiAdapter {
                 path: config.capture_path.clone(),
                 source,
             })?;
-        Ok(Self::from_connection(
+        Self::from_connection(
             vehicle,
             Box::new(serial),
             Box::new(capture),
             config.capture_path,
             SourceIncarnation::new(identity),
             config.control_mode,
-        ))
+        )
     }
 
     fn from_connection(
@@ -184,14 +195,23 @@ impl DjiAdapter {
         capture_path: PathBuf,
         incarnation: SourceIncarnation,
         control_mode: DjiControlMode,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, DjiAdapterError> {
+        let minimum = if control_mode == DjiControlMode::Observed {
+            -50
+        } else {
+            -900
+        };
+        let mut contract = turret_dji::pitch_capabilities(minimum)?;
+        let unavailable = (control_mode == DjiControlMode::Observed)
+            .then_some(turret_core::UnavailableReason::MissingFeedback);
+        capability::set_availability(&mut contract, unavailable);
+        Ok(Self {
             vehicle,
             origin: Instant::now(),
-            connection: Connection::new(transport, capture, capture_path),
+            connection: Connection::new(transport, capture, capture_path, contract, 0),
             observations: Observations::new(incarnation),
             control: ControlState::new(control_mode),
-        }
+        })
     }
 
     /// Return the current observations, without implying a working motion route.
@@ -224,10 +244,11 @@ impl DjiAdapter {
         let now = clock();
         let ready = self.movement_ready(now);
         let had_pending = self.connection.pending_pitch().is_some();
-        self.connection.write_pending_blocking(now, ready);
+        self.connection
+            .write_pending_blocking(now, ready, &mut clock);
         let written = self.connection.take_written_pitch();
+        let completed_at = clock();
         if let Some(bench) = &mut self.control.bench {
-            let completed_at = clock();
             bench.exclude_io(io_started, completed_at);
             if let Some(pitch) = written {
                 bench.written(pitch, completed_at);
@@ -241,6 +262,39 @@ impl DjiAdapter {
                 bench.stalled(completed_at, self.connection.pending_pitch().is_some());
             }
         }
+        self.refresh_contract(completed_at);
+    }
+
+    fn refresh_contract(&mut self, now: Duration) {
+        use turret_core::UnavailableReason;
+        let reason = if self.connection.fault.is_some() {
+            Some(UnavailableReason::Transport)
+        } else if self.control.link_loss {
+            Some(UnavailableReason::Policy)
+        } else if self.control.mode() == DjiControlMode::Observed && !self.movement_ready(now) {
+            Some(UnavailableReason::MissingFeedback)
+        } else {
+            None
+        };
+        let mut contract = *self.connection.execution.capabilities();
+        capability::set_availability(&mut contract, reason);
+        let feedback = self
+            .observations
+            .angle_feedback(now, self.connection.fault.is_none());
+        contract.gimbal.axes.pitch.feedback.angle = feedback;
+        contract.gimbal.axes.roll.feedback.angle = feedback;
+        contract.gimbal.axes.yaw.feedback.angle = feedback;
+        if contract == *self.connection.execution.capabilities() {
+            return;
+        }
+        let reason = if self.connection.cancel_movement() {
+            reason
+        } else {
+            Some(UnavailableReason::Transport)
+        };
+        contract.revision = contract.revision.wrapping_add(1);
+        capability::set_availability(&mut contract, reason);
+        self.connection.execution.update_capabilities(contract);
     }
 
     fn tick(&self) -> SimTick {
@@ -250,7 +304,12 @@ impl DjiAdapter {
 
 impl VehicleAdapter for DjiAdapter {
     fn capabilities(&self) -> AdapterCapabilities {
-        capability::capabilities(self.vehicle, self.control.mode())
+        capability::capabilities(
+            self.vehicle,
+            self.control.mode(),
+            self.connection.execution.capabilities(),
+            self.observations.incarnation(),
+        )
     }
 
     fn apply_control(&mut self, frame: &ScopedControlFrame) -> ApplyOutcome {
@@ -258,12 +317,28 @@ impl VehicleAdapter for DjiAdapter {
     }
 
     fn sample_telemetry(&mut self) -> TelemetryBatch {
-        self.observations.sample(
+        let mut batch = self.observations.sample(
             self.vehicle,
             self.tick(),
             self.origin.elapsed(),
             self.connection.fault.is_none(),
-        )
+        );
+        let progress = self.connection.execution.wire_progress();
+        let revision = self.connection.execution.capabilities().revision;
+        if let Some(sample) = batch.samples.first_mut() {
+            if let Some(payload) = sample.payload.as_mut() {
+                payload.command = progress;
+                payload.capability_revision = revision;
+            }
+        } else if progress.is_some() {
+            let mut state = self.observations.empty_state();
+            state.command = progress;
+            state.capability_revision = revision;
+            batch
+                .samples
+                .push(observation::telemetry(self.vehicle, self.tick(), state));
+        }
+        batch
     }
 
     fn video_sources(&self) -> Vec<VideoSource> {

@@ -304,6 +304,8 @@ fn staleness_policy_rejects_an_artificially_aged_frame() {
     // if it arrives older than the policy's maximum control age (ADR-0009).
     let policy = StalenessPolicy::new(Duration::from_millis(50));
     let frame = ScopedControlFrame {
+        timing: None,
+        admitted_timing: None,
         action_ids: vec![],
         session: SessionId::new(7),
         vehicle: VehicleId::new(1),
@@ -362,7 +364,9 @@ fn harness_runs_a_minimal_grant_and_drive_script() {
             scope: motion(),
             to: OPERATOR_A,
         }),
-        ScriptStep::Frame(ScopedControlFrame {
+        ScriptStep::Frame(Box::new(ScopedControlFrame {
+            timing: None,
+            admitted_timing: None,
             action_ids: vec![],
             session: SessionId::new(1),
             vehicle: VEHICLE,
@@ -383,7 +387,7 @@ fn harness_runs_a_minimal_grant_and_drive_script() {
                 },
             )),
             actions: vec![],
-        }),
+        })),
         ScriptStep::Step(5),
     ];
     let script = Script {
