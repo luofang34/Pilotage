@@ -37,10 +37,19 @@ impl ArduPilotAdapter {
                 id: self.vehicle,
                 class: VehicleClass::Multicopter,
                 display_name: DISPLAY_NAME.to_owned(),
-                scopes: if flying {
-                    vec![flight_scope_descriptor(), direct_scope_descriptor()]
-                } else {
-                    vec![]
+                scopes: {
+                    let mut scopes = if flying {
+                        vec![flight_scope_descriptor(), direct_scope_descriptor()]
+                    } else {
+                        vec![]
+                    };
+                    if let Some(gimbal) = self.gimbal.as_ref() {
+                        scopes.push(pilotage_mavlink::gimbal_endpoint::scope_descriptor(
+                            gimbal,
+                            &self.gimbal_stamp,
+                        ));
+                    }
+                    scopes
                 },
                 link_loss_actions: if flying {
                     vec![LinkLossPolicy::Neutralize]

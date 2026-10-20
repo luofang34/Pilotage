@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tracing::warn;
-use turret_core::{Effect, PayloadCapabilities, PayloadCommand};
+use turret_core::{CommandIdentity, PayloadCapabilities, PayloadCommand};
 
 #[derive(Debug, thiserror::Error)]
 pub(super) enum CameraCommandError {
@@ -27,6 +27,7 @@ struct Endpoint {
     requirement: CameraWriteRequirement,
     capabilities: PayloadCapabilities,
     channel: PayloadChannel,
+    reported_effect: Option<CommandIdentity>,
 }
 
 #[derive(Debug)]
@@ -98,6 +99,7 @@ impl CameraControl {
                 requirement: *requirement,
                 capabilities,
                 channel: PayloadChannel::new(capabilities, report.epoch, started),
+                reported_effect: None,
             });
             if endpoint.capabilities != capabilities {
                 if let Err(error) = endpoint.channel.update_capabilities(capabilities) {
@@ -108,12 +110,17 @@ impl CameraControl {
             }
             endpoint.requirement = *requirement;
             match endpoint.channel.poll_effect() {
-                Ok(Effect::None) => {}
-                Ok(effect) => warn!(
-                    ?effect,
-                    ?key,
-                    "camera command ended; physical cancellation is unconfirmed"
-                ),
+                Ok(None) => {}
+                Ok(Some(effect)) => {
+                    if endpoint.reported_effect != Some(effect.command.identity) {
+                        warn!(
+                            ?effect,
+                            ?key,
+                            "camera command ended; physical cancellation remains unresolved"
+                        );
+                        endpoint.reported_effect = Some(effect.command.identity);
+                    }
+                }
                 Err(error) => warn!(%error, ?key, "camera execution polling failed"),
             }
         }

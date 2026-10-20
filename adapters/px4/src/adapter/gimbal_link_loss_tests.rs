@@ -1,5 +1,3 @@
-#![allow(clippy::expect_used, clippy::panic)]
-
 //! Per-scope link-loss behavior at the PX4 adapter boundary: a gimbal-scope
 //! failsafe queues a best-effort zero-rate stop WITHOUT touching flight, a
 //! motion-scope failsafe neutralizes flight without freezing the gimbal, and a
@@ -79,9 +77,16 @@ fn gimbal_link_loss_latches_gimbal_but_leaves_motion_flying() {
 }
 
 #[test]
-fn gimbal_link_loss_engage_queues_a_zero_rate_without_claiming_authority() {
+fn gimbal_link_loss_fences_unsent_motion_without_inventing_a_physical_stop() {
     let (control, mut lanes) = gimbal_control();
     let mut adapter = Px4Adapter::from_state(VehicleId::new(1), live_state()).with_gimbal(control);
+
+    let initial = adapter.apply_control(&gimbal_frame(
+        vec![(LogicalAxisId::new(super::PITCH_AXIS), 0.5)],
+        vec![],
+    ));
+    assert_eq!(initial.disposition, Disposition::Accepted);
+    while lanes.commands.try_recv().is_ok() {}
 
     adapter
         .set_link_loss_policy(
@@ -89,32 +94,36 @@ fn gimbal_link_loss_engage_queues_a_zero_rate_without_claiming_authority() {
             &ScopeId::new(super::GIMBAL_SCOPE),
             Some(LinkLossPolicy::Neutralize),
         )
-        .expect("the gimbal accepts the zero-rate failsafe");
+        .expect("the gimbal accepts ownership release");
 
-    assert!(
-        lanes.commands.try_recv().is_err(),
-        "a stop must not steal manager ownership"
-    );
-    let rate = lanes
-        .rates
-        .borrow_and_update()
-        .clone()
-        .expect("a zero-rate demand was published");
-    assert_eq!(
-        (rate.pitch_rps, rate.yaw_rps),
-        (0.0, 0.0),
-        "the failsafe queues a zero-rate setpoint"
-    );
+    let release = lanes.commands.try_recv().expect("ownership release");
+    assert_eq!(release.command, 1001);
+    assert_eq!(&release.params[..2], &[-3.0, -3.0]);
+    assert!(release.receipt.is_some());
+    assert!(lanes.commands.try_recv().is_err());
+    assert!(lanes.rates.borrow_and_update().is_none());
+    let progress = adapter
+        .gimbal
+        .as_ref()
+        .unwrap()
+        .snapshot_cached()
+        .unwrap()
+        .progress;
+    assert_eq!(progress.sent_at, None);
+    assert_eq!(progress.ended, Some(turret_core::EndReason::Revoked));
 }
 
 #[test]
-fn a_refused_gimbal_zero_rate_is_a_typed_failure_but_still_latches() {
-    // Fail-closed: if the zero-rate cannot reach its lane the enactment is a
-    // typed failure, yet the latch still engages so gimbal frames stay
-    // suppressed (a counted fault at the host, never a silent success).
+fn closed_transport_still_allows_unsent_motion_to_be_fenced() {
     let (control, lanes) = gimbal_control();
-    drop(lanes); // both the command and rate receivers are gone
     let mut adapter = Px4Adapter::from_state(VehicleId::new(1), live_state()).with_gimbal(control);
+
+    let initial = adapter.apply_control(&gimbal_frame(
+        vec![(LogicalAxisId::new(super::PITCH_AXIS), 0.5)],
+        vec![],
+    ));
+    assert_eq!(initial.disposition, Disposition::Accepted);
+    drop(lanes);
 
     let result = adapter.set_link_loss_policy(
         VehicleId::new(1),
@@ -126,8 +135,17 @@ fn a_refused_gimbal_zero_rate_is_a_typed_failure_but_still_latches() {
             result,
             Err(pilotage_adapter_api::LinkLossEnactError::ChannelRejected { .. })
         ),
-        "a refused zero-rate send is a typed failure, got {result:?}"
+        "pending motion is fenced but the ownership release cannot be queued"
     );
+    let progress = adapter
+        .gimbal
+        .as_ref()
+        .unwrap()
+        .snapshot_cached()
+        .unwrap()
+        .progress;
+    assert_eq!(progress.sent_at, None);
+    assert_eq!(progress.ended, Some(turret_core::EndReason::Revoked));
     let outcome = adapter.apply_control(&gimbal_frame(
         vec![(LogicalAxisId::new(super::PITCH_AXIS), 0.5)],
         vec![],
@@ -135,7 +153,7 @@ fn a_refused_gimbal_zero_rate_is_a_typed_failure_but_still_latches() {
     assert_eq!(
         outcome.disposition,
         Disposition::Rejected(RejectReason::LinkLossEngaged),
-        "the latch engages even when the zero-rate send was refused"
+        "the latch also fences an unavailable transport"
     );
 }
 

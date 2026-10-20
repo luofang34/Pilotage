@@ -19,8 +19,8 @@ mod error;
 mod uplink;
 
 pub use adapter::{
-    ARM_BUTTON, ArduPilotAdapter, DIRECT_SCOPE, DISARM_BUTTON, FLIGHT_SCOPE, PITCH_AXIS, ROLL_AXIS,
-    THROTTLE_AXIS, YAW_AXIS,
+    ARM_BUTTON, ArduPilotAdapter, DIRECT_SCOPE, DISARM_BUTTON, FLIGHT_SCOPE, GIMBAL_SCOPE,
+    PITCH_AXIS, ROLL_AXIS, THROTTLE_AXIS, YAW_AXIS,
 };
 pub use config::{ArduPilotConfig, ArduPilotProfile};
 pub use error::ArduPilotAdapterError;

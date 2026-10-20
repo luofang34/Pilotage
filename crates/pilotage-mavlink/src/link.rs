@@ -17,6 +17,8 @@ mod error;
 pub mod estimator;
 mod fc_reports;
 mod fence;
+mod gimbal;
+pub use gimbal::{GimbalManagerReport, GimbalReports};
 pub mod measurement;
 mod outbound;
 pub use fence::{CameraWriteRequirement, ManagerWriteRequirement, SendFence};
@@ -85,10 +87,8 @@ pub struct LinkState {
     pub started_at: Instant,
     /// Origin the truth stream projects against, latched on its first fix.
     pub truth_origin: Option<TruthOrigin>,
-    /// Latest gimbal-device orientation report. Cached outside the
-    /// estimate measurement discipline: it is payload-device status,
-    /// never an input to vehicle state or control validation.
-    pub gimbal_device: Option<GimbalDeviceAttitude>,
+    /// Discovered payload identities and feedback, separate from vehicle authorization.
+    pub gimbals: GimbalReports,
     /// Latest report of battery instance 0. Cached outside the estimate measurement
     /// discipline: it is vehicle state, never an input to an estimate.
     pub battery: Option<BatteryReport>,
@@ -97,10 +97,6 @@ pub struct LinkState {
     /// Latest command acknowledgement, kept so uplink senders can
     /// surface a typed denial instead of a silently dead command path.
     pub last_command_ack: Option<CommandAckReport>,
-    /// Latest gimbal CONFIGURE acknowledgement, tracked apart from
-    /// `last_command_ack` so unrelated acks cannot bury a claim denial
-    /// while the FC silently ignores gimbal demands.
-    pub gimbal_configure_ack: Option<CommandAckReport>,
     /// Receive stamp of the last FC heartbeat.
     pub last_heartbeat: Option<Instant>,
     /// Whether the last FC heartbeat reported the vehicle armed.

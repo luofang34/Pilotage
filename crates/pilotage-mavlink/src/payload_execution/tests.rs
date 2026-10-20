@@ -4,7 +4,7 @@ use std::time::Duration;
 fn channel() -> PayloadChannel {
     let limit = turret_core::AngularRate::radians_per_second(0.8).unwrap();
     PayloadChannel::new(
-        turret_mavlink::manager_capabilities(1, limit, limit).unwrap(),
+        turret_mavlink::manager_capabilities(1, Some(information()), limit, limit).unwrap(),
         1,
         Instant::now(),
     )
@@ -59,7 +59,9 @@ fn pending_command_keeps_terminal_evidence_when_active_command_is_also_revoked()
         Some(turret_core::EndReason::Revoked)
     );
     assert!(!second.write(1, || panic!("revoked pending write")).unwrap());
-    assert_eq!(channel.poll_effect().unwrap(), Effect::CancelAction);
+    let effect = channel.poll_effect().unwrap().unwrap();
+    assert_eq!(effect.effect, Effect::CancelAction);
+    assert_eq!(effect.command.identity.id, 1);
 }
 
 #[test]
@@ -74,13 +76,17 @@ fn capability_update_preserves_pending_termination_and_active_cancel_effect() {
         .unwrap();
     let limit = turret_core::AngularRate::radians_per_second(0.8).unwrap();
     channel
-        .update_capabilities(turret_mavlink::manager_capabilities(2, limit, limit).unwrap())
+        .update_capabilities(
+            turret_mavlink::manager_capabilities(2, Some(information()), limit, limit).unwrap(),
+        )
         .unwrap();
     assert_eq!(
         channel.snapshot_cached().unwrap().unwrap().progress.ended,
         Some(turret_core::EndReason::Revoked)
     );
-    assert_eq!(channel.poll_effect().unwrap(), Effect::CancelAction);
+    let effect = channel.poll_effect().unwrap().unwrap();
+    assert_eq!(effect.effect, Effect::CancelAction);
+    assert_eq!(effect.command.identity.id, 1);
 }
 
 #[test]
@@ -135,3 +141,17 @@ fn final_write_checks_original_deadline_and_full_write_evidence() {
             .is_err()
     );
 }
+
+fn information() -> turret_mavlink::ManagerInformation {
+    turret_mavlink::ManagerInformation {
+        cap_flags: 2 | 32 | 64 | 128 | 256 | 512,
+        roll_min: f32::NAN,
+        roll_max: f32::NAN,
+        pitch_min: -1.5,
+        pitch_max: 1.5,
+        yaw_min: -3.0,
+        yaw_max: 3.0,
+    }
+}
+
+mod effects;

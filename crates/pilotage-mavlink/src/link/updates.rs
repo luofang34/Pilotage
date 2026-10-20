@@ -154,6 +154,14 @@ pub struct GeomagneticReferenceUpdate {
 /// status), with its receive stamp for staleness handling.
 #[derive(Debug, Clone, Copy)]
 pub struct GimbalDeviceAttitude {
+    /// Component that emitted this device report.
+    pub source_component: u8,
+    /// Attached device ID 1..6, or zero for an independent component.
+    pub device_id: u8,
+    /// Device boot-clock wrap generation; reconnect establishes a new incarnation.
+    pub epoch: u64,
+    /// Wrapping count of accepted device acquisitions.
+    pub sequence: u32,
     /// Orientation quaternion (w, x, y, z); vehicle-frame yaw unless
     /// the device flags say YAW_LOCK.
     pub quat_wxyz: [f32; 4],

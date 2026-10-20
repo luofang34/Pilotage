@@ -57,8 +57,6 @@ pub struct ParamReport {
 /// FC-owned reports from the selected source.
 #[derive(Debug, Default)]
 pub struct FcReports {
-    /// Latest independent manager ownership report and its local receive time.
-    pub gimbal_manager: Option<(crate::codec::GimbalManagerStatus, Instant)>,
     /// Cameras discovered on the selected vehicle, keyed by component and attached-device id.
     pub cameras: BTreeMap<(u8, u8), super::CameraReport>,
     /// HEARTBEAT `custom_mode` of the last FC heartbeat.

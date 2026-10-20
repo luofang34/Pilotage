@@ -3,8 +3,8 @@
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
 use pilotage_mavlink::codec::{
-    ATTITUDE_QUATERNION_ID, BATTERY_STATUS_ID, EKF_STATUS_REPORT_ID, GNSS_RAW_ID,
-    LOCAL_POSITION_NED_ID,
+    ATTITUDE_QUATERNION_ID, BATTERY_STATUS_ID, EKF_STATUS_REPORT_ID,
+    GIMBAL_DEVICE_ATTITUDE_STATUS_ID, GNSS_RAW_ID, LOCAL_POSITION_NED_ID,
 };
 use pilotage_mavlink::{AuthorizationSource, CommandTarget, LinkConfig};
 
@@ -31,6 +31,9 @@ pub struct ArduPilotConfig {
     pub endpoint: SocketAddr,
     /// MAVLink system id of the vehicle.
     pub system_id: u8,
+    /// Whether to discover a MAVLink Gimbal Protocol v2 payload on this link.
+    /// Discovery does not claim control or assume which axes the device supports.
+    pub gimbal: bool,
 }
 
 /// The EKF status interval: 10 Hz, so the 300 ms authorization lag below
@@ -46,7 +49,15 @@ impl ArduPilotConfig {
             profile,
             endpoint: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 14_550)),
             system_id: 1,
+            gimbal: false,
         }
+    }
+
+    /// Enables gimbal discovery and its command path without claiming control.
+    #[must_use]
+    pub fn with_gimbal(mut self, gimbal: bool) -> Self {
+        self.gimbal = gimbal;
+        self
     }
 
     /// The operating profile.
@@ -72,15 +83,30 @@ impl ArduPilotConfig {
         // configured, so every lane the samples read is requested:
         // attitude and local position at 30 Hz, the receiver fix at 5 Hz,
         // the EKF status that authorizes them, and the battery at 1 Hz.
-        config.stream_interval_requests = &[
-            (ATTITUDE_QUATERNION_ID, 33_333),
-            (LOCAL_POSITION_NED_ID, 33_333),
-            (GNSS_RAW_ID, 200_000),
-            (EKF_STATUS_REPORT_ID, EKF_STATUS_INTERVAL_US),
-            (BATTERY_STATUS_ID, 1_000_000),
-        ];
+        config.stream_interval_requests = stream_intervals(self.gimbal);
         config
     }
+}
+
+fn stream_intervals(gimbal: bool) -> &'static [(u32, u32)] {
+    const FLIGHT: [(u32, u32); 5] = [
+        (ATTITUDE_QUATERNION_ID, 33_333),
+        (LOCAL_POSITION_NED_ID, 33_333),
+        (GNSS_RAW_ID, 200_000),
+        (EKF_STATUS_REPORT_ID, EKF_STATUS_INTERVAL_US),
+        (BATTERY_STATUS_ID, 1_000_000),
+    ];
+    // ManagerControl requests manager information and ownership status itself.
+    // Device feedback needs a continuous stream for the operator's camera view.
+    const WITH_GIMBAL: [(u32, u32); 6] = [
+        FLIGHT[0],
+        FLIGHT[1],
+        FLIGHT[2],
+        FLIGHT[3],
+        FLIGHT[4],
+        (GIMBAL_DEVICE_ATTITUDE_STATUS_ID, 20_000),
+    ];
+    if gimbal { &WITH_GIMBAL } else { &FLIGHT }
 }
 
 #[cfg(test)]
