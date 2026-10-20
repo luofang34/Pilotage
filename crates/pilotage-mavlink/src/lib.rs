@@ -14,6 +14,7 @@ pub mod ardupilot;
 pub mod codec;
 mod command_result;
 pub mod gimbal_control;
+pub mod gimbal_endpoint;
 mod gimbal_flags;
 pub use gimbal_control::ManagerControl;
 pub mod link;

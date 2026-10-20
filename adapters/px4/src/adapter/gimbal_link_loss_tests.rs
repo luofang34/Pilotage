@@ -94,12 +94,13 @@ fn gimbal_link_loss_fences_unsent_motion_without_inventing_a_physical_stop() {
             &ScopeId::new(super::GIMBAL_SCOPE),
             Some(LinkLossPolicy::Neutralize),
         )
-        .expect("the gimbal accepts the zero-rate failsafe");
+        .expect("the gimbal accepts ownership release");
 
-    assert!(
-        lanes.commands.try_recv().is_err(),
-        "a stop must not steal manager ownership"
-    );
+    let release = lanes.commands.try_recv().expect("ownership release");
+    assert_eq!(release.command, 1001);
+    assert_eq!(&release.params[..2], &[-3.0, -3.0]);
+    assert!(release.receipt.is_some());
+    assert!(lanes.commands.try_recv().is_err());
     assert!(lanes.rates.borrow_and_update().is_none());
     let progress = adapter
         .gimbal
@@ -130,9 +131,21 @@ fn closed_transport_still_allows_unsent_motion_to_be_fenced() {
         Some(LinkLossPolicy::Neutralize),
     );
     assert!(
-        result.is_ok(),
-        "no physical stop is needed for a command never written"
+        matches!(
+            result,
+            Err(pilotage_adapter_api::LinkLossEnactError::ChannelRejected { .. })
+        ),
+        "pending motion is fenced but the ownership release cannot be queued"
     );
+    let progress = adapter
+        .gimbal
+        .as_ref()
+        .unwrap()
+        .snapshot_cached()
+        .unwrap()
+        .progress;
+    assert_eq!(progress.sent_at, None);
+    assert_eq!(progress.ended, Some(turret_core::EndReason::Revoked));
     let outcome = adapter.apply_control(&gimbal_frame(
         vec![(LogicalAxisId::new(super::PITCH_AXIS), 0.5)],
         vec![],

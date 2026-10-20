@@ -115,6 +115,34 @@ fn claims_require_fresh_free_owner_and_selected_device() {
     );
 }
 
+#[test]
+fn self_release_accepts_unowned_status_but_never_releases_a_new_owner() {
+    let state = Arc::new(Mutex::new(super::super::LinkState::default()));
+    let (epoch, revision) = discovered_manager(&state, 1, 2);
+    let fence = SendFence::default().for_manager(
+        state.clone(),
+        (1, 2),
+        epoch,
+        revision,
+        ManagerWriteRequirement::Release,
+    );
+    status(&state, 1, 2, (0, 0));
+    assert!(fence.with_valid_write(|| Ok(true)).unwrap());
+    status(&state, 2, 2, (42, 190));
+    assert!(
+        !fence
+            .with_valid_write(|| panic!("new owner must not be released"))
+            .unwrap()
+    );
+    status(
+        &state,
+        3,
+        2,
+        (crate::codec::GCS_SYSTEM_ID, crate::codec::GCS_COMPONENT_ID),
+    );
+    assert!(fence.with_valid_write(|| Ok(true)).unwrap());
+}
+
 fn camera_report(
     state: &Arc<Mutex<super::super::LinkState>>,
     received: std::time::Instant,

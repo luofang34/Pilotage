@@ -13,8 +13,8 @@ use pilotage_protocol::{
 };
 
 use super::{
-    ARM_BUTTON, DIRECT_SCOPE, DISARM_BUTTON, FLIGHT_SCOPE, GIMBAL_NEUTRAL_BUTTON, GIMBAL_SCOPE,
-    PITCH_AXIS, Px4Adapter, ROLL_AXIS, THROTTLE_AXIS, YAW_AXIS,
+    ARM_BUTTON, DIRECT_SCOPE, DISARM_BUTTON, FLIGHT_SCOPE, PITCH_AXIS, Px4Adapter, ROLL_AXIS,
+    THROTTLE_AXIS, YAW_AXIS,
 };
 
 /// The velocity envelope the flight scope advertises and enforces.
@@ -86,13 +86,10 @@ impl Px4Adapter {
                         scopes.push(pilotage_adapter_api::sim_lifecycle_descriptor());
                     }
                     if let Some(gimbal) = self.gimbal.as_ref() {
-                        let mut descriptor = gimbal_scope_descriptor(gimbal.capabilities());
-                        if let Some(payload) = descriptor.payload.as_mut() {
-                            let (incarnation, _) = self.gimbal_stamp.identity();
-                            payload.connection_incarnation = incarnation.into_bytes().to_vec();
-                            payload.connection_epoch = 1;
-                        }
-                        scopes.push(descriptor);
+                        scopes.push(pilotage_mavlink::gimbal_endpoint::scope_descriptor(
+                            gimbal,
+                            &self.gimbal_stamp,
+                        ));
                     }
                     scopes.extend(self.camera_scopes());
                     scopes
@@ -171,55 +168,6 @@ fn flight_scope_descriptor(envelope: FlightEnvelope, lateral: bool) -> ScopeDesc
             }),
             arm_button: Some(ARM_BUTTON),
             disarm_button: Some(DISARM_BUTTON),
-        }),
-    }
-}
-
-fn gimbal_scope_descriptor(capabilities: turret_core::PayloadCapabilities) -> ScopeDescriptor {
-    use turret_core::{Capability, ReferenceFrame};
-    let supports = |capability: Capability<turret_core::RateCapability>| matches!(capability, Capability::Available(rate) if rate.frames.contains(ReferenceFrame::HorizonVehicleYaw));
-    let pitch = supports(capabilities.gimbal.axes.pitch.rate);
-    let yaw = supports(capabilities.gimbal.axes.yaw.rate);
-    let recenter = matches!(capabilities.gimbal.recenter, Capability::Available(_));
-    ScopeDescriptor {
-        payload: Some(super::payload::gimbal_capabilities(&capabilities)),
-        authority_group: None,
-        scope: ScopeId::new(GIMBAL_SCOPE),
-        axes: [(PITCH_AXIS, pitch), (YAW_AXIS, yaw)]
-            .into_iter()
-            .filter_map(|(id, present)| present.then_some(LogicalAxisId::new(id)))
-            .collect(),
-        intents: if pitch || yaw {
-            vec![IntentCapability {
-                max_yaw_rate: 0.0,
-                family: IntentFamily::GimbalRate,
-                frames: vec![],
-                max_linear: 0.0,
-                max_vertical: 0.0,
-                max_angular: pilotage_mavlink::gimbal_control::MAX_PITCH_RATE_RPS,
-            }]
-        } else {
-            vec![]
-        },
-        actions: if recenter {
-            vec![ActionCapability {
-                action: ActionKind::GimbalRecenter,
-                mode_targets: vec![],
-                feel_targets: vec![],
-            }]
-        } else {
-            vec![]
-        },
-        legacy: Some(LegacyCommandMap::GimbalRate {
-            pitch: pitch.then_some(LegacyAxisRoute {
-                axis: PITCH_AXIS,
-                sign: 1.0,
-            }),
-            yaw: yaw.then_some(LegacyAxisRoute {
-                axis: YAW_AXIS,
-                sign: 1.0,
-            }),
-            recenter_button: recenter.then_some(GIMBAL_NEUTRAL_BUTTON),
         }),
     }
 }

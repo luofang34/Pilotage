@@ -51,6 +51,34 @@ fn ownership(control: &ManagerControl, component: u8, device: u8, time: u32) {
 
 const FLAGS: u32 = 2 | 32 | 64 | 128 | 256 | 512;
 
+fn write_release(control: &mut ManagerControl, commands: &mut mpsc::Receiver<OutboundCommand>) {
+    control.maintain();
+    let mut written = false;
+    while let Ok(command) = commands.try_recv() {
+        if command.command == 1001
+            && command.params[0] == -3.0
+            && command
+                .fence
+                .as_ref()
+                .unwrap()
+                .with_valid_write(|| Ok(true))
+                .unwrap()
+        {
+            command
+                .receipt
+                .as_ref()
+                .unwrap()
+                .record_sent(Instant::now());
+            written = true;
+        }
+    }
+    assert!(
+        written,
+        "contract invalidation must release the prior local ownership"
+    );
+    control.maintain();
+}
+
 #[test]
 fn wrapped_manager_requests_information_and_recovers_only_after_rediscovery() {
     let (mut control, mut commands, rates) = control();
@@ -71,6 +99,8 @@ fn wrapped_manager_requests_information_and_recovers_only_after_rediscovery() {
     assert!(requested_information);
     information(&control, 1, 2, 2, FLAGS);
     ownership(&control, 1, 2, 3);
+    write_release(&mut control, &mut commands);
+    ownership(&control, 1, 2, 4);
     assert!(control.rate_demand(0.5, 0.0));
     let demand = rates.borrow().clone().unwrap();
     assert_eq!((demand.target_component, demand.gimbal_device_id), (1, 2));
@@ -121,7 +151,7 @@ fn independent_manager_target_and_contract_revision_are_bound_at_final_write() {
 
 #[test]
 fn invalid_limits_revoke_the_known_contract_until_valid_discovery_arrives() {
-    let (mut control, _commands, rates) = control();
+    let (mut control, mut commands, rates) = control();
     information(&control, 1, 2, 1, FLAGS);
     ownership(&control, 1, 2, 2);
     assert!(control.rate_demand(0.5, 0.0));
@@ -144,6 +174,8 @@ fn invalid_limits_revoke_the_known_contract_until_valid_discovery_arrives() {
     assert!(rates.borrow().is_none());
     information(&control, 1, 2, 4, FLAGS);
     ownership(&control, 1, 2, 5);
+    write_release(&mut control, &mut commands);
+    ownership(&control, 1, 2, 6);
     assert!(control.rate_demand(0.5, 0.0));
     assert!(
         rates

@@ -208,4 +208,5 @@ fn rejected_replacement_does_not_cancel_pending_stop_responsibility() {
 }
 
 mod discovery;
+mod release;
 mod stops;

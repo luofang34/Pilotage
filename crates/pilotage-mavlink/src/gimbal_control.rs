@@ -9,6 +9,7 @@ use turret_core::{AngularRate, PayloadCommand, Tick};
 use turret_mavlink::ManagerPolicy;
 
 mod discovery;
+mod release;
 #[cfg(test)]
 mod tests;
 mod transport;
@@ -51,6 +52,7 @@ pub struct ManagerControl {
     explicit_validity: bool,
     fence: SendFence,
     release_after_stop: Option<(crate::PayloadEffect, WriteReceipt, Instant)>,
+    ownership_release: Option<release::OwnershipRelease>,
     next_id: u64,
     dropped_sends: u64,
     drop_link_loss_stop: bool,
@@ -90,6 +92,7 @@ impl ManagerControl {
             explicit_validity: false,
             fence: SendFence::default(),
             release_after_stop: None,
+            ownership_release: None,
             next_id: 0,
             dropped_sends: 0,
             drop_link_loss_stop: false,
@@ -201,6 +204,13 @@ impl ManagerControl {
 
     /// Fence pending payloads without claiming that previously sent motion stopped.
     pub fn invalidate_pending(&mut self) {
+        // The self-release follows all old writes, including an in-progress claim.
+        self.fence.invalidate();
+        self.request_ownership_release();
+        self.revoke_local();
+    }
+
+    fn revoke_local(&mut self) {
         self.fence.invalidate();
         self.fence = SendFence::default();
         if let Err(error) = self.channel.revoke() {

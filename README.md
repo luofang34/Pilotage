@@ -52,6 +52,13 @@ You provide the pieces git does not vendor:
   Gazebo dev libraries (camera sidecar, optional). Each build script prints its
   own install hint on failure.
 
+For an ArduPilot SITL connection, set `PILOTAGE_ARDUPILOT_PROFILE=simulation`
+and start the session host with `--adapter ardupilot`. Set
+`PILOTAGE_ARDUPILOT_ADDR` to the local UDP endpoint, or use the default
+`127.0.0.1:14550`. To enable MAVLink gimbal discovery, set
+`PILOTAGE_ARDUPILOT_GIMBAL=1`. Discovery does not claim gimbal control.
+The device reports which axes and actions it supports.
+
 ## DJI USB bench connection on macOS
 
 Select one RC-N1 attachment and a new capture file. The capture directory

@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use pilotage_mavlink::LinkState;
 use pilotage_protocol::{VehicleClass, VehicleId};
 
-use super::{EstimateSource, Px4Adapter, sampling};
+use super::{EstimateSource, Px4Adapter};
 use crate::uplink::Px4Uplink;
 
 impl Px4Adapter {
@@ -25,9 +25,9 @@ impl Px4Adapter {
             _frame_forwarder: None,
             arm: pilotage_mavlink::sampling::ArmTracker::default(),
             arm_incarnation: pilotage_adapter_api::SourceIncarnation::new([0; 16]),
-            gimbal_stamp: sampling::GimbalStamp::new(pilotage_adapter_api::SourceIncarnation::new(
-                [0x60; 16],
-            )),
+            gimbal_stamp: pilotage_mavlink::gimbal_endpoint::GimbalStamp::new(
+                pilotage_adapter_api::SourceIncarnation::new([0x60; 16]),
+            ),
             started_at: std::time::Instant::now(),
             last_reset: None,
             reset_latch: None,

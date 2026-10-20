@@ -151,6 +151,18 @@ impl ManagerControl {
             .map(|selection| (selection.component, selection.device))
     }
 
+    /// Read a fresh refusal from this endpoint's manager component.
+    pub fn claim_denial_cached(&self, maximum_age: Duration) -> Option<u8> {
+        let (component, _) = self.selected_device()?;
+        let state = self.manager_state.as_ref()?.lock().ok()?;
+        let ack = state.gimbals.configure_acks.get(&component)?;
+        (ack.command == CMD_GIMBAL_CONFIGURE
+            && ack.result != 0
+            && ack.result != 5
+            && ack.received_at.elapsed() < maximum_age)
+            .then_some(ack.result)
+    }
+
     /// Read only the feedback that belongs to the selected manager and device.
     pub fn device_cached(&self) -> Option<crate::GimbalDeviceAttitude> {
         let (component, device) = self.selected_device()?;

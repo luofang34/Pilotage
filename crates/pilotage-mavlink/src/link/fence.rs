@@ -50,6 +50,8 @@ pub enum ManagerWriteRequirement {
     Primary,
     /// A best-effort stop may outlive status freshness but cannot control another owner.
     Stop,
+    /// Remove only this sender's ownership; an unclaimed manager is also safe.
+    Release,
 }
 
 #[derive(Debug, Clone)]
@@ -91,6 +93,7 @@ impl ManagerGuard {
             ManagerWriteRequirement::Unclaimed => fresh && owner == (0, 0),
             ManagerWriteRequirement::Primary => fresh && primary,
             ManagerWriteRequirement::Stop => primary,
+            ManagerWriteRequirement::Release => primary || owner == (0, 0),
         };
         if !allowed {
             return Ok(false);
