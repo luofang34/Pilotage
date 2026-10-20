@@ -103,3 +103,18 @@ fn written_without_an_fc_answer_does_not_report_acceptance_or_completion() {
         wire::CommandOutcome::Unspecified as i32
     );
 }
+
+#[test]
+fn a_land_ack_and_timeout_do_not_invent_landed_or_disarmed_state() {
+    let mut sample = sample();
+    sample.flight_procedure.as_mut().expect("procedure").kind = FlightProcedureKind::Land;
+    let wire = super::super::sample_to_wire(sample, MonoTimestamp::from_nanos(9000));
+    let decoded = wire::TelemetrySample::decode(wire.encode_to_vec().as_slice())
+        .expect("telemetry roundtrip");
+    let progress = decoded.flight_procedure.expect("landing procedure");
+    assert_eq!(progress.kind, wire::FlightProcedureKind::Land as i32);
+    assert_eq!(progress.phase, wire::FlightProcedurePhase::TimedOut as i32);
+    assert_eq!(progress.fc_outcome, wire::CommandOutcome::Accepted as i32);
+    assert!(decoded.fc_state.is_none());
+    assert!(decoded.pose.is_none());
+}

@@ -2,7 +2,7 @@ use super::*;
 use pilotage_adapter_api::ActionCapability;
 use pilotage_protocol::{ActionKind, ModeTarget};
 
-fn takeoff_engine() -> (SessionEngine, ClientKey, SessionId, Generation) {
+pub(super) fn takeoff_engine() -> (SessionEngine, ClientKey, SessionId, Generation) {
     let mut capabilities = super::super::capabilities();
     capabilities.vehicles[0].class = pilotage_protocol::VehicleClass::Multicopter;
     capabilities.vehicles[0].scopes[0]

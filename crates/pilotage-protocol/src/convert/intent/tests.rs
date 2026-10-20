@@ -84,6 +84,7 @@ fn actions_round_trip_and_reject_the_unspecified_sentinel() {
         ControlAction::Arm,
         ControlAction::Disarm,
         ControlAction::Takeoff,
+        ControlAction::Land,
         ControlAction::ModeRequest {
             target: crate::intent::ModeTarget::Hold,
         },
@@ -128,7 +129,11 @@ fn a_mode_request_requires_an_explicit_target() {
 
 #[test]
 fn a_stray_mode_target_on_a_non_mode_action_is_rejected() {
-    for action in [wire::ControlAction::Arm, wire::ControlAction::Takeoff] {
+    for action in [
+        wire::ControlAction::Arm,
+        wire::ControlAction::Takeoff,
+        wire::ControlAction::Land,
+    ] {
         assert!(matches!(
             action_from_wire(wire::ControlActionRequest {
                 zoom: None,

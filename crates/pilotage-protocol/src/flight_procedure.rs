@@ -7,6 +7,8 @@ use crate::wire;
 pub enum FlightProcedureKind {
     /// The vehicle's native takeoff procedure.
     Takeoff,
+    /// The vehicle's native landing procedure.
+    Land,
 }
 
 impl FlightProcedureKind {
@@ -15,6 +17,7 @@ impl FlightProcedureKind {
     pub const fn to_wire(self) -> wire::FlightProcedureKind {
         match self {
             Self::Takeoff => wire::FlightProcedureKind::Takeoff,
+            Self::Land => wire::FlightProcedureKind::Land,
         }
     }
 
@@ -24,6 +27,7 @@ impl FlightProcedureKind {
         match wire::FlightProcedureKind::try_from(raw).ok()? {
             wire::FlightProcedureKind::Unspecified => None,
             wire::FlightProcedureKind::Takeoff => Some(Self::Takeoff),
+            wire::FlightProcedureKind::Land => Some(Self::Land),
         }
     }
 }

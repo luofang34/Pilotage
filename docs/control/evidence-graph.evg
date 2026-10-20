@@ -406,12 +406,12 @@ attr test the_reset_release_re_lease_cycle_stays_repeatable
 node RESULT-CTRL-ENGINE-ACTIONS verification-result
 title reliable action-command engine suite — recorded pass
 attr command cargo test -p pilotage-session --lib tests::action_command
-attr config-digest 09532a92307a0f03e791cf535b03a9431f492ff2
+attr config-digest c96e9cb6c3918fd574023267f7ece67dbd822c7e
 attr tool-version rustc 1.99.0 (b940084d7 2026-09-28)
-attr source-digest git-blob:a5ec82195e02dc716afbd390a9cbab2fdec8e199
+attr source-digest git-blob:dec7d2d4d1d90485ec5ae35cee87d8c7699ee751
 attr artifact docs/control/evidence-artifacts/ctrl01/engine-actions.run.txt
-attr output-digest sha256:3ddf360125ac350079c3e0cef40f0206edf9698ca3bc62c5fbd28d898209efdf
-attr run-id local:09532a92307a0f03e791cf535b03a9431f492ff2
+attr output-digest sha256:2f50d0571d2199daece7e70585a7ef6b8eb341e1ac9889b803e345fa460b8c37
+attr run-id local:c96e9cb6c3918fd574023267f7ece67dbd822c7e
 attr outcome pass
 node RESULT-CTRL-BINDING verification-result
 title profile-binding enforcement suite — recorded pass
@@ -436,12 +436,12 @@ attr outcome pass
 node RESULT-CTRL-DEDUP verification-result
 title actor exactly-once dedup suite — recorded pass
 attr command cargo test -p pilotage-session-host --lib engine_actor::tests::reliable_actions
-attr config-digest afad387c195b9c8dff728d5fd9f91d853b9b3a99
-attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
-attr source-digest git-blob:0bad809001caa76554bbcc6659921498070291fd
+attr config-digest c96e9cb6c3918fd574023267f7ece67dbd822c7e
+attr tool-version rustc 1.99.0 (b940084d7 2026-09-28)
+attr source-digest git-blob:72c3e7e7ca4af8adc2f4f50608de810659952024
 attr artifact docs/control/evidence-artifacts/ctrl01/actor-dedup.run.txt
-attr output-digest sha256:a2bb8ddfa3c003b3aab3dfbb0249ede5b39fdbbefb86014f0616badc4edf6610
-attr run-id local:afad387c195b9c8dff728d5fd9f91d853b9b3a99
+attr output-digest sha256:15befdc3508ceb5f3f4d7c3295dc35c2233a1bf2bb67803836b4c95b8df7445b
+attr run-id local:c96e9cb6c3918fd574023267f7ece67dbd822c7e
 attr outcome pass
 node RESULT-CTRL-WIRE verification-result
 title reliable action chain over the real transport — recorded pass
@@ -554,6 +554,12 @@ title committed input-source coordinator verification baseline
 attr scm git
 attr commit 62f19c4c9e4bac4488c94e8925bfbc884b60e2e8
 attr tree 8fc93d8333feeda16d0912db40ac877f6e99e786
+
+node CFG-CTRL-LANDING configuration-item
+title committed code baseline for native landing action contract tests
+attr scm git
+attr commit c96e9cb6c3918fd574023267f7ece67dbd822c7e
+attr tree e07a2c881a96fb92810a58df81672b8f7e73db25
 
 node TOOL-CTRL-CARGO tool
 title cargo test on Rust stable — not DO-330 tool-qualified
@@ -714,7 +720,7 @@ edge RESULT-CTRL-ENGINE-ACTIONS result-of CASE-CTRL-DATAGRAM-ACTION
 edge RESULT-CTRL-ENGINE-ACTIONS result-of CASE-CTRL-LIFECYCLE
 edge RESULT-CTRL-ENGINE-ACTIONS covers CTRL-CHAN-002
 edge RESULT-CTRL-ENGINE-ACTIONS covers CTRL-LIFE-005
-edge RESULT-CTRL-ENGINE-ACTIONS justified-by CFG-CTRL-PAYLOAD
+edge RESULT-CTRL-ENGINE-ACTIONS justified-by CFG-CTRL-LANDING
 edge RESULT-CTRL-ENGINE-ACTIONS justified-by TOOL-CTRL-CARGO
 
 edge RESULT-CTRL-BINDING result-of CASE-CTRL-UNANNOUNCED
@@ -732,7 +738,7 @@ edge RESULT-CTRL-GROUP justified-by TOOL-CTRL-CARGO
 
 edge RESULT-CTRL-DEDUP result-of CASE-CTRL-ID-REUSE
 edge RESULT-CTRL-DEDUP covers CTRL-CHAN-002
-edge RESULT-CTRL-DEDUP justified-by CFG-CTRL-VIDEO-V3
+edge RESULT-CTRL-DEDUP justified-by CFG-CTRL-LANDING
 edge RESULT-CTRL-DEDUP justified-by TOOL-CTRL-CARGO
 
 edge RESULT-CTRL-WIRE result-of CASE-CTRL-WIRE-CHAIN

@@ -2,11 +2,12 @@ use super::{FlightProcedureKind, FlightProcedurePhase, FlightProcedureReason};
 
 #[test]
 fn every_procedure_value_roundtrips_without_losing_its_meaning() {
-    let kind = FlightProcedureKind::Takeoff;
-    assert_eq!(
-        FlightProcedureKind::from_wire(kind.to_wire() as i32),
-        Some(kind)
-    );
+    for kind in [FlightProcedureKind::Takeoff, FlightProcedureKind::Land] {
+        assert_eq!(
+            FlightProcedureKind::from_wire(kind.to_wire() as i32),
+            Some(kind)
+        );
+    }
     for phase in [
         FlightProcedurePhase::Queued,
         FlightProcedurePhase::Written,

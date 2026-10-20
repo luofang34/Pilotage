@@ -567,6 +567,7 @@ message FlightProcedureState {
 enum FlightProcedureKind {
   FLIGHT_PROCEDURE_KIND_UNSPECIFIED = 0;
   FLIGHT_PROCEDURE_KIND_TAKEOFF = 1;
+  FLIGHT_PROCEDURE_KIND_LAND = 2;
 }
 
 enum FlightProcedurePhase {
