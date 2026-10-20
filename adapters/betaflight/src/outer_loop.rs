@@ -18,7 +18,10 @@
 //! On the ground the throttle stays at idle until the demand asks to
 //! climb, so take-off is the operator's climb command.
 
+mod steady;
+
 use crate::rc::{ANGLE_LIMIT_DEG, MAX_RATE_DPS, Sticks};
+use steady::SteadyHover;
 
 /// Standard gravity, m/s².
 const GRAVITY: f64 = 9.806_65;
@@ -127,6 +130,7 @@ pub(crate) struct OuterLoop {
     // integrator above also absorbs drag while climbing, so right after a
     // climb it reads high; this estimate only learns in a hover.
     settled_hover: Option<f64>,
+    steady_hover: SteadyHover,
 }
 
 impl OuterLoop {
@@ -141,6 +145,7 @@ impl OuterLoop {
             velocity_integral: [0.0; 2],
             hover: HOVER_GUESS,
             settled_hover: None,
+            steady_hover: SteadyHover::default(),
         }
     }
 
@@ -150,9 +155,12 @@ impl OuterLoop {
     }
 
     /// The learned hover throttle: what holds the quad level in a settled
-    /// hover, or the climb-rate integrator before the quad has hovered.
+    /// hover; before the quad has hovered, what steady vertical flight
+    /// taught; before even that, the climb-rate integrator.
     pub(crate) fn hover_throttle(&self) -> f64 {
-        self.settled_hover.unwrap_or(self.hover)
+        self.settled_hover
+            .or(self.steady_hover.estimate())
+            .unwrap_or(self.hover)
     }
 
     /// Forgets the flight: the quad was disarmed or the link restarted.
@@ -161,6 +169,7 @@ impl OuterLoop {
         *self = Self {
             hover: self.hover,
             settled_hover: self.settled_hover,
+            steady_hover: self.restarted_steady_hover(),
             ..Self::new(self.envelope)
         };
     }
@@ -174,8 +183,15 @@ impl OuterLoop {
             flying: airborne,
             hover: throttle.clamp(HOVER_RANGE.0, HOVER_RANGE.1),
             settled_hover: self.settled_hover,
+            steady_hover: self.restarted_steady_hover(),
             ..Self::new(self.envelope)
         };
+    }
+
+    fn restarted_steady_hover(&self) -> SteadyHover {
+        let mut steady = self.steady_hover;
+        steady.restart();
+        steady
     }
 
     /// One step: the stick positions (arm switch left off; the caller
@@ -300,7 +316,17 @@ impl OuterLoop {
         self.hover =
             (self.hover + CLIMB_INTEGRAL_GAIN * error * dt).clamp(HOVER_RANGE.0, HOVER_RANGE.1);
         let tilt = (estimate.roll.cos() * estimate.pitch.cos()).clamp(0.7, 1.0);
-        let throttle = ((self.hover + CLIMB_GAIN * error) / tilt).clamp(0.0, 1.0);
+        let unclamped = (self.hover + CLIMB_GAIN * error) / tilt;
+        let throttle = unclamped.clamp(0.0, 1.0);
+        // On the ground the climb rate is steady at zero whatever the
+        // throttle, so only flight clear of it teaches.
+        let trusted = estimate.altitude >= LANDED_ALTITUDE && (0.0..=1.0).contains(&unclamped);
+        self.steady_hover.observe(
+            (throttle * tilt).clamp(HOVER_RANGE.0, HOVER_RANGE.1),
+            estimate.climb_rate,
+            trusted,
+            dt,
+        );
         let settled = neutral
             && estimate.climb_rate.abs() < HOVER_SETTLED_CLIMB
             && self
