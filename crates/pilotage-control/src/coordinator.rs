@@ -91,6 +91,17 @@ impl ControlCoordinator {
         self.disengage_agent();
     }
 
+    /// Change camera pan routing through the runtime's neutral handover.
+    pub fn set_camera_pan_routing(&mut self, routing: crate::CameraPanRouting) -> bool {
+        self.runtime.set_camera_pan_routing(routing)
+    }
+
+    /// The configured camera pan destination, independent of current authority.
+    #[must_use]
+    pub fn camera_pan_routing(&self) -> crate::CameraPanRouting {
+        self.runtime.camera_pan_routing()
+    }
+
     /// Re-seeds discrete controls before a live datagram run starts.
     pub fn begin_control_run(&mut self) {
         self.runtime.begin_control_run();

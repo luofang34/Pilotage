@@ -1,8 +1,6 @@
-//! The gimbal quasimode, ported from the retired JS prototype and expressed
-//! as pure functions over a profile's bindings. LT held redirects the right
-//! stick from flight to `vehicle.gimbal` line-of-sight rate demands; while it
-//! is held the right stick and LT read neutral to every flight scheme, so no
-//! scheme can consume a captured input by accident. R3 recenters the gimbal.
+//! Camera modifier capture, normalized pointing demands, and recenter edges.
+//! The runtime routes each demand to its declared destination. R3 recenters
+//! the gimbal only; it does not change an airframe heading target.
 
 use pilotage_input::normalize_axis;
 

@@ -9,6 +9,7 @@ use crate::sample::{ButtonSample, Mode, RawSample, SessionState};
 
 // The motion-lease reacquisition tests share these helpers but would push this
 // file past the module size limit, so they live in a sibling submodule.
+mod camera_pan;
 mod input_loss;
 mod motion;
 mod schemes;
