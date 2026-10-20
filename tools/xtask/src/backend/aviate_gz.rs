@@ -76,6 +76,8 @@ impl SimBackend for AviateGz {
         let mut env = vec![
             // The camera sidecar discovers gz topics through this.
             ("GZ_IP".to_owned(), "127.0.0.1".to_owned()),
+            // The world's camera rig, through the gz sidecar.
+            ("PILOTAGE_AVIATE_CAMERA".to_owned(), "gazebo".to_owned()),
             // A sensor's topic is scoped by the world it is in. The
             // launcher is what chooses the world, so it is what says which
             // one rather than the host guessing a name.

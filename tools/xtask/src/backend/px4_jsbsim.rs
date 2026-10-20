@@ -73,6 +73,9 @@ impl SimBackend for Px4Jsbsim {
 
     fn host_env(&self, ctx: &SessionContext) -> Vec<(String, String)> {
         let mut env = ports::host_env(ctx.instance, self.model.airframe());
+        // No Gazebo runs: video comes only from the world-model camera
+        // stage (`--camera maplibre`), never from the gz sidecar.
+        env.push(("PILOTAGE_PX4_CAMERA".to_owned(), "off".to_owned()));
         env.push((
             "PILOTAGE_SIM_TRUTH_ADDR".to_owned(),
             format!("127.0.0.1:{}", truth_port(ctx.instance)),
