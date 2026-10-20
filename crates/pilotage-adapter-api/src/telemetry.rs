@@ -215,7 +215,16 @@ pub struct LandedStateSample {
     pub stamp: MeasurementStamp,
 }
 
-/// FC-owned vehicle state with separately stamped arm and landed reports.
+/// The flight controller's motor operation report with independent provenance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MotorStateSample {
+    /// FC-reported motor operation, not inferred from arm state or a command.
+    pub state: pilotage_protocol::MotorState,
+    /// Identity and acquisition time of this motor report.
+    pub stamp: MeasurementStamp,
+}
+
+/// FC-owned vehicle state with independently stamped reports.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FcStateSample {
     /// Arm state as the FC reports it: 0 unknown, 1 disarmed, 2 armed.
@@ -226,8 +235,12 @@ pub struct FcStateSample {
     pub last_command: Option<FcCommandAck>,
     /// Landed detector report, or `None` when unavailable.
     pub landed_state: Option<LandedStateSample>,
-    /// Identity and acquisition time of the arm report.
-    pub stamp: MeasurementStamp,
+    /// Motor operation report, or `None` when unavailable.
+    pub motor_state: Option<MotorStateSample>,
+    /// Identity and acquisition time of the arm report, or `None` when absent.
+    ///
+    /// Independent motor or landed reports do not supply an arm stamp.
+    pub stamp: Option<MeasurementStamp>,
 }
 
 /// Gimbal payload-device orientation (Gimbal Protocol v2 attitude

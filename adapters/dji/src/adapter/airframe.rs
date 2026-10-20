@@ -1,9 +1,10 @@
 use std::time::Duration;
 
 use pilotage_adapter_api::{
-    AvionicsAttitudeSample, AvionicsSample, MeasurementClock, MeasurementStamp, SourceIncarnation,
-    SourceIntegrity, SourceRole,
+    AvionicsAttitudeSample, AvionicsSample, FcStateSample, MeasurementClock, MeasurementStamp,
+    MotorStateSample, SourceIncarnation, SourceIntegrity, SourceRole,
 };
+use pilotage_protocol::MotorState;
 
 use crate::{DumlFrame, RouteAddress};
 
@@ -15,6 +16,7 @@ const ESTIMATOR_QUALITY_UNUSABLE: u32 = 2;
 pub(super) struct AirframeReport {
     sequence: u16,
     angles_tenths: [i16; 3],
+    motor_state: MotorState,
 }
 
 impl AirframeReport {
@@ -30,7 +32,7 @@ impl AirframeReport {
         }
         let payload: &[u8; 70] = frame.payload().try_into().ok()?;
         // This Mini 3 profile infers the legacy OSD angle prefix. It does not
-        // establish axis directions, a north reference, or the remaining fields.
+        // establish axis directions or a north reference.
         // https://github.com/o-gs/dji-firmware-tools/blob/195692263c2684cf1ddc4995f2736be6c0fb135e/comm_dissector/wireshark/dji-dumlv1-flyc.lua#L886-L912
         let angles_tenths = [
             i16::from_le_bytes([payload[24], payload[25]]),
@@ -46,8 +48,42 @@ impl AirframeReport {
         Some(Self {
             sequence: frame.sequence(),
             angles_tenths,
+            // The SDK's fc_osd_push / KeyAreMotorsOnPush reads bit 3 at
+            // byte 32. This reports motor operation, not arm or landed state.
+            motor_state: if payload[32] & 8 == 0 {
+                MotorState::Stopped
+            } else {
+                MotorState::Running
+            },
         })
     }
+
+    fn avionics(self, stamp: MeasurementStamp) -> AvionicsSample {
+        let [pitch_rad, roll_rad, yaw_rad] = self
+            .angles_tenths
+            .map(|angle| (f32::from(angle) / 10.0).to_radians());
+        AvionicsSample {
+            attitude: Some(AvionicsAttitudeSample::ReportedEuler {
+                pitch_rad,
+                roll_rad,
+                yaw_rad,
+                stamp,
+            }),
+            kinematics: None,
+            baro: None,
+            geodetic: None,
+            magnetic_variation: None,
+            estimator_status_stamp: None,
+            valid_flags: 0,
+            // No estimator status accompanies this fallback value.
+            quality: ESTIMATOR_QUALITY_UNUSABLE,
+        }
+    }
+}
+
+pub(super) struct AirframeSample {
+    pub(super) avionics: AvionicsSample,
+    pub(super) fc_state: FcStateSample,
 }
 
 #[derive(Default)]
@@ -77,7 +113,7 @@ impl AirframeObservations {
         now: Duration,
         connection_valid: bool,
         incarnation: SourceIncarnation,
-    ) -> Option<AvionicsSample> {
+    ) -> Option<AirframeSample> {
         let (report, received) = self.latest?;
         if !connection_valid
             || self.sequence == self.published_sequence
@@ -86,35 +122,33 @@ impl AirframeObservations {
             return None;
         }
         self.published_sequence = self.sequence;
-        let [pitch_rad, roll_rad, yaw_rad] = report
-            .angles_tenths
-            .map(|angle| (f32::from(angle) / 10.0).to_radians());
-        Some(AvionicsSample {
-            attitude: Some(AvionicsAttitudeSample::ReportedEuler {
-                pitch_rad,
-                roll_rad,
-                yaw_rad,
-                stamp: MeasurementStamp {
-                    // The role identifies the report, not estimator authorization.
-                    role: SourceRole::OperationalEstimate,
-                    integrity: SourceIntegrity::ChecksummedOnly,
-                    // Route 0e is a relay. This key identifies its OSD stream.
-                    source_id: SOURCE_ID,
-                    source_incarnation: incarnation,
-                    source_epoch: 0,
-                    sequence: self.sequence,
-                    acquired_at_ns: received.as_nanos().min(u128::from(u64::MAX)) as u64,
-                    clock: MeasurementClock::HostMonotonic,
-                },
+        let stamp = MeasurementStamp {
+            role: SourceRole::FcState,
+            integrity: SourceIntegrity::ChecksummedOnly,
+            // Route 0e is a relay. This key identifies its OSD stream.
+            source_id: SOURCE_ID,
+            source_incarnation: incarnation,
+            source_epoch: 0,
+            sequence: self.sequence,
+            acquired_at_ns: received.as_nanos().min(u128::from(u64::MAX)) as u64,
+            clock: MeasurementClock::HostMonotonic,
+        };
+        Some(AirframeSample {
+            avionics: report.avionics(MeasurementStamp {
+                // The role identifies the report, not estimator authorization.
+                role: SourceRole::OperationalEstimate,
+                ..stamp
             }),
-            kinematics: None,
-            baro: None,
-            geodetic: None,
-            magnetic_variation: None,
-            estimator_status_stamp: None,
-            valid_flags: 0,
-            // No estimator status accompanies this fallback value.
-            quality: ESTIMATOR_QUALITY_UNUSABLE,
+            fc_state: FcStateSample {
+                arm_state: 0,
+                last_command: None,
+                landed_state: None,
+                motor_state: Some(MotorStateSample {
+                    state: report.motor_state,
+                    stamp,
+                }),
+                stamp: None,
+            },
         })
     }
 }

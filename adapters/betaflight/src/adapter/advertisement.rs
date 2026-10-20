@@ -53,6 +53,7 @@ fn flight_actions() -> Vec<ActionCapability> {
             action,
             mode_targets: vec![],
             feel_targets: vec![],
+            takeoff_start_state: None,
         })
         .to_vec()
 }

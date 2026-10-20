@@ -184,23 +184,23 @@ attr test testDuplicateStatusDowngradeIsNotReversibleByANewerNumeric
 node RESULT-LINK-ADAPTER verification-result
 title adapter source-role acceptance suite — recorded pass
 attr command cargo test -p pilotage-adapter-aviate source_roles
-attr config-digest 12ea221583d702b26cc1a9dd75824da9c43d8865
-attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
-attr source-digest git-blob:df6661aa2a02241acc3a3422067ac50239e439ac
+attr config-digest 4e5eabe3c1a1195cb38edebb4f905b74128a1f4a
+attr tool-version rustc 1.99.0 (b940084d7 2026-09-28)
+attr source-digest git-blob:9d88dd71aa7a9bc87e0717f6d1e224b4d1389b2a
 attr artifact docs/link/evidence-artifacts/link04/adapter.run.txt
-attr output-digest sha256:5723cb0f008368a1bcfda87658a77fac63fc4467b29dddd514e6868444b2ba82
-attr run-id local:12ea221583d702b26cc1a9dd75824da9c43d8865
+attr output-digest sha256:88004c98970738ddbbdb5bba6deb89441ae8eba2f7a1598f313b9c0d808336ce
+attr run-id local:4e5eabe3c1a1195cb38edebb4f905b74128a1f4a
 attr outcome pass
 
 node RESULT-LINK-WIRE verification-result
 title host wire-mapping suite — recorded pass
 attr command cargo test -p pilotage-session-host --lib engine_actor::telemetry
-attr config-digest df2aef7d4c23b9008e7fbee3568e376142c7bab2
+attr config-digest 4e5eabe3c1a1195cb38edebb4f905b74128a1f4a
 attr tool-version rustc 1.99.0 (b940084d7 2026-09-28)
-attr source-digest git-blob:dd3741b3aa2a98152055259601f7abd9aa3e0207
+attr source-digest git-blob:35274f4b4234619bacc4619185f5e915aca313df
 attr artifact docs/link/evidence-artifacts/link04/host-wire.run.txt
-attr output-digest sha256:8c0ce0a8f2e4017671133b790531c7c47082218e8390928c1e4ab919fda5ad53
-attr run-id local:df2aef7d4c23b9008e7fbee3568e376142c7bab2
+attr output-digest sha256:ee3edcf87d4e5a8ab8e71a191820ad3199bed7e987bf780f327b650aaea5fa08
+attr run-id local:4e5eabe3c1a1195cb38edebb4f905b74128a1f4a
 attr outcome pass
 
 node RESULT-LINK-CAPTURE verification-result
@@ -248,6 +248,12 @@ attr artifact docs/link/evidence-artifacts/link05/authz-regime.run.txt
 attr output-digest sha256:ec85ba6fcf019599b4ece6546859e854ec254478c5457fb29a8316b4fa8bf9ee
 attr run-id local:27bc04929ec212d25e45a1cb9ca6ec7f5fc34e7f
 attr outcome pass
+
+node CFG-LINK-START-CONDITIONS configuration-item
+title committed baseline for independent takeoff start-condition verification
+attr scm git
+attr commit 4e5eabe3c1a1195cb38edebb4f905b74128a1f4a
+attr tree ecc22cc76704663f47d79fe6b92208a69f66ad82
 
 node CFG-LINK-OBSERVED-TAKEOFF configuration-item
 title committed baseline for observed takeoff telemetry verification
@@ -380,12 +386,12 @@ edge RESULT-LINK-ADAPTER result-of CASE-LINK-ORACLE
 edge RESULT-LINK-ADAPTER result-of CASE-LINK-MISLABEL
 edge RESULT-LINK-ADAPTER covers LINK-ROLE-001
 edge RESULT-LINK-ADAPTER covers LINK-CTRL-002
-edge RESULT-LINK-ADAPTER justified-by CFG-LINK-EXTRACTION
+edge RESULT-LINK-ADAPTER justified-by CFG-LINK-START-CONDITIONS
 edge RESULT-LINK-ADAPTER justified-by TOOL-LINK-CARGO
 
 edge RESULT-LINK-WIRE result-of CASE-LINK-WIRE
 edge RESULT-LINK-WIRE covers LINK-PROV-003
-edge RESULT-LINK-WIRE justified-by CFG-LINK-OBSERVED-TAKEOFF
+edge RESULT-LINK-WIRE justified-by CFG-LINK-START-CONDITIONS
 edge RESULT-LINK-WIRE justified-by TOOL-LINK-CARGO
 
 edge RESULT-LINK-CAPTURE result-of CASE-LINK-CAPTURE

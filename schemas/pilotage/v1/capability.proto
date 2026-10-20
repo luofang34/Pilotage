@@ -81,6 +81,15 @@ message IntentCapability {
   float max_yaw_rate = 6;
 }
 
+// The required vehicle state when a native takeoff procedure starts.
+// This is a requirement, not a report of the current vehicle state.
+enum TakeoffStartState {
+  // The requirement is unknown. A client must not infer a start state.
+  TAKEOFF_START_STATE_UNSPECIFIED = 0;
+  TAKEOFF_START_STATE_ARMED_ON_GROUND = 1;
+  TAKEOFF_START_STATE_MOTORS_STOPPED_ON_GROUND = 2;
+}
+
 // One typed discrete action a scope accepts, with the mode targets it admits
 // for a MODE_REQUEST (empty for actions that carry no target).
 message ActionCapability {
@@ -91,6 +100,9 @@ message ActionCapability {
   // vehicle advertises, so a control never asks for a law the vehicle has no
   // qualified profile for.
   repeated FeelTarget feel_targets = 3;
+  // Required only for TAKEOFF. Unspecified and unknown values do not permit
+  // a client to infer readiness. The adapter checks all start conditions.
+  TakeoffStartState takeoff_start_state = 4;
 }
 
 // A single independently assignable control scope published by a host for

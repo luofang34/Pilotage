@@ -32,6 +32,7 @@ fn motion_actions() -> Vec<ActionCapability> {
             action: ActionKind::Arm,
             mode_targets: vec![],
             feel_targets: vec![],
+            takeoff_start_state: None,
         },
         ActionCapability {
             action: ActionKind::ModeRequest,
@@ -41,6 +42,7 @@ fn motion_actions() -> Vec<ActionCapability> {
                 ModeTarget::Hold,
             ],
             feel_targets: vec![],
+            takeoff_start_state: None,
         },
     ]
 }
@@ -99,6 +101,7 @@ fn capabilities() -> AdapterCapabilities {
                         action: ActionKind::Arm,
                         mode_targets: vec![],
                         feel_targets: vec![],
+                        takeoff_start_state: None,
                     }],
                     legacy: None,
                 },

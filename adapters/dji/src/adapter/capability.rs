@@ -74,6 +74,7 @@ pub(super) fn capabilities(
                     action: ActionKind::GimbalRecenter,
                     mode_targets: Vec::new(),
                     feel_targets: Vec::new(),
+                    takeoff_start_state: None,
                 }],
                 legacy: None,
             }],

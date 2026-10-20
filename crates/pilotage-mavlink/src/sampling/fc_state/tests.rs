@@ -79,24 +79,19 @@ fn heartbeat_receive_time_and_landed_receive_time_remain_independent() {
     let landed = landed_state_sample(&latest, landed_at).expect("landed report");
     let sample = fc_state_sample(Some(report), None, Some(landed)).expect("FC sample");
     assert_eq!(sample.arm_state, 1);
-    assert_eq!(sample.stamp, report.stamp);
-    assert_eq!(sample.stamp.source_id, 42);
-    assert_eq!(
-        sample.stamp.source_incarnation,
-        SourceIncarnation::new([7; 16])
-    );
-    assert_eq!(sample.stamp.source_epoch, latest.source_epoch);
-    assert_eq!(sample.stamp.role, SourceRole::FcState);
-    assert_eq!(sample.stamp.integrity, SourceIntegrity::ChecksummedOnly);
-    assert_eq!(sample.stamp.clock, MeasurementClock::HostMonotonic);
-    assert_eq!(sample.stamp.acquired_at_ns, 100_000_000);
+    let stamp = sample.stamp.expect("arm stamp");
+    assert_eq!(stamp, report.stamp);
+    assert_eq!(stamp.source_id, 42);
+    assert_eq!(stamp.source_incarnation, SourceIncarnation::new([7; 16]));
+    assert_eq!(stamp.source_epoch, latest.source_epoch);
+    assert_eq!(stamp.role, SourceRole::FcState);
+    assert_eq!(stamp.integrity, SourceIntegrity::ChecksummedOnly);
+    assert_eq!(stamp.clock, MeasurementClock::HostMonotonic);
+    assert_eq!(stamp.acquired_at_ns, 100_000_000);
     assert_eq!(landed.stamp.acquired_at_ns, 160_000_000);
-    assert_eq!(
-        landed.stamp.source_incarnation,
-        sample.stamp.source_incarnation
-    );
-    assert_eq!(landed.stamp.source_epoch, sample.stamp.source_epoch);
-    assert_eq!(landed.stamp.source_id, sample.stamp.source_id);
+    assert_eq!(landed.stamp.source_incarnation, stamp.source_incarnation);
+    assert_eq!(landed.stamp.source_epoch, stamp.source_epoch);
+    assert_eq!(landed.stamp.source_id, stamp.source_id);
     assert_eq!(sample.landed_state, Some(landed));
 }
 

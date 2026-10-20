@@ -257,9 +257,10 @@ fn truth_and_fc_sample() -> TelemetrySample {
         }),
         fc_state: Some(FcStateSample {
             landed_state: None,
+            motor_state: None,
             arm_state: 2,
             last_command: None,
-            stamp: fc_stamp,
+            stamp: Some(fc_stamp),
         }),
         gimbal: None,
         battery: None,
@@ -319,12 +320,13 @@ fn the_fc_command_verdict_crosses_the_wire() {
     // A refused arm: kind 1 with the typed outcome.
     let refused = super::fc_state_to_wire(FcStateSample {
         landed_state: None,
+        motor_state: None,
         arm_state: 1,
         last_command: Some(pilotage_adapter_api::FcCommandAck {
             arm: true,
             outcome: pilotage_adapter_api::CommandOutcome::Failed,
         }),
-        stamp,
+        stamp: Some(stamp),
     });
     assert_eq!(
         refused.last_command_kind, 1,
@@ -341,9 +343,10 @@ fn the_fc_command_verdict_crosses_the_wire() {
     // No verdict observed: the lane stays at kind 0.
     let none = super::fc_state_to_wire(FcStateSample {
         landed_state: None,
+        motor_state: None,
         arm_state: 2,
         last_command: None,
-        stamp,
+        stamp: Some(stamp),
     });
     assert_eq!(none.last_command_kind, 0);
     assert_eq!(
@@ -355,6 +358,7 @@ fn the_fc_command_verdict_crosses_the_wire() {
 mod geodetic;
 mod landed_state;
 mod magnetic_variation;
+mod motor_state;
 
 #[test]
 fn a_battery_sample_survives_the_wire_with_unknown_values_as_nan() {

@@ -80,6 +80,7 @@ fn takeoff_is_advertised_only_as_its_own_action() {
             action: ActionKind::Takeoff,
             mode_targets: vec![],
             feel_targets: vec![],
+            takeoff_start_state: None,
         }],
         legacy: None,
     });

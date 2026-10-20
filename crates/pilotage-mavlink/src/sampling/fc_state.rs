@@ -85,8 +85,9 @@ pub fn fc_state_sample(
         // the same report provenance: enactment truth the operator needs
         // when "command accepted" and "vehicle armed" disagree.
         last_command,
-        stamp: report.stamp,
+        stamp: Some(report.stamp),
         landed_state,
+        motor_state: None,
     })
 }
 

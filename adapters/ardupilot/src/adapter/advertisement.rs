@@ -75,6 +75,8 @@ fn action(action: ActionKind) -> ActionCapability {
         action,
         mode_targets: vec![],
         feel_targets: vec![],
+        takeoff_start_state: (action == ActionKind::Takeoff)
+            .then_some(pilotage_protocol::TakeoffStartState::ArmedOnGround),
     }
 }
 

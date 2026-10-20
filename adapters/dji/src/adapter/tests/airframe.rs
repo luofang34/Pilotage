@@ -2,6 +2,7 @@ use pilotage_adapter_api::{
     AvionicsAttitudeSample, Disposition, MeasurementClock, SourceIncarnation, SourceIntegrity,
     SourceRole, VehicleAdapter,
 };
+use pilotage_protocol::MotorState;
 
 use super::{
     TestResult,
@@ -29,7 +30,14 @@ fn captured_body_angles_are_reported_euler_without_navigation_or_authorization()
         assert_eq!(batch.samples.len(), 1);
         let sample = &batch.samples[0];
         assert!(sample.payload.is_none() && sample.gimbal.is_none() && sample.battery.is_none());
-        assert!(sample.fc_state.is_none() && sample.sim_truth.is_none());
+        assert!(sample.sim_truth.is_none());
+        let fc_state = sample.fc_state.unwrap();
+        assert_eq!(fc_state.arm_state, 0);
+        assert!(fc_state.stamp.is_none());
+        assert!(fc_state.last_command.is_none() && fc_state.landed_state.is_none());
+        let motor = fc_state.motor_state.unwrap();
+        assert_eq!(motor.state, MotorState::Stopped);
+        assert_eq!(motor.stamp.role, SourceRole::FcState);
         assert!(sample.pose.is_none() && sample.speed.is_none());
         let avionics = sample.avionics.unwrap();
         assert!(avionics.kinematics.is_none() && avionics.baro.is_none());
@@ -57,9 +65,48 @@ fn captured_body_angles_are_reported_euler_without_navigation_or_authorization()
         assert_eq!(stamp.clock, MeasurementClock::HostMonotonic);
         assert_eq!(stamp.sequence, index as u32 + 1);
         assert_eq!(stamp.acquired_at_ns, millis * 1_000_000);
+        assert_eq!(
+            motor.stamp,
+            pilotage_adapter_api::MeasurementStamp {
+                role: SourceRole::FcState,
+                ..stamp
+            }
+        );
         assert!(harness.telemetry(millis).samples.is_empty());
         assert!(matches!(
             harness.apply(frame(0.0), millis).disposition,
+            Disposition::Rejected(_)
+        ));
+    }
+    Ok(())
+}
+
+#[test]
+fn motor_flag_is_separate_from_flying_arm_and_landed_state() -> TestResult {
+    // Positive cases use the SDK bit definition. They are not flight captures.
+    for flags in [0_u32, 8, 12, 6, 0xffff_fff7, u32::MAX] {
+        let mut bytes = captured_reports().remove(0);
+        bytes[43..47].copy_from_slice(&flags.to_le_bytes());
+        seal_duml(&mut bytes);
+        let mut harness = Harness::mobile();
+        harness.feed(&crate::logiclink::encode_control(&packets(&bytes)[0]))?;
+        harness.step(0);
+        let batch = harness.telemetry(0);
+        let sample = &batch.samples[0];
+        let fc_state = sample.fc_state.unwrap();
+        let expected = if flags & 8 == 0 {
+            MotorState::Stopped
+        } else {
+            MotorState::Running
+        };
+        assert_eq!(fc_state.motor_state.unwrap().state, expected);
+        assert_eq!(fc_state.arm_state, 0);
+        assert!(fc_state.stamp.is_none());
+        assert!(fc_state.landed_state.is_none() && fc_state.last_command.is_none());
+        assert!(sample.flight_procedure.is_none());
+        assert!(sample.pose.is_none() && sample.speed.is_none());
+        assert!(matches!(
+            harness.apply(frame(0.0), 0).disposition,
             Disposition::Rejected(_)
         ));
     }
@@ -181,6 +228,7 @@ fn body_battery_and_gimbal_have_independent_freshness_and_sequences() -> TestRes
     harness.step(0);
     let stale_body = harness.telemetry(301);
     assert!(stale_body.samples[0].avionics.is_none());
+    assert!(stale_body.samples[0].fc_state.is_none());
     assert!(stale_body.samples[0].payload.is_none());
     assert_eq!(stale_body.samples[0].battery.unwrap().stamp.sequence, 1);
     harness.feed(&reports[1])?;
@@ -194,10 +242,12 @@ fn body_battery_and_gimbal_have_independent_freshness_and_sequences() -> TestRes
     let gimbal = harness.telemetry(320);
     assert!(gimbal.samples[0].payload.is_some());
     assert!(gimbal.samples[0].avionics.is_none() && gimbal.samples[0].battery.is_none());
+    assert!(gimbal.samples[0].fc_state.is_none());
     harness.feed(&battery[1])?;
     harness.step(330);
     let battery = harness.telemetry(330);
     assert!(battery.samples[0].avionics.is_none() && battery.samples[0].payload.is_none());
+    assert!(battery.samples[0].fc_state.is_none());
     assert_eq!(battery.samples[0].battery.unwrap().stamp.sequence, 2);
     Ok(())
 }

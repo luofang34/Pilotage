@@ -33,16 +33,19 @@ fn motion_scope() -> ScopeDescriptor {
                 action: ActionKind::Arm,
                 mode_targets: vec![],
                 feel_targets: vec![],
+                takeoff_start_state: None,
             },
             ActionCapability {
                 action: ActionKind::Disarm,
                 mode_targets: vec![],
                 feel_targets: vec![],
+                takeoff_start_state: None,
             },
             ActionCapability {
                 action: ActionKind::ModeRequest,
                 mode_targets: vec![ModeTarget::CameraVelocity],
                 feel_targets: vec![],
+                takeoff_start_state: None,
             },
         ],
         legacy: Some(LegacyCommandMap::Velocity {
@@ -77,6 +80,7 @@ fn gimbal_scope() -> ScopeDescriptor {
             action: ActionKind::GimbalRecenter,
             mode_targets: vec![],
             feel_targets: vec![],
+            takeoff_start_state: None,
         }],
         legacy: Some(LegacyCommandMap::GimbalRate {
             pitch: Some(LegacyAxisRoute { axis: 1, sign: 1.0 }),

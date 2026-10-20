@@ -15,10 +15,12 @@ mod ids;
 mod intent;
 mod join_token;
 mod landed_state;
+mod motor_state;
 mod payload;
 mod scopes;
 mod session;
 mod session_convert;
+mod takeoff_start_state;
 mod timing;
 mod vehicle_class;
 pub mod video_frame;
@@ -43,6 +45,7 @@ pub use intent::{
 };
 pub use join_token::{ADMISSION_REJECTED_CLOSE_CODE, JoinToken, JoinTokenError};
 pub use landed_state::LandedState;
+pub use motor_state::MotorState;
 pub use scopes::{DIRECT_SCOPE, MOTION_SCOPE};
 pub use session::{
     ClientHello, ControlActionCommand, ControlActionResult, FrameRejected, FrameRejectionReason,
@@ -50,6 +53,7 @@ pub use session::{
     Ping, Pong, ProfileActivation, SESSION_PROTOCOL_VERSION, ScopeHolderSnapshot,
     ScopeTransferAccept, ScopeTransferOffer, ScopeTransferRequest, ServerWelcome,
 };
+pub use takeoff_start_state::TakeoffStartState;
 pub use vehicle_class::VehicleClass;
 pub use video_frame::{
     CaptureHeader, ContractFault, DecodedFrame, Offsets, encode_v2 as encode_video_frame_v2,
