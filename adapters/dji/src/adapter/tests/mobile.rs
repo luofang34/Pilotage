@@ -43,6 +43,7 @@ fn upper_capture_reaches_real_payload_state_without_faking_vehicle_pose() {
 #[test]
 fn mobile_control_uses_the_same_admission_and_actual_write_evidence() {
     let mut harness = Harness::mobile();
+    harness.feed_model(87, 0).unwrap();
     for (index, pose) in observed_poses().iter().enumerate() {
         let command = packets(pose).remove(0);
         harness

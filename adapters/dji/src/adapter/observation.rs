@@ -76,7 +76,14 @@ impl Observations {
 
     pub(super) fn receive(&mut self, frame: &DumlFrame, now: Duration) {
         self.battery.receive(frame, now);
+        let revision = self.model_revision();
+        let was_identified = self.model_deadline(now).is_some();
         self.airframe.receive(frame, now);
+        if self.model_revision() != revision
+            || (!was_identified && self.model_deadline(now).is_some())
+        {
+            self.invalidate_continuity();
+        }
         let angles = GimbalAngles::from_push(frame, RouteAddress(2))
             .or_else(|| GimbalAngles::from_push(frame, RouteAddress(10)));
         let Some(angles) = angles else {
@@ -128,9 +135,26 @@ impl Observations {
     }
 
     pub(super) fn ready(&self, now: Duration) -> bool {
-        self.consecutive >= 3
+        self.model_deadline(now).is_some()
+            && self.consecutive >= 3
             && self.age(now).is_some_and(|age| age <= MAX_AGE)
             && self.latest.is_some_and(|pose| pose.qualifies(self.profile))
+    }
+
+    pub(super) fn model_deadline(&self, now: Duration) -> Option<Duration> {
+        self.airframe.model_deadline(now)
+    }
+
+    pub(super) fn model_revision(&self) -> u64 {
+        self.airframe.binding_revision()
+    }
+
+    pub(super) fn expire_model(&mut self, now: Duration) {
+        let revision = self.model_revision();
+        self.airframe.expire_binding(now);
+        if self.model_revision() != revision {
+            self.invalidate_continuity();
+        }
     }
 
     pub(super) fn sample(

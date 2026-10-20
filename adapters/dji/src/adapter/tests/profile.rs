@@ -86,6 +86,7 @@ fn bench_rejects_observed_speed_and_keeps_its_five_degree_rate() -> TestResult {
 fn observed_manual_and_recenter_steps_keep_the_one_second_encoding() -> TestResult {
     for (recenter, expected_target) in [(false, -750_i16), (true, -150_i16)] {
         let mut harness = Harness::new();
+        harness.feed_model(87, 0)?;
         for (index, mut pose) in observed_poses().into_iter().enumerate() {
             pose[11..13].copy_from_slice(&(-450_i16).to_le_bytes());
             let end = pose.len() - 2;

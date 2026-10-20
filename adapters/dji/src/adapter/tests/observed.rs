@@ -12,6 +12,7 @@ use super::{
 use crate::adapter::{DjiFault, HOST_PITCH_RATE_LIMIT_RPS};
 
 fn pose(harness: &mut Harness, pitch: i16, sequence: u16, millis: u64) -> TestResult {
+    harness.feed_model(87, sequence)?;
     let mut bytes = observed_poses().remove(0);
     bytes[6..8].copy_from_slice(&sequence.to_le_bytes());
     bytes[11..13].copy_from_slice(&pitch.to_le_bytes());

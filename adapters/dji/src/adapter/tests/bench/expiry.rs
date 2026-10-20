@@ -107,7 +107,7 @@ fn receive_and_capture_time_cannot_extend_a_pending_command_deadline() -> TestRe
         h.set_write_limit(usize::MAX)?;
         h.feed(traffic)?;
         let received_before = h.adapter.status_cached().received_bytes;
-        let mut clock = [100, 3000, 3000].into_iter();
+        let mut clock = [100, 3000, 3000, 3000].into_iter();
         h.adapter.step_with_time_blocking(|| {
             Duration::from_millis(clock.next().expect("step clock sample"))
         });

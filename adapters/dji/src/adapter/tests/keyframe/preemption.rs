@@ -7,6 +7,7 @@ use crate::adapter::DjiFault;
 #[cfg(test)]
 fn moving_with_keyframe(write_limit: usize) -> Harness {
     let mut harness = Harness::mobile();
+    harness.feed_model(87, 0).unwrap();
     for (index, pose) in observed_poses().iter().enumerate() {
         harness
             .feed(&crate::logiclink::encode_control(&packets(pose)[0]))
@@ -45,6 +46,14 @@ fn neutral_hold_preempts_between_keyframe_packets_and_preserves_recovery_interva
     );
     harness.step(1029);
     assert_eq!(commands(&harness).len(), 4);
+    harness.feed_model(87, 1).unwrap();
+    harness.step(1029);
+    harness
+        .adapter
+        .connection
+        .keyframes
+        .request
+        .store(true, Ordering::Release);
     harness.step(1030);
     let resumed = commands(&harness);
     assert_eq!(resumed.len(), 5);

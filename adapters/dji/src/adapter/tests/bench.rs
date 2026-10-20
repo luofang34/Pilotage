@@ -303,7 +303,7 @@ fn blocked_recording_time_is_excluded_but_subwire_fraction_is_retained() -> Test
     let mut h = initialized()?;
     h.apply(frame(-BENCH_PITCH_RATE_LIMIT_RPS / 2.0), 10);
     h.feed(include_bytes!("../../duml/fixtures/c5-cdc-passive.bin"))?;
-    let mut clock = [10, 90, 90].into_iter();
+    let mut clock = [10, 90, 90, 90].into_iter();
     h.adapter
         .step_with_time_blocking(|| Duration::from_millis(clock.next().unwrap()));
     h.apply(frame(-BENCH_PITCH_RATE_LIMIT_RPS / 2.0), 100);
@@ -317,7 +317,7 @@ fn successful_write_commits_only_after_record_and_excludes_record_delay() -> Tes
     let mut h = initialized()?;
     h.apply(frame(-BENCH_PITCH_RATE_LIMIT_RPS), 100);
     assert_eq!(h.adapter.status_cached().commanded_pitch_tenths, Some(0));
-    let mut clock = [100, 100, 130, 180].into_iter();
+    let mut clock = [100, 100, 130, 180, 180].into_iter();
     h.adapter
         .step_with_time_blocking(|| Duration::from_millis(clock.next().unwrap()));
     assert_eq!(h.adapter.status_cached().commanded_pitch_tenths, Some(-5));
