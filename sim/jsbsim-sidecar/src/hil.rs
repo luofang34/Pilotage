@@ -7,7 +7,7 @@ mod reader;
 
 pub use reader::FrameReader;
 
-use pilotage_mavlink::codec::{compute_crc, encode_frame_v2_from};
+use pilotage_mavlink_framing::{compute_crc, encode_frame_v2_from};
 
 use crate::sensors::{GnssSample, InertialSample};
 use crate::truth::Truth;

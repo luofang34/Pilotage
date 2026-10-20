@@ -3,7 +3,7 @@
 
 #![allow(clippy::unwrap_used)]
 
-use pilotage_mavlink::codec::{compute_crc, encode_frame_v2_from};
+use pilotage_mavlink_framing::{compute_crc, encode_frame_v2_from};
 
 use super::{
     ActuatorControls, Encoder, FIELDS_BARO, FIELDS_IMU, FrameReader, HIL_ACTUATOR_CONTROLS,

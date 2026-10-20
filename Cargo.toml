@@ -11,6 +11,7 @@ members = [
     "crates/pilotage-timing",
     "crates/pilotage-adapter-api",
     "crates/pilotage-mavlink",
+    "crates/pilotage-mavlink-framing",
     "crates/pilotage-msp",
     "sim/multirotor-fdm",
     "crates/pilotage-conformance",
@@ -144,6 +145,7 @@ pilotage-ingress = { path = "crates/pilotage-ingress" }
 pilotage-input = { path = "crates/pilotage-input" }
 pilotage-adapter-api = { path = "crates/pilotage-adapter-api" }
 pilotage-mavlink = { path = "crates/pilotage-mavlink" }
+pilotage-mavlink-framing = { path = "crates/pilotage-mavlink-framing" }
 pilotage-msp = { path = "crates/pilotage-msp" }
 pilotage-situation-view = { path = "crates/pilotage-situation-view" }
 pilotage-airspace-view = { path = "crates/pilotage-airspace-view" }

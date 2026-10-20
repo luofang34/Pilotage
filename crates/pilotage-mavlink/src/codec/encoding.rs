@@ -2,8 +2,8 @@
 //! offboard setpoints, and gimbal-manager demands.
 
 use super::{
-    COMMAND_ACK_ID, COMMAND_LONG_ID, GIMBAL_MANAGER_SET_ATTITUDE_ID, HEARTBEAT_ID, MAGIC_V2,
-    MANUAL_CONTROL_ID, SET_POSITION_TARGET_ID, compute_crc,
+    COMMAND_ACK_ID, COMMAND_LONG_ID, GIMBAL_MANAGER_SET_ATTITUDE_ID, HEARTBEAT_ID,
+    MANUAL_CONTROL_ID, SET_POSITION_TARGET_ID, encode_frame_v2_from,
 };
 
 /// MAVLink system id stamped on every frame this codec encodes (the
@@ -32,41 +32,6 @@ pub(super) fn encode_frame_v2(
         GCS_COMPONENT_ID,
         out,
     )
-}
-
-/// Writes a MAVLink 2.0 frame under an explicit SOURCE identity — the
-/// encoder for messages another party originates (an autopilot, a fake
-/// FC in a test, a gateway loopback, a simulator). `out` must hold
-/// `10 + payload.len() + 2` bytes; a too-small buffer returns 0.
-#[allow(clippy::too_many_arguments)]
-pub fn encode_frame_v2_from(
-    seq: u8,
-    msg_id: u32,
-    payload: &[u8],
-    extra: u8,
-    system_id: u8,
-    component_id: u8,
-    out: &mut [u8],
-) -> usize {
-    let total = 10 + payload.len() + 2;
-    if out.len() < total || payload.len() > 255 {
-        return 0;
-    }
-    out[0] = MAGIC_V2;
-    out[1] = payload.len() as u8;
-    out[2] = 0;
-    out[3] = 0;
-    out[4] = seq;
-    out[5] = system_id;
-    out[6] = component_id;
-    out[7] = (msg_id & 0xff) as u8;
-    out[8] = ((msg_id >> 8) & 0xff) as u8;
-    out[9] = ((msg_id >> 16) & 0xff) as u8;
-    out[10..10 + payload.len()].copy_from_slice(payload);
-    let crc = compute_crc(&out[1..10 + payload.len()], extra);
-    out[10 + payload.len()] = (crc & 0xff) as u8;
-    out[10 + payload.len() + 1] = (crc >> 8) as u8;
-    total
 }
 
 /// Serializes an FC-sourced COMMAND_ACK frame addressed to the GCS

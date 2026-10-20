@@ -25,18 +25,17 @@ use decoding::decode_known;
 pub use encoding::{
     GCS_COMPONENT_ID, GCS_SYSTEM_ID, GIMBAL_FLAGS_HORIZON_YAW_FOLLOW, MAV_FRAME_BODY_OFFSET_NED,
     ManualControlSticks, encode_arm_command, encode_autopilot_heartbeat,
-    encode_body_velocity_setpoint, encode_command_ack, encode_command_long, encode_frame_v2_from,
-    encode_gcs_heartbeat, encode_gimbal_rate_setpoint, encode_manual_control,
-    encode_position_setpoint, encode_velocity_setpoint,
+    encode_body_velocity_setpoint, encode_command_ack, encode_command_long, encode_gcs_heartbeat,
+    encode_gimbal_rate_setpoint, encode_manual_control, encode_position_setpoint,
+    encode_velocity_setpoint,
 };
 pub use param_encoding::ParamEncoding;
 pub use parameters::{
     PARAM_ID_LEN, ParamValue, encode_param_request_read, encode_param_set, encode_param_value,
     param_id,
 };
+pub use pilotage_mavlink_framing::{MAGIC_V2, compute_crc, encode_frame_v2_from};
 
-/// MAVLink 2.0 start-of-frame marker.
-pub const MAGIC_V2: u8 = 0xFD;
 /// HEARTBEAT message id.
 pub const HEARTBEAT_ID: u32 = 0;
 /// ATTITUDE_QUATERNION message id.
@@ -344,22 +343,6 @@ fn crc_extra(msg_id: u32) -> Option<u8> {
         STATUSTEXT_ID => Some(83),
         _ => None,
     }
-}
-
-/// One step of the MAVLink X.25 CRC.
-fn crc_accumulate(byte: u8, crc: u16) -> u16 {
-    let tmp = byte ^ (crc as u8);
-    let tmp = tmp ^ (tmp << 4);
-    (crc >> 8) ^ (u16::from(tmp) << 8) ^ (u16::from(tmp) << 3) ^ (u16::from(tmp) >> 4)
-}
-
-/// MAVLink CRC over `data`, finished with the message's CRC_EXTRA.
-pub fn compute_crc(data: &[u8], extra: u8) -> u16 {
-    let mut crc = 0xFFFFu16;
-    for &b in data {
-        crc = crc_accumulate(b, crc);
-    }
-    crc_accumulate(extra, crc)
 }
 
 fn frame_header(bytes: &[u8], at: usize) -> Option<(FrameSource, u32)> {

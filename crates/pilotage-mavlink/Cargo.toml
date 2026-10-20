@@ -9,6 +9,7 @@ publish = false
 workspace = true
 
 [dependencies]
+pilotage-mavlink-framing = { workspace = true }
 pilotage-adapter-api = { workspace = true }
 pilotage-geo = { workspace = true }
 pilotage-protocol = { workspace = true }
