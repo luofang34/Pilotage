@@ -170,6 +170,16 @@ fn decode_status_text(payload: &[u8]) -> FcMessage {
     }
 }
 
+fn decode_heartbeat(payload: &[u8]) -> FcMessage {
+    FcMessage::Heartbeat {
+        // Payload: custom_mode u32 @0, type @4, autopilot @5,
+        // base_mode @6 (bit 0x80 = SAFETY_ARMED).
+        armed: payload.get(6).is_some_and(|b| b & 0x80 != 0),
+        custom_mode: u32_at(payload, 0),
+        autopilot: payload.get(5).copied().unwrap_or(0),
+    }
+}
+
 pub(super) fn decode_known(msg_id: u32, payload: &[u8]) -> Option<FcMessage> {
     match msg_id {
         super::GIMBAL_MANAGER_STATUS_ID => Some(FcMessage::GimbalManagerStatus(
@@ -178,13 +188,7 @@ pub(super) fn decode_known(msg_id: u32, payload: &[u8]) -> Option<FcMessage> {
         super::CAMERA_INFORMATION_ID | super::CAMERA_SETTINGS_ID => {
             super::camera::decode(msg_id, payload).map(FcMessage::Camera)
         }
-        HEARTBEAT_ID => Some(FcMessage::Heartbeat {
-            // Payload: custom_mode u32 @0, type @4, autopilot @5,
-            // base_mode @6 (bit 0x80 = SAFETY_ARMED).
-            armed: payload.get(6).is_some_and(|b| b & 0x80 != 0),
-            custom_mode: u32_at(payload, 0),
-            autopilot: payload.get(5).copied().unwrap_or(0),
-        }),
+        HEARTBEAT_ID => Some(decode_heartbeat(payload)),
         // Payload: five f32 variances @0..20, then flags u16 @20.
         EKF_STATUS_REPORT_ID => Some(FcMessage::EkfStatusReport {
             flags: u16_at(payload, 20),

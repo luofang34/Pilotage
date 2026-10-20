@@ -214,8 +214,7 @@ fn attitude_only_omits_planar_projection_while_group_flows() {
     assert!(avionics.kinematics_stamp.is_none());
 }
 
-#[test]
-fn truth_and_fc_state_survive_the_wire_under_their_own_identities() {
+fn truth_and_fc_sample() -> TelemetrySample {
     let truth_stamp = MeasurementStamp {
         role: SourceRole::SimulationTruth,
         integrity: SourceIntegrity::Unprotected,
@@ -236,7 +235,7 @@ fn truth_and_fc_state_survive_the_wire_under_their_own_identities() {
         acquired_at_ns: 77,
         clock: MeasurementClock::HostMonotonic,
     };
-    let sample = TelemetrySample {
+    TelemetrySample {
         payload: None,
         vehicle: VehicleId::new(1),
         tick: SimTick::new(1_000_000),
@@ -259,9 +258,12 @@ fn truth_and_fc_state_survive_the_wire_under_their_own_identities() {
         }),
         gimbal: None,
         battery: None,
-    };
+    }
+}
 
-    let wire_sample = sample_to_wire(sample, MonoTimestamp::from_nanos(5));
+#[test]
+fn truth_and_fc_state_survive_the_wire_under_their_own_identities() {
+    let wire_sample = sample_to_wire(truth_and_fc_sample(), MonoTimestamp::from_nanos(5));
     assert!(
         wire_sample.avionics.is_none(),
         "truth must not be projected into the estimator lane"

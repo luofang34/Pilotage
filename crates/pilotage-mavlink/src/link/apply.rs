@@ -11,7 +11,7 @@ use super::{
     AttitudeUpdate, AuthorizationSource, BatteryReport, CommandAckReport, GimbalDeviceAttitude,
     KinematicsUpdate, LinkState, estimator,
 };
-use crate::codec::{FcMessage, FrameSource};
+use crate::codec::{FcMessage, FrameSource, GimbalManagerStatus};
 
 /// Folds decoded messages into the shared cache. Kept synchronous and
 /// lock-scoped: the lock is never held across an await.
@@ -321,19 +321,21 @@ fn apply_kinematics(
     }
 }
 
+fn apply_gimbal_manager_status(latest: &mut LinkState, report: GimbalManagerStatus, now: Instant) {
+    if latest
+        .fc_reports
+        .gimbal_manager
+        .is_none_or(|(previous, _)| report.time_boot_ms > previous.time_boot_ms)
+    {
+        latest.fc_reports.gimbal_manager = Some((report, now));
+    }
+}
+
 /// Applies one source-matched decoded message to the cache.
 fn apply_message(latest: &mut LinkState, message: FcMessage, now: Instant) {
     match message {
         FcMessage::Camera(_) | FcMessage::InvalidAviateEstimatorStatus => {}
-        FcMessage::GimbalManagerStatus(report) => {
-            if latest
-                .fc_reports
-                .gimbal_manager
-                .is_none_or(|(previous, _)| report.time_boot_ms > previous.time_boot_ms)
-            {
-                latest.fc_reports.gimbal_manager = Some((report, now));
-            }
-        }
+        FcMessage::GimbalManagerStatus(report) => apply_gimbal_manager_status(latest, report, now),
         FcMessage::Heartbeat {
             armed,
             custom_mode,

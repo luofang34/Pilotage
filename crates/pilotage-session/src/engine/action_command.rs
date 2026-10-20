@@ -8,7 +8,8 @@
 //! can never fire under authority it no longer holds.
 
 use pilotage_protocol::{
-    ControlActionCommand, ControlActionResult, ControlPayload, ScopedControlFrame, SequenceNum,
+    AdmittedTiming, ControlActionCommand, ControlActionResult, ControlPayload, ScopedControlFrame,
+    SequenceNum,
 };
 use pilotage_timing::MonoTimestamp;
 
@@ -90,10 +91,20 @@ impl SessionEngine {
             );
             return;
         }
+        let frame = self.action_command_frame(client, command, admitted_timing);
+        actions.push(SessionAction::ApplyToAdapter { client, frame });
+    }
+
+    fn action_command_frame(
+        &self,
+        client: ClientKey,
+        command: ControlActionCommand,
+        admitted_timing: Option<AdmittedTiming>,
+    ) -> ScopedControlFrame {
         // Deliver as an actions-only typed frame so the adapter boundary,
         // per-action results, and the actor's exactly-once bookkeeping stay
         // on the single existing path.
-        let frame = ScopedControlFrame {
+        ScopedControlFrame {
             timing: command.timing,
             admitted_timing,
             session: command.session,
@@ -111,8 +122,7 @@ impl SessionEngine {
             intent: None,
             actions: vec![command.action],
             action_ids: vec![command.action_id],
-        };
-        actions.push(SessionAction::ApplyToAdapter { client, frame });
+        }
     }
 
     /// Every binding check between a command and this engine's own records.
