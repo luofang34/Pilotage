@@ -71,7 +71,11 @@ impl SimBackend for Px4Gz {
     }
 
     fn host_env(&self, ctx: &SessionContext) -> Vec<(String, String)> {
-        let mut env = vec![("GZ_IP".to_owned(), "127.0.0.1".to_owned())];
+        let mut env = vec![
+            ("GZ_IP".to_owned(), "127.0.0.1".to_owned()),
+            // The world's camera rig, through the gz sidecar.
+            ("PILOTAGE_PX4_CAMERA".to_owned(), "gazebo".to_owned()),
+        ];
         env.extend(ports::host_env(ctx.instance, self.model.airframe()));
         // Only a vehicle that carries a gimbal advertises the
         // vehicle.gimbal scope; the flag's absence means none.

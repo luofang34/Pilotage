@@ -74,6 +74,9 @@ impl SimBackend for AviateJsbsim {
             // Truth is the sidecar's, on the host's own lane: Gazebo's shm
             // block, when another session runs one, is another vehicle.
             ("PILOTAGE_AVIATE_TRUTH".to_owned(), "host-lane".to_owned()),
+            // No Gazebo runs: video comes only from the world-model camera
+            // stage (`--camera maplibre`), never from the gz sidecar.
+            ("PILOTAGE_AVIATE_CAMERA".to_owned(), "off".to_owned()),
             (
                 "PILOTAGE_SIM_TRUTH_ADDR".to_owned(),
                 format!("127.0.0.1:{}", truth_port(instance)),

@@ -2,13 +2,14 @@
 //! the frames is a deployment property, selected by
 //! `PILOTAGE_PX4_CAMERA`:
 //!
-//! - unset or `on`: Pilotage's C++ gz-transport sidecar delivers the
+//! - `gazebo`: Pilotage's C++ gz-transport sidecar delivers the
 //!   flight-deck rig's `/camera` and `/chase_camera` frames (px4-gz).
 //! - `xplane-plugin`: the in-simulator Pilotage camera plugin dials
 //!   this process and delivers the vehicle camera view (FPV or gimbal
 //!   payload) — the px4-xplane path, where the engine exposes no
 //!   camera topic and the simulator owns the producer's lifetime.
-//! - `off`: no video.
+//! - unset or `off`: no video. A session that runs no Gazebo never
+//!   spawns its sidecar: the launcher has to ask for it.
 //!
 //! Every producer speaks the same `pilotage.bridge.v1` protocol, so the
 //! client, stamping, and media plumbing do not change with the producer.
@@ -41,14 +42,20 @@ const XPLANE_CAMERA_PORT: u16 = 45990;
 /// stale frames instead of growing latency.
 const FRAME_CHANNEL_DEPTH: usize = 4;
 
-/// Resolves `PILOTAGE_PX4_CAMERA` — an unknown value degrades to no
-/// video with a warning rather than inventing a producer.
+/// Resolves `PILOTAGE_PX4_CAMERA`.
 fn camera_mode() -> CameraMode {
-    match std::env::var("PILOTAGE_PX4_CAMERA").as_deref() {
-        Err(_) | Ok("on") => CameraMode::Gazebo,
-        Ok("xplane-plugin") => CameraMode::XPlanePlugin,
-        Ok("off") => CameraMode::Off,
-        Ok(other) => {
+    mode_from(std::env::var("PILOTAGE_PX4_CAMERA").ok().as_deref())
+}
+
+/// The mode a `PILOTAGE_PX4_CAMERA` value names: absence is no video,
+/// and an unknown value degrades to no video with a warning rather than
+/// inventing a producer.
+fn mode_from(value: Option<&str>) -> CameraMode {
+    match value {
+        None | Some("off") => CameraMode::Off,
+        Some("gazebo") => CameraMode::Gazebo,
+        Some("xplane-plugin") => CameraMode::XPlanePlugin,
+        Some(other) => {
             tracing::warn!(value = other, "unknown PILOTAGE_PX4_CAMERA; no video");
             CameraMode::Off
         }
@@ -178,7 +185,20 @@ pub(crate) async fn spawn_camera_bridge(
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
-    use super::{CameraMode, Producer, XPLANE_CAMERA_PORT, bridge_config, producer_for};
+    use super::{CameraMode, Producer, XPLANE_CAMERA_PORT, bridge_config, mode_from, producer_for};
+
+    /// Only a launcher that asks for Gazebo gets the gz sidecar: a
+    /// session that names no camera runs none.
+    #[test]
+    fn the_gz_sidecar_runs_only_when_named() {
+        assert_eq!(mode_from(None), CameraMode::Off);
+        assert_eq!(mode_from(Some("off")), CameraMode::Off);
+        assert_eq!(mode_from(Some("gazebo")), CameraMode::Gazebo);
+        assert_eq!(mode_from(Some("xplane-plugin")), CameraMode::XPlanePlugin);
+        for unknown in ["on", "maplibre", ""] {
+            assert_eq!(mode_from(Some(unknown)), CameraMode::Off, "{unknown:?}");
+        }
+    }
     use pilotage_adapter_api::MeasurementClock;
 
     #[test]
