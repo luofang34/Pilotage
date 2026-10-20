@@ -6,10 +6,10 @@ use pilotage_adapter_api::{
 };
 use pilotage_protocol::MotorState;
 
-use crate::{DumlFrame, RouteAddress};
+use crate::DumlFrame;
+use crate::flight::{Mini3FlightReport, osd_payload};
 
 const MAX_AGE: Duration = Duration::from_millis(300);
-const MINI3_FC_TYPE: u8 = 87;
 const SOURCE_ID: u64 = 0x0e_03_43;
 const ESTIMATOR_QUALITY_UNUSABLE: u32 = 2;
 
@@ -22,10 +22,7 @@ pub(super) struct AirframeReport {
 impl AirframeReport {
     pub(super) fn from_push(frame: &DumlFrame) -> Option<Self> {
         let payload = osd_payload(frame)?;
-        // The SDK selects the Mini 3 FC from this OSD product discriminator.
-        if payload[48] != MINI3_FC_TYPE {
-            return None;
-        }
+        let flight = Mini3FlightReport::from_push(frame)?;
         // This Mini 3 profile infers the legacy OSD angle prefix. It does not
         // establish axis directions or a north reference.
         // https://github.com/o-gs/dji-firmware-tools/blob/195692263c2684cf1ddc4995f2736be6c0fb135e/comm_dissector/wireshark/dji-dumlv1-flyc.lua#L886-L912
@@ -42,12 +39,10 @@ impl AirframeReport {
         }
         Some(Self {
             angles_tenths,
-            // The SDK's fc_osd_push / KeyAreMotorsOnPush reads bit 3 at
-            // byte 32. This reports motor operation, not arm or landed state.
-            motor_state: if payload[32] & 8 == 0 {
-                MotorState::Stopped
-            } else {
+            motor_state: if flight.motors_running {
                 MotorState::Running
+            } else {
+                MotorState::Stopped
             },
         })
     }
@@ -75,19 +70,6 @@ impl AirframeReport {
     }
 }
 
-fn osd_payload(frame: &DumlFrame) -> Option<&[u8; 70]> {
-    if frame.version() != 1
-        || frame.sender() != RouteAddress(14)
-        || frame.receiver() != RouteAddress(2)
-        || frame.flags() != 0
-        || frame.command_set() != 3
-        || frame.command_id() != 0x43
-    {
-        return None;
-    }
-    frame.payload().try_into().ok()
-}
-
 pub(super) struct AirframeSample {
     pub(super) avionics: AvionicsSample,
     pub(super) fc_state: FcStateSample,
@@ -104,12 +86,12 @@ pub(super) struct AirframeObservations {
 
 impl AirframeObservations {
     pub(super) fn receive(&mut self, frame: &DumlFrame, now: Duration) {
-        let Some(payload) = osd_payload(frame) else {
+        if osd_payload(frame).is_none() {
             return;
-        };
+        }
         // A replacement FC can restart its sequence. Negative identity evidence
         // closes the binding even when it cannot advance the stream watermark.
-        if payload[48] != MINI3_FC_TYPE {
+        if Mini3FlightReport::reports_other_model(frame) {
             self.invalidate_binding();
         }
         if let Some(previous) = self.last_sequence {
