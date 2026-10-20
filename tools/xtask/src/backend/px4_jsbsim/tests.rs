@@ -108,6 +108,9 @@ fn the_quad_plans_the_sidecar_then_px4_on_the_instance_port() {
     // gimbal model maps them back with.
     assert_eq!(env(&px4_stage.env, "PX4_PARAM_MNT_MODE_OUT"), Some("0"));
     assert_eq!(env(&px4_stage.env, "PX4_PARAM_MNT_DO_STAB"), Some("1"));
+    // PX4's open-loop output filter is off, so a gimbal rate demand moves
+    // the gimbal at the demanded rate rather than a fraction of it.
+    assert_eq!(env(&px4_stage.env, "PX4_PARAM_MNT_TAU"), Some("0"));
     assert_eq!(env(&px4_stage.env, "PX4_PARAM_PWM_MAIN_FUNC6"), Some("421"));
     let travel = [
         env(&px4_stage.env, "PX4_PARAM_MNT_RANGE_ROLL").unwrap(),
