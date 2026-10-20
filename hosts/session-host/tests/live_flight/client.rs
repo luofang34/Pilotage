@@ -70,6 +70,7 @@ impl Client {
             send,
             recv,
             engine: ClientEngine::new(ClientConfig {
+                join_token: None,
                 client_name: "live-simulator-flight".into(),
                 reconnect: ReconnectPolicy::default(),
             }),

@@ -64,6 +64,7 @@ export function createReconnectController({
   jitterRatio = 0.25,
 }) {
   const state = { wanted: false, attempts: 0, timer: null, stopped: false, halted: false };
+  let currentAttempt = null;
 
   function clearTimer() {
     if (state.timer !== null) {
@@ -73,7 +74,7 @@ export function createReconnectController({
   }
 
   function scheduleNext(rawFailure) {
-    if (state.stopped || state.halted || state.timer !== null) return;
+    if (state.stopped || state.halted) return;
     if (!state.wanted) return; // the user never asked to be connected
     const failure = classifyConnectFailure(rawFailure);
     if (rawFailure && !failure.retryable) {
@@ -82,9 +83,11 @@ export function createReconnectController({
       // failure attached — a visibilitychange, a stray drop notification —
       // would classify as retryable and silently restart the loop.
       state.halted = true;
+      clearTimer();
       log(`connection cannot be auto-recovered (${failure.kind}); press Connect to retry`);
       return;
     }
+    if (state.timer !== null) return;
     if (isActive()) return; // already connected
     if (!isVisible()) return; // hidden/frozen tab would just drop again — wait for visibility
     const delay = reconnectDelayMs(state.attempts, { baseMs, maxMs, jitterRatio }, random());
@@ -98,8 +101,10 @@ export function createReconnectController({
 
   async function attempt(manual) {
     if (state.stopped || !state.wanted) return;
+    const identity = {};
+    currentAttempt = identity;
     const outcome = await connect({ manual });
-    if (state.stopped) return;
+    if (state.stopped || currentAttempt !== identity) return;
     if (outcome && outcome.ok) return; // success: notifyBootstrapComplete resets the backoff
     scheduleNext(outcome && outcome.failure);
   }

@@ -47,6 +47,7 @@ fn live_host_keeps_video_past_the_shutdown_budget_until_shutdown_is_requested() 
             engine_rx,
             shutdown_rx,
             start,
+            None,
         ));
         started.recv().await.expect("producer started");
         engine_barrier(&engine_tx).await;

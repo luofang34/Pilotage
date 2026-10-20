@@ -3,6 +3,7 @@
 // returning programmed outcomes) — not only the pure decision helpers.
 //
 // Run: node clients/web/reconnect.test.mjs
+import "./session-admission.test.mjs";
 
 import {
   reconnectDelayMs,
@@ -108,6 +109,17 @@ function harness(script, { visible = true, active = false } = {}) {
     maxMs: 15000,
   });
   return { sched, connect, logs, controller, setVisible: (v) => (visible = v) };
+}
+
+{
+  const h = harness([{ ok: true }]);
+  h.controller.requestConnect();
+  await flush();
+  h.controller.notifyDropped({ phase: "transport" });
+  check("an untyped drop schedules recovery", h.sched.count() === 1);
+  h.controller.notifyDropped({ phase: "rejected", kind: "admission" });
+  check("a later admission refusal cancels recovery", h.sched.count() === 0);
+  check("admission refusal latches the reconnect halt", h.controller.snapshot().halted);
 }
 
 // ---- auto-reconnect restores the transport but never requests control -------

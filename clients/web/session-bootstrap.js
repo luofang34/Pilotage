@@ -21,12 +21,12 @@ export function createSessionBootstrap({
   handleActionResult,
   applyLeaseResponse,
 }) {
-  async function sendClientHello(writer, token) {
+  async function sendClientHello(writer, token, joinToken = new Uint8Array(0)) {
     if (!transportSessions.isActive(token)) return false;
     const hello = encodeClientHelloEnvelope({
       protocolVersion: SESSION_PROTOCOL_VERSION,
       clientName: "pilotage-web-viewer",
-      joinToken: new Uint8Array(0),
+      joinToken,
     });
     await writer.write(lengthDelimit(hello));
     if (!transportSessions.isActive(token)) return false;

@@ -2333,6 +2333,7 @@ dependencies = [
  "prost",
  "prost-build",
  "sha2 0.10.9",
+ "subtle",
  "thiserror",
 ]
 

@@ -114,6 +114,7 @@ fn lease_response(scope: &str, granted: bool, generation: u64) -> wire::LeaseRes
 /// An admitted link holding nothing yet: the observer's seat.
 fn admitted_link() -> Link {
     let mut engine = ClientEngine::new(ClientConfig {
+        join_token: None,
         client_name: "routing-test".into(),
         reconnect: ReconnectPolicy::default(),
     });

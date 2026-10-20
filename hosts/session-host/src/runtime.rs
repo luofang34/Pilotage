@@ -33,6 +33,8 @@ mod wire_codec;
 pub use automation::spawn_reference_mission_rig;
 pub use automation::{AutomationStatus, MissionRig, TelemetryObserver};
 pub use options::{DEFAULT_MISSION_ANCHOR, MissionNavdataSource, MissionOptions, RuntimeOptions};
+mod network;
+pub use network::{NetworkError, NetworkOptions};
 // The envelope encoder is exported for the wire-fixture test: the committed
 // browser fixture must be THIS host's bytes, not a hand-maintained copy.
 pub use wire_codec::encode_envelope_message;
@@ -142,6 +144,21 @@ pub async fn start(port: u16, adapter: AdapterKind) -> Result<RunningHost, HostE
     start_with_options(port, adapter, RuntimeOptions::from_env()?).await
 }
 
+/// Start with explicit network policy and environment-derived adapter options.
+///
+/// # Errors
+///
+/// Returns [`HostError`] when configuration or startup fails.
+pub async fn start_with_network(
+    port: u16,
+    adapter: AdapterKind,
+    network: NetworkOptions,
+) -> Result<RunningHost, HostError> {
+    let mut options = RuntimeOptions::from_env()?;
+    options.network = network;
+    start_with_options(port, adapter, options).await
+}
+
 /// [`start`] with explicit [`RuntimeOptions`] instead of the environment.
 ///
 /// # Errors
@@ -152,6 +169,7 @@ pub async fn start_with_options(
     adapter: AdapterKind,
     options: RuntimeOptions,
 ) -> Result<RunningHost, HostError> {
+    options.network.validate()?;
     let dev_identity = build_dev_identity().await?;
     let identity: Identity = dev_identity.identity;
     let cert_hash_hex = dev_identity.cert_hash_hex.clone();
@@ -159,14 +177,8 @@ pub async fn start_with_options(
     // The endpoint intentionally keeps OS-default UDP socket buffers. A larger
     // host send buffer would permit a larger video burst but cannot enlarge the
     // browser's receive buffer; per-connection media admission is the bound.
-    let builder = ServerConfig::builder();
-    let builder = if adapter == AdapterKind::Dji {
-        // This bench connection accepts operators on the attached computer.
-        builder.with_bind_address(([127, 0, 0, 1], port).into())
-    } else {
-        builder.with_bind_default(port)
-    };
-    let config = builder
+    let config = ServerConfig::builder()
+        .with_bind_address((options.network.bind_ip, port).into())
         .with_identity(identity)
         .keep_alive_interval(Some(Duration::from_secs(3)))
         .build();
@@ -272,6 +284,7 @@ async fn run_until_shutdown<A>(
     engine_rx: mpsc::Receiver<ToEngine>,
     shutdown_rx: oneshot::Receiver<()>,
     start: tokio::time::Instant,
+    join_token: Option<pilotage_protocol::JoinToken>,
 ) where
     A: VehicleAdapter + Send + 'static,
 {
@@ -288,7 +301,7 @@ async fn run_until_shutdown<A>(
     ));
 
     tokio::select! {
-        () = accept_loop(&endpoint, &engine_tx, &mut tasks, start, media.clone()) => {}
+        () = accept_loop(&endpoint, &engine_tx, &mut tasks, start, media.clone(), join_token) => {}
         result = shutdown_rx => {
             // A dropped sender (host caller gone without an explicit
             // shutdown) is treated the same as an explicit signal, so
@@ -321,6 +334,7 @@ async fn run_with_media_until_shutdown<A>(
     engine_rx: mpsc::Receiver<ToEngine>,
     shutdown_rx: oneshot::Receiver<()>,
     start: tokio::time::Instant,
+    join_token: Option<pilotage_protocol::JoinToken>,
 ) where
     A: VehicleAdapter + Send + 'static,
 {
@@ -333,6 +347,7 @@ async fn run_with_media_until_shutdown<A>(
         engine_rx,
         shutdown_rx,
         start,
+        join_token,
     )
     .await;
     // The adapter is gone. Give the producer and media writers one shared
@@ -366,6 +381,7 @@ async fn accept_loop(
     tasks: &mut JoinSet<()>,
     start: tokio::time::Instant,
     media: Option<MediaHandle>,
+    join_token: Option<pilotage_protocol::JoinToken>,
 ) {
     let next_client = AtomicU64::new(0);
     loop {
@@ -386,7 +402,14 @@ async fn accept_loop(
         let client = ClientKey::new(next_client.fetch_add(1, Ordering::Relaxed));
         tasks.spawn(named_task(
             "connection",
-            accept_and_run(incoming, client, start, engine_tx, media.clone()),
+            accept_and_run(
+                incoming,
+                client,
+                start,
+                engine_tx,
+                media.clone(),
+                join_token.clone(),
+            ),
         ));
     }
 }
@@ -400,6 +423,7 @@ async fn accept_and_run(
     start: tokio::time::Instant,
     engine_tx: mpsc::Sender<ToEngine>,
     media: Option<MediaHandle>,
+    join_token: Option<pilotage_protocol::JoinToken>,
 ) {
     let session_request = match incoming.await {
         Ok(request) => request,
@@ -415,7 +439,7 @@ async fn accept_and_run(
             return;
         }
     };
-    connection::run_connection(connection, client, start, engine_tx, media).await;
+    connection::run_connection(connection, client, start, engine_tx, media, join_token).await;
 }
 
 /// Wraps a future so its exit is logged by name (ADR-0015: critical tasks

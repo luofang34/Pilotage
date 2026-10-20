@@ -206,6 +206,7 @@ fn resolve_slots(args: &FleetArgs, repo_root: &Path) -> Result<Vec<Slot>, XtaskE
             log_dir: repo_root.join(FLEET_DIR).join(&name),
             web_root: stages::viewer_source(repo_root),
             lan: false,
+            join_token_file: None,
             instance: args.instance_base.saturating_add(offset),
             ready_timeout_s: args.ready_timeout_s,
             sim_camera: args.sim_camera,

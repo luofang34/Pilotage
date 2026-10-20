@@ -5,7 +5,9 @@
 use crate::error::XtaskError;
 
 mod profile;
+mod sim;
 pub use profile::Profile;
+use sim::parse_sim;
 
 /// Options for `cargo xtask sim`.
 #[derive(Debug, PartialEq, Eq)]
@@ -25,6 +27,8 @@ pub struct SimArgs {
     /// its connect manifest become reachable from another device, and the
     /// native connect facts are printed.
     pub lan: bool,
+    /// Local file with the host's join code. Required for `--lan`.
+    pub join_token_file: Option<std::path::PathBuf>,
     /// Simulator instance index (`--instance`, default 0). A session on
     /// another instance shifts its simulator and FC ports and isolates
     /// its simulator, so it can run beside the instance-0 session.
@@ -222,51 +226,6 @@ fn parse_reset(args: &[String]) -> Result<(String, u16), XtaskError> {
     Ok((fc, instance))
 }
 
-fn parse_sim(args: &[String]) -> Result<SimArgs, XtaskError> {
-    let mut fc = "aviate".to_owned();
-    let mut profile = Profile::Simulation;
-    let mut host_port: u16 = 4433;
-    let mut viewer_port: u16 = 8080;
-    let mut open = true;
-    let mut lan = false;
-    let mut instance: u16 = 0;
-    let mut ready_timeout_s = crate::backend::DEFAULT_READY_TIMEOUT_S;
-    let mut sim_camera = false;
-    let mut iter = args.iter();
-    while let Some(arg) = iter.next() {
-        match arg.as_str() {
-            "--fc" => fc = required_value(&mut iter, "--fc")?,
-            "--instance" => instance = required_number(&mut iter, "--instance")?,
-            "--profile" => profile = Profile::parse(&required_value(&mut iter, "--profile")?)?,
-            "--port" => host_port = required_port(&mut iter, "--port")?,
-            "--viewer-port" => viewer_port = required_port(&mut iter, "--viewer-port")?,
-            "--open" => open = true,
-            "--no-open" => open = false,
-            "--lan" => lan = true,
-            "--ready-timeout" => ready_timeout_s = required_timeout(&mut iter)?,
-            "--camera" => {
-                sim_camera = crate::camera::parse_choice(&required_value(&mut iter, "--camera")?)?
-            }
-            other => {
-                return Err(XtaskError::Usage {
-                    message: format!("unknown sim flag {other:?}"),
-                });
-            }
-        }
-    }
-    Ok(SimArgs {
-        fc,
-        profile,
-        host_port,
-        viewer_port,
-        open,
-        lan,
-        instance,
-        ready_timeout_s,
-        sim_camera,
-    })
-}
-
 fn parse_fleet(args: &[String]) -> Result<FleetArgs, XtaskError> {
     let mut fleet = FleetArgs {
         vehicles: Vec::new(),
@@ -404,7 +363,8 @@ commands:
                            runs beside instance 0 on other ports
       --open               open the ready URL (default)
       --no-open            do not open the ready URL
-      --lan                serve the session to the local network
+      --lan                serve the session to the local network; requires a join code
+      --join-token-file <path> absolute path to the host's local join-code file
       --ready-timeout <s>  how long each simulator and flight-controller
                            stage may take to come up (default: 180)
       --camera <camera>    none (default) | maplibre: render the vehicle's

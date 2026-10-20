@@ -259,6 +259,7 @@ async fn start_sim_compat_host() -> runtime::RunningHost {
         0,
         AdapterKind::Reference,
         runtime::RuntimeOptions {
+            network: runtime::NetworkOptions::default(),
             legacy_compatibility: true,
             mission: None,
             sim_camera_port: None,
@@ -304,6 +305,7 @@ async fn hello_lease_frame_and_stale_generation_rejection() {
         .expect("bootstrap stream opens")
         .await
         .expect("bootstrap stream finishes opening");
+    send_envelope(&mut send, &hello_envelope(SESSION_PROTOCOL_VERSION)).await;
     let mut authority_recv = timeout(TEST_TIMEOUT, connection.accept_uni())
         .await
         .expect("accept_uni does not time out")
@@ -316,7 +318,6 @@ async fn hello_lease_frame_and_stale_generation_rejection() {
     // (ADR-0005); consume it before parsing length-delimited envelopes.
     read_authority_tag(&mut authority_recv, &mut authority_pending).await;
 
-    send_envelope(&mut send, &hello_envelope(SESSION_PROTOCOL_VERSION)).await;
     let welcome_envelope = read_one_envelope(&mut recv, &mut pending).await;
     let welcome = match welcome_envelope.payload {
         Some(wire::envelope::Payload::ServerWelcome(welcome)) => welcome,

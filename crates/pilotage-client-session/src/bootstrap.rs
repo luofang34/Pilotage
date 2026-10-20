@@ -6,13 +6,16 @@ use pilotage_protocol::wire;
 use crate::control::SCHEMA_VERSION;
 
 /// The hello this client opens every session with.
-pub(crate) fn hello(client_name: &str) -> Vec<u8> {
+pub(crate) fn hello(
+    client_name: &str,
+    join_token: Option<&pilotage_protocol::JoinToken>,
+) -> Vec<u8> {
     let envelope = wire::Envelope {
         schema_version: SCHEMA_VERSION,
         payload: Some(wire::envelope::Payload::ClientHello(wire::ClientHello {
             protocol_version: pilotage_protocol::SESSION_PROTOCOL_VERSION,
             client_name: client_name.to_owned(),
-            join_token: Vec::new(),
+            join_token: join_token.map_or_else(Vec::new, |token| token.as_bytes().to_vec()),
         })),
     };
     pilotage_protocol::encode_envelope_length_delimited(&envelope)

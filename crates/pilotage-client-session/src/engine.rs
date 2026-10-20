@@ -23,6 +23,8 @@ pub struct ClientConfig {
     pub client_name: String,
     /// Backoff bounds for recovery.
     pub reconnect: ReconnectPolicy,
+    /// Optional secret for transport admission, independent of control leases.
+    pub join_token: Option<pilotage_protocol::JoinToken>,
 }
 
 /// Where the session stands. Shells render this; they do not infer it.
@@ -154,6 +156,9 @@ impl ClientEngine {
 
     /// Consumes one transport event.
     pub fn handle(&mut self, event: TransportEvent, now_ms: u64) -> Vec<ClientAction> {
+        if self.phase == ClientPhase::Stopped {
+            return Vec::new();
+        }
         match event {
             TransportEvent::Connected => self.on_connected(),
             TransportEvent::BootstrapReceived(bytes) => self.on_bootstrap(&bytes),
@@ -187,6 +192,14 @@ impl ClientEngine {
             }
             TransportEvent::DatagramReceived(bytes) => self.on_datagram(&bytes, now_ms),
             TransportEvent::TransportLost { .. } => self.on_lost(now_ms),
+            TransportEvent::AdmissionRejected => {
+                self.reset_connection();
+                self.phase = ClientPhase::Stopped;
+                vec![
+                    ClientAction::Emit(ModuleEvent::ConnectionDown { retry_at_ms: None }),
+                    ClientAction::Stop(ClientFault::AdmissionRejected),
+                ]
+            }
         }
     }
 
@@ -280,6 +293,7 @@ impl ClientEngine {
         self.streams.reset();
         vec![ClientAction::SendBootstrap(bootstrap::hello(
             &self.config.client_name,
+            self.config.join_token.as_ref(),
         ))]
     }
 
@@ -440,15 +454,7 @@ impl ClientEngine {
         if self.phase == ClientPhase::Stopped {
             return Vec::new();
         }
-        // Authority does not survive the loss; observation is what recovery
-        // restores. The lanes are dropped and never rebuilt by reconnect.
-        self.lanes.clear();
-        self.pending_leases.clear();
-        self.pending_takeover = None;
-        self.admission = None;
-        self.activation_announced = false;
-        self.streams.reset();
-        self.bootstrap_pending.clear();
+        self.reset_connection();
         self.phase = ClientPhase::Disconnected;
         let at_ms = self
             .reconnect
@@ -459,5 +465,21 @@ impl ClientEngine {
             }),
             ClientAction::ScheduleReconnect { at_ms },
         ]
+    }
+
+    fn reset_connection(&mut self) {
+        // Recovery cannot restore the authority held by a lost connection.
+        self.lanes.clear();
+        self.pending_leases.clear();
+        self.pending_takeover = None;
+        self.admission = None;
+        self.activation_announced = false;
+        self.streams.reset();
+        self.bootstrap_pending.clear();
+        self.authority = AuthorityMirror::default();
+        self.control_window_id = 0;
+        self.window_received_at_ns = 0;
+        self.window_probe_at = None;
+        self.last_control_at = 0;
     }
 }

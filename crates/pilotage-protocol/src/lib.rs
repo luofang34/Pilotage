@@ -13,6 +13,7 @@ pub mod h264;
 mod heading;
 mod ids;
 mod intent;
+mod join_token;
 mod landed_state;
 mod payload;
 mod scopes;
@@ -40,6 +41,7 @@ pub use intent::{
     GimbalRateIntent, IntentFamily, ModeTarget, PositionHoldIntent, ReferenceFrame, VelocityIntent,
     actions_conflict,
 };
+pub use join_token::{ADMISSION_REJECTED_CLOSE_CODE, JoinToken, JoinTokenError};
 pub use landed_state::LandedState;
 pub use scopes::{DIRECT_SCOPE, MOTION_SCOPE};
 pub use session::{

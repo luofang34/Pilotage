@@ -41,6 +41,8 @@ pub struct SessionContext {
     pub web_root: PathBuf,
     /// Serve the session to the local network rather than loopback only.
     pub lan: bool,
+    /// Local join-code file passed to the host, never to the public viewer.
+    pub join_token_file: Option<PathBuf>,
     /// Simulator instance index. Instance 0 is the single-session default;
     /// a backend that can run several copies at once shifts its ports and
     /// isolates its simulator by this index.
@@ -71,6 +73,7 @@ impl SessionContext {
             viewer_port: 8080,
             profile: Profile::Simulation,
             lan: false,
+            join_token_file: None,
             instance: 0,
             ready_timeout_s: DEFAULT_READY_TIMEOUT_S,
             sim_camera: false,

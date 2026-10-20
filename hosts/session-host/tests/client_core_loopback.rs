@@ -60,6 +60,7 @@ impl Driver {
             recv,
             authority_recv: None,
             engine: ClientEngine::new(ClientConfig {
+                join_token: None,
                 client_name: "client-core-loopback".into(),
                 reconnect: ReconnectPolicy::default(),
             }),
@@ -230,6 +231,7 @@ async fn the_client_core_drives_admission_lease_and_an_applied_control_frame() {
         0,
         AdapterKind::Reference,
         runtime::RuntimeOptions {
+            network: runtime::NetworkOptions::default(),
             legacy_compatibility: true,
             mission: None,
             sim_camera_port: None,
@@ -310,6 +312,7 @@ async fn a_cooperative_handover_moves_control_between_two_engine_clients() {
         0,
         AdapterKind::Reference,
         runtime::RuntimeOptions {
+            network: runtime::NetworkOptions::default(),
             legacy_compatibility: true,
             mission: None,
             sim_camera_port: None,
