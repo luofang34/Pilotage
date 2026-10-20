@@ -54,11 +54,11 @@ fn full_writes_deduplicate_unchanged_targets_but_new_feedback_advances_them() ->
         harness.apply(frame(-HOST_PITCH_RATE_LIMIT_RPS), millis);
         harness.step(millis);
     }
-    assert_eq!(targets(&harness)?, vec![-150]);
+    assert_eq!(targets(&harness)?, vec![-300]);
     pose(&mut harness, -10, 3, 130)?;
     harness.apply(frame(-HOST_PITCH_RATE_LIMIT_RPS), 140);
     harness.step(141);
-    assert_eq!(targets(&harness)?, vec![-150, -160]);
+    assert_eq!(targets(&harness)?, vec![-300, -310]);
     Ok(())
 }
 
@@ -74,7 +74,7 @@ fn one_recenter_follows_fresh_feedback_from_full_down_to_horizontal() -> TestRes
         harness.step(now + 1);
     }
     let targets = targets(&harness)?;
-    assert_eq!(targets.first(), Some(&-750));
+    assert_eq!(targets.first(), Some(&-600));
     assert_eq!(targets.last(), Some(&0));
     assert_eq!(targets.iter().filter(|target| **target == 0).count(), 1);
     assert!(targets.windows(2).all(|pair| pair[1] - pair[0] == 5));
@@ -117,13 +117,13 @@ fn an_unchanged_pending_target_keeps_its_original_write_deadline() -> TestResult
 
 #[test]
 fn an_expired_pending_recenter_cannot_resume_with_continuous_neutral_input() -> TestResult {
-    let mut harness = ready_at(-300)?;
+    let mut harness = ready_at(-600)?;
     harness.set_write_limit(0)?;
     harness.apply(recenter(), 20);
     harness.apply(frame(0.0), 80);
     harness.step(120);
     harness.set_write_limit(usize::MAX)?;
-    pose(&mut harness, -295, 3, 130)?;
+    pose(&mut harness, -595, 3, 130)?;
     harness.apply(frame(0.0), 140);
     harness.step(141);
     assert!(targets(&harness)?.is_empty());
@@ -134,7 +134,7 @@ fn an_expired_pending_recenter_cannot_resume_with_continuous_neutral_input() -> 
 #[test]
 fn expired_or_rejected_input_cancels_recenter_without_neutral_resumption() -> TestResult {
     for reject in [false, true] {
-        let mut harness = ready_at(-300)?;
+        let mut harness = ready_at(-600)?;
         harness.apply(recenter(), 20);
         harness.step(21);
         if reject {
@@ -146,10 +146,10 @@ fn expired_or_rejected_input_cancels_recenter_without_neutral_resumption() -> Te
             ));
         }
         let now = if reject { 80 } else { 121 };
-        pose(&mut harness, -295, 3, now)?;
+        pose(&mut harness, -595, 3, now)?;
         harness.apply(frame(0.0), now);
         harness.step(now + 1);
-        assert_eq!(targets(&harness)?, vec![-150]);
+        assert_eq!(targets(&harness)?, vec![-300]);
     }
     Ok(())
 }
@@ -169,17 +169,17 @@ fn rejected_demand_from_current_authority_cancels_an_active_recenter() -> TestRe
         yaw,
         arm,
     ] {
-        let mut harness = ready_at(-300)?;
+        let mut harness = ready_at(-600)?;
         harness.apply(recenter(), 20);
         harness.step(21);
         assert!(matches!(
             harness.apply(rejected, 40).disposition,
             Disposition::Rejected(_)
         ));
-        pose(&mut harness, -295, 3, 80)?;
+        pose(&mut harness, -595, 3, 80)?;
         harness.apply(frame(0.0), 80);
         harness.step(81);
-        assert_eq!(targets(&harness)?, vec![-150]);
+        assert_eq!(targets(&harness)?, vec![-300]);
     }
     Ok(())
 }
@@ -207,7 +207,7 @@ fn rejected_foreign_scope_or_authority_cannot_cancel_the_current_recenter() -> T
         old_deadline,
         unbound_deadline,
     ] {
-        let mut harness = ready_at(-300)?;
+        let mut harness = ready_at(-600)?;
         let mut current = recenter();
         current.generation = Generation::new(2);
         harness.apply(current, 20);
@@ -216,49 +216,49 @@ fn rejected_foreign_scope_or_authority_cannot_cancel_the_current_recenter() -> T
             harness.apply(rejected, 40).disposition,
             Disposition::Rejected(_)
         ));
-        pose(&mut harness, -295, 3, 80)?;
+        pose(&mut harness, -595, 3, 80)?;
         let mut neutral = frame(0.0);
         neutral.generation = Generation::new(2);
         harness.apply(neutral, 80);
         harness.step(81);
-        assert_eq!(targets(&harness)?, vec![-150, -145]);
+        assert_eq!(targets(&harness)?, vec![-300, -295]);
     }
     Ok(())
 }
 #[test]
 fn feedback_loss_cancels_recenter_before_fresh_reports_return() -> TestResult {
-    let mut harness = ready_at(-300)?;
+    let mut harness = ready_at(-600)?;
     harness.apply(recenter(), 20);
     harness.step(21);
     harness.step(321);
     for sequence in 3..6 {
-        pose(&mut harness, -295, sequence, 330 + u64::from(sequence) * 10)?;
+        pose(&mut harness, -595, sequence, 330 + u64::from(sequence) * 10)?;
     }
     harness.apply(frame(0.0), 390);
     harness.step(391);
-    assert_eq!(targets(&harness)?, vec![-150]);
+    assert_eq!(targets(&harness)?, vec![-300]);
     Ok(())
 }
 
 #[test]
 fn an_out_of_range_observation_cancels_recenter_before_valid_feedback_returns() -> TestResult {
-    let mut harness = ready_at(-300)?;
+    let mut harness = ready_at(-600)?;
     harness.apply(recenter(), 20);
     harness.step(21);
     pose(&mut harness, 1, 3, 40)?;
     for sequence in 4..7 {
-        pose(&mut harness, -295, sequence, 10 + u64::from(sequence) * 10)?;
+        pose(&mut harness, -595, sequence, 10 + u64::from(sequence) * 10)?;
     }
     harness.apply(frame(0.0), 80);
     harness.step(81);
-    assert_eq!(targets(&harness)?, vec![-150]);
+    assert_eq!(targets(&harness)?, vec![-300]);
     Ok(())
 }
 
 #[test]
 fn new_authority_and_link_loss_require_a_new_recenter_request() -> TestResult {
     for link_loss in [false, true] {
-        let mut harness = ready_at(-300)?;
+        let mut harness = ready_at(-600)?;
         harness.apply(recenter(), 20);
         harness.step(21);
         if link_loss {
@@ -266,6 +266,7 @@ fn new_authority_and_link_loss_require_a_new_recenter_request() -> TestResult {
             harness.link_loss(None, 31)?;
         }
         let written = harness.written()?;
+        pose(&mut harness, -595, 3, 40)?;
         let mut neutral = frame(0.0);
         neutral.generation = Generation::new(2);
         harness.apply(neutral, 40);
@@ -277,7 +278,7 @@ fn new_authority_and_link_loss_require_a_new_recenter_request() -> TestResult {
 
 #[test]
 fn a_late_control_frame_does_not_cancel_a_partial_link_loss_hold() -> TestResult {
-    let mut harness = ready_at(-300)?;
+    let mut harness = ready_at(-600)?;
     harness.apply(recenter(), 20);
     harness.step(21);
     harness.set_write_limit(3)?;
@@ -295,7 +296,7 @@ fn a_late_control_frame_does_not_cancel_a_partial_link_loss_hold() -> TestResult
     assert!(harness.adapter.status_cached().fault.is_none());
     harness.set_write_limit(usize::MAX)?;
     harness.step(50);
-    assert_eq!(targets(&harness)?, vec![-150, -300]);
+    assert_eq!(targets(&harness)?, vec![-300, -600]);
     assert!(harness.adapter.status_cached().fault.is_none());
     Ok(())
 }
@@ -316,7 +317,7 @@ fn a_new_recenter_after_manual_camera_motion_can_send_zero_again() -> TestResult
 
 #[test]
 fn a_cancelled_partial_write_never_commits_a_plan_or_sends_a_successor() -> TestResult {
-    let mut harness = ready_at(-300)?;
+    let mut harness = ready_at(-600)?;
     harness.set_write_limit(3)?;
     harness.apply(recenter(), 20);
     harness.step(21);
@@ -336,7 +337,7 @@ fn a_cancelled_partial_write_never_commits_a_plan_or_sends_a_successor() -> Test
 
 #[test]
 fn capture_failure_after_a_full_write_cannot_commit_planner_history() -> TestResult {
-    let mut harness = ready_at(-300)?;
+    let mut harness = ready_at(-600)?;
     harness.apply(recenter(), 20);
     harness.fail_capture()?;
     harness.step(21);
@@ -352,7 +353,7 @@ fn capture_failure_after_a_full_write_cannot_commit_planner_history() -> TestRes
             .observed
             .as_mut()
             .unwrap()
-            .plan(-300, 0.0, false, Duration::from_millis(40))?
+            .plan(-600, 0.0, false, Duration::from_millis(40))?
             .is_none()
     );
     let progress = harness
@@ -368,11 +369,11 @@ fn capture_failure_after_a_full_write_cannot_commit_planner_history() -> TestRes
 
 #[test]
 fn a_missing_full_write_receipt_keeps_unknown_outcome_and_cancels_recenter() -> TestResult {
-    let mut harness = ready_at(-300)?;
+    let mut harness = ready_at(-600)?;
     harness.apply(recenter(), 20);
     harness.lose_write_receipt()?;
     harness.step(21);
-    assert_eq!(targets(&harness)?, vec![-150]);
+    assert_eq!(targets(&harness)?, vec![-300]);
     assert!(harness.adapter.status_cached().control_locked);
     assert!(harness.adapter.control.observed_write.is_none());
     let progress = harness

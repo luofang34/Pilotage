@@ -153,7 +153,7 @@ This adapter exposes a DJI Mini 3 bench object with gimbal control. Flight
 and positioning control are not implemented. Keep the propellers removed.
 The default `observed` control mode requires fresh gimbal observations before
 it sends a pitch command. Pitch targets are limited to -90 through 0 degrees.
-The host limits target planning to 15 degrees per second. This is not a
+The host limits target planning to 30 degrees per second. This is not a
 measured device speed limit. Recenter continues while control input and
 feedback remain valid. The host does not repeat an unchanged target after
 a full write.

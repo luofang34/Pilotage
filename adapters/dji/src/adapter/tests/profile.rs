@@ -13,7 +13,7 @@ use crate::adapter::{BENCH_PITCH_RATE_LIMIT_RPS, DjiFault, HOST_PITCH_RATE_LIMIT
 
 #[test]
 fn both_modes_advertise_the_selected_host_policy_without_a_hardware_speed_claim() -> TestResult {
-    for (harness, degrees_per_second) in [(Harness::new(), 15.0), (Harness::bench(), 5.0)] {
+    for (harness, degrees_per_second) in [(Harness::new(), 30.0), (Harness::bench(), 5.0)] {
         let profile = harness.adapter.profile;
         assert_eq!(profile.minimum_tenths(), -900);
         assert!(
@@ -84,10 +84,10 @@ fn bench_rejects_observed_speed_and_keeps_its_five_degree_rate() -> TestResult {
 
 #[test]
 fn observed_manual_and_recenter_steps_keep_the_one_second_encoding() -> TestResult {
-    for (recenter, expected_target) in [(false, -450_i16), (true, -150_i16)] {
+    for (recenter, expected_target) in [(false, -750_i16), (true, -150_i16)] {
         let mut harness = Harness::new();
         for (index, mut pose) in observed_poses().into_iter().enumerate() {
-            pose[11..13].copy_from_slice(&(-300_i16).to_le_bytes());
+            pose[11..13].copy_from_slice(&(-450_i16).to_le_bytes());
             let end = pose.len() - 2;
             let checksum = turret_dji::frame_checksum(&pose[..end]).to_le_bytes();
             pose[end..].copy_from_slice(&checksum);

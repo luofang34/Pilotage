@@ -47,7 +47,28 @@ fn a_diagonal_shared_mapping_commands_bounded_pitch_without_yaw() -> TestResult 
     let written = harness.written()?;
     let packets = packets(&written);
     assert_eq!(packets.len(), 2);
-    assert_eq!(packets[1].payload(), &[0, 0, 0, 0, 57, 255, 7, 10]);
+    assert_eq!(packets[1].payload(), &[0, 0, 0, 0, 163, 254, 7, 10]);
+    Ok(())
+}
+
+#[test]
+fn partial_demand_scales_from_the_advertised_pitch_policy() -> TestResult {
+    for (demand, target) in [(-0.25, -124), (-0.5, -199), (-1.0, -349)] {
+        let mut harness = Harness::new();
+        harness.prime()?;
+        let request = mapped_frame(&harness, demand, 0.0)?;
+        assert_eq!(
+            harness.apply(request, 20).disposition,
+            Disposition::Transformed
+        );
+        harness.step(30);
+        let written = harness.written()?;
+        let commands = packets(&written);
+        assert_eq!(commands.len(), 2);
+        let payload = commands[1].payload();
+        assert_eq!(i16::from_le_bytes([payload[4], payload[5]]), target);
+        assert_eq!(&payload[6..], &[7, 10]);
+    }
     Ok(())
 }
 

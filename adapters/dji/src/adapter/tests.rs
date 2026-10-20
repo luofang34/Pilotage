@@ -103,7 +103,7 @@ fn recorded_poses_publish_payload_only_and_bound_pitch_commands() -> TestResult 
         (move_packet.command_set(), move_packet.command_id()),
         (4, 0x14)
     );
-    assert_eq!(move_packet.payload(), &[0, 0, 0, 0, 57, 255, 7, 10]);
+    assert_eq!(move_packet.payload(), &[0, 0, 0, 0, 163, 254, 7, 10]);
     assert_eq!(h.recorded("tx")?, written);
     Ok(())
 }

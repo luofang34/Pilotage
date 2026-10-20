@@ -39,7 +39,7 @@ pub use video::EncodedVideoStream;
 
 const GIMBAL_SCOPE: &str = "vehicle.gimbal";
 // This host policy bounds synthesized commands, not the hardware's maximum speed.
-const HOST_PITCH_RATE_LIMIT_RPS: f32 = core::f32::consts::PI / 12.0;
+const HOST_PITCH_RATE_LIMIT_RPS: f32 = core::f32::consts::PI / 6.0;
 const BENCH_PITCH_RATE_LIMIT_RPS: f32 = core::f32::consts::PI / 36.0;
 
 pub use config::{DjiAdapterError, DjiConfig, DjiControlMode, DjiFault, DjiStatus};
