@@ -8,6 +8,32 @@ use crate::{
 
 const MOTION: &str = "vehicle.motion";
 
+#[test]
+fn land_uses_the_reliable_action_lane_without_an_implicit_disarm() {
+    let mut engine = engine();
+    admit(&mut engine, 7, 42);
+    engine.request_lease(1, MOTION);
+    grant(&mut engine, 4);
+    let prepared = engine
+        .prepare_control_action_at(
+            1,
+            MOTION,
+            wire::ControlActionRequest {
+                action: wire::ControlAction::Land as i32,
+                ..Default::default()
+            },
+            10,
+        )
+        .expect("held landing lane");
+    assert_identity(&prepared, 10);
+    assert_eq!(prepared.actions.len(), 1);
+    let sent = command(&prepared.actions);
+    assert_eq!(
+        sent.request.expect("landing request").action,
+        wire::ControlAction::Land as i32
+    );
+}
+
 fn takeoff(action_id: u32) -> wire::ControlActionRequest {
     wire::ControlActionRequest {
         action: wire::ControlAction::Takeoff as i32,

@@ -173,6 +173,7 @@ fn action_kind(kind: pilotage_protocol::ActionKind) -> wire::ControlAction {
         Domain::Arm => wire::ControlAction::Arm,
         Domain::Disarm => wire::ControlAction::Disarm,
         Domain::Takeoff => wire::ControlAction::Takeoff,
+        Domain::Land => wire::ControlAction::Land,
         Domain::ModeRequest => wire::ControlAction::ModeRequest,
         Domain::GimbalRecenter => wire::ControlAction::GimbalRecenter,
         Domain::CameraZoomIn => wire::ControlAction::CameraZoomIn,

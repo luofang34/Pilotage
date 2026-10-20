@@ -12,6 +12,7 @@ fn takeoff_cannot_share_an_unordered_set_with_a_flight_transition() {
             target: ModeTarget::Return,
         },
         ControlAction::Takeoff,
+        ControlAction::Land,
     ] {
         assert!(actions_conflict(&[ControlAction::Takeoff, other]));
         assert!(actions_conflict(&[other, ControlAction::Takeoff]));

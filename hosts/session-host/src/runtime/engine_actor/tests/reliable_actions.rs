@@ -65,6 +65,24 @@ fn a_retransmitted_action_executes_once_and_replays_its_result() {
 }
 
 #[test]
+fn a_land_retransmission_keeps_one_action_and_replays_its_correlated_result() {
+    let mut actor = actor();
+    let mut receiver = register_client(&mut actor);
+    let client = ClientKey::new(1);
+    let mut frame = arm_frame(17);
+    frame.actions = vec![pilotage_protocol::ControlAction::Land];
+    actor.apply_to_adapter(client, frame.clone());
+    assert_eq!(
+        actor.adapter.applied_actions,
+        vec![vec![pilotage_protocol::ControlAction::Land]]
+    );
+    assert_eq!(drain_result_ids(&mut receiver), vec![17]);
+    actor.apply_to_adapter(client, frame);
+    assert_eq!(actor.adapter.applied_actions.len(), 1);
+    assert_eq!(drain_result_ids(&mut receiver), vec![17]);
+}
+
+#[test]
 fn an_uncorrelated_action_is_never_deduplicated() {
     let mut actor = actor();
     let _receiver = register_client(&mut actor);
