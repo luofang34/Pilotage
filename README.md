@@ -54,9 +54,37 @@ You provide the pieces git does not vendor:
 
 ## DJI USB bench connection on macOS
 
-Select the RC-N1 USB CDC callout path and a new capture file. The capture
-directory must exist. The host refuses to overwrite a capture.
+Select one RC-N1 attachment and a new capture file. The capture directory
+must exist. The host refuses to overwrite a capture.
 The DJI host listens on the local loopback interface.
+
+For the upper USB port, set `PILOTAGE_DJI_USB=auto` to select the only matching
+DJI C5 device in the macOS I/O Registry. The device must already expose the
+iAP and `com.dji.logiclink` interfaces. Discovery only reads registry properties.
+The host stops if no device or more than one device matches. It checks the
+full USB descriptors when it opens the selected device.
+The host does not run the upper-port bootstrap procedure or change the USB
+role or device configuration. Connecting the cable alone does not ensure
+that the required profile is present.
+
+```sh
+PILOTAGE_DJI_USB=auto \
+PILOTAGE_DJI_CAPTURE=/tmp/dji-session-01.jsonl \
+cargo run --release -p pilotage-session-host --no-default-features -- --adapter dji
+```
+
+To select an explicit attachment for diagnostics, use
+`PILOTAGE_DJI_USB_REGISTRY_ID` instead of `PILOTAGE_DJI_USB`. Use the current
+device registry ID as a nonzero decimal value or a hexadecimal value with
+a `0x` prefix. The registry ID can change when the cable is disconnected.
+
+The upper interface supplies telemetry and H.264 video from one connection.
+Video decoding requires `ffmpeg` on `PATH`. Set `PILOTAGE_DJI_FFMPEG` to an
+absolute executable path to select another installation. A decoder that
+cannot start prevents host startup. Camera capture time and calibration
+remain unknown.
+
+For the lower USB CDC port, select its callout path instead:
 
 ```sh
 PILOTAGE_DJI_SERIAL=/dev/cu.usbmodemDEVICE \
@@ -64,8 +92,13 @@ PILOTAGE_DJI_CAPTURE=/tmp/dji-session-01.jsonl \
 cargo run --release -p pilotage-session-host --no-default-features -- --adapter dji
 ```
 
-This adapter exposes a DJI Mini 3 bench object with gimbal control. Flight,
-positioning, and video are not implemented. Keep the propellers removed.
+Set only one of `PILOTAGE_DJI_SERIAL`, `PILOTAGE_DJI_USB_REGISTRY_ID`, or
+`PILOTAGE_DJI_USB`.
+An invalid attachment or an unsupported platform fails startup. The host
+does not select another device or transport.
+
+This adapter exposes a DJI Mini 3 bench object with gimbal control. Flight
+and positioning control are not implemented. Keep the propellers removed.
 The default `observed` control mode requires fresh gimbal observations before
 it sends a pitch command. Pitch targets are limited to -5 through 0 degrees.
 The adapter ignores horizontal gimbal input because yaw control is not

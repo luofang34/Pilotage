@@ -6,8 +6,8 @@ use pilotage_adapter_api::{
 };
 use pilotage_protocol::{ControlAction, ControlIntent, ScopeId, ScopedControlFrame, VehicleId};
 
-use super::{DjiAdapter, DjiControlMode, bench::BenchState, capability::MAX_PITCH_RATE};
-use crate::GimbalPitchTarget;
+use super::{DjiAdapter, DjiControlMode, bench::BenchState};
+use turret_dji::Mini3ControlProfile;
 
 #[derive(Default)]
 pub(super) struct ControlState {
@@ -20,10 +20,11 @@ pub(super) struct ControlState {
 }
 
 impl ControlState {
-    pub(super) fn new(mode: DjiControlMode) -> Self {
+    pub(super) fn new(mode: DjiControlMode, profile: Mini3ControlProfile) -> Self {
         Self {
+            sequence: 2,
             bench: (mode == DjiControlMode::BenchInitialHorizontal)
-                .then(BenchState::from_confirmed_horizontal),
+                .then(|| BenchState::from_confirmed_horizontal(profile)),
             ..Self::default()
         }
     }
@@ -87,7 +88,7 @@ impl DjiAdapter {
         if self.control.link_loss {
             return Err(RejectReason::LinkLossEngaged);
         }
-        let (rate, recenter) = demand(frame)?;
+        let (rate, recenter) = demand(frame, self.profile)?;
         let deadline = write_deadline(frame, now)?;
         self.bind_authority(frame, now)?;
         if self.control.bench.is_some() {
@@ -109,14 +110,16 @@ impl DjiAdapter {
                 return Err(RejectReason::MeasurementUnavailable);
             }
         }
-        let pitch = turret_dji::observed_pitch_target(pose.angles.pitch_tenths, rate, recenter)
+        let pitch = self
+            .profile
+            .observed_pitch_target(pose.angles.pitch_tenths, rate, recenter)
             .map_err(|error| RejectReason::Other(error.to_string()))?;
         if !self
             .connection
             .queue_pitch_until(pitch, self.control.sequence, now, deadline)
         {
             return Err(RejectReason::Other(
-                "DJI serial packet is still pending".to_owned(),
+                "DJI transport packet is still pending".to_owned(),
             ));
         }
         self.control.sequence = self.control.sequence.wrapping_add(1);
@@ -207,7 +210,9 @@ impl DjiAdapter {
         let Some(pose) = self.observations.latest else {
             return Err(rejected("gimbal observation is absent"));
         };
-        let pitch = GimbalPitchTarget::from_tenths(pose.angles.pitch_tenths)
+        let pitch = self
+            .profile
+            .pitch_target(pose.angles.pitch_tenths)
             .map_err(|error| rejected(&error.to_string()))?;
         if !self.connection.queue_pitch_until(
             pitch,
@@ -224,14 +229,17 @@ impl DjiAdapter {
             .write_pending_blocking(now, true, &mut clock);
         if self.connection.fault.is_some() || self.connection.pending_bytes() != 0 {
             return Err(rejected(
-                "the DJI hold command did not reach the complete serial write",
+                "the DJI hold command did not reach the complete transport write",
             ));
         }
         Ok(())
     }
 }
 
-fn demand(frame: &ScopedControlFrame) -> Result<(f32, bool), RejectReason> {
+fn demand(
+    frame: &ScopedControlFrame,
+    profile: Mini3ControlProfile,
+) -> Result<(f32, bool), RejectReason> {
     if frame.carries_payload()
         || !frame.carries_typed()
         || frame.actions.len() > 1
@@ -249,7 +257,7 @@ fn demand(frame: &ScopedControlFrame) -> Result<(f32, bool), RejectReason> {
             if rate.pitch_rate.is_finite()
                 && rate.yaw_rate.is_finite()
                 && rate.yaw_rate == 0.0
-                && rate.pitch_rate.abs() <= MAX_PITCH_RATE =>
+                && rate.pitch_rate.abs() <= profile.rate_limit().as_radians_per_second() =>
         {
             rate.pitch_rate
         }

@@ -3,6 +3,7 @@ use std::time::Duration;
 use pilotage_adapter_api::{SourceIncarnation, TelemetryBatch, TelemetrySample};
 use pilotage_protocol::{VehicleId, wire};
 use pilotage_timing::SimTick;
+use turret_dji::Mini3ControlProfile;
 
 use crate::{DumlFrame, GimbalAngles, RouteAddress};
 
@@ -18,6 +19,7 @@ pub(super) struct Pose {
 pub(super) struct Observations {
     pub(super) latest: Option<Pose>,
     pub(super) consecutive: u8,
+    profile: Mini3ControlProfile,
     incarnation: SourceIncarnation,
     sequence: u32,
     published_sequence: u32,
@@ -55,10 +57,11 @@ impl Observations {
         }
     }
 
-    pub(super) fn new(incarnation: SourceIncarnation) -> Self {
+    pub(super) fn new(incarnation: SourceIncarnation, profile: Mini3ControlProfile) -> Self {
         Self {
             latest: None,
             consecutive: 0,
+            profile,
             incarnation,
             sequence: 0,
             published_sequence: 0,
@@ -88,8 +91,9 @@ impl Observations {
         }
         let yaw_follow = frame.payload().get(6).is_some_and(|mode| mode >> 6 == 2);
         let continuous = self.age(now).is_some_and(|age| age <= MAX_AGE)
-            && self.latest.is_some_and(Pose::qualifies);
-        self.consecutive = if !yaw_follow || !(-50..=0).contains(&angles.pitch_tenths) {
+            && self.latest.is_some_and(|pose| pose.qualifies(self.profile));
+        self.consecutive = if !yaw_follow || self.profile.pitch_target(angles.pitch_tenths).is_err()
+        {
             0
         } else if !continuous {
             1
@@ -118,7 +122,7 @@ impl Observations {
     pub(super) fn ready(&self, now: Duration) -> bool {
         self.consecutive >= 3
             && self.age(now).is_some_and(|age| age <= MAX_AGE)
-            && self.latest.is_some_and(Pose::qualifies)
+            && self.latest.is_some_and(|pose| pose.qualifies(self.profile))
     }
 
     pub(super) fn sample(
@@ -197,8 +201,8 @@ impl Observations {
 }
 
 impl Pose {
-    fn qualifies(self) -> bool {
-        self.yaw_follow && (-50..=0).contains(&self.angles.pitch_tenths)
+    fn qualifies(self, profile: Mini3ControlProfile) -> bool {
+        self.yaw_follow && profile.pitch_target(self.angles.pitch_tenths).is_ok()
     }
 }
 

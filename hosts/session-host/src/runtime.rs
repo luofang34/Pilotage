@@ -12,6 +12,8 @@ mod betaflight_config;
 mod connection;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) mod dji;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod dji_video;
 mod engine_actor;
 #[cfg(feature = "sim")]
 mod gazebo_launch;
@@ -23,6 +25,7 @@ mod shutdown;
 #[cfg(feature = "sim")]
 mod sim_camera;
 mod stream_tag;
+mod video_lifecycle;
 mod wire_codec;
 // The mission rig is exported for the in-process integration test: the
 // same actor/principal wiring the runtime uses, without a transport.
@@ -304,17 +307,16 @@ async fn run_until_shutdown<A>(
 }
 
 /// The camera-equipped variant of [`run_until_shutdown`]: identical
-/// lifecycle, plus it joins the media task on the way out so no video uni
-/// stream is abandoned mid-write. The media task ends once its frame
-/// source (the adapter) is dropped, which the engine-actor task does at
-/// teardown.
+/// lifecycle, plus bounded shutdown of the producer and media tasks.
+/// Cancellation stops both tasks. A graceful shutdown first lets the
+/// adapter close the frame source and lets the media writers finish.
 #[allow(clippy::too_many_arguments)]
 async fn run_with_media_until_shutdown<A>(
     endpoint: Endpoint<wtransport::endpoint::endpoint_side::Server>,
     engine: SessionEngine,
     adapter: A,
     media: MediaHandle,
-    media_task: tokio::task::JoinHandle<()>,
+    media_tasks: video_lifecycle::VideoTasks,
     engine_tx: mpsc::Sender<ToEngine>,
     engine_rx: mpsc::Receiver<ToEngine>,
     shutdown_rx: oneshot::Receiver<()>,
@@ -333,10 +335,9 @@ async fn run_with_media_until_shutdown<A>(
         start,
     )
     .await;
-    // The engine actor (owner of the adapter and its frame sender) has now
-    // been torn down, closing the media task's frame source; wait for it to
-    // drain and finish its writers.
-    media_task.await.ok();
+    // The adapter is gone. Give the producer and media writers one shared
+    // shutdown interval, then abort and join each task that did not stop.
+    media_tasks.finish().await;
 }
 
 /// Requests and logs the engine actor's per-stage latency summary

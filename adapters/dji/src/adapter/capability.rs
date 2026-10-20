@@ -5,8 +5,6 @@ use pilotage_adapter_api::{
 };
 use pilotage_protocol::{ActionKind, IntentFamily, ScopeId, VehicleClass, VehicleId};
 
-pub(super) use turret_dji::MAX_PITCH_RATE;
-
 pub(super) fn set_availability(
     contract: &mut turret_core::PayloadCapabilities,
     reason: Option<turret_core::UnavailableReason>,
@@ -35,6 +33,7 @@ fn availability<T>(
 pub(super) fn capabilities(
     vehicle: VehicleId,
     mode: DjiControlMode,
+    profile: turret_dji::Mini3ControlProfile,
     payload: &turret_core::PayloadCapabilities,
     incarnation: pilotage_adapter_api::SourceIncarnation,
 ) -> AdapterCapabilities {
@@ -68,7 +67,7 @@ pub(super) fn capabilities(
                     frames: Vec::new(),
                     max_linear: 0.0,
                     max_vertical: 0.0,
-                    max_angular: MAX_PITCH_RATE,
+                    max_angular: profile.rate_limit().as_radians_per_second(),
                     max_yaw_rate: 0.0,
                 }],
                 actions: vec![ActionCapability {

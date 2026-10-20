@@ -1,4 +1,4 @@
-//! DJI command framing and a bounded Unix gimbal adapter.
+//! DJI command framing, bounded gimbal control, and encoded video reception.
 //!
 //! A parsed frame proves its checksums, not its origin or freshness.
 //! The gimbal command encoder permits pitch targets from -90 to 0 degrees.
@@ -8,11 +8,15 @@
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod adapter;
+pub mod logiclink;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod serial;
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-pub use adapter::{DjiAdapter, DjiAdapterError, DjiConfig, DjiControlMode, DjiFault, DjiStatus};
+pub use adapter::{
+    DjiAdapter, DjiAdapterError, DjiAttachment, DjiConfig, DjiControlMode, DjiFault, DjiStatus,
+    EncodedVideoChunk, EncodedVideoStream,
+};
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 pub use serial::{RawSerial, SerialError};
 pub use turret_dji::ParseStats;

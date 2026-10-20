@@ -36,7 +36,7 @@ struct HostSide {
 /// that feeds it when that is not the adapter.
 struct SessionVideo {
     frames: Option<mpsc::Receiver<RawVideoFrame>>,
-    producer: Option<JoinHandle<()>>,
+    producer: Option<(&'static str, JoinHandle<()>)>,
 }
 
 /// Builds the chosen adapter and spawns the per-adapter
@@ -58,6 +58,15 @@ pub(super) async fn spawn_adapter_runtime(
         shutdown_rx,
         start,
     };
+    launch_adapter(adapter, options, sim_camera_port, host).await
+}
+
+async fn launch_adapter(
+    adapter: AdapterKind,
+    options: RuntimeOptions,
+    sim_camera_port: Option<u16>,
+    host: HostSide,
+) -> Result<JoinHandle<()>, HostError> {
     match adapter {
         #[cfg(feature = "sim")]
         AdapterKind::Reference => {
@@ -117,21 +126,32 @@ pub(super) async fn spawn_adapter_runtime(
             Ok(spawn_runtime(engine, adapter, video, host))
         }
         #[cfg(any(target_os = "macos", target_os = "linux"))]
-        AdapterKind::Dji => {
-            if sim_camera_port.is_some() {
-                return Err(HostError::SimCameraConflict { adapter: "dji" });
-            }
-            let adapter = super::dji::start_blocking(HOST_VEHICLE)?;
-            let engine = build_engine(&adapter, options);
-            let video = SessionVideo {
-                frames: None,
-                producer: None,
-            };
-            Ok(spawn_runtime(engine, adapter, video, host))
-        }
+        AdapterKind::Dji => launch_dji(options, sim_camera_port, host),
         #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         AdapterKind::Dji => Err(HostError::AdapterNotInBuild { adapter: "dji" }),
     }
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn launch_dji(
+    options: RuntimeOptions,
+    sim_camera_port: Option<u16>,
+    host: HostSide,
+) -> Result<JoinHandle<()>, HostError> {
+    if sim_camera_port.is_some() {
+        return Err(HostError::SimCameraConflict { adapter: "dji" });
+    }
+    let super::dji::DjiRuntime {
+        adapter,
+        frames,
+        producer,
+    } = super::dji::start_blocking(HOST_VEHICLE)?;
+    let engine = build_engine(&adapter, options);
+    let video = SessionVideo {
+        frames,
+        producer: producer.map(|task| ("dji-video-decoder", task)),
+    };
+    Ok(spawn_runtime(engine, adapter, video, host))
 }
 
 /// Chooses the session's video. With a simulator camera port configured
@@ -165,7 +185,7 @@ async fn attach_sim_camera(
     let (frames, producer) = sim_camera::spawn(listener, engine_tx);
     Ok(SessionVideo {
         frames: Some(frames),
-        producer: Some(producer),
+        producer: Some(("sim-camera", producer)),
     })
 }
 
@@ -208,21 +228,15 @@ where
         ));
     };
     let (media, media_task) = media::spawn_media_task(frames, start);
-    // The media task ends once its frame source closes; a host-side
-    // producer closes it when the engine actor ends, so both are joined.
-    let media_task = match video.producer {
-        None => media_task,
-        Some(producer) => tokio::spawn(async move {
-            producer.await.ok();
-            media_task.await.ok();
-        }),
-    };
+    // Own the tasks before spawning the future so cancellation before its
+    // first poll also stops the decoder and media tasks.
+    let media_tasks = super::video_lifecycle::VideoTasks::new(media_task, video.producer);
     tokio::spawn(run_with_media_until_shutdown(
         endpoint,
         engine,
         adapter,
         media,
-        media_task,
+        media_tasks,
         engine_tx,
         engine_rx,
         shutdown_rx,
