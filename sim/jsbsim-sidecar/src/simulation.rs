@@ -100,9 +100,16 @@ impl Simulation {
             engine.set(property, value);
         }
         engine.run_ic()?;
-        // Ground trim: rest the gear on the terrain at the start attitude.
+        // Ground trim rests the gear on the terrain at the start attitude.
+        // On sloped terrain JSBSim's trim may not converge; the vehicle
+        // then starts just above its resting height and settles.
         let trim = engine.input("simulation/do_simple_trim")?;
-        engine.command(trim, "simulation/do_simple_trim", 2.0)?;
+        if let Err(error) = engine.command(trim, "simulation/do_simple_trim", 2.0) {
+            tracing::warn!(%error, "ground trim failed; dropping the vehicle onto its gear");
+            let agl = engine.input("ic/h-agl-ft")?;
+            engine.set(agl, (aircraft.rest_height_m() + 0.02) / 0.3048);
+            engine.run_ic()?;
+        }
         let truth = TruthProperties::resolve(&mut engine)?;
         let actuation = Actuation::resolve(aircraft, &mut engine)?;
         Ok(Self {
