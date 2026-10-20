@@ -16,7 +16,7 @@ use pilotage_mavlink::codec::MAV_CMD_COMPONENT_ARM_DISARM;
 use pilotage_mavlink::gimbal_endpoint::{self, GimbalStamp};
 use pilotage_mavlink::sampling::{
     ArmTracker, OperationalPose, VehicleReports, battery_sample, estimate_batch, fc_state_sample,
-    operational_pose, report_only_sample,
+    landed_state_sample, operational_pose, report_only_sample,
 };
 use pilotage_mavlink::{LinkState, ManagerControl, MavlinkLink, command_outcome};
 use pilotage_protocol::{ActionKind, ScopeId, ScopedControlFrame, VehicleId};
@@ -333,8 +333,10 @@ impl VehicleAdapter for ArduPilotAdapter {
         let fc_state = fc_state_sample(
             self.arm.report(),
             self.last_arm_ack(),
-            self.incarnation,
-            self.started_at,
+            self.state
+                .lock()
+                .ok()
+                .and_then(|latest| landed_state_sample(&latest, Instant::now())),
         );
         let battery = battery_sample(
             self.state.lock().ok().and_then(|latest| latest.battery),

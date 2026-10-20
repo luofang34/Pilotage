@@ -8,6 +8,8 @@
 use pilotage_protocol::wire;
 use prost::Message;
 
+use crate::ActionRequestIdentity;
+
 /// Wire schema version stamped on every envelope this crate builds.
 pub(crate) const SCHEMA_VERSION: u32 = 1;
 
@@ -155,11 +157,27 @@ impl ControlLane {
         request: wire::ControlActionRequest,
         sampled_at_nanos: u64,
     ) -> Vec<u8> {
-        self.next_action_id = self.next_action_id.wrapping_add(1);
+        self.prepare_action_at(request, sampled_at_nanos).1
+    }
+
+    pub(crate) fn prepare_action_at(
+        &mut self,
+        request: wire::ControlActionRequest,
+        sampled_at_nanos: u64,
+    ) -> (ActionRequestIdentity, Vec<u8>) {
+        self.next_action_id = self.next_action_id.wrapping_add(1).max(1);
         let mut request = request;
         if request.action_id == 0 {
             request.action_id = self.next_action_id;
         }
+        let identity = ActionRequestIdentity {
+            session_id: self.session_id,
+            vehicle_id: self.vehicle_id,
+            scope: self.scope.clone(),
+            generation: self.generation,
+            sequence: 0,
+            action_id: request.action_id,
+        };
         let envelope = wire::Envelope {
             schema_version: SCHEMA_VERSION,
             payload: Some(wire::envelope::Payload::ControlActionCommand(
@@ -169,23 +187,26 @@ impl ControlLane {
                     }),
                     timing: Some(self.command_timing()),
                     session: Some(wire::SessionId {
-                        value: self.session_id,
+                        value: identity.session_id,
                     }),
                     vehicle: Some(wire::VehicleId {
-                        value: self.vehicle_id,
+                        value: identity.vehicle_id,
                     }),
                     scope: Some(wire::ScopeId {
-                        value: self.scope.clone(),
+                        value: identity.scope.clone(),
                     }),
                     generation: Some(wire::Generation {
-                        value: self.generation,
+                        value: identity.generation,
                     }),
                     activation_revision: self.activation_revision,
                     request: Some(request),
                 },
             )),
         };
-        pilotage_protocol::encode_envelope_length_delimited(&envelope)
+        (
+            identity,
+            pilotage_protocol::encode_envelope_length_delimited(&envelope),
+        )
     }
 
     /// Restores fencing counters exactly, for tests that must reproduce a

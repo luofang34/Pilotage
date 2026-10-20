@@ -75,6 +75,7 @@ impl BetaflightAdapter {
             magnetic_variation: None,
         };
         let fc_state = FcStateSample {
+            landed_state: None,
             arm_state: if snapshot.armed { 2 } else { 1 },
             last_command,
             stamp: self.stamp(&observed, SourceRole::FcState, FC_STATE_SOURCE_ID),

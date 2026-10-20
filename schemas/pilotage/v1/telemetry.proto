@@ -216,14 +216,12 @@ message SimTruthState {
   GeodeticFix geodetic = 13;
 }
 
-// FC-owned vehicle state (arm today; mode/failsafe belong here as they
-// arrive) under its own provenance stamp: the FC is the only author, and
-// the stamp records the link observation that reported it.
+// FC-owned vehicle state. Each report has its own observation stamp.
 message FcState {
   // 0 unknown, 1 disarmed, 2 armed.
   uint32 arm_state = 1;
-  // Identity and acquisition of the FC report carrying this state.
-  // Absence makes the sample unconsumable.
+  // Identity and acquisition of the arm report.
+  // Absence makes the arm fields unconsumable.
   MeasurementStamp stamp = 2;
   // The FC's acknowledgement of the most recent commanded arm or disarm:
   // 0 none observed, 1 the command was an arm, 2 a disarm. Enactment
@@ -236,6 +234,24 @@ message FcState {
   // The typed answer to that command; meaningful only when
   // last_command_kind is non-zero.
   CommandOutcome last_command_outcome = 5;
+  // The FC's landed detector. Its stamp advances independently of arm.
+  // Absence does not mean on-ground or in-air.
+  LandedStateObservation landed_state = 6;
+}
+
+// A flight controller's report, not a command result or an altitude inference.
+enum LandedState {
+  LANDED_STATE_UNKNOWN = 0;
+  LANDED_STATE_ON_GROUND = 1;
+  LANDED_STATE_IN_AIR = 2;
+  LANDED_STATE_TAKING_OFF = 3;
+  LANDED_STATE_LANDING = 4;
+}
+
+message LandedStateObservation {
+  LandedState state = 1;
+  // Absence makes this observation unconsumable.
+  MeasurementStamp stamp = 2;
 }
 
 // The vehicle's answer to one discrete command, independent of the flight

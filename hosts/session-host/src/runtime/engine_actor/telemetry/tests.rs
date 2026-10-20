@@ -256,6 +256,7 @@ fn truth_and_fc_sample() -> TelemetrySample {
             stamp: truth_stamp,
         }),
         fc_state: Some(FcStateSample {
+            landed_state: None,
             arm_state: 2,
             last_command: None,
             stamp: fc_stamp,
@@ -317,6 +318,7 @@ fn the_fc_command_verdict_crosses_the_wire() {
     };
     // A refused arm: kind 1 with the typed outcome.
     let refused = super::fc_state_to_wire(FcStateSample {
+        landed_state: None,
         arm_state: 1,
         last_command: Some(pilotage_adapter_api::FcCommandAck {
             arm: true,
@@ -338,6 +340,7 @@ fn the_fc_command_verdict_crosses_the_wire() {
     assert_eq!(legacy, 0, "the FC-specific result code is not written");
     // No verdict observed: the lane stays at kind 0.
     let none = super::fc_state_to_wire(FcStateSample {
+        landed_state: None,
         arm_state: 2,
         last_command: None,
         stamp,
@@ -350,6 +353,7 @@ fn the_fc_command_verdict_crosses_the_wire() {
 }
 
 mod geodetic;
+mod landed_state;
 mod magnetic_variation;
 
 #[test]

@@ -13,6 +13,7 @@ pub mod h264;
 mod heading;
 mod ids;
 mod intent;
+mod landed_state;
 mod payload;
 mod scopes;
 mod session;
@@ -39,6 +40,7 @@ pub use intent::{
     GimbalRateIntent, IntentFamily, ModeTarget, PositionHoldIntent, ReferenceFrame, VelocityIntent,
     actions_conflict,
 };
+pub use landed_state::LandedState;
 pub use scopes::{DIRECT_SCOPE, MOTION_SCOPE};
 pub use session::{
     ClientHello, ControlActionCommand, ControlActionResult, FrameRejected, FrameRejectionReason,

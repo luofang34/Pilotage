@@ -301,6 +301,12 @@ fn sim_truth_to_wire(sample: SimTruthSample) -> wire::SimTruthState {
 fn fc_state_to_wire(sample: FcStateSample) -> wire::FcState {
     wire::FcState {
         arm_state: sample.arm_state,
+        landed_state: sample
+            .landed_state
+            .map(|landed| wire::LandedStateObservation {
+                state: landed.state.to_wire() as i32,
+                stamp: Some(measurement_stamp_to_wire(landed.stamp)),
+            }),
         // 0 none observed, 1 arm, 2 disarm — the FC's verdict for the most
         // recent commanded arm/disarm (enactment truth).
         last_command_kind: sample

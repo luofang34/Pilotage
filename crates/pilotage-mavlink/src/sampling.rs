@@ -23,7 +23,7 @@ use crate::{AttitudeUpdate, KinematicsUpdate, LinkState};
 mod battery;
 mod fc_state;
 pub use battery::{BATTERY_SOURCE_ID, battery_sample};
-pub use fc_state::{ArmReport, ArmTracker, fc_state_sample};
+pub use fc_state::{ArmReport, ArmTracker, fc_state_sample, landed_state_sample};
 #[cfg(test)]
 mod tests;
 
