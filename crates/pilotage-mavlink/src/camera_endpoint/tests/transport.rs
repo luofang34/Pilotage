@@ -1,3 +1,5 @@
+mod reset;
+
 use super::*;
 use crate::{CommandTarget, LinkConfig, MavlinkLink, OutboundCommand};
 use tokio::net::UdpSocket;
