@@ -1,23 +1,24 @@
 use std::time::Duration;
 
-use pilotage_adapter_api::VehicleAdapter;
+use pilotage_adapter_api::{Disposition, VehicleAdapter};
+use pilotage_protocol::ControlAction;
 use turret_core::{AngularRate, Capability};
 use turret_dji::{Mini3ControlProfile, PitchPlanner};
 
 use super::{
     TestResult,
-    harness::{Harness, observed_poses, packets},
+    harness::{Harness, frame, observed_poses, packets},
 };
-use crate::adapter::{DjiFault, HOST_PITCH_RATE_LIMIT_RPS};
+use crate::adapter::{BENCH_PITCH_RATE_LIMIT_RPS, DjiFault, HOST_PITCH_RATE_LIMIT_RPS};
 
 #[test]
 fn both_modes_advertise_the_selected_host_policy_without_a_hardware_speed_claim() -> TestResult {
-    for (harness, minimum) in [(Harness::new(), -900), (Harness::bench(), -900)] {
+    for (harness, degrees_per_second) in [(Harness::new(), 15.0), (Harness::bench(), 5.0)] {
         let profile = harness.adapter.profile;
-        assert_eq!(profile.minimum_tenths(), minimum);
-        assert_eq!(
-            profile.rate_limit().as_radians_per_second(),
-            HOST_PITCH_RATE_LIMIT_RPS
+        assert_eq!(profile.minimum_tenths(), -900);
+        assert!(
+            (profile.rate_limit().as_radians_per_second().to_degrees() - degrees_per_second).abs()
+                < 0.00001
         );
         let pitch = harness
             .adapter
@@ -43,13 +44,81 @@ fn both_modes_advertise_the_selected_host_policy_without_a_hardware_speed_claim(
         };
         assert!(position.maximum_rate.is_none());
         assert_eq!(rate.maximum_rate, profile.rate_limit());
-        assert!(profile.pitch_target(minimum).is_ok());
-        assert!(profile.pitch_target(minimum - 1).is_err());
+        assert!(profile.pitch_target(-900).is_ok());
+        assert!(profile.pitch_target(-901).is_err());
         let advertised = harness.adapter.capabilities();
         assert_eq!(
             advertised.vehicles[0].scopes[0].intents[0].max_angular,
             profile.rate_limit().as_radians_per_second()
         );
+    }
+    Ok(())
+}
+
+#[test]
+fn bench_rejects_observed_speed_and_keeps_its_five_degree_rate() -> TestResult {
+    let mut harness = Harness::bench();
+    harness.step(0);
+    harness.apply(frame(0.0), 0);
+    let before = harness.written()?;
+    assert!(matches!(
+        harness
+            .apply(frame(-HOST_PITCH_RATE_LIMIT_RPS), 100)
+            .disposition,
+        Disposition::Rejected(_)
+    ));
+    harness.step(100);
+    assert_eq!(harness.written()?, before);
+    assert_eq!(
+        harness
+            .apply(frame(-BENCH_PITCH_RATE_LIMIT_RPS), 200)
+            .disposition,
+        Disposition::Transformed
+    );
+    harness.step(200);
+    let commands = packets(&harness.written()?);
+    assert_eq!(commands.len(), 2);
+    assert_eq!(commands[1].payload(), &[0, 0, 0, 0, 251, 255, 7, 10]);
+    Ok(())
+}
+
+#[test]
+fn observed_manual_and_recenter_steps_keep_the_one_second_encoding() -> TestResult {
+    for (recenter, expected_target) in [(false, -450_i16), (true, -150_i16)] {
+        let mut harness = Harness::new();
+        for (index, mut pose) in observed_poses().into_iter().enumerate() {
+            pose[11..13].copy_from_slice(&(-300_i16).to_le_bytes());
+            let end = pose.len() - 2;
+            let checksum = turret_dji::frame_checksum(&pose[..end]).to_le_bytes();
+            pose[end..].copy_from_slice(&checksum);
+            harness.feed(&pose)?;
+            harness.step(index as u64 * 10);
+        }
+        let mut request = frame(if recenter {
+            0.0
+        } else {
+            -HOST_PITCH_RATE_LIMIT_RPS
+        });
+        if recenter {
+            request.actions.push(ControlAction::GimbalRecenter);
+        }
+        assert_eq!(
+            harness.apply(request, 20).disposition,
+            if recenter {
+                Disposition::Accepted
+            } else {
+                Disposition::Transformed
+            }
+        );
+        harness.step(21);
+        let commands = packets(&harness.written()?);
+        assert_eq!(commands.len(), 2);
+        let payload = commands[1].payload();
+        assert_eq!(
+            i16::from_le_bytes([payload[4], payload[5]]),
+            expected_target
+        );
+        assert_eq!(&payload[6..], &[7, 10]);
     }
     Ok(())
 }
@@ -135,7 +204,7 @@ fn a_written_target_rejected_by_the_planner_preserves_send_evidence_and_locks_co
     ));
     let narrower = Mini3ControlProfile::new(
         -50,
-        AngularRate::radians_per_second(HOST_PITCH_RATE_LIMIT_RPS)?,
+        AngularRate::radians_per_second(BENCH_PITCH_RATE_LIMIT_RPS)?,
     )?;
     harness.adapter.control.bench = Some(PitchPlanner::from_confirmed_horizontal(narrower));
     harness.step(20);

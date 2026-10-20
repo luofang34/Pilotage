@@ -54,11 +54,11 @@ fn full_writes_deduplicate_unchanged_targets_but_new_feedback_advances_them() ->
         harness.apply(frame(-HOST_PITCH_RATE_LIMIT_RPS), millis);
         harness.step(millis);
     }
-    assert_eq!(targets(&harness)?, vec![-50]);
+    assert_eq!(targets(&harness)?, vec![-150]);
     pose(&mut harness, -10, 3, 130)?;
     harness.apply(frame(-HOST_PITCH_RATE_LIMIT_RPS), 140);
     harness.step(141);
-    assert_eq!(targets(&harness)?, vec![-50, -60]);
+    assert_eq!(targets(&harness)?, vec![-150, -160]);
     Ok(())
 }
 
@@ -74,7 +74,7 @@ fn one_recenter_follows_fresh_feedback_from_full_down_to_horizontal() -> TestRes
         harness.step(now + 1);
     }
     let targets = targets(&harness)?;
-    assert_eq!(targets.first(), Some(&-850));
+    assert_eq!(targets.first(), Some(&-750));
     assert_eq!(targets.last(), Some(&0));
     assert_eq!(targets.iter().filter(|target| **target == 0).count(), 1);
     assert!(targets.windows(2).all(|pair| pair[1] - pair[0] == 5));
@@ -149,7 +149,7 @@ fn expired_or_rejected_input_cancels_recenter_without_neutral_resumption() -> Te
         pose(&mut harness, -295, 3, now)?;
         harness.apply(frame(0.0), now);
         harness.step(now + 1);
-        assert_eq!(targets(&harness)?, vec![-250]);
+        assert_eq!(targets(&harness)?, vec![-150]);
     }
     Ok(())
 }
@@ -179,7 +179,7 @@ fn rejected_demand_from_current_authority_cancels_an_active_recenter() -> TestRe
         pose(&mut harness, -295, 3, 80)?;
         harness.apply(frame(0.0), 80);
         harness.step(81);
-        assert_eq!(targets(&harness)?, vec![-250]);
+        assert_eq!(targets(&harness)?, vec![-150]);
     }
     Ok(())
 }
@@ -221,7 +221,7 @@ fn rejected_foreign_scope_or_authority_cannot_cancel_the_current_recenter() -> T
         neutral.generation = Generation::new(2);
         harness.apply(neutral, 80);
         harness.step(81);
-        assert_eq!(targets(&harness)?, vec![-250, -245]);
+        assert_eq!(targets(&harness)?, vec![-150, -145]);
     }
     Ok(())
 }
@@ -236,7 +236,7 @@ fn feedback_loss_cancels_recenter_before_fresh_reports_return() -> TestResult {
     }
     harness.apply(frame(0.0), 390);
     harness.step(391);
-    assert_eq!(targets(&harness)?, vec![-250]);
+    assert_eq!(targets(&harness)?, vec![-150]);
     Ok(())
 }
 
@@ -251,7 +251,7 @@ fn an_out_of_range_observation_cancels_recenter_before_valid_feedback_returns() 
     }
     harness.apply(frame(0.0), 80);
     harness.step(81);
-    assert_eq!(targets(&harness)?, vec![-250]);
+    assert_eq!(targets(&harness)?, vec![-150]);
     Ok(())
 }
 
@@ -295,7 +295,7 @@ fn a_late_control_frame_does_not_cancel_a_partial_link_loss_hold() -> TestResult
     assert!(harness.adapter.status_cached().fault.is_none());
     harness.set_write_limit(usize::MAX)?;
     harness.step(50);
-    assert_eq!(targets(&harness)?, vec![-250, -300]);
+    assert_eq!(targets(&harness)?, vec![-150, -300]);
     assert!(harness.adapter.status_cached().fault.is_none());
     Ok(())
 }
@@ -372,7 +372,7 @@ fn a_missing_full_write_receipt_keeps_unknown_outcome_and_cancels_recenter() -> 
     harness.apply(recenter(), 20);
     harness.lose_write_receipt()?;
     harness.step(21);
-    assert_eq!(targets(&harness)?, vec![-250]);
+    assert_eq!(targets(&harness)?, vec![-150]);
     assert!(harness.adapter.status_cached().control_locked);
     assert!(harness.adapter.control.observed_write.is_none());
     let progress = harness

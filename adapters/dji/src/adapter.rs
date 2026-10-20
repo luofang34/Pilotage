@@ -39,7 +39,8 @@ pub use video::EncodedVideoStream;
 
 const GIMBAL_SCOPE: &str = "vehicle.gimbal";
 // This host policy bounds synthesized commands, not the hardware's maximum speed.
-const HOST_PITCH_RATE_LIMIT_RPS: f32 = core::f32::consts::PI / 36.0;
+const HOST_PITCH_RATE_LIMIT_RPS: f32 = core::f32::consts::PI / 12.0;
+const BENCH_PITCH_RATE_LIMIT_RPS: f32 = core::f32::consts::PI / 36.0;
 
 pub use config::{DjiAdapterError, DjiConfig, DjiControlMode, DjiFault, DjiStatus};
 
@@ -101,10 +102,12 @@ impl DjiAdapter {
         incarnation: SourceIncarnation,
         control_mode: DjiControlMode,
     ) -> Result<Self, DjiAdapterError> {
-        let profile = Mini3ControlProfile::new(
-            -900,
-            turret_core::AngularRate::radians_per_second(HOST_PITCH_RATE_LIMIT_RPS)?,
-        )?;
+        let rate = match control_mode {
+            DjiControlMode::Observed => HOST_PITCH_RATE_LIMIT_RPS,
+            DjiControlMode::BenchInitialHorizontal => BENCH_PITCH_RATE_LIMIT_RPS,
+        };
+        let profile =
+            Mini3ControlProfile::new(-900, turret_core::AngularRate::radians_per_second(rate)?)?;
         let mut contract = profile.capabilities()?;
         let unavailable = (control_mode == DjiControlMode::Observed)
             .then_some(turret_core::UnavailableReason::MissingFeedback);
