@@ -55,6 +55,8 @@ pub struct VideoStats {
     pub fpv_received: u64,
     /// Frames received on the chase source (source id 1).
     pub chase_received: u64,
+    /// Frames received on the gimbal payload source (source id 2).
+    pub gimbal_received: u64,
     /// Frames that decoded successfully.
     pub frames_decoded: u64,
     /// Frames that failed to decode.
@@ -74,6 +76,10 @@ pub struct VideoStats {
     /// First successfully decoded frame from the chase source (id 1), retained
     /// so `--save-frames` can prove each source streamed separately.
     pub chase_first_frame: Option<DecodedFrame>,
+    /// Most recent successfully decoded frame from the gimbal payload source
+    /// (id 2): a payload camera moves, so the latest frame shows where it
+    /// pointed when the run ended.
+    pub gimbal_last_frame: Option<DecodedFrame>,
     /// The most recently decoded frame; at run end this is also the "last"
     /// frame for `--save-frames`.
     pub last_frame: Option<DecodedFrame>,
@@ -95,6 +101,7 @@ impl VideoStats {
             frames_received: 0,
             fpv_received: 0,
             chase_received: 0,
+            gimbal_received: 0,
             frames_decoded: 0,
             frames_decode_failed: 0,
             inter_arrival: Histogram::new(VIDEO_HISTOGRAM_CAPACITY),
@@ -102,6 +109,7 @@ impl VideoStats {
             first_frame: None,
             fpv_first_frame: None,
             chase_first_frame: None,
+            gimbal_last_frame: None,
             last_frame: None,
             middle_frame: None,
         }
@@ -109,7 +117,7 @@ impl VideoStats {
 
     /// Folds one arrived JPEG buffer into the stats: decodes it, records
     /// inter-arrival latency against `since_last`, counts the frame against its
-    /// `source_id` (0 = FPV, 1 = chase), and updates the retained first/last
+    /// `source_id` (0 = FPV, 1 = chase, 2 = gimbal), and updates the retained first/last
     /// frames.
     pub fn record(&mut self, source_id: u8, jpeg: &[u8], since_last: Option<Duration>) {
         self.record_at(source_id, jpeg, since_last, None);
@@ -130,6 +138,7 @@ impl VideoStats {
         match source_id {
             0 => self.fpv_received = self.fpv_received.saturating_add(1),
             1 => self.chase_received = self.chase_received.saturating_add(1),
+            2 => self.gimbal_received = self.gimbal_received.saturating_add(1),
             _ => {}
         }
         let Some(frame) = decode_jpeg(jpeg) else {
@@ -151,6 +160,7 @@ impl VideoStats {
             1 if self.chase_first_frame.is_none() => {
                 self.chase_first_frame = Some(frame.clone());
             }
+            2 => self.gimbal_last_frame = Some(frame.clone()),
             _ => {}
         }
         if self.middle_frame.is_none()
@@ -289,5 +299,27 @@ mod tests {
         assert_eq!((first.width, first.height), (4, 4));
         let last = stats.last_frame.as_ref().expect("last frame retained");
         assert_eq!((last.width, last.height), (6, 6));
+    }
+
+    #[test]
+    fn the_gimbal_source_is_counted_and_its_latest_frame_kept() {
+        let mut stats = VideoStats::new();
+        stats.record(2, &synthetic_jpeg(4, 4), None);
+        stats.record(0, &synthetic_jpeg(8, 8), None);
+        stats.record(2, &synthetic_jpeg(6, 6), None);
+        assert_eq!(
+            (
+                stats.fpv_received,
+                stats.chase_received,
+                stats.gimbal_received
+            ),
+            (1, 0, 2)
+        );
+        let gimbal = stats.gimbal_last_frame.as_ref().expect("gimbal frame kept");
+        assert_eq!(
+            (gimbal.width, gimbal.height),
+            (6, 6),
+            "the latest, not the first"
+        );
     }
 }
