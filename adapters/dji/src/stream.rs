@@ -60,7 +60,7 @@ impl StreamBuffer {
     }
 
     fn consume(&mut self, length: usize) {
-        self.start += length;
+        self.start = self.start.wrapping_add(length);
         if self.start == self.storage.len() {
             self.storage.clear();
             self.start = 0;
