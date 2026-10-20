@@ -68,9 +68,8 @@ fn decode_sim_truth(payload: &[u8]) -> FcMessage {
 
 /// Wire order: time_boot_ms u32 @0, q[4] @4..20, angular
 /// velocity x/y/z @20..32, failure_flags u32 @32, flags u16
-/// @36, targets @38..40, then v2 extension fields this decoder
-/// ignores (zero-truncated payloads shorter than 40 still
-/// decode via the zero-extending accessors).
+/// @36, targets @38..40, and attached-device identity at extension @48.
+/// Zero-truncated fields are decoded using the zero-extending accessors.
 fn decode_gimbal_status(payload: &[u8]) -> FcMessage {
     FcMessage::GimbalDeviceAttitudeStatus {
         time_boot_ms: u32_at(payload, 0),
@@ -87,6 +86,9 @@ fn decode_gimbal_status(payload: &[u8]) -> FcMessage {
         ],
         failure_flags: u32_at(payload, 32),
         flags: u16_at(payload, 36),
+        target_system: payload.get(38).copied().unwrap_or(0),
+        target_component: payload.get(39).copied().unwrap_or(0),
+        device_id: payload.get(48).copied().unwrap_or(0),
     }
 }
 
@@ -182,6 +184,9 @@ fn decode_heartbeat(payload: &[u8]) -> FcMessage {
 
 pub(super) fn decode_known(msg_id: u32, payload: &[u8]) -> Option<FcMessage> {
     match msg_id {
+        super::GIMBAL_MANAGER_INFORMATION_ID => Some(FcMessage::GimbalManagerInformation(
+            super::gimbal_manager::decode_information(payload),
+        )),
         super::GIMBAL_MANAGER_STATUS_ID => Some(FcMessage::GimbalManagerStatus(
             super::gimbal_manager::decode(payload),
         )),

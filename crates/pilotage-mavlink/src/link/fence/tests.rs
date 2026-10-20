@@ -42,11 +42,37 @@ fn status(state: &Arc<Mutex<super::super::LinkState>>, time: u32, device: u8, ow
     super::super::apply_messages_at(state, &messages, 0, 0, std::time::Instant::now());
 }
 
+fn discovered_manager(
+    state: &Arc<Mutex<super::super::LinkState>>,
+    component: u8,
+    device: u8,
+) -> (u64, u64) {
+    let mut payload = [0_u8; 33];
+    payload[4..8].copy_from_slice(&0x138_u32.to_le_bytes());
+    payload[32] = device;
+    let mut bytes = [0_u8; 45];
+    let length = crate::codec::encode_frame_v2_from(1, 280, &payload, 70, 1, component, &mut bytes);
+    let mut messages = Vec::new();
+    let stats = crate::parse_datagram(&bytes[..length], &mut messages);
+    assert_eq!(stats.crc_failures, 0);
+    assert_eq!(messages.len(), 1);
+    super::super::apply_messages_at(state, &messages, 0, 0, std::time::Instant::now());
+    let state = state.lock().unwrap();
+    let report = state.gimbals.managers.get(&(component, device)).unwrap();
+    (report.epoch, report.capability_revision)
+}
+
 #[test]
 fn received_competing_owner_fences_write_before_adapter_poll() {
     let state = Arc::new(Mutex::new(super::super::LinkState::default()));
-    let fence =
-        SendFence::default().for_manager(state.clone(), 2, ManagerWriteRequirement::Primary);
+    let (epoch, revision) = discovered_manager(&state, 1, 2);
+    let fence = SendFence::default().for_manager(
+        state.clone(),
+        (1, 2),
+        epoch,
+        revision,
+        ManagerWriteRequirement::Primary,
+    );
     status(
         &state,
         1,
@@ -65,8 +91,14 @@ fn received_competing_owner_fences_write_before_adapter_poll() {
 #[test]
 fn claims_require_fresh_free_owner_and_selected_device() {
     let state = Arc::new(Mutex::new(super::super::LinkState::default()));
-    let fence =
-        SendFence::default().for_manager(state.clone(), 2, ManagerWriteRequirement::Unclaimed);
+    let (epoch, revision) = discovered_manager(&state, 1, 2);
+    let fence = SendFence::default().for_manager(
+        state.clone(),
+        (1, 2),
+        epoch,
+        revision,
+        ManagerWriteRequirement::Unclaimed,
+    );
     status(&state, 1, 2, (0, 0));
     assert!(fence.with_valid_write(|| Ok(true)).unwrap());
     status(&state, 2, 2, (42, 190));

@@ -10,7 +10,9 @@ use pilotage_timing::SimTick;
 
 use super::Px4Adapter;
 use super::control::rejected_control;
-use crate::gimbal::{CMD_GIMBAL_CONFIGURE, MAX_PITCH_RATE_RPS, MAX_YAW_RATE_RPS, Px4GimbalControl};
+use pilotage_mavlink::gimbal_control::{
+    CMD_GIMBAL_CONFIGURE, MAX_PITCH_RATE_RPS, MAX_YAW_RATE_RPS, ManagerControl,
+};
 
 /// Bound the age of a negative device reply independently of confirmed ownership.
 const CLAIM_DENIAL_FRESHNESS: Duration = Duration::from_secs(5);
@@ -100,7 +102,8 @@ impl Px4Adapter {
     fn fresh_claim_denial(&self) -> Option<u8> {
         let source = self.estimate.as_ref()?;
         let latest = source.state.lock().ok()?;
-        let ack = latest.gimbal_configure_ack?;
+        let (component, _) = self.gimbal.as_ref()?.selected_device()?;
+        let ack = latest.gimbals.configure_acks.get(&component)?;
         (ack.command == CMD_GIMBAL_CONFIGURE
             && ack.result != 0
             && ack.received_at.elapsed() < CLAIM_DENIAL_FRESHNESS)
@@ -109,7 +112,7 @@ impl Px4Adapter {
 }
 
 fn apply_recenter_actions(
-    gimbal: &mut Px4GimbalControl,
+    gimbal: &mut ManagerControl,
     actions: &[ControlAction],
 ) -> (bool, Vec<ActionResult>) {
     let mut delivered = true;

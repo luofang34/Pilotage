@@ -16,14 +16,8 @@ pub(super) fn gimbal_capabilities(
 
 impl Px4Adapter {
     pub(super) fn observe_gimbal_manager(&mut self) {
-        let report = self
-            .estimate
-            .as_ref()
-            .and_then(|source| source.state.lock().ok()?.fc_reports.gimbal_manager);
-        if let Some((report, received)) = report
-            && let Some(gimbal) = self.gimbal.as_mut()
-        {
-            gimbal.observe_manager(report, received);
+        if let Some(gimbal) = self.gimbal.as_mut() {
+            gimbal.refresh_discovery();
         }
     }
 
@@ -48,10 +42,7 @@ impl Px4Adapter {
             ..Default::default()
         };
         if let Some(sample) = sample
-            && let Some(device) = self
-                .estimate
-                .as_ref()
-                .and_then(|source| source.state.lock().ok()?.gimbal_device)
+            && let Some(device) = gimbal.device_cached()
         {
             let angles = crate::uplink::direct::euler_of(sample.quat_wxyz);
             let stamp = stamp(sample.stamp);

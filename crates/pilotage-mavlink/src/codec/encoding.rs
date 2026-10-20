@@ -271,31 +271,32 @@ pub const GIMBAL_FLAGS_HORIZON_YAW_FOLLOW: u32 = 4 | 8;
 /// Serializes a GIMBAL_MANAGER_SET_ATTITUDE rate demand: the attitude
 /// quaternion and roll rate are NaN ("ignored" per the message spec;
 /// the device keeps its own horizon), leaving the pitch/yaw angular
-/// velocity demand in rad/s under [`GIMBAL_FLAGS_HORIZON_YAW_FOLLOW`].
+/// velocity demand in rad/s under the caller's validated reference flags.
 ///
-/// PX4 silently drops this message unless the sender holds gimbal
-/// primary control. The caller must confirm ownership from manager status.
+/// The caller must confirm ownership from the selected manager's status.
 ///
 /// Wire order (35 bytes): flags u32 @0, q\[4\] @4..20, angular_velocity
 /// x/y/z @20..32, target_system @32, target_component @33,
 /// gimbal_device_id @34 (0 = all gimbal devices).
 pub fn encode_gimbal_rate_setpoint(
     seq: u8,
-    pitch_rate_rps: f32,
-    yaw_rate_rps: f32,
+    flags: u32,
+    rates_rps: [f32; 3],
     target_system: u8,
     target_component: u8,
     gimbal_device_id: u8,
 ) -> [u8; 47] {
     let mut payload = [0u8; 35];
-    payload[0..4].copy_from_slice(&GIMBAL_FLAGS_HORIZON_YAW_FOLLOW.to_le_bytes());
-    for slot in 0..5 {
-        // q[0..4] and angular_velocity_x: NaN = ignored.
+    payload[0..4].copy_from_slice(&flags.to_le_bytes());
+    for slot in 0..4 {
+        // The quaternion is omitted because this packet requests rates only.
         let at = 4 + slot * 4;
         payload[at..at + 4].copy_from_slice(&f32::NAN.to_le_bytes());
     }
-    payload[24..28].copy_from_slice(&pitch_rate_rps.to_le_bytes());
-    payload[28..32].copy_from_slice(&yaw_rate_rps.to_le_bytes());
+    for (index, rate) in rates_rps.iter().enumerate() {
+        let offset = 20 + index * 4;
+        payload[offset..offset + 4].copy_from_slice(&rate.to_le_bytes());
+    }
     payload[32] = target_system;
     payload[33] = target_component;
     payload[34] = gimbal_device_id;

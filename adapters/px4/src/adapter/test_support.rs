@@ -43,7 +43,35 @@ impl Px4Adapter {
     }
 
     /// Installs a test gimbal control path, for tests.
-    pub(crate) fn with_gimbal(mut self, gimbal: crate::gimbal::Px4GimbalControl) -> Self {
+    pub(crate) fn with_gimbal(mut self, gimbal: pilotage_mavlink::ManagerControl) -> Self {
+        let state = self.estimate.as_ref().expect("test state").state.clone();
+        super::gimbal_tests::discover_gimbal(&state);
+        let report = state
+            .lock()
+            .expect("state")
+            .gimbals
+            .managers
+            .get(&(1, 2))
+            .and_then(|report| report.status)
+            .map(|(status, _)| status)
+            .expect("manager");
+        pilotage_mavlink::link::apply_messages_at(
+            &state,
+            &[(
+                super::tests::SOURCE,
+                pilotage_mavlink::codec::FcMessage::GimbalManagerStatus(
+                    pilotage_mavlink::codec::GimbalManagerStatus {
+                        time_boot_ms: report.time_boot_ms.wrapping_add(1),
+                        ..report
+                    },
+                ),
+            )],
+            0,
+            0,
+            std::time::Instant::now(),
+        );
+        let mut gimbal = gimbal.with_manager_state(state);
+        gimbal.refresh_discovery();
         self.gimbal = Some(gimbal);
         self
     }

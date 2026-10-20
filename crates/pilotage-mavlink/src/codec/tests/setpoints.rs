@@ -73,7 +73,7 @@ fn attitude_target_reports_the_commanded_thrust() {
 
 #[test]
 fn gimbal_rate_setpoint_locks_the_wire_layout() {
-    let frame = super::super::encode_gimbal_rate_setpoint(9, 0.4, -0.6, 1, 1, 0);
+    let frame = super::super::encode_gimbal_rate_setpoint(9, 12, [f32::NAN, 0.4, -0.6], 1, 1, 0);
     // Header: v2 magic, 35-byte payload, GCS identity, msg id 282.
     assert_eq!(frame[0], MAGIC_V2);
     assert_eq!(frame[1], 35);

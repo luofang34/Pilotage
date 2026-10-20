@@ -15,7 +15,10 @@ mod gimbal_manager;
 pub use camera::{
     CAMERA_INFORMATION_ID, CAMERA_SETTINGS_ID, CameraMessage, MAV_CMD_SET_CAMERA_ZOOM,
 };
-pub use gimbal_manager::{GIMBAL_MANAGER_STATUS_ID, GimbalManagerStatus};
+pub use gimbal_manager::{
+    GIMBAL_MANAGER_INFORMATION_ID, GIMBAL_MANAGER_STATUS_ID, GimbalManagerInformation,
+    GimbalManagerStatus,
+};
 mod decoding;
 mod encoding;
 mod param_encoding;
@@ -92,6 +95,8 @@ pub const MAV_AUTOPILOT_ARDUPILOTMEGA: u8 = 3;
 /// One parsed frame event from the Aviate subset.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FcMessage {
+    /// Manager-declared operations and physical limits.
+    GimbalManagerInformation(GimbalManagerInformation),
     /// Actual gimbal-manager primary and secondary control ownership.
     GimbalManagerStatus(GimbalManagerStatus),
     /// Camera capabilities or settings, separate from vehicle-state authorization.
@@ -263,6 +268,12 @@ pub enum FcMessage {
         flags: u16,
         /// Non-zero reports a device failure condition.
         failure_flags: u32,
+        /// Intended receiver system, or zero for broadcast.
+        target_system: u8,
+        /// Intended receiver component, or zero for broadcast.
+        target_component: u8,
+        /// Attached non-MAVLink device (1..6), or zero for the sending component.
+        device_id: u8,
     },
 }
 
@@ -322,6 +333,7 @@ fn crc_extra(msg_id: u32) -> Option<u8> {
     match msg_id {
         CAMERA_INFORMATION_ID => Some(92),
         CAMERA_SETTINGS_ID => Some(146),
+        GIMBAL_MANAGER_INFORMATION_ID => Some(70),
         GIMBAL_MANAGER_STATUS_ID => Some(48),
         HEARTBEAT_ID => Some(50),
         ATTITUDE_QUATERNION_ID => Some(246),

@@ -92,7 +92,7 @@ pub struct Px4Adapter {
     // Gimbal-manager command path; rides the receive link's socket
     // because the FC's GCS instance retargets its telemetry stream to
     // the last peer that spoke.
-    gimbal: Option<crate::gimbal::Px4GimbalControl>,
+    gimbal: Option<pilotage_mavlink::ManagerControl>,
     camera_control: Option<camera_control::CameraControl>,
     // Pilotage's gz sidecar bridges the flight-deck rig's camera topics;
     // the adapter remains usable without video when it cannot spawn.
@@ -159,11 +159,11 @@ impl Px4Adapter {
                 // `Px4Profile::Simulation`, so a real vehicle can never withhold
                 // its safe-state command.
                 Some(
-                    crate::gimbal::Px4GimbalControl::new(
+                    pilotage_mavlink::ManagerControl::new(
                         link.command_sender(),
                         rates,
                         link_config.system_id,
-                        link_config.component_id,
+                        None,
                     )
                     .map_err(pilotage_mavlink::LinkError::from)?
                     .with_manager_state(link.state())

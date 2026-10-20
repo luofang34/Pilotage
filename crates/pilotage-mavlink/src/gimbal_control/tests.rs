@@ -1,19 +1,19 @@
 use super::*;
-use pilotage_mavlink::codec::{GCS_COMPONENT_ID, GCS_SYSTEM_ID, GimbalManagerStatus};
+use crate::codec::{GCS_COMPONENT_ID, GCS_SYSTEM_ID, GimbalManagerStatus};
 use tokio::sync::mpsc;
 
 fn control() -> (
-    Px4GimbalControl,
+    ManagerControl,
     mpsc::Receiver<OutboundCommand>,
     watch::Receiver<Option<GimbalRateDemand>>,
 ) {
     let (commands, receiver) = mpsc::channel(16);
     let (rates, observer) = watch::channel(None);
     (
-        Px4GimbalControl::new(commands, rates, 1, 1)
+        ManagerControl::new(commands, rates, 1, Some((1, 2)))
             .unwrap()
             .with_manager_state(std::sync::Arc::new(std::sync::Mutex::new(
-                pilotage_mavlink::LinkState::default(),
+                crate::LinkState::default(),
             ))),
         receiver,
         observer,
@@ -28,31 +28,57 @@ fn status(time: u32, device: u8, owner: (u8, u8)) -> GimbalManagerStatus {
         primary_component: owner.1,
     }
 }
-fn observe(control: &mut Px4GimbalControl, report: GimbalManagerStatus) {
+fn observe(control: &mut ManagerControl, report: GimbalManagerStatus) {
     let received = Instant::now();
-    pilotage_mavlink::link::apply_messages_at(
+    let information = crate::codec::GimbalManagerInformation {
+        time_boot_ms: report.time_boot_ms,
+        cap_flags: 2 | 32 | 64 | 128 | 256 | 512,
+        roll_min: f32::NAN,
+        roll_max: f32::NAN,
+        pitch_min: -1.5,
+        pitch_max: 1.5,
+        yaw_min: -3.0,
+        yaw_max: 3.0,
+        device_id: report.device_id,
+    };
+    crate::link::apply_messages_at(
         control.manager_state.as_ref().unwrap(),
         &[(
-            pilotage_mavlink::codec::FrameSource {
+            crate::codec::FrameSource {
                 system_id: 1,
                 component_id: 1,
-                frame_sequence: 1,
+                frame_sequence: 0,
             },
-            pilotage_mavlink::codec::FcMessage::GimbalManagerStatus(report),
+            crate::codec::FcMessage::GimbalManagerInformation(information),
         )],
         0,
         0,
         received,
     );
-    control.observe_manager(report, received);
+    crate::link::apply_messages_at(
+        control.manager_state.as_ref().unwrap(),
+        &[(
+            crate::codec::FrameSource {
+                system_id: 1,
+                component_id: 1,
+                frame_sequence: 1,
+            },
+            crate::codec::FcMessage::GimbalManagerStatus(report),
+        )],
+        0,
+        0,
+        received,
+    );
+    control.refresh_discovery();
 }
-fn owned(control: &mut Px4GimbalControl) {
+fn owned(control: &mut ManagerControl) {
     observe(control, status(1, 2, (GCS_SYSTEM_ID, GCS_COMPONENT_ID)));
 }
 #[test]
 fn unknown_owner_requests_status_without_control_or_claim() {
     let (mut control, mut commands, rates) = control();
     assert!(!control.rate_demand(0.5, 0.0));
+    assert_eq!(commands.try_recv().unwrap().command, 512);
     assert_eq!(commands.try_recv().unwrap().command, 512);
     assert!(commands.try_recv().is_err());
     assert!(rates.borrow().is_none());
@@ -135,6 +161,14 @@ fn link_loss_fences_previous_generation_and_queues_stop_without_stealing_authori
     owned(&mut control);
     assert!(control.rate_demand(1.0, 0.0));
     let prior = rates.borrow().clone().unwrap();
+    assert!(
+        prior
+            .payload_write
+            .as_ref()
+            .unwrap()
+            .write(1, || Ok(1))
+            .unwrap()
+    );
     assert_eq!(commands.try_recv().unwrap().command, 512);
     assert!(control.queue_link_loss_stop());
     assert!(!prior.fence.unwrap().is_valid());
@@ -148,6 +182,17 @@ fn rejected_replacement_does_not_cancel_pending_stop_responsibility() {
     let (mut control, _commands, rates) = control();
     owned(&mut control);
     assert!(control.rate_demand(1.0, 0.0));
+    assert!(
+        rates
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .payload_write
+            .as_ref()
+            .unwrap()
+            .write(1, || Ok(1))
+            .unwrap()
+    );
     assert!(control.queue_link_loss_stop());
     let stop = rates.borrow().clone().unwrap();
     control.timing = Some(PayloadTiming {
@@ -161,3 +206,6 @@ fn rejected_replacement_does_not_cancel_pending_stop_responsibility() {
     assert!(control.release_after_stop.is_some());
     assert_eq!(rates.borrow().as_ref().unwrap().pitch_rps, 0.0);
 }
+
+mod discovery;
+mod stops;

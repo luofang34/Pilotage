@@ -1,34 +1,46 @@
-//! PX4 transport binding for the portable Turret MAVLink manager client.
-use pilotage_mavlink::{
+//! Shared transport binding for the portable Turret MAVLink manager client.
+use crate::{
     GimbalRateDemand, OutboundCommand, PayloadChannel, PayloadTiming, SendFence, WriteReceipt,
 };
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc::Sender, watch};
 use tracing::warn;
-use turret_core::{AngularRate, Effect, PayloadCommand, Tick};
+use turret_core::{AngularRate, PayloadCommand, Tick};
 use turret_mavlink::ManagerPolicy;
 
+mod discovery;
 #[cfg(test)]
 mod tests;
 mod transport;
 
-pub(crate) const MAX_PITCH_RATE_RPS: f32 = 0.8;
-pub(crate) const MAX_YAW_RATE_RPS: f32 = 0.8;
-pub(crate) const CMD_GIMBAL_CONFIGURE: u16 = 1001;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Selection {
+    component: u8,
+    device: u8,
+    epoch: u64,
+    revision: u64,
+}
+
+/// Host policy limit for normalized pitch input, radians per second.
+pub const MAX_PITCH_RATE_RPS: f32 = 0.8;
+/// Host policy limit for normalized yaw input, radians per second.
+pub const MAX_YAW_RATE_RPS: f32 = 0.8;
+/// MAV_CMD_DO_GIMBAL_MANAGER_CONFIGURE command identifier.
+pub const CMD_GIMBAL_CONFIGURE: u16 = 1001;
 
 /// The I/O owner for one concretely selected MAVLink gimbal manager device.
 #[derive(Debug)]
-pub struct Px4GimbalControl {
+pub struct ManagerControl {
     commands: Sender<OutboundCommand>,
     rates: watch::Sender<Option<GimbalRateDemand>>,
     target_system: u8,
-    target_component: u8,
+    preferred: Option<(u8, u8)>,
     policy: ManagerPolicy,
     channel: PayloadChannel,
-    manager_state: Option<std::sync::Arc<std::sync::Mutex<pilotage_mavlink::LinkState>>>,
+    manager_state: Option<std::sync::Arc<std::sync::Mutex<crate::LinkState>>>,
     capabilities: turret_core::PayloadCapabilities,
     started: Instant,
-    device: Option<u8>,
+    selected: Option<Selection>,
     manager_time: Option<u32>,
     manager_received: Option<Instant>,
     next_probe: Instant,
@@ -38,36 +50,36 @@ pub struct Px4GimbalControl {
     timing: Option<PayloadTiming>,
     explicit_validity: bool,
     fence: SendFence,
-    release_after_stop: Option<(WriteReceipt, Instant)>,
+    release_after_stop: Option<(crate::PayloadEffect, WriteReceipt, Instant)>,
     next_id: u64,
     dropped_sends: u64,
     drop_link_loss_stop: bool,
     rejection: &'static str,
 }
 
-impl Px4GimbalControl {
+impl ManagerControl {
     /// Bind portable manager policy and execution to the link's existing lanes.
     pub fn new(
         commands: Sender<OutboundCommand>,
         rates: watch::Sender<Option<GimbalRateDemand>>,
         target_system: u8,
-        target_component: u8,
+        preferred: Option<(u8, u8)>,
     ) -> Result<Self, turret_core::Error> {
         let pitch = AngularRate::radians_per_second(MAX_PITCH_RATE_RPS)?;
         let yaw = AngularRate::radians_per_second(MAX_YAW_RATE_RPS)?;
-        let capabilities = turret_mavlink::manager_capabilities(1, pitch, yaw)?;
+        let capabilities = turret_mavlink::manager_capabilities(0, None, pitch, yaw)?;
         let started = Instant::now();
         Ok(Self {
             commands,
             rates,
             target_system,
-            target_component,
+            preferred,
             policy: ManagerPolicy::new(pitch, yaw)?,
             channel: PayloadChannel::new(capabilities, 1, started),
             manager_state: None,
             capabilities,
             started,
-            device: None,
+            selected: None,
             manager_time: None,
             manager_received: None,
             next_probe: started,
@@ -89,7 +101,7 @@ impl Px4GimbalControl {
     #[must_use]
     pub fn with_manager_state(
         mut self,
-        state: std::sync::Arc<std::sync::Mutex<pilotage_mavlink::LinkState>>,
+        state: std::sync::Arc<std::sync::Mutex<crate::LinkState>>,
     ) -> Self {
         self.manager_state = Some(state);
         self
@@ -102,69 +114,28 @@ impl Px4GimbalControl {
         self
     }
 
-    pub(crate) fn capabilities(&self) -> turret_core::PayloadCapabilities {
+    /// Current discovered support and implementation limits.
+    pub fn capabilities(&self) -> turret_core::PayloadCapabilities {
         self.capabilities
     }
 
     /// Endpoint clock origin shared by command and observation timestamps.
-    pub(crate) fn started_at(&self) -> Instant {
+    pub fn started_at(&self) -> Instant {
         self.started
     }
 
-    pub(crate) fn snapshot_cached(&self) -> Option<pilotage_mavlink::PayloadSnapshot> {
+    /// Read retained command evidence without changing its age.
+    pub fn snapshot_cached(&self) -> Option<crate::PayloadSnapshot> {
         self.channel.snapshot_cached().ok().flatten()
     }
 
-    pub(crate) fn rejection_detail(&self) -> &'static str {
+    /// Describe the most recent rejected operation.
+    pub fn rejection_detail(&self) -> &'static str {
         self.rejection
     }
 
-    /// Bind one device from the expected manager; other device reports cannot authorize it.
-    pub(crate) fn observe_manager(
-        &mut self,
-        report: pilotage_mavlink::codec::GimbalManagerStatus,
-        received: Instant,
-    ) {
-        if report.device_id == 0
-            || self.device.is_some_and(|device| device != report.device_id)
-            || self
-                .manager_time
-                .is_some_and(|time| report.time_boot_ms <= time)
-        {
-            return;
-        }
-        let Some(at) = self.tick(received) else {
-            return;
-        };
-        self.device = Some(report.device_id);
-        self.manager_time = Some(report.time_boot_ms);
-        self.manager_received = Some(received);
-        let owned = self.policy.has_authority(at).unwrap_or(false);
-        if self
-            .policy
-            .observe_status(report.primary_system, report.primary_component, at)
-            .is_err()
-        {
-            return;
-        }
-        let claim_obsolete =
-            self.claim_receipt.is_some() && !self.policy.claim_due(self.now()).unwrap_or(false);
-        if claim_obsolete {
-            self.claim_receipt = None;
-            self.fence.invalidate();
-            self.fence = SendFence::default();
-        }
-        if owned && !self.policy.has_authority(self.now()).unwrap_or(false) {
-            self.fence.invalidate();
-            self.fence = SendFence::default();
-            if let Err(error) = self.channel.revoke() {
-                warn!(%error, "gimbal ownership fence failed");
-            }
-        }
-    }
-
     /// Convert only unspent host budgets to endpoint-local absolute deadlines.
-    pub(crate) fn bind_timing(&mut self, timing: Option<pilotage_protocol::AdmittedTiming>) {
+    pub fn bind_timing(&mut self, timing: Option<pilotage_protocol::AdmittedTiming>) {
         let now = Instant::now();
         self.explicit_validity = timing.is_some_and(|value| value.active_remaining.is_some());
         let send = timing.map_or(Duration::from_millis(250), |value| value.send_remaining);
@@ -195,7 +166,10 @@ impl Px4GimbalControl {
         {
             return true;
         }
-        match self.policy.rate_intent(pitch, yaw, self.now()) {
+        match self
+            .policy
+            .rate_intent(pitch, yaw, &self.capabilities, self.now())
+        {
             Ok(Some(payload)) => self.submit(payload),
             Ok(None) => true,
             Err(_) => {
@@ -216,8 +190,17 @@ impl Px4GimbalControl {
         }
     }
 
+    /// Execute a typed gimbal command within the discovered contract and original deadlines.
+    pub fn command(&mut self, payload: PayloadCommand) -> bool {
+        if matches!(payload, PayloadCommand::Zoom(_)) {
+            self.rejection = "camera commands require the independent camera endpoint";
+            return false;
+        }
+        self.authorize() && self.submit(payload)
+    }
+
     /// Fence pending payloads without claiming that previously sent motion stopped.
-    pub(crate) fn invalidate_pending(&mut self) {
+    pub fn invalidate_pending(&mut self) {
         self.fence.invalidate();
         self.fence = SendFence::default();
         if let Err(error) = self.channel.revoke() {
@@ -241,16 +224,9 @@ impl Px4GimbalControl {
 
     /// Observe actual write receipts and execute Turret expiry/revocation effects.
     pub fn maintain(&mut self) {
+        self.refresh_discovery();
         self.sync_receipts();
-        match self.channel.poll_effect() {
-            Ok(Effect::None) => {}
-            Ok(_) => {
-                self.queue_stop();
-            }
-            Err(error) => {
-                warn!(%error, "gimbal lifecycle polling failed");
-            }
-        }
+        self.queue_stop();
         self.finish_release();
         self.probe_status();
     }
