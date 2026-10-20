@@ -30,10 +30,6 @@ pub struct Truth {
     /// Non-gravitational force per unit mass, body FRD, m/s²: what an
     /// accelerometer measures.
     pub specific_force_frd: [f64; 3],
-    /// Static air pressure, Pa.
-    pub pressure_pa: f64,
-    /// Static air temperature, °C.
-    pub temperature_c: f64,
     /// Dynamic pressure, Pa.
     pub dynamic_pressure_pa: f64,
     /// True airspeed, m/s.
@@ -53,8 +49,6 @@ pub struct TruthProperties {
     rates_rad_s: [Property; 3],
     forces_lbf: [Property; 3],
     mass_slug: Property,
-    pressure_psf: Property,
-    temperature_r: Property,
     qbar_psf: Property,
     vtrue_fps: Property,
     vc_fps: Property,
@@ -99,8 +93,6 @@ impl TruthProperties {
             rates_rad_s,
             forces_lbf,
             mass_slug: engine.property("inertia/mass-slugs")?,
-            pressure_psf: engine.property("atmosphere/P-psf")?,
-            temperature_r: engine.property("atmosphere/T-R")?,
             qbar_psf: engine.property("aero/qbar-psf")?,
             vtrue_fps: engine.property("velocities/vtrue-fps")?,
             vc_fps: engine.property("velocities/vc-fps")?,
@@ -122,8 +114,6 @@ impl TruthProperties {
             attitude: Euler { roll, pitch, yaw },
             rates_frd: get3(self.rates_rad_s, 1.0),
             specific_force_frd: force_n.map(|f| f / mass_kg),
-            pressure_pa: engine.get(self.pressure_psf) * PA_PER_PSF,
-            temperature_c: engine.get(self.temperature_r) * 5.0 / 9.0 - 273.15,
             dynamic_pressure_pa: engine.get(self.qbar_psf) * PA_PER_PSF,
             true_airspeed_mps: engine.get(self.vtrue_fps) * M_PER_FT,
             calibrated_airspeed_mps: engine.get(self.vc_fps) * M_PER_FT,

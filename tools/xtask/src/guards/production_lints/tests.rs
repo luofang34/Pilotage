@@ -6,7 +6,6 @@
 use super::{FfiCrate, clippy_invocations, findings_in};
 
 const BINDING: FfiCrate = FfiCrate {
-    package: "binding",
     dir: "sim/binding",
     unsafe_module: "src/ffi.rs",
 };
@@ -28,10 +27,14 @@ fn an_ffi_crate_is_linted_apart_with_unsafe_code_denied() {
     let invocations = clippy_invocations(&[BINDING]);
     assert_eq!(invocations.len(), 2);
     let workspace = invocations[0].join(" ");
-    assert!(workspace.contains("--workspace --lib --bins --examples --exclude binding --"));
+    assert!(workspace.contains("--workspace --lib --bins --examples --"));
     assert!(workspace.contains("-F unsafe_code"));
     let binding = invocations[1].join(" ");
-    assert!(binding.starts_with("clippy -p binding --lib --bins --examples --"));
+    assert!(
+        binding.starts_with(
+            "clippy --manifest-path sim/binding/Cargo.toml --lib --bins --examples --"
+        )
+    );
     assert!(binding.contains("-D unsafe_code"));
     for lint in [
         "clippy::unwrap_used",

@@ -5,11 +5,32 @@
 
 use pilotage_geo::TerrainRefId;
 use pilotage_world::{
-    MagneticEpoch, N51, TerrainError, TerrainSample, TerrainSource, UniformTerrain, World,
-    metres_per_degree,
+    MagneticEpoch, N51, Ned, TerrainError, TerrainSample, TerrainSource, UniformTerrain, World,
+    local_plane, world_position,
 };
 
 use super::{GroundModel, GroundPatch};
+
+/// North and east metres of a point from the N51 threshold, in the world
+/// model's frame there.
+fn offset(latitude_deg: f64, longitude_deg: f64) -> (f64, f64) {
+    let plane = local_plane(N51.latitude_deg, N51.longitude_deg, N51.elevation_m).unwrap();
+    let ned = plane
+        .to_ned(world_position(latitude_deg, longitude_deg, N51.elevation_m))
+        .unwrap();
+    (ned.north_m, ned.east_m)
+}
+
+/// The point `north_m` and `east_m` from the N51 threshold.
+fn point(north_m: f64, east_m: f64) -> (f64, f64) {
+    let plane = local_plane(N51.latitude_deg, N51.longitude_deg, N51.elevation_m).unwrap();
+    let at = plane.to_geodetic(Ned {
+        north_m,
+        east_m,
+        down_m: 0.0,
+    });
+    (at.latitude_deg, at.longitude_deg)
+}
 
 /// A plane rising 0.1 m per metre north and falling 0.05 m per metre
 /// east of the N51 threshold, from 50 m there.
@@ -25,9 +46,7 @@ impl TerrainSource for Slope {
         latitude_deg: f64,
         longitude_deg: f64,
     ) -> Result<Option<TerrainSample>, TerrainError> {
-        let (per_lat, per_lon) = metres_per_degree(N51.latitude_deg);
-        let north = (latitude_deg - N51.latitude_deg) * per_lat;
-        let east = (longitude_deg - N51.longitude_deg) * per_lon;
+        let (north, east) = offset(latitude_deg, longitude_deg);
         let mut sample = UniformTerrain {
             elevation_m: 50.0 + 0.1 * north - 0.05 * east,
         }
@@ -59,12 +78,9 @@ fn a_plane_is_answered_exactly_between_grid_points() {
     let patch =
         GroundPatch::sample_blocking(&mut world, N51.latitude_deg, N51.longitude_deg, 8).unwrap();
     assert_eq!(patch.spacing_m(), 12.0);
-    let (per_lat, per_lon) = metres_per_degree(N51.latitude_deg);
     for (north, east) in [(0.0, 0.0), (7.3, -3.1), (-40.0, 55.5), (90.0, 90.0)] {
-        let answer = patch.answer(
-            N51.latitude_deg + north / per_lat,
-            N51.longitude_deg + east / per_lon,
-        );
+        let (lat, lon) = point(north, east);
+        let answer = patch.answer(lat, lon);
         let expected = 50.0 + 0.1 * north - 0.05 * east;
         assert!(
             (answer.height_m - expected).abs() < 1e-6,
@@ -88,9 +104,9 @@ fn beyond_the_grid_the_edge_height_stands() {
     let mut world = world(Slope);
     let patch =
         GroundPatch::sample_blocking(&mut world, N51.latitude_deg, N51.longitude_deg, 2).unwrap();
-    let (per_lat, _) = metres_per_degree(N51.latitude_deg);
     // The grid reaches 24 m north; 1 km north reads the edge, 52.4 m.
-    let far = patch.answer(N51.latitude_deg + 1_000.0 / per_lat, N51.longitude_deg);
+    let (lat, lon) = point(1_000.0, 0.0);
+    let far = patch.answer(lat, lon);
     assert!((far.height_m - 52.4).abs() < 1e-6, "{far:?}");
 }
 
@@ -99,9 +115,48 @@ fn the_grid_is_resampled_past_half_its_reach() {
     let mut world = world(UniformTerrain { elevation_m: 0.0 });
     let patch =
         GroundPatch::sample_blocking(&mut world, N51.latitude_deg, N51.longitude_deg, 32).unwrap();
-    let (per_lat, per_lon) = metres_per_degree(N51.latitude_deg);
     // 32 cells of 10 m reach 320 m; re-centre past 160 m.
-    assert!(!patch.needs_recentre(N51.latitude_deg + 150.0 / per_lat, N51.longitude_deg));
-    assert!(patch.needs_recentre(N51.latitude_deg + 170.0 / per_lat, N51.longitude_deg));
-    assert!(patch.needs_recentre(N51.latitude_deg, N51.longitude_deg - 170.0 / per_lon));
+    let (lat, lon) = point(150.0, 0.0);
+    assert!(!patch.needs_recentre(lat, lon));
+    let (lat, lon) = point(170.0, 0.0);
+    assert!(patch.needs_recentre(lat, lon));
+    let (lat, lon) = point(0.0, -170.0);
+    assert!(patch.needs_recentre(lat, lon));
+}
+
+/// The geodetic up direction at a point, in ECEF.
+fn up(latitude_deg: f64, longitude_deg: f64) -> [f64; 3] {
+    let (lat, lon) = (latitude_deg.to_radians(), longitude_deg.to_radians());
+    [lat.cos() * lon.cos(), lat.cos() * lon.sin(), lat.sin()]
+}
+
+fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+#[test]
+fn the_contact_normal_is_up_on_flat_ground_and_tilted_by_the_slope() {
+    let mut flat = world(UniformTerrain { elevation_m: 56.3 });
+    let patch =
+        GroundPatch::sample_blocking(&mut flat, N51.latitude_deg, N51.longitude_deg, 4).unwrap();
+    let normal = patch
+        .answer(N51.latitude_deg, N51.longitude_deg)
+        .normal_ecef;
+    assert!(dot(normal, up(N51.latitude_deg, N51.longitude_deg)) > 1.0 - 1e-12);
+    let mut hill = world(Slope);
+    let patch =
+        GroundPatch::sample_blocking(&mut hill, N51.latitude_deg, N51.longitude_deg, 4).unwrap();
+    let normal = patch
+        .answer(N51.latitude_deg, N51.longitude_deg)
+        .normal_ecef;
+    assert!((dot(normal, normal) - 1.0).abs() < 1e-12);
+    let tilt = dot(normal, up(N51.latitude_deg, N51.longitude_deg)).acos();
+    assert!((tilt - 0.1_f64.hypot(0.05).atan()).abs() < 1e-6, "{tilt}");
+    // Rising to the north, the normal leans south: toward -z of north.
+    let (lat, lon) = (
+        N51.latitude_deg.to_radians(),
+        N51.longitude_deg.to_radians(),
+    );
+    let north = [-lat.sin() * lon.cos(), -lat.sin() * lon.sin(), lat.cos()];
+    assert!(dot(normal, north) < 0.0);
 }

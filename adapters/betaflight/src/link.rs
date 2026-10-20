@@ -19,6 +19,7 @@ use pilotage_msp::{
 use tokio::net::TcpStream;
 use tokio::sync::watch;
 
+use crate::config::BetaflightProfile;
 use crate::local_frame::LocalFrame;
 use crate::outer_loop::{Envelope, Estimate, Horizontal};
 use crate::rc::Sticks;
@@ -118,6 +119,7 @@ pub(crate) struct Observation {
 /// Runs the link forever, reconnecting after every failure.
 pub(crate) async fn run(
     endpoint: SocketAddr,
+    profile: BetaflightProfile,
     envelope: Envelope,
     commands: watch::Receiver<LinkCommand>,
     reports: watch::Sender<LinkReport>,
@@ -129,7 +131,7 @@ pub(crate) async fn run(
             Ok(stream) => {
                 epoch = epoch.wrapping_add(1);
                 stream.set_nodelay(true).ok();
-                let mut session = Session::new(envelope, epoch, &commands, &reports);
+                let mut session = Session::new(profile, envelope, epoch, &commands, &reports);
                 let ended = session.run(MspPort::new(stream), &mut switch).await;
                 tracing::warn!(error = %ended, epoch, "Betaflight MSP link ended; reconnecting");
             }
@@ -142,6 +144,7 @@ pub(crate) async fn run(
 
 /// One connection's state.
 struct Session<'a> {
+    profile: BetaflightProfile,
     epoch: u32,
     commands: watch::Receiver<LinkCommand>,
     reports: &'a watch::Sender<LinkReport>,
@@ -154,12 +157,14 @@ struct Session<'a> {
 
 impl<'a> Session<'a> {
     fn new(
+        profile: BetaflightProfile,
         envelope: Envelope,
         epoch: u32,
         commands: &'a watch::Receiver<LinkCommand>,
         reports: &'a watch::Sender<LinkReport>,
     ) -> Self {
         Self {
+            profile,
             epoch,
             commands: commands.clone(),
             reports,
@@ -172,7 +177,7 @@ impl<'a> Session<'a> {
     }
 
     async fn run(&mut self, mut port: MspPort<TcpStream>, switch: &mut ArmSwitch) -> LinkError {
-        let setup = match setup::configure(&mut port).await {
+        let setup = match setup::configure(&mut port, self.profile).await {
             Ok(setup) => setup,
             Err(error) => return error,
         };

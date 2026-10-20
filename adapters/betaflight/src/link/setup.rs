@@ -2,7 +2,12 @@
 //!
 //! What can change at run time is configured here, idempotently: the aux
 //! mode ranges for ARM and ANGLE are compared slot by slot and written
-//! (then saved) only where they differ. What takes effect only at boot is
+//! (then saved) only where they differ. Writes persist on the flight
+//! controller, so they happen only under [`BetaflightProfile::Simulation`],
+//! with the [`SimulationWrites`] proof no other profile yields; this
+//! module is the only place an MSP configuration write can come from. On
+//! a physical vehicle a differing range is a [`ConfigIssue::ModeRange`]
+//! that blocks arming and names the slot and the range Pilotage needs. What takes effect only at boot is
 //! checked, never written: the receiver provider is chosen in `rxInit`,
 //! and a reboot of Betaflight SITL ends its process, so an adapter that
 //! wrote it would kill the vehicle it configures. A wrong receiver is a
@@ -16,7 +21,22 @@ use tokio::io::{AsyncRead, AsyncWrite};
 
 use super::LinkError;
 use super::port::MspPort;
+use crate::config::BetaflightProfile;
 use crate::rc::required_mode_ranges;
+
+/// The proof that configuration writes are permitted: constructible only
+/// from [`BetaflightProfile::Simulation`], inside this module.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SimulationWrites(());
+
+impl SimulationWrites {
+    fn for_profile(profile: BetaflightProfile) -> Option<Self> {
+        match profile {
+            BetaflightProfile::Simulation => Some(Self(())),
+            BetaflightProfile::Physical => None,
+        }
+    }
+}
 
 /// A configuration fact that keeps the adapter from flying the vehicle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -36,6 +56,19 @@ pub(crate) enum ConfigIssue {
         /// The mode's name.
         name: &'static str,
     },
+    /// A physical flight controller's aux mode range differs from the
+    /// channel layout the adapter drives; it is never written.
+    #[error(
+        "Betaflight aux mode range {slot} is {found:?}; Pilotage needs {wanted:?} (set it on the vehicle: the adapter never writes a physical vehicle's configuration)"
+    )]
+    ModeRange {
+        /// The mode-range slot.
+        slot: usize,
+        /// The range the channel layout needs.
+        wanted: ModeRange,
+        /// The range the flight controller reported, if the slot exists.
+        found: Option<ModeRange>,
+    },
 }
 
 /// What the first connect learned.
@@ -47,10 +80,11 @@ pub(crate) struct Setup {
     pub(crate) issue: Option<ConfigIssue>,
 }
 
-/// Reads the configuration, writes the aux ranges where they differ, and
-/// reports what blocks flight.
+/// Reads the configuration, writes the aux ranges where they differ
+/// (simulation only), and reports what blocks flight.
 pub(crate) async fn configure<S: AsyncRead + AsyncWrite + Unpin>(
     port: &mut MspPort<S>,
+    profile: BetaflightProfile,
 ) -> Result<Setup, LinkError> {
     let api = ApiVersion::decode(&port.request(command::MSP_API_VERSION, vec![]).await?)?;
     let boxes = BoxIds::decode(&port.request(command::MSP_BOXIDS, vec![]).await?);
@@ -66,6 +100,35 @@ pub(crate) async fn configure<S: AsyncRead + AsyncWrite + Unpin>(
         "Betaflight connected"
     );
     let issue = receiver_issue(features).or_else(|| missing_mode(&boxes));
+    let Some(writes) = SimulationWrites::for_profile(profile) else {
+        return Ok(Setup {
+            boxes,
+            issue: issue.or_else(|| mode_range_issue(&ranges)),
+        });
+    };
+    write_mode_ranges(port, &ranges, writes).await?;
+    Ok(Setup { boxes, issue })
+}
+
+/// The first aux range that differs from the channel layout.
+fn mode_range_issue(ranges: &[ModeRange]) -> Option<ConfigIssue> {
+    required_mode_ranges()
+        .into_iter()
+        .enumerate()
+        .find(|(slot, wanted)| ranges.get(*slot) != Some(wanted))
+        .map(|(slot, wanted)| ConfigIssue::ModeRange {
+            slot,
+            wanted,
+            found: ranges.get(slot).copied(),
+        })
+}
+
+/// Writes every differing aux range and saves them.
+async fn write_mode_ranges<S: AsyncRead + AsyncWrite + Unpin>(
+    port: &mut MspPort<S>,
+    ranges: &[ModeRange],
+    SimulationWrites(()): SimulationWrites,
+) -> Result<(), LinkError> {
     let mut changed = false;
     for (slot, wanted) in required_mode_ranges().into_iter().enumerate() {
         if ranges.get(slot) == Some(&wanted) {
@@ -81,7 +144,7 @@ pub(crate) async fn configure<S: AsyncRead + AsyncWrite + Unpin>(
         port.request(command::MSP_EEPROM_WRITE, vec![]).await?;
         tracing::info!("saved the Betaflight aux mode ranges");
     }
-    Ok(Setup { boxes, issue })
+    Ok(())
 }
 
 /// The receiver check: MSP on, UDP off.

@@ -324,7 +324,21 @@ impl<A: pilotage_adapter_api::VehicleAdapter> super::EngineActor<A> {
         let capabilities = self.adapter.capabilities();
         let refreshed = self.engine.refresh_capabilities(capabilities, now);
         self.enact(refreshed);
+        #[cfg(feature = "sim")]
+        let lane_truth = self
+            .truth_lane
+            .as_mut()
+            .and_then(super::sim_truth_lane::SimTruthLane::poll);
         for sample in batch.samples {
+            #[cfg(feature = "sim")]
+            let sample = {
+                let mut sample = sample;
+                // The adapter's own truth takes precedence over the side lane.
+                if sample.sim_truth.is_none() {
+                    sample.sim_truth = lane_truth;
+                }
+                sample
+            };
             let vehicle = sample.vehicle;
             #[cfg(feature = "sim")]
             if let Some(recorder) = self.recorder.as_mut() {

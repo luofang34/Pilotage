@@ -23,8 +23,9 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use pilotage_msp::{Attitude, Decoder, Frame, Version, command};
-use pilotage_multirotor_fdm::quad::GRAVITY;
-use pilotage_multirotor_fdm::{FdmPacket, Origin, PacketClock, QuadState, Quat, Vec3};
+use pilotage_multirotor_fdm::{
+    Environment, FdmPacket, Origin, PacketClock, QuadParams, QuadState, Quat, Vec3,
+};
 
 const ORIGIN: Origin = Origin {
     lat_deg: 47.397_742,
@@ -47,19 +48,21 @@ fn stream(poses: mpsc::Receiver<Pose>, stop: Arc<AtomicBool>) {
     let start = Instant::now();
     let dt = 0.002;
     let mut clock = PacketClock::default();
+    let environment = Environment::new(ORIGIN).expect("well-formed origin");
+    let params = QuadParams::six_inch(environment.gravity_mps2());
     let mut steps: u32 = 0;
     while !stop.load(Ordering::Relaxed) {
         if let Ok((q, w)) = poses.try_recv() {
             (attitude, rates) = (q, w);
         }
         attitude = attitude.integrate(rates, dt);
-        let mut state = QuadState::landed(Vec3::ZERO, 0.0);
+        let mut state = QuadState::landed(&params, Vec3::ZERO, 0.0);
         state.position.z = -20.0;
         state.attitude = attitude;
         state.rates = rates;
-        state.specific_force = attitude.rotate_inverse(Vec3::new(0.0, 0.0, -GRAVITY));
+        state.specific_force = attitude.rotate_inverse(Vec3::new(0.0, 0.0, -params.gravity));
         state.on_ground = false;
-        let packet = FdmPacket::from_state(clock.tick(), &state, &ORIGIN);
+        let packet = FdmPacket::from_state(clock.tick(), &state, &environment).expect("air");
         socket
             .send_to(&packet.to_bytes(), "127.0.0.1:9003")
             .expect("send");

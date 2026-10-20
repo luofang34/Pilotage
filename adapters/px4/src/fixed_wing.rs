@@ -25,12 +25,13 @@ use pilotage_adapter_api::{CommandOutcome, FcCommandAck};
 use pilotage_mavlink::codec::{
     FcMessage, FrameSource, GCS_COMPONENT_ID, GCS_SYSTEM_ID, MAV_CMD_COMPONENT_ARM_DISARM,
     MAV_CMD_DO_SET_MODE, ManualControlSticks, encode_arm_command, encode_command_long,
-    encode_gcs_heartbeat, encode_manual_control, encode_param_set, parse_datagram,
+    encode_gcs_heartbeat, encode_manual_control, parse_datagram,
 };
 use pilotage_mavlink::command_outcome;
 use pilotage_protocol::VelocityIntent;
 use tracing::{info, warn};
 
+use crate::config::Px4Profile;
 use crate::uplink::clock::UplinkClock;
 
 mod params;
@@ -83,10 +84,10 @@ pub(crate) enum IntentDisposition {
 }
 
 /// Why the uplink refused to start the arm sequence.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum ArmRefusal {
-    /// The pinned PX4 parameters are not all confirmed yet.
-    ParametersUnconfirmed,
+    /// A required PX4 parameter is not in place.
+    Parameter(crate::pinning::ParamRefusal),
 }
 
 /// The UDP MAVLink uplink to a fixed-wing PX4's onboard instance.
@@ -126,7 +127,12 @@ impl FixedWingUplink {
     /// # Errors
     ///
     /// Returns the socket bind error.
-    pub fn new(target: SocketAddr, system_id: u8, component_id: u8) -> std::io::Result<Self> {
+    pub fn new(
+        profile: Px4Profile,
+        target: SocketAddr,
+        system_id: u8,
+        component_id: u8,
+    ) -> std::io::Result<Self> {
         let socket = UdpSocket::bind("127.0.0.1:0")?;
         socket.set_nonblocking(true)?;
         info!(%target, system_id, "PX4 fixed-wing uplink ready");
@@ -137,7 +143,7 @@ impl FixedWingUplink {
             component_id,
             seq: 0,
             clock: UplinkClock::System,
-            params: crate::pinning::ParamPinning::new(&params::PINNED),
+            params: crate::pinning::ParamPinning::new(profile, &params::PINNED),
             phase: Phase::Idle,
             sticks: sticks::NEUTRAL,
             last_stick_sent: None,
@@ -190,8 +196,8 @@ impl FixedWingUplink {
             let frame = encode_gcs_heartbeat(self.seq);
             self.send(&frame);
         }
-        for (name, value) in self.params.due(now) {
-            let frame = encode_param_set(self.seq, name, value, self.system_id, self.component_id);
+        for request in self.params.due(now) {
+            let frame = request.encode(self.seq, self.system_id, self.component_id);
             self.send(&frame);
         }
         self.step_phase(now, down_m);
@@ -254,8 +260,8 @@ impl FixedWingUplink {
     /// link loss: the warmup ends in Position mode, which PX4 refuses until
     /// it sees manual control again. Otherwise it ends in the takeoff.
     pub(crate) fn begin_arm(&mut self, down_m: f32) -> Result<(), ArmRefusal> {
-        if !self.params.all_confirmed() {
-            return Err(ArmRefusal::ParametersUnconfirmed);
+        if let Some(refusal) = self.params.refusal() {
+            return Err(ArmRefusal::Parameter(refusal));
         }
         self.sticks = sticks::NEUTRAL;
         let ground = self.ground_down_m.unwrap_or(0.0);

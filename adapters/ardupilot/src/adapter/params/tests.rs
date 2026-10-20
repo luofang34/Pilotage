@@ -8,7 +8,8 @@ use pilotage_mavlink::codec::{FcMessage, FrameSource, ParamValue, param_id};
 use pilotage_mavlink::link::apply_messages_at;
 use pilotage_mavlink::{LinkState, ParamRequest};
 
-use super::DirectParams;
+use super::{DirectParams, DirectRefusal};
+use crate::config::ArduPilotProfile;
 
 fn report(state: &std::sync::Arc<std::sync::Mutex<LinkState>>, name: &str, value: ParamValue) {
     let source = FrameSource {
@@ -27,13 +28,13 @@ fn report(state: &std::sync::Arc<std::sync::Mutex<LinkState>>, name: &str, value
 fn direct_flight_waits_for_both_parameters_and_sets_only_bit_three() {
     let state = std::sync::Arc::new(std::sync::Mutex::new(LinkState::default()));
     let (lane, mut requests) = mpsc::channel(16);
-    let mut params = DirectParams::new(lane, 1, 1);
+    let mut params = DirectParams::new(ArduPilotProfile::Simulation, lane, 1, 1);
     let now = Instant::now();
 
     params.maintain(&state.lock().expect("lock"), now);
     let reads: Vec<_> = std::iter::from_fn(|| requests.try_recv().ok()).collect();
     assert_eq!(reads.len(), 2, "both parameters are read");
-    assert!(params.ready_hover().is_none());
+    assert!(params.ready_hover().is_err());
 
     // GUID_OPTIONS = 1 (arming from the transmitter), as ArduPilot sends
     // an integer: the number in the float field, typed INT32.
@@ -51,7 +52,7 @@ fn direct_flight_waits_for_both_parameters_and_sets_only_bit_three() {
         "an INT32 write carrying the number 9 in the float field"
     );
     assert!(
-        params.ready_hover().is_none(),
+        params.ready_hover().is_err(),
         "not until the FC confirms the bit"
     );
 
@@ -61,7 +62,7 @@ fn direct_flight_waits_for_both_parameters_and_sets_only_bit_three() {
         ParamValue::Int32(9.0_f32.to_bits() as i32),
     );
     params.maintain(&state.lock().expect("lock"), now + Duration::from_secs(1));
-    assert_eq!(params.ready_hover(), Some(0.39));
+    assert_eq!(params.ready_hover(), Ok(0.39));
     assert!(
         requests.try_recv().is_err(),
         "no second write, no early re-read"
@@ -72,7 +73,7 @@ fn direct_flight_waits_for_both_parameters_and_sets_only_bit_three() {
 fn an_implausible_hover_thrust_is_not_believed() {
     let state = std::sync::Arc::new(std::sync::Mutex::new(LinkState::default()));
     let (lane, _requests) = mpsc::channel(16);
-    let mut params = DirectParams::new(lane, 1, 1);
+    let mut params = DirectParams::new(ArduPilotProfile::Simulation, lane, 1, 1);
     report(
         &state,
         "GUID_OPTIONS",
@@ -80,5 +81,51 @@ fn an_implausible_hover_thrust_is_not_believed() {
     );
     report(&state, "MOT_THST_HOVER", ParamValue::Real32(0.0));
     params.maintain(&state.lock().expect("lock"), Instant::now());
-    assert!(params.ready_hover().is_none());
+    assert!(params.ready_hover().is_err());
+}
+
+#[test]
+fn a_physical_vehicle_is_never_written_and_direct_flight_names_the_bit() {
+    let state = std::sync::Arc::new(std::sync::Mutex::new(LinkState::default()));
+    let (lane, mut requests) = mpsc::channel(16);
+    let mut params = DirectParams::new(ArduPilotProfile::Physical, lane, 1, 1);
+    let now = Instant::now();
+    report(
+        &state,
+        "GUID_OPTIONS",
+        ParamValue::Int32(1.0_f32.to_bits() as i32),
+    );
+    report(&state, "MOT_THST_HOVER", ParamValue::Real32(0.39));
+    for later in [0, 5, 10] {
+        params.maintain(
+            &state.lock().expect("lock"),
+            now + Duration::from_secs(later),
+        );
+    }
+    let sent: Vec<_> = std::iter::from_fn(|| requests.try_recv().ok()).collect();
+    assert!(!sent.is_empty(), "the parameters are read");
+    assert!(
+        sent.iter()
+            .all(|p| matches!(p.request, ParamRequest::Read(_))),
+        "a physical vehicle got a write: {sent:?}"
+    );
+    let refusal = params.ready_hover();
+    assert_eq!(
+        refusal,
+        Err(DirectRefusal::ThrustAsThrustClear {
+            options: 1,
+            expected: 9
+        })
+    );
+    let detail = refusal.err().map(|r| r.to_string()).unwrap_or_default();
+    assert!(detail.contains("GUID_OPTIONS is 1"), "{detail}");
+
+    // Set on the vehicle by its operator, direct flight is ready.
+    report(
+        &state,
+        "GUID_OPTIONS",
+        ParamValue::Int32(9.0_f32.to_bits() as i32),
+    );
+    params.maintain(&state.lock().expect("lock"), now + Duration::from_secs(11));
+    assert_eq!(params.ready_hover(), Ok(0.39));
 }

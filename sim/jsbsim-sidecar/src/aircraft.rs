@@ -79,6 +79,15 @@ impl Aircraft {
         }
     }
 
+    /// The height of the centre of gravity above level ground when the
+    /// aircraft rests on its gear, m.
+    pub fn rest_height_m(self) -> f64 {
+        match self {
+            Self::X500 => 0.12,
+            Self::Rascal => 0.31,
+        }
+    }
+
     /// The model's directory in this crate.
     pub fn bundled_dir(self) -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))

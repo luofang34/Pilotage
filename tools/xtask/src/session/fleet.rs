@@ -32,7 +32,7 @@ const LOOPBACK: &str = "127.0.0.1";
 /// Where each vehicle spawns on `site`, in launch order: each backend
 /// says which ground it starts on, and vehicles on one ground stand in a
 /// row in launch order.
-pub(crate) fn spawn_points(site: &Site, grounds: &[Ground]) -> Vec<Placement> {
+pub(crate) fn spawn_points(site: &Site, grounds: &[Ground]) -> Result<Vec<Placement>, XtaskError> {
     grounds
         .iter()
         .enumerate()
@@ -42,7 +42,7 @@ pub(crate) fn spawn_points(site: &Site, grounds: &[Ground]) -> Vec<Placement> {
                 .take(index)
                 .filter(|other| *other == ground)
                 .count();
-            site.placement(*ground, before)
+            crate::site::place(site, *ground, before)
         })
         .collect()
 }
@@ -158,7 +158,7 @@ pub async fn run_fleet(args: &FleetArgs) -> Result<(), XtaskError> {
     }
     let grounds: Vec<Ground> = slots.iter().map(|slot| slot.backend.ground()).collect();
     print_line(&format!("fleet site: {}", describe_site(&args.site)));
-    for (slot, point) in slots.iter_mut().zip(spawn_points(&args.site, &grounds)) {
+    for (slot, point) in slots.iter_mut().zip(spawn_points(&args.site, &grounds)?) {
         plan_slot(slot, &point)?;
     }
 

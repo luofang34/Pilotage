@@ -110,6 +110,16 @@ pub enum HostError {
         #[source]
         source: std::net::AddrParseError,
     },
+    /// A present Aviate setting was outside the values the adapter accepts.
+    #[error("invalid {variable} value {value:?} (expected {expected})")]
+    AviateSetting {
+        /// The environment variable being parsed.
+        variable: &'static str,
+        /// The rejected value.
+        value: String,
+        /// What the variable accepts.
+        expected: &'static str,
+    },
     /// A present PX4 setting was outside the values the adapter accepts.
     #[error("invalid {variable} value {value:?} (expected {expected})")]
     Px4Setting {

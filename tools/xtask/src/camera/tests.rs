@@ -100,3 +100,52 @@ fn a_known_spawn_point_is_cached_before_the_cameras_start() {
     let without = stage(&context(1), None).expect("stage");
     assert!(!without.spec.args.iter().any(|arg| arg == "--prewarm"));
 }
+
+/// The adapter camera each backend's host is handed, one value per
+/// variable.
+fn adapter_cameras(env: &[(String, String)]) -> Vec<(&str, &str)> {
+    env.iter()
+        .filter(|(name, _)| name == "PILOTAGE_PX4_CAMERA" || name == "PILOTAGE_AVIATE_CAMERA")
+        .map(|(name, value)| (name.as_str(), value.as_str()))
+        .collect()
+}
+
+/// Only a session that runs Gazebo spawns the gz camera sidecar, and
+/// every JSBSim session says so itself rather than leaning on an adapter
+/// default; with the world-model camera stage every adapter camera is
+/// off, each named once.
+#[test]
+fn only_gazebo_sessions_select_the_gz_camera() {
+    for entry in crate::backend::BACKENDS {
+        let backend = crate::backend::backend_for(entry.name).expect("registered");
+        let plain = SessionContext::for_test(PathBuf::from("/repo"));
+        let without = crate::session::host_stage(&plain, backend.as_ref()).expect("host stage");
+        let cameras = adapter_cameras(&without.spec.env);
+        let gazebo = cameras.iter().any(|(_, value)| *value == "gazebo");
+        assert_eq!(
+            gazebo,
+            entry.name.ends_with("-gz"),
+            "{} selects {cameras:?}",
+            entry.name
+        );
+        if entry.name.contains("jsbsim") {
+            assert!(
+                !cameras.is_empty() && cameras.iter().all(|(_, value)| *value == "off"),
+                "{} must state its camera off, got {cameras:?}",
+                entry.name
+            );
+        }
+        let with = crate::session::host_stage(&context(4), backend.as_ref()).expect("host stage");
+        let mut cameras = adapter_cameras(&with.spec.env);
+        cameras.sort_unstable();
+        assert_eq!(
+            cameras,
+            [
+                ("PILOTAGE_AVIATE_CAMERA", "off"),
+                ("PILOTAGE_PX4_CAMERA", "off")
+            ],
+            "{}",
+            entry.name
+        );
+    }
+}

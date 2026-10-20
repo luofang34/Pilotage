@@ -33,10 +33,15 @@ const COMPONENT_ID: u8 = 51;
 pub const FIELDS_IMU: u32 = 0x003f;
 /// The magnetometer bits.
 pub const FIELDS_MAG: u32 = 0x01c0;
-/// The barometer bits (pressure, pressure altitude, temperature).
+/// The barometer bits: pressure, pressure altitude, temperature. PX4
+/// takes a barometer sample only when all three are set.
 pub const FIELDS_BARO: u32 = 0x1a00;
 /// The differential-pressure bit.
 pub const FIELDS_DIFF_PRESSURE: u32 = 0x0400;
+/// Standard gravity, m/s²: the unit HIL_STATE_QUATERNION's milli-g is
+/// defined against (ISO 80000-3), not the local gravity of the world
+/// model, which the specific force it scales already contains.
+const STANDARD_GRAVITY_MPS2: f64 = 9.806_65;
 /// MAV_MODE_FLAG_SAFETY_ARMED in `HIL_ACTUATOR_CONTROLS.mode`.
 pub const MODE_ARMED: u8 = 0x80;
 
@@ -216,7 +221,7 @@ impl Encoder {
         let [p, qr, r] = truth.rates_frd;
         let [vn, ve, vd] = truth.velocity_ned;
         let mg = |mps2: f64| {
-            (mps2 / 9.806_65 * 1000.0)
+            (mps2 / STANDARD_GRAVITY_MPS2 * 1000.0)
                 .round()
                 .clamp(f64::from(i16::MIN), f64::from(i16::MAX)) as i16
         };

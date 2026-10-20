@@ -2,76 +2,15 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use super::*;
 use crate::identity::file_digest_blocking;
 
-struct Fixture {
-    root: PathBuf,
-    aircraft: PathBuf,
-    trial: PathBuf,
-    bridge: PathBuf,
-    config: PathBuf,
-}
-
-impl Fixture {
-    fn new() -> Self {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("clock")
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!(
-            "pilotage-xplane-trial-{}-{nonce}",
-            std::process::id()
-        ));
-        let aircraft = root.join("Aircraft/Test Aircraft.acf");
-        let trial = root.join("Resources/plugins/PilotageTrial/64/mac.xpl");
-        let bridge = root.join("Resources/plugins/px4xplane/64/mac.xpl");
-        let config = root.join("Resources/plugins/px4xplane/64/config.ini");
-        for path in [&aircraft, &trial, &bridge, &config] {
-            std::fs::create_dir_all(path.parent().expect("parent")).expect("directory");
-            std::fs::write(path, path.to_string_lossy().as_bytes()).expect("file");
-        }
-        Self {
-            root,
-            aircraft,
-            trial,
-            bridge,
-            config,
-        }
-    }
-
-    fn expected(&self) -> ExpectedXPlaneIdentity {
-        ExpectedXPlaneIdentity {
-            aircraft: expected("aircraft", &self.aircraft),
-            trial_plugin: expected("trial", &self.trial),
-            bridge_plugin: expected("bridge", &self.bridge),
-            bridge_config: expected("config", &self.config),
-            trial_source_build_id: "source-build".to_owned(),
-            simulator_model_digest: Digest::from_bytes([9; 32]),
-        }
-    }
-
-    fn hello(&self) -> String {
-        format!(
-            "HELLO 2 120400 400 1 {} {} {} {} {}\n",
-            hex("source-build"),
-            file_digest_blocking("bridge", &self.bridge).expect("bridge digest"),
-            hex_path(&self.aircraft),
-            hex_path(&self.trial),
-            hex_path(&self.bridge),
-        )
-    }
-}
-
-impl Drop for Fixture {
-    fn drop(&mut self) {
-        std::fs::remove_dir_all(&self.root).ok();
-    }
-}
+mod fixture;
+use fixture::Fixture;
 
 #[test]
 fn a_verified_session_binds_identity_and_checks_every_sample() {

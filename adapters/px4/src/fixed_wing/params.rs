@@ -1,7 +1,9 @@
-//! The PX4 parameters the fixed-wing uplink pins at connect
-//! ([`crate::pinning`] confirms each write). The uplink refuses to arm
-//! until every one is pinned, because the stick mapping and the link-loss
-//! behavior both depend on them.
+//! The PX4 parameters the fixed-wing uplink depends on. Under
+//! [`crate::config::Px4Profile::Simulation`] it writes them at connect;
+//! on a physical vehicle it only reads them ([`crate::pinning`] is the one
+//! place either happens). The uplink refuses to arm until every one holds
+//! the value below, because the stick mapping and the link-loss behavior
+//! both depend on them.
 
 use pilotage_mavlink::codec::ParamValue;
 
@@ -15,7 +17,7 @@ use super::sticks::{
 /// handover to Position mode happens during the climb, not after a loiter.
 pub(crate) const TAKEOFF_ALTITUDE_M: f32 = 30.0;
 
-/// Every pinned parameter and why:
+/// Every required parameter and why:
 ///
 /// - `COM_RC_IN_MODE = 1`: manual control from MAVLink only. SITL has no
 ///   RC receiver, and this makes MANUAL_CONTROL the source whose loss is

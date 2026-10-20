@@ -59,11 +59,26 @@ pub enum ReceiverEvent {
     /// is measured by the run loop's own wall clock at the point it receives
     /// this event, not by a timestamp carried on the event itself.
     VideoFrame {
-        /// Video source this frame came from: 0 = onboard FPV, 1 = chase.
+        /// Video source this frame came from: 0 = onboard FPV, 1 = chase,
+        /// 2 = gimbal.
         source_id: u8,
         /// The JPEG bytes (tag, source id, and length prefix already stripped).
         jpeg: Vec<u8>,
+        /// Client-local monotonic timestamp at receipt, on the clock
+        /// telemetry receipts are stamped with.
+        received_at: pilotage_timing::MonoTimestamp,
+        /// The frame's capture stamp, when its stream carries one.
+        capture: Option<VideoCapture>,
     },
+}
+
+/// When a video frame was captured, as its capture-identity header states.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VideoCapture {
+    /// Capture clock code.
+    pub clock: u8,
+    /// Capture time in that clock, nanoseconds.
+    pub time_ns: u64,
 }
 
 /// Spawns the receiver task: branches poll datagrams (telemetry, `Pong`,

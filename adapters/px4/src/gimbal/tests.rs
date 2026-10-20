@@ -161,3 +161,15 @@ fn rejected_replacement_does_not_cancel_pending_stop_responsibility() {
     assert!(control.release_after_stop.is_some());
     assert_eq!(rates.borrow().as_ref().unwrap().pitch_rps, 0.0);
 }
+
+#[test]
+fn a_stick_demand_reaches_the_wire_as_the_advertised_rate_in_radians_per_second() {
+    let (mut control, mut lanes) = control();
+    assert!(control.rate_demand(-0.5, 0.25));
+    let rate = latest_rate(&mut lanes).expect("rate published");
+    // The rate the scope advertises is the rate PX4 is asked for, unscaled:
+    // GIMBAL_MANAGER_SET_ATTITUDE carries rad/s, and the live gimbal rate
+    // test holds PX4 to moving at it.
+    assert_eq!(rate.pitch_rps, -0.5 * super::MAX_PITCH_RATE_RPS);
+    assert_eq!(rate.yaw_rps, 0.25 * super::MAX_YAW_RATE_RPS);
+}

@@ -21,6 +21,9 @@ mod hid_pipeline;
 // The source-role suite exercises the simulation-truth oracle.
 #[cfg(feature = "sim")]
 mod source_roles;
+// Choosing the truth source is a simulation-build concern.
+#[cfg(feature = "sim")]
+mod truth_source;
 
 #[test]
 fn a_profile_that_requires_unavailable_acceleration_fails_closed() {

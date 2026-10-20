@@ -97,7 +97,6 @@ pub(super) async fn spawn_adapter_runtime(
             Ok(spawn_runtime(engine, adapter, video, host))
         }
         AdapterKind::ArduPilot => {
-            // An ArduPilot SITL has no camera of its own.
             let config = ardupilot_config::from_env()?;
             let adapter = pilotage_adapter_ardupilot::ArduPilotAdapter::start(HOST_VEHICLE, config)
                 .await
@@ -117,21 +116,28 @@ pub(super) async fn spawn_adapter_runtime(
             Ok(spawn_runtime(engine, adapter, video, host))
         }
         #[cfg(any(target_os = "macos", target_os = "linux"))]
-        AdapterKind::Dji => {
-            if sim_camera_port.is_some() {
-                return Err(HostError::SimCameraConflict { adapter: "dji" });
-            }
-            let adapter = super::dji::start_blocking(HOST_VEHICLE)?;
-            let engine = build_engine(&adapter, options);
-            let video = SessionVideo {
-                frames: None,
-                producer: None,
-            };
-            Ok(spawn_runtime(engine, adapter, video, host))
-        }
+        AdapterKind::Dji => spawn_dji_runtime_blocking(options, sim_camera_port, host),
         #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         AdapterKind::Dji => Err(HostError::AdapterNotInBuild { adapter: "dji" }),
     }
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn spawn_dji_runtime_blocking(
+    options: RuntimeOptions,
+    sim_camera_port: Option<u16>,
+    host: HostSide,
+) -> Result<JoinHandle<()>, HostError> {
+    if sim_camera_port.is_some() {
+        return Err(HostError::SimCameraConflict { adapter: "dji" });
+    }
+    let adapter = super::dji::start_blocking(HOST_VEHICLE)?;
+    let engine = build_engine(&adapter, options);
+    let video = SessionVideo {
+        frames: None,
+        producer: None,
+    };
+    Ok(spawn_runtime(engine, adapter, video, host))
 }
 
 /// Chooses the session's video. With a simulator camera port configured
@@ -246,6 +252,7 @@ async fn start_aviate() -> Result<pilotage_adapter_aviate::AviateAdapter, HostEr
     pilotage_adapter_aviate::AviateAdapter::start_with_control_feel(
         HOST_VEHICLE,
         profile,
+        aviate_profile::truth_from_env(std::env::var("PILOTAGE_AVIATE_TRUTH"))?,
         aviate_profile::link_config_from_env(profile, std::env::var("PILOTAGE_AVIATE_ADDR"))?,
         control_feel,
     )

@@ -22,6 +22,8 @@ mod command;
 mod outbound;
 #[cfg(feature = "sim")]
 mod recorder;
+#[cfg(feature = "sim")]
+mod sim_truth_lane;
 mod telemetry;
 pub use command::ToEngine;
 use outbound::{targets_reliable_stream, to_connection_message};
@@ -84,6 +86,10 @@ pub struct EngineActor<A: VehicleAdapter> {
     /// build does not carry the module, not merely leave it idle.
     #[cfg(feature = "sim")]
     recorder: Option<recorder::Recorder>,
+    /// The simulator's own truth, when `PILOTAGE_SIM_TRUTH_ADDR` names
+    /// where it arrives; simulation-only like the recorder.
+    #[cfg(feature = "sim")]
+    truth_lane: Option<sim_truth_lane::SimTruthLane>,
     /// The single monotonic origin shared with every connection task's
     /// client-message stamps (ADR-0009: one `host_time` reference domain).
     /// Passed in rather than sampled here so tick-driven timestamps and
@@ -113,6 +119,8 @@ impl<A: VehicleAdapter> EngineActor<A> {
             nav_guidance: BTreeMap::new(),
             #[cfg(feature = "sim")]
             recorder: recorder::Recorder::from_env(),
+            #[cfg(feature = "sim")]
+            truth_lane: sim_truth_lane::SimTruthLane::from_env(),
             start,
         }
     }

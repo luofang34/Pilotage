@@ -17,7 +17,11 @@ fn armed_uplink() -> (Px4Uplink, UdpSocket) {
     let fc = UdpSocket::bind("127.0.0.1:0").expect("bind fake FC");
     fc.set_read_timeout(Some(Duration::from_secs(2)))
         .expect("timeout");
-    let mut uplink = Px4Uplink::new(fc.local_addr().expect("addr")).expect("uplink");
+    let mut uplink = Px4Uplink::new(
+        crate::config::Px4Profile::Simulation,
+        fc.local_addr().expect("addr"),
+    )
+    .expect("uplink");
     uplink.use_manual_clock();
     uplink.begin_arm(0.0);
     (uplink, fc)
@@ -52,7 +56,11 @@ const LEVEL: DirectDemand = DirectDemand::BodyRate([0.0; 3]);
 #[test]
 fn direct_flight_needs_an_active_stream_and_a_reported_thrust() {
     let fc = UdpSocket::bind("127.0.0.1:0").expect("bind fake FC");
-    let mut idle = Px4Uplink::new(fc.local_addr().expect("addr")).expect("uplink");
+    let mut idle = Px4Uplink::new(
+        crate::config::Px4Profile::Simulation,
+        fc.local_addr().expect("addr"),
+    )
+    .expect("uplink");
     idle.direct.observe_thrust(0.6);
     assert_eq!(idle.send_direct(LEVEL, 0.6), DirectDisposition::UplinkIdle);
 

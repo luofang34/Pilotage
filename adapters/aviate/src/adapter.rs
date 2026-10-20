@@ -28,7 +28,7 @@ mod advertisement;
 mod camera;
 mod profile;
 mod sim_attachments;
-pub use profile::AviateProfile;
+pub use profile::{AviateProfile, AviateTruth};
 #[cfg(not(feature = "sim"))]
 use sim_attachments::no_camera;
 use sim_attachments::{CameraBridge, Pointing, TruthOracle};

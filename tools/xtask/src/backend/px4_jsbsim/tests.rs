@@ -87,10 +87,11 @@ fn the_quad_plans_the_sidecar_then_px4_on_the_instance_port() {
     assert!(
         sidecar
             .program
-            .ends_with("target/release/pilotage-jsbsim-sidecar")
+            .ends_with("sim/jsbsim-sidecar/target/release/pilotage-jsbsim-sidecar")
     );
     assert_eq!(arg(&sidecar.args, "--port"), Some("4581"));
     assert_eq!(arg(&sidecar.args, "--aircraft"), Some("x500"));
+    assert_eq!(arg(&sidecar.args, "--truth-addr"), Some("127.0.0.1:19581"));
     assert_eq!(arg(&sidecar.args, "--aircraft-dir"), None);
     assert_eq!(
         arg(&sidecar.args, "--jsbsim-root"),
@@ -107,6 +108,9 @@ fn the_quad_plans_the_sidecar_then_px4_on_the_instance_port() {
     // gimbal model maps them back with.
     assert_eq!(env(&px4_stage.env, "PX4_PARAM_MNT_MODE_OUT"), Some("0"));
     assert_eq!(env(&px4_stage.env, "PX4_PARAM_MNT_DO_STAB"), Some("1"));
+    // PX4's open-loop output filter is off, so a gimbal rate demand moves
+    // the gimbal at the demanded rate rather than a fraction of it.
+    assert_eq!(env(&px4_stage.env, "PX4_PARAM_MNT_TAU"), Some("0"));
     assert_eq!(env(&px4_stage.env, "PX4_PARAM_PWM_MAIN_FUNC6"), Some("421"));
     let travel = [
         env(&px4_stage.env, "PX4_PARAM_MNT_RANGE_ROLL").unwrap(),
@@ -119,6 +123,21 @@ fn the_quad_plans_the_sidecar_then_px4_on_the_instance_port() {
         Some(travel.join(",").as_str())
     );
     assert!(px4_stage.cwd.as_ref().unwrap().ends_with("rootfs/21"));
+}
+
+#[test]
+fn the_sidecar_stands_on_the_site_terrain_once_it_is_built() {
+    let (root, px4, jsbsim) = scaffold("terrain");
+    let stages = plan_with_dirs(&context(&root, 0), &px4, &jsbsim, JsbsimModel::Quad).unwrap();
+    assert_eq!(arg(&stages[0].spec.args, "--terrain"), None);
+    let archive = crate::sim_terrain::archive_path(&root, "n51");
+    std::fs::create_dir_all(archive.parent().unwrap()).unwrap();
+    std::fs::write(&archive, "").unwrap();
+    let stages = plan_with_dirs(&context(&root, 0), &px4, &jsbsim, JsbsimModel::Quad).unwrap();
+    assert_eq!(
+        arg(&stages[0].spec.args, "--terrain"),
+        Some(archive.to_str().unwrap())
+    );
 }
 
 #[test]
@@ -209,6 +228,11 @@ fn an_instance_claims_its_simulator_port_and_px4s_links() {
             "{port} unclaimed"
         );
     }
+    assert!(
+        claims
+            .iter()
+            .any(|claim| matches!(claim, Claim::Udp { port: 19_582, .. }))
+    );
     assert_eq!(simulator_port(22), 4582);
 }
 
@@ -222,6 +246,11 @@ fn the_host_flies_the_selected_airframe_on_the_instance_links() {
     assert_eq!(env(&host, "PILOTAGE_PX4_ADDR"), Some("127.0.0.1:14570"));
     assert_eq!(env(&host, "PILOTAGE_PX4_SYSTEM_ID"), Some("21"));
     assert!(env(&host, "GZ_IP").is_none());
+    // The host takes truth from the sidecar, on the port the sidecar sends to.
+    assert_eq!(
+        env(&host, "PILOTAGE_SIM_TRUTH_ADDR"),
+        Some("127.0.0.1:19580")
+    );
     assert_eq!(env(&host, "PILOTAGE_PX4_GIMBAL"), None);
     let quad = Px4Jsbsim::default().host_env(&ctx);
     assert_eq!(env(&quad, "PILOTAGE_PX4_GIMBAL"), Some("1"));

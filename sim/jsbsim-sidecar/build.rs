@@ -1,7 +1,8 @@
 //! Compiles the C++ shim over JSBSim and links JSBSim's static library.
 //!
 //! JSBSim is an external checkout: `JSBSIM_DIR`, else `~/jsbsim`, with
-//! its build installed in `install/` by `cargo xtask build-jsbsim`. The
+//! its build installed in `install/` by `scripts/build-jsbsim.sh` (which
+//! `cargo xtask build-jsbsim` runs). The
 //! checkout's path is also handed to the crate as `PILOTAGE_JSBSIM_ROOT`,
 //! the default root for JSBSim's engine and systems data.
 //!
@@ -33,7 +34,7 @@ fn main() -> ExitCode {
     let include = prefix.join("include/JSBSim");
     if !library.is_file() || !include.join("FGFDMExec.h").is_file() {
         println!(
-            "cargo:warning=JSBSim is not built at {}: run cargo xtask build-jsbsim \
+            "cargo:warning=JSBSim is not built at {}: run scripts/build-jsbsim.sh \
              (or set JSBSIM_DIR)",
             prefix.display()
         );

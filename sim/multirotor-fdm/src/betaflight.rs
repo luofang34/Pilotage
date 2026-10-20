@@ -18,8 +18,7 @@
 //! The ignored live test `tests/betaflight_conventions.rs` checks these
 //! against a running SITL.
 
-use crate::atmosphere::pressure_pa;
-use crate::geodesy::Origin;
+use crate::environment::{Environment, EnvironmentError};
 use crate::quad::QuadState;
 use crate::rotation::{Quat, Vec3};
 
@@ -112,22 +111,32 @@ pub fn attitude_from_field(field: [f64; 4]) -> Quat {
 }
 
 impl FdmPacket {
-    /// The packet describing `state` at `timestamp`, positioned around
-    /// `origin`.
-    #[must_use]
-    pub fn from_state(timestamp: f64, state: &QuadState, origin: &Origin) -> Self {
-        let (lat, lon, alt) =
-            origin.to_geodetic(state.position.x, state.position.y, state.position.z);
+    /// The packet describing `state` at `timestamp` in `environment`.
+    ///
+    /// # Errors
+    ///
+    /// [`EnvironmentError::Atmosphere`] where the standard atmosphere has
+    /// no air at the quad's altitude.
+    pub fn from_state(
+        timestamp: f64,
+        state: &QuadState,
+        environment: &Environment,
+    ) -> Result<Self, EnvironmentError> {
+        let position = environment.geodetic(state.position);
         let v = state.velocity;
-        Self {
+        Ok(Self {
             timestamp,
             angular_velocity: gyro_field(state.rates),
             linear_acceleration: accelerometer_field(state.specific_force),
             orientation: orientation_field(state.attitude),
             velocity: [v.y, v.x, -v.z],
-            position: [lon, lat, alt],
-            pressure: pressure_pa(alt),
-        }
+            position: [
+                position.longitude_deg,
+                position.latitude_deg,
+                position.ellipsoidal_height_m,
+            ],
+            pressure: environment.pressure_pa(position)?,
+        })
     }
 
     /// The packet's wire bytes.

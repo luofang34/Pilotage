@@ -1,0 +1,73 @@
+name: JSBSim sidecar
+
+# The JSBSim sidecar builds outside the workspace, from public sources
+# only, so Aviate's CI can build it from a checkout of this repository.
+# This job proves that: no deploy keys, no checkout credential, and a
+# fresh CARGO_HOME, so a private git dependency anywhere in the
+# sidecar's graph fails the fetch.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: jsbsim-sidecar-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  PROTOC_SHA256: a7be2928c0454f132c599e25b79b7ad1b57663f2337d7f7e468a1d59b98ec1b0
+  PROTOC_VERSION: "26.1"
+
+jobs:
+  jsbsim-sidecar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install protoc
+        run: |
+          archive="${RUNNER_TEMP}/protoc-${PROTOC_VERSION}.zip"
+          install_dir="${RUNNER_TEMP}/protoc"
+          curl --fail --location --retry 3 --silent --show-error \
+            "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip" \
+            --output "${archive}"
+          echo "${PROTOC_SHA256}  ${archive}" | sha256sum --check --strict
+          unzip -q "${archive}" -d "${install_dir}"
+          echo "${install_dir}/bin" >> "${GITHUB_PATH}"
+          "${install_dir}/bin/protoc" --version
+
+      # The cache key follows the release the build script pins.
+      - name: Cache the JSBSim build
+        uses: actions/cache@v4
+        with:
+          path: ~/jsbsim
+          key: jsbsim-${{ runner.os }}-${{ hashFiles('scripts/build-jsbsim.sh') }}
+
+      - name: Build JSBSim
+        run: bash scripts/build-jsbsim.sh
+
+      - name: Build and test the sidecar alone, without credentials
+        working-directory: sim/jsbsim-sidecar
+        env:
+          GIT_CONFIG_NOSYSTEM: "1"
+          GIT_TERMINAL_PROMPT: "0"
+          RUSTDOCFLAGS: -D missing_docs -D rustdoc::broken_intra_doc_links
+        run: |
+          export CARGO_HOME="${RUNNER_TEMP}/cargo-home"
+          export GIT_CONFIG_GLOBAL="${RUNNER_TEMP}/empty-gitconfig"
+          : > "${GIT_CONFIG_GLOBAL}"
+          cargo fmt --check
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked --all-targets
+          cargo doc --locked --no-deps
+          cargo build --locked --release

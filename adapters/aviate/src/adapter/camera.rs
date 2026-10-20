@@ -1,12 +1,13 @@
 //! The camera producer path. Which producer feeds the frames is a
 //! deployment property, selected by `PILOTAGE_AVIATE_CAMERA`:
 //!
-//! - unset or `on`: Pilotage's C++ gz-transport sidecar delivers the
-//!   flight world's `/camera` and `/chase_camera` frames.
+//! - `gazebo`: Pilotage's C++ gz-transport sidecar delivers the
+//!   flight world's `/camera` and `/chase_camera` frames (aviate-gz).
 //! - `xplane-plugin`: the in-simulator Pilotage camera plugin dials this
 //!   process and delivers the vehicle camera view (FPV or gimbal
 //!   payload), and accepts pointing and zoom commands back.
-//! - `off`: no video.
+//! - unset or `off`: no video. A session that runs no Gazebo never
+//!   spawns its sidecar: the launcher has to ask for it.
 //!
 //! The frames are captured on the producer's own clock, but Aviate's
 //! flight state is estimated on the flight controller's vehicle-boot
@@ -40,14 +41,20 @@ pub(crate) enum CameraMode {
     Off,
 }
 
-/// Resolves `PILOTAGE_AVIATE_CAMERA` — an unknown value degrades to no
-/// video with a warning rather than inventing a producer.
+/// Resolves `PILOTAGE_AVIATE_CAMERA`.
 pub(crate) fn camera_mode() -> CameraMode {
-    match std::env::var("PILOTAGE_AVIATE_CAMERA").as_deref() {
-        Err(_) | Ok("on") => CameraMode::Gazebo,
-        Ok("xplane-plugin") => CameraMode::XPlanePlugin,
-        Ok("off") => CameraMode::Off,
-        Ok(other) => {
+    mode_from(std::env::var("PILOTAGE_AVIATE_CAMERA").ok().as_deref())
+}
+
+/// The mode a `PILOTAGE_AVIATE_CAMERA` value names: absence is no video,
+/// and an unknown value degrades to no video with a warning rather than
+/// inventing a producer.
+pub(crate) fn mode_from(value: Option<&str>) -> CameraMode {
+    match value {
+        None | Some("off") => CameraMode::Off,
+        Some("gazebo") => CameraMode::Gazebo,
+        Some("xplane-plugin") => CameraMode::XPlanePlugin,
+        Some(other) => {
             tracing::warn!(value = other, "unknown PILOTAGE_AVIATE_CAMERA; no video");
             CameraMode::Off
         }
@@ -189,3 +196,6 @@ pub(crate) async fn spawn_camera_bridge() -> (
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
