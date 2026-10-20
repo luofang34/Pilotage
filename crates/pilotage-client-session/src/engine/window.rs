@@ -12,27 +12,32 @@ const NS_PER_MS: u64 = 1_000_000;
 
 #[derive(Debug, Default)]
 pub(super) struct ControlWindow {
-    id: u64,
-    received_at_ns: u64,
-    expires_at_ns: u64,
+    windows: VecDeque<ReceivedWindow>,
     probes: VecDeque<u64>,
     last_probe_at: Option<u64>,
 }
 
+#[derive(Debug)]
+struct ReceivedWindow {
+    id: u64,
+    received_at_ns: u64,
+    expires_at_ns: u64,
+}
+
 impl ControlWindow {
     pub(super) fn id_at(&self, now_ns: u64) -> u64 {
-        if now_ns >= self.received_at_ns && now_ns < self.expires_at_ns {
-            self.id
-        } else {
-            0
-        }
+        self.windows
+            .iter()
+            .find(|window| now_ns >= window.received_at_ns && now_ns < window.expires_at_ns)
+            .map_or(0, |window| window.id)
     }
 
     pub(super) fn receive(&mut self, pong: &wire::Pong, now_ns: u64) {
         let Some(sent) = pong.echoed_sender_sent_at.as_ref().map(|stamp| stamp.nanos) else {
             return;
         };
-        let advance = pong.control_window_id.wrapping_sub(self.id);
+        let latest = self.windows.front().map_or(0, |window| window.id);
+        let advance = pong.control_window_id.wrapping_sub(latest);
         let expires = sent.saturating_add(u64::from(pong.control_window_ms) * 1_000_000);
         if pong.nonce != sent
             || !self.probes.contains(&sent)
@@ -45,12 +50,18 @@ impl ControlWindow {
             return;
         }
         self.probes.retain(|probe| *probe != sent);
-        self.id = pong.control_window_id;
         // The event time is a millisecond bucket, not a precise receive time.
         // Only a later bucket proves that an input followed this reply.
-        self.received_at_ns = now_ns.saturating_add(NS_PER_MS);
-        // Receipt cannot renew a window delayed in either direction.
-        self.expires_at_ns = expires;
+        self.windows.push_front(ReceivedWindow {
+            id: pong.control_window_id,
+            received_at_ns: now_ns.saturating_add(NS_PER_MS),
+            // Receipt cannot renew a window delayed in either direction.
+            expires_at_ns: expires,
+        });
+        // Coalesced replies must not discard an already valid input's window.
+        if self.windows.len() > 4 {
+            self.windows.pop_back();
+        }
     }
 
     fn probe(&mut self, now_ns: u64) -> Option<ClientAction> {

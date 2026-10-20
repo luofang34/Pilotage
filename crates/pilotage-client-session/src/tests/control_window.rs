@@ -83,6 +83,76 @@ fn a_fractional_millisecond_probe_accepts_a_same_millisecond_reply() {
     assert!(!client.control_action_ready(1, MOTION, 260 * MS));
 }
 
+#[test]
+fn a_refresh_keeps_the_prior_window_for_an_already_valid_input() {
+    let mut client = physical_engine();
+    client.request_lease(1, MOTION);
+    grant(&mut client, 4);
+    let first = probe(&mut client, 10);
+    pong(&mut client, &first, 1, 20);
+    let second = probe(&mut client, 110);
+    pong(&mut client, &second, 2, 120);
+    let sampled = 120 * MS + 500_000;
+    let actions = client.control_frame(
+        1,
+        MOTION,
+        crate::ControlCommand::Legacy(wire::ControlPayload::default()),
+        sampled,
+    );
+    let ClientAction::SendDatagram(bytes) = &actions[0] else {
+        panic!("control frame")
+    };
+    let envelope = wire::Envelope::decode(bytes.as_slice()).expect("frame envelope");
+    let Some(wire::envelope::Payload::ControlFrame(frame)) = envelope.payload else {
+        panic!("control frame")
+    };
+    assert_eq!(frame.timing.unwrap().control_window_id, 1);
+    assert!(client.control_action_ready(1, MOTION, sampled));
+    assert!(!client.control_action_ready(1, MOTION, 20 * MS));
+    assert!(
+        client
+            .prepare_control_action_at(1, MOTION, takeoff(), sampled)
+            .is_some()
+    );
+    assert!(client.control_action_ready(1, MOTION, 121 * MS));
+    assert!(!client.control_action_ready(1, MOTION, 360 * MS));
+}
+
+#[test]
+fn coalesced_replies_preserve_the_original_windows_without_extending_them() {
+    let mut client = physical_engine();
+    client.request_lease(1, MOTION);
+    grant(&mut client, 4);
+    let first = probe(&mut client, 10);
+    pong(&mut client, &first, 1, 20);
+    let second = probe(&mut client, 110);
+    let third = probe(&mut client, 210);
+    pong(&mut client, &second, 2, 220);
+    pong(&mut client, &third, 3, 220);
+    let prepared = client
+        .prepare_control_action_at(1, MOTION, takeoff(), 220 * MS + 500_000)
+        .expect("the first reply still covers this input");
+    let ClientAction::SendBootstrap(bytes) = &prepared.actions[0] else {
+        panic!("one reliable action")
+    };
+    let (envelope, _) =
+        pilotage_protocol::decode_envelope_length_delimited(bytes).expect("action envelope");
+    let Some(wire::envelope::Payload::ControlActionCommand(command)) = envelope.payload else {
+        panic!("reliable action")
+    };
+    assert_eq!(command.timing.unwrap().control_window_id, 1);
+    assert!(!client.control_action_ready(1, MOTION, 20 * MS));
+    assert!(client.control_action_ready(1, MOTION, 221 * MS));
+    assert!(!client.control_action_ready(1, MOTION, 460 * MS));
+    client.handle(
+        TransportEvent::TransportLost {
+            detail: "closed".into(),
+        },
+        470,
+    );
+    assert!(!client.control_action_ready(1, MOTION, 220 * MS + 500_000));
+}
+
 fn pong(client: &mut ClientEngine, ping: &wire::Ping, id: u64, now_ms: u64) -> Vec<ClientAction> {
     let envelope = wire::Envelope {
         schema_version: pilotage_protocol::SCHEMA_VERSION,
