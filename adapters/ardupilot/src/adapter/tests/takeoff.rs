@@ -27,6 +27,13 @@ fn takeoff_is_advertised_only_on_the_velocity_flight_scope() {
             .iter()
             .any(|action| action.action == ActionKind::Takeoff);
         assert_eq!(supported, scope.scope.as_str() == FLIGHT_SCOPE);
+        for action in &scope.actions {
+            assert_eq!(
+                action.takeoff_start_state,
+                (action.action == ActionKind::Takeoff)
+                    .then_some(pilotage_protocol::TakeoffStartState::ArmedOnGround)
+            );
+        }
     }
 }
 

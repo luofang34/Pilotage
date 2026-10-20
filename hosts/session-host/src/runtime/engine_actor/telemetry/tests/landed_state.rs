@@ -6,7 +6,7 @@ use pilotage_timing::MonoTimestamp;
 fn landed_observation_does_not_refresh_the_arm_observation() {
     let mut sample = super::truth_and_fc_sample();
     let fc = sample.fc_state.as_mut().expect("FC sample");
-    let arm_stamp = fc.stamp;
+    let arm_stamp = fc.stamp.expect("arm stamp");
     let landed_stamp = MeasurementStamp {
         sequence: arm_stamp.sequence.wrapping_add(9),
         acquired_at_ns: arm_stamp.acquired_at_ns + 10_000,
@@ -40,7 +40,7 @@ fn missing_and_unknown_landed_states_do_not_assert_on_ground() {
     let fc = unknown.fc_state.as_mut().expect("FC sample");
     fc.landed_state = Some(LandedStateSample {
         state: LandedState::Unknown,
-        stamp: fc.stamp,
+        stamp: fc.stamp.expect("arm stamp"),
     });
     let mapped = super::sample_to_wire(unknown, MonoTimestamp::from_nanos(2));
     let landed = mapped

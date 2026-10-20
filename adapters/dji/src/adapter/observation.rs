@@ -142,16 +142,20 @@ impl Observations {
     ) -> TelemetryBatch {
         let payload = self.sample_payload(now, connection_valid);
         let battery = self.battery.sample(now, connection_valid, self.incarnation);
-        let avionics = self
+        let airframe = self
             .airframe
             .sample(now, connection_valid, self.incarnation);
-        if payload.is_none() && battery.is_none() && avionics.is_none() {
+        if payload.is_none() && battery.is_none() && airframe.is_none() {
             return TelemetryBatch::default();
         }
+        let (avionics, fc_state) = airframe
+            .map(|sample| (Some(sample.avionics), Some(sample.fc_state)))
+            .unwrap_or_default();
         TelemetryBatch {
             samples: vec![TelemetrySample {
                 battery,
                 avionics,
+                fc_state,
                 ..telemetry(vehicle, tick, payload)
             }],
         }

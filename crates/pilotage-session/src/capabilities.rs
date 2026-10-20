@@ -141,6 +141,9 @@ fn action_capability(action: &pilotage_adapter_api::ActionCapability) -> wire::A
             .iter()
             .map(|target| feel_target(*target) as i32)
             .collect(),
+        takeoff_start_state: pilotage_protocol::TakeoffStartState::option_to_wire(
+            action.takeoff_start_state,
+        ) as i32,
     }
 }
 

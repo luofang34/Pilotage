@@ -76,9 +76,10 @@ impl BetaflightAdapter {
         };
         let fc_state = FcStateSample {
             landed_state: None,
+            motor_state: None,
             arm_state: if snapshot.armed { 2 } else { 1 },
             last_command,
-            stamp: self.stamp(&observed, SourceRole::FcState, FC_STATE_SOURCE_ID),
+            stamp: Some(self.stamp(&observed, SourceRole::FcState, FC_STATE_SOURCE_ID)),
         };
         let pose = observed.north_east.map(|[north, east]| Pose2d {
             x: north,

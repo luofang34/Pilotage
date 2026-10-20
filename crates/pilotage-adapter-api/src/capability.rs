@@ -50,6 +50,7 @@ pub fn sim_lifecycle_descriptor() -> ScopeDescriptor {
             action: pilotage_protocol::ActionKind::SimReset,
             mode_targets: vec![],
             feel_targets: vec![],
+            takeoff_start_state: None,
         }],
         legacy: None,
     }
@@ -106,6 +107,11 @@ pub struct ActionCapability {
     /// A client offers only what a vehicle advertises, so a control never asks
     /// for a law the vehicle has no qualified profile for.
     pub feel_targets: Vec<FeelTarget>,
+    /// The required start state for `Takeoff`; `None` for other actions.
+    ///
+    /// `None` on `Takeoff` means unknown. Clients must not infer readiness
+    /// from arm support or vehicle class. The adapter checks all conditions.
+    pub takeoff_start_state: Option<pilotage_protocol::TakeoffStartState>,
 }
 
 /// One legacy numeric axis routed onto a typed intent component: the axis

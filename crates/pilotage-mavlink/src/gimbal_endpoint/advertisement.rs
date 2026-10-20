@@ -52,6 +52,7 @@ pub fn scope_descriptor(control: &ManagerControl, stamp: &GimbalStamp) -> ScopeD
                 action: ActionKind::GimbalRecenter,
                 mode_targets: vec![],
                 feel_targets: vec![],
+                takeoff_start_state: None,
             }]
         } else {
             vec![]

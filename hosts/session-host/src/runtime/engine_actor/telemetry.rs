@@ -307,6 +307,10 @@ fn fc_state_to_wire(sample: FcStateSample) -> wire::FcState {
                 state: landed.state.to_wire() as i32,
                 stamp: Some(measurement_stamp_to_wire(landed.stamp)),
             }),
+        motor_state: sample.motor_state.map(|motor| wire::MotorStateObservation {
+            state: motor.state.to_wire() as i32,
+            stamp: Some(measurement_stamp_to_wire(motor.stamp)),
+        }),
         // 0 none observed, 1 arm, 2 disarm — the FC's verdict for the most
         // recent commanded arm/disarm (enactment truth).
         last_command_kind: sample
@@ -317,7 +321,7 @@ fn fc_state_to_wire(sample: FcStateSample) -> wire::FcState {
             .map_or(wire::CommandOutcome::Unspecified, |ack| {
                 ack.outcome.to_wire()
             }) as i32,
-        stamp: Some(measurement_stamp_to_wire(sample.stamp)),
+        stamp: sample.stamp.map(measurement_stamp_to_wire),
         // The FC-specific result code stays unwritten: the typed outcome
         // is the only answer a client reads.
         ..wire::FcState::default()
