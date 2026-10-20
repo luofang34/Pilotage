@@ -11,6 +11,7 @@ import {
 import { createSessionBootstrap } from "./session-bootstrap.js";
 import { createSessionTransport } from "./session-transport.js";
 import { TransportSessionLifecycle } from "./transport-session.js";
+import { resolveViewerElements } from "./viewer-elements.js";
 
 const CERT = "cd".repeat(32);
 const CODE = "a7".repeat(32);
@@ -95,20 +96,26 @@ function harness(code = CODE) {
   const closeWait = deferred();
   const timers = new Set();
   const state = {};
+  const instances = [];
   const logs = [];
   const log = (message) => {
     logs.push(message);
     if (message.startsWith("connection cannot be auto-recovered")) halted.resolve();
   };
-  const els = {
+  const elements = {
     host: { value: "pilotage.local" },
     port: { value: "4433" },
     certHash: { value: CERT },
     joinCode: { value: code },
     resumeBtn: { hidden: true },
   };
+  const els = resolveViewerElements({
+    getElementById: (id) => elements[id],
+    querySelectorAll: () => [],
+  });
   class Transport {
     constructor(url, options) {
+      instances.push(this);
       this.url = url;
       this.options = options;
       this.ready = Promise.resolve();
@@ -183,7 +190,7 @@ function harness(code = CODE) {
     },
   });
   return {
-    state, els, logs, transport, timers, closeWait, telemetry, failed, halted,
+    state, els, logs, transport, timers, closeWait, telemetry, failed, halted, instances,
     async nextTransport() {
       const instance = await created.promise;
       created = deferred();
@@ -195,6 +202,30 @@ function harness(code = CODE) {
       Object.assign(globalThis, original);
     },
   };
+}
+
+for (const [field, value] of [
+  ["host", ""], ["port", ""], ["certHash", ""],
+  ["certHash", "a".repeat(63)], ["certHash", "g".repeat(64)], ["host", "pilotage.local/path"],
+]) {
+  const h = harness();
+  try {
+    const valid = h.els[field].value;
+    h.els[field].value = value;
+    assert.deepEqual(await h.transport.connect(), { ok: false, failure: { phase: "construct" } });
+    assert.equal(h.instances.length, 0, `${field}: invalid target cannot create a transport`);
+    assert.ok(!h.logs.join("\n").includes(CODE));
+    h.els[field].value = valid;
+    h.transport.reconnect.requestConnect();
+    const transport = await h.nextTransport();
+    await transport.reading.promise;
+    assert.deepEqual(helloJoinToken(transport.writes[0]), joinCodeBytes(CODE));
+    transport.welcome();
+    await h.telemetry.promise;
+    assert.equal(h.state.connected, true);
+  } finally {
+    h.restore();
+  }
 }
 
 for (const code of ["", CODE]) {

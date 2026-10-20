@@ -2,9 +2,10 @@ import { runBootstrapReader } from "./bootstrap.js";
 import { negotiateSessionAuthority } from "./connect-authority.js";
 import { createReconnectController } from "./reconnect.js";
 import {
+  applySessionTargetParams,
   createJoinCredentials,
   failureAfterClose,
-  pilotageSessionUrl,
+  sessionConnectionParameters,
   transportCloseFailure,
 } from "./session-admission.js";
 import {
@@ -37,13 +38,6 @@ export function createSessionTransport({
     manifestSeen: false,
     endReported: false,
   };
-
-  function applyUrlParams() {
-    const params = new URLSearchParams(window.location.search);
-    if (params.has("host")) els.host.value = params.get("host");
-    if (params.has("port")) els.port.value = params.get("port");
-    if (params.has("cert")) els.certHash.value = params.get("cert");
-  }
 
   async function refreshSessionConfig() {
     let response = null;
@@ -84,45 +78,15 @@ export function createSessionTransport({
     }
   }
 
-  function hexToBytes(hex) {
-    const clean = hex.trim().toLowerCase();
-    const out = new Uint8Array(clean.length / 2);
-    for (let i = 0; i < out.length; i += 1) {
-      out[i] = Number.parseInt(clean.substr(i * 2, 2), 16);
-    }
-    return out;
-  }
-
   async function connect({ manual } = { manual: true }) {
-    const host = els.host.value.trim();
-    const port = els.port.value.trim();
-    const certHashHex = els.certHash.value.trim();
-    if (!host || !port || !certHashHex) {
-      log("host, port, and cert hash are all required");
-      return { ok: false, failure: { phase: "construct" } };
-    }
-    if (!/^[0-9a-fA-F]{64}$/.test(certHashHex)) {
-      log("certificate hash must be exactly 64 hexadecimal characters (SHA-256)");
-      return { ok: false, failure: { phase: "construct" } };
-    }
-    const certHash = hexToBytes(certHashHex);
-    let url;
-    let joinToken;
-    try {
-      url = pilotageSessionUrl(host, port);
-      joinToken = credentials.forConnection(
-        `${url}#${certHashHex.toLowerCase()}`, els.joinCode.value, manual,
-      );
-    } catch (error) {
-      log(error.message);
-      return { ok: false, failure: { phase: "construct" } };
-    }
+    const parameters = sessionConnectionParameters(els, credentials, manual, log);
+    if (!parameters) return { ok: false, failure: { phase: "construct" } };
     const session = await negotiateSessionAuthority({
       manual,
       gate: controlGate,
       releases: releaseTracker,
       openAndBootstrap: (leaseProbe) =>
-        openTransportSession({ url, certHash, certHashHex, joinToken, manual, leaseProbe }),
+        openTransportSession({ ...parameters, manual, leaseProbe }),
       startControl: ({ transport, token }) => control.startControlLoop(transport, token),
       controlUnavailable: ({ token }) => {
         transportSessions.runIfActive(token, () => {
@@ -311,7 +275,7 @@ export function createSessionTransport({
   });
 
   return {
-    applyUrlParams,
+    applyUrlParams: () => applySessionTargetParams(els, window.location.search),
     connect,
     handleTransportClosed,
     reconnect,
