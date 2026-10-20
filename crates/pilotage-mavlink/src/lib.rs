@@ -13,13 +13,16 @@
 pub mod ardupilot;
 pub mod codec;
 mod command_result;
+pub mod gimbal_control;
+pub mod gimbal_endpoint;
 mod gimbal_flags;
+pub use gimbal_control::ManagerControl;
 pub mod link;
 mod payload_execution;
 pub mod sampling;
 pub use payload_execution::{
-    PayloadChannel, PayloadExecutionError, PayloadSnapshot, PayloadTiming, PayloadWrite,
-    WriteReceipt,
+    PayloadChannel, PayloadEffect, PayloadExecutionError, PayloadSnapshot, PayloadTiming,
+    PayloadWrite, WriteReceipt,
 };
 
 pub use codec::{FcMessage, FrameSource, ParseStats, parse_datagram};
@@ -28,7 +31,7 @@ pub use gimbal_flags::gimbal_reference;
 pub use link::{
     AttitudeThrustDemand, AttitudeUpdate, AuthorizationSource, BatteryReport, BodyVelocityDemand,
     CameraReport, CameraWriteRequirement, CommandAckReport, CommandTarget, FcReports,
-    GimbalDeviceAttitude, GimbalRateDemand, KinematicsUpdate, LinkConfig, LinkError, LinkState,
-    ManagerWriteRequirement, MavlinkLink, OffboardSetpoint, OutboundCommand, OutboundParam,
-    ParamRequest, ResetPolicy, SendFence, StatusTextReport,
+    GimbalDeviceAttitude, GimbalManagerReport, GimbalRateDemand, GimbalReports, KinematicsUpdate,
+    LinkConfig, LinkError, LinkState, ManagerWriteRequirement, MavlinkLink, OffboardSetpoint,
+    OutboundCommand, OutboundParam, ParamRequest, ResetPolicy, SendFence, StatusTextReport,
 };

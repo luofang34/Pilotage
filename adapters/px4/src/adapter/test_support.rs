@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use pilotage_mavlink::LinkState;
 use pilotage_protocol::{VehicleClass, VehicleId};
 
-use super::{EstimateSource, Px4Adapter, sampling};
+use super::{EstimateSource, Px4Adapter};
 use crate::uplink::Px4Uplink;
 
 impl Px4Adapter {
@@ -25,9 +25,9 @@ impl Px4Adapter {
             _frame_forwarder: None,
             arm: pilotage_mavlink::sampling::ArmTracker::default(),
             arm_incarnation: pilotage_adapter_api::SourceIncarnation::new([0; 16]),
-            gimbal_stamp: sampling::GimbalStamp::new(pilotage_adapter_api::SourceIncarnation::new(
-                [0x60; 16],
-            )),
+            gimbal_stamp: pilotage_mavlink::gimbal_endpoint::GimbalStamp::new(
+                pilotage_adapter_api::SourceIncarnation::new([0x60; 16]),
+            ),
             started_at: std::time::Instant::now(),
             last_reset: None,
             reset_latch: None,
@@ -43,7 +43,35 @@ impl Px4Adapter {
     }
 
     /// Installs a test gimbal control path, for tests.
-    pub(crate) fn with_gimbal(mut self, gimbal: crate::gimbal::Px4GimbalControl) -> Self {
+    pub(crate) fn with_gimbal(mut self, gimbal: pilotage_mavlink::ManagerControl) -> Self {
+        let state = self.estimate.as_ref().expect("test state").state.clone();
+        super::gimbal_tests::discover_gimbal(&state);
+        let report = state
+            .lock()
+            .expect("state")
+            .gimbals
+            .managers
+            .get(&(1, 2))
+            .and_then(|report| report.status)
+            .map(|(status, _)| status)
+            .expect("manager");
+        pilotage_mavlink::link::apply_messages_at(
+            &state,
+            &[(
+                super::tests::SOURCE,
+                pilotage_mavlink::codec::FcMessage::GimbalManagerStatus(
+                    pilotage_mavlink::codec::GimbalManagerStatus {
+                        time_boot_ms: report.time_boot_ms.wrapping_add(1),
+                        ..report
+                    },
+                ),
+            )],
+            0,
+            0,
+            std::time::Instant::now(),
+        );
+        let mut gimbal = gimbal.with_manager_state(state);
+        gimbal.refresh_discovery();
         self.gimbal = Some(gimbal);
         self
     }

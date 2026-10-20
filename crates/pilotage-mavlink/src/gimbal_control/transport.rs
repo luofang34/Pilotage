@@ -1,12 +1,14 @@
 use super::*;
-use pilotage_mavlink::codec::{GCS_COMPONENT_ID, GCS_SYSTEM_ID};
+use crate::codec::{GCS_COMPONENT_ID, GCS_SYSTEM_ID};
 use turret_mavlink::Demand;
 
-impl Px4GimbalControl {
+impl ManagerControl {
     pub(super) fn authorize(&mut self) -> bool {
+        self.refresh_discovery();
         self.sync_receipts();
-        if self.release_after_stop.is_some() {
-            self.rejection = "gimbal stop write is pending";
+        self.finish_release();
+        if self.release_after_stop.is_some() || self.ownership_release.is_some() {
+            self.rejection = "gimbal stop or ownership release write is pending";
             return false;
         }
         if !self.requested {
@@ -22,7 +24,7 @@ impl Px4GimbalControl {
             self.requested = true;
         }
         self.probe_status();
-        let Some(device) = self.device else {
+        let Some(selection) = self.selected else {
             self.rejection = "gimbal manager device is not discovered";
             return false;
         };
@@ -33,7 +35,7 @@ impl Px4GimbalControl {
             let receipt = WriteReceipt::default();
             let until = Instant::now() + Duration::from_millis(250);
             if self.enqueue(
-                turret_mavlink::claim_command(GCS_SYSTEM_ID, GCS_COMPONENT_ID, device),
+                turret_mavlink::claim_command(GCS_SYSTEM_ID, GCS_COMPONENT_ID, selection.device),
                 None,
                 Some(receipt.clone()),
                 until,
@@ -51,6 +53,18 @@ impl Px4GimbalControl {
             return;
         }
         self.next_probe = now + Duration::from_millis(400);
+        if self.information_missing() {
+            self.enqueue(
+                Demand::CommandLong {
+                    command: 512,
+                    params: [280.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                },
+                None,
+                None,
+                now + Duration::from_millis(250),
+            );
+        }
+
         self.enqueue(
             turret_mavlink::request_manager_status(),
             None,
@@ -80,7 +94,7 @@ impl Px4GimbalControl {
     }
 
     pub(super) fn submit(&mut self, payload: PayloadCommand) -> bool {
-        let Some(device) = self.device else {
+        let Some(selection) = self.selected else {
             return false;
         };
         if self.timing.is_none() {
@@ -113,7 +127,7 @@ impl Px4GimbalControl {
                 timing.send_before = timing.send_before.min(complete);
             }
         }
-        let Ok(demand) = turret_mavlink::encode_payload(payload, device, 0) else {
+        let Ok(demand) = turret_mavlink::encode_payload(payload, selection.device, 0) else {
             return false;
         };
         self.next_id = self.next_id.wrapping_add(1);
@@ -131,7 +145,7 @@ impl Px4GimbalControl {
     pub(super) fn enqueue(
         &mut self,
         demand: Demand,
-        payload_write: Option<pilotage_mavlink::PayloadWrite>,
+        payload_write: Option<crate::PayloadWrite>,
         receipt: Option<WriteReceipt>,
         send_before: Instant,
     ) -> bool {
@@ -143,7 +157,7 @@ impl Px4GimbalControl {
                     command,
                     params,
                     target_system: self.target_system,
-                    target_component: self.target_component,
+                    target_component: self.manager_component(),
                     send_before: Some(send_before),
                     fence: Some(fence),
                     payload_write,
@@ -155,22 +169,23 @@ impl Px4GimbalControl {
                 gimbal_device_id,
                 pitch_rps,
                 yaw_rps,
-                ..
-            } if flags == turret_mavlink::HORIZON_VEHICLE_YAW_FLAGS => self
+                roll_rps,
+            } => self
                 .rates
                 .send(Some(GimbalRateDemand {
+                    flags,
+                    roll_rps,
                     pitch_rps,
                     yaw_rps,
                     gimbal_device_id,
                     target_system: self.target_system,
-                    target_component: self.target_component,
+                    target_component: self.manager_component(),
                     send_before: Some(send_before),
                     fence: Some(fence),
                     payload_write,
                     receipt,
                 }))
                 .is_ok(),
-            _ => false,
         };
         if !sent {
             self.record_drop();
@@ -179,7 +194,7 @@ impl Px4GimbalControl {
     }
 
     fn command_fence(&self, demand: Demand, payload: bool) -> SendFence {
-        use pilotage_mavlink::ManagerWriteRequirement as Requirement;
+        use crate::ManagerWriteRequirement as Requirement;
         let requirement = match demand {
             Demand::CommandLong {
                 command: 1001,
@@ -194,67 +209,19 @@ impl Px4GimbalControl {
             _ => None,
         };
         if let Some(requirement) = requirement {
-            if let (Some(state), Some(device)) = (&self.manager_state, self.device) {
-                return self.fence.for_manager(state.clone(), device, requirement);
+            if let (Some(state), Some(selection)) = (&self.manager_state, self.selected) {
+                return self.fence.for_manager(
+                    state.clone(),
+                    (selection.component, selection.device),
+                    selection.epoch,
+                    selection.revision,
+                    requirement,
+                );
             }
             let invalid = SendFence::default();
             invalid.invalidate();
             return invalid;
         }
         self.fence.clone()
-    }
-
-    pub(super) fn queue_stop(&mut self) -> bool {
-        let Some(device) = self.device else {
-            return true;
-        };
-        self.fence.invalidate();
-        self.fence = SendFence::default();
-        let Ok(stop) = turret_mavlink::stop_command(PayloadCommand::Recenter) else {
-            return false;
-        };
-        let Ok(demand) = turret_mavlink::encode_payload(stop, device, 0) else {
-            return false;
-        };
-        let receipt = WriteReceipt::default();
-        let deadline = Instant::now() + Duration::from_millis(250);
-        let queued = self.enqueue(demand, None, Some(receipt.clone()), deadline);
-        self.release_after_stop = Some((receipt, deadline));
-        queued
-    }
-
-    fn manager_reported_other_owner(&self) -> bool {
-        self.manager_state
-            .as_ref()
-            .and_then(|state| state.lock().ok()?.fc_reports.gimbal_manager)
-            .is_some_and(|(report, received)| {
-                Some(report.device_id) == self.device
-                    && received.elapsed() < Duration::from_secs(1)
-                    && (report.primary_system, report.primary_component)
-                        != (GCS_SYSTEM_ID, GCS_COMPONENT_ID)
-            })
-    }
-
-    pub(super) fn finish_release(&mut self) {
-        let Some((receipt, deadline)) = self.release_after_stop.as_ref() else {
-            return;
-        };
-        if receipt.sent_at_cached().is_none() && !self.manager_reported_other_owner() {
-            if Instant::now() >= *deadline {
-                self.queue_stop();
-            }
-            return;
-        }
-        self.release_after_stop = None;
-        if let Some(device) = self.device {
-            self.enqueue(
-                turret_mavlink::release_command(device),
-                None,
-                None,
-                Instant::now() + Duration::from_millis(250),
-            );
-        }
-        self.policy.revoke();
-        self.requested = false;
     }
 }

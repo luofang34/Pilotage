@@ -21,7 +21,6 @@ mod adapter;
 mod config;
 mod error;
 mod fixed_wing;
-mod gimbal;
 mod pinning;
 mod uplink;
 
@@ -32,5 +31,4 @@ pub use adapter::{
 pub use config::{Px4Airframe, Px4Config, Px4Profile};
 pub use error::Px4AdapterError;
 pub use fixed_wing::FixedWingUplink;
-pub use gimbal::Px4GimbalControl;
 pub use uplink::Px4Uplink;

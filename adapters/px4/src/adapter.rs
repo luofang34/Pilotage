@@ -18,7 +18,7 @@ use pilotage_timing::SimTick;
 use pilotage_mavlink::sampling::{
     ArmTracker, VehicleReports, battery_sample, estimate_batch, fc_state_sample, report_only_sample,
 };
-use pilotage_mavlink::{LinkState, MavlinkLink};
+use pilotage_mavlink::{LinkState, MavlinkLink, gimbal_endpoint};
 
 use crate::config::Px4Config;
 use crate::error::Px4AdapterError;
@@ -40,9 +40,6 @@ mod gimbal_link_loss_tests;
 #[cfg(test)]
 mod gimbal_tests;
 mod link_loss;
-mod payload;
-mod pointing;
-mod sampling;
 #[cfg(test)]
 mod test_support;
 #[cfg(test)]
@@ -70,9 +67,9 @@ pub const ARM_BUTTON: u16 = 0;
 pub const DISARM_BUTTON: u16 = 1;
 /// The gimbal pointing scope (GIM-01, ADR-0006 vocabulary): pitch/yaw
 /// LOS rate demands, leased and fenced independently of flight.
-pub const GIMBAL_SCOPE: &str = "vehicle.gimbal";
+pub const GIMBAL_SCOPE: &str = gimbal_endpoint::SCOPE;
 /// Gimbal-scope button whose press recenters the gimbal.
-pub const GIMBAL_NEUTRAL_BUTTON: u16 = 0;
+pub const GIMBAL_NEUTRAL_BUTTON: u16 = gimbal_endpoint::NEUTRAL_BUTTON;
 
 /// Telemetry-only-until-armed adapter for PX4 (ADR-0018). Real-time
 /// (ADR-0013): PX4 advances on its own clock; `step` reports the
@@ -92,7 +89,7 @@ pub struct Px4Adapter {
     // Gimbal-manager command path; rides the receive link's socket
     // because the FC's GCS instance retargets its telemetry stream to
     // the last peer that spoke.
-    gimbal: Option<crate::gimbal::Px4GimbalControl>,
+    gimbal: Option<pilotage_mavlink::ManagerControl>,
     camera_control: Option<camera_control::CameraControl>,
     // Pilotage's gz sidecar bridges the flight-deck rig's camera topics;
     // the adapter remains usable without video when it cannot spawn.
@@ -107,7 +104,7 @@ pub struct Px4Adapter {
     // gimbal identity plus a reboot-aware epoch, kept apart from the FC
     // arm incarnation so a device reboot never regresses time under a
     // fixed identity+epoch.
-    gimbal_stamp: sampling::GimbalStamp,
+    gimbal_stamp: gimbal_endpoint::GimbalStamp,
     started_at: std::time::Instant,
     last_reset: Option<std::time::Instant>,
     // Commanded-reset latch: engaged when a sim reset is requested,
@@ -159,11 +156,11 @@ impl Px4Adapter {
                 // `Px4Profile::Simulation`, so a real vehicle can never withhold
                 // its safe-state command.
                 Some(
-                    crate::gimbal::Px4GimbalControl::new(
+                    pilotage_mavlink::ManagerControl::new(
                         link.command_sender(),
                         rates,
                         link_config.system_id,
-                        link_config.component_id,
+                        None,
                     )
                     .map_err(pilotage_mavlink::LinkError::from)?
                     .with_manager_state(link.state())
@@ -198,9 +195,9 @@ impl Px4Adapter {
             _frame_forwarder: frame_forwarder,
             arm: ArmTracker::default(),
             arm_incarnation: pilotage_adapter_api::SourceIncarnation::new(rand_incarnation()),
-            gimbal_stamp: sampling::GimbalStamp::new(pilotage_adapter_api::SourceIncarnation::new(
-                rand_incarnation(),
-            )),
+            gimbal_stamp: gimbal_endpoint::GimbalStamp::new(
+                pilotage_adapter_api::SourceIncarnation::new(rand_incarnation()),
+            ),
             started_at: std::time::Instant::now(),
             last_reset: None,
             reset_latch: None,
@@ -332,7 +329,10 @@ impl VehicleAdapter for Px4Adapter {
             return self.apply_camera(frame, tick);
         }
         if frame.scope.as_str() == GIMBAL_SCOPE {
-            return self.apply_gimbal(frame, tick);
+            return self.gimbal.as_mut().map_or_else(
+                || rejected_control(tick, RejectReason::UnknownScope),
+                |gimbal| gimbal_endpoint::apply_control(gimbal, self.vehicle, frame, tick),
+            );
         }
         if frame.scope.as_str() == pilotage_adapter_api::SIM_LIFECYCLE_SCOPE {
             return self.apply_sim_lifecycle(frame, tick);
@@ -349,7 +349,9 @@ impl VehicleAdapter for Px4Adapter {
     fn sample_telemetry(&mut self) -> TelemetryBatch {
         self.expire_camera_reports();
         self.maintain_camera();
-        self.observe_gimbal_manager();
+        if let Some(gimbal) = self.gimbal.as_mut() {
+            gimbal.refresh_discovery();
+        }
         self.observe_arm_report();
         let fc_state = fc_state_sample(
             self.arm.report(),
@@ -357,11 +359,12 @@ impl VehicleAdapter for Px4Adapter {
             self.arm_incarnation,
             self.started_at,
         );
-        let gimbal_attitude = self
+        let gimbal = self
             .gimbal
-            .is_some()
-            .then(|| self.gimbal_attitude())
-            .flatten();
+            .as_ref()
+            .map_or_else(gimbal_endpoint::GimbalObservation::default, |gimbal| {
+                gimbal_endpoint::sample(gimbal, &self.gimbal_stamp)
+            });
         let battery = battery_sample(
             self.estimate
                 .as_ref()
@@ -374,10 +377,10 @@ impl VehicleAdapter for Px4Adapter {
             .as_ref()
             .map(|source| estimate_batch(self.vehicle, &source.state))
             .unwrap_or_default();
-        let payload = self.payload_state(gimbal_attitude.as_ref());
+        let payload = gimbal.payload;
         let reports = VehicleReports {
             fc_state,
-            gimbal: gimbal_attitude,
+            gimbal: gimbal.attitude,
             battery,
         };
         // FC-state, gimbal-device, and battery reports are independent

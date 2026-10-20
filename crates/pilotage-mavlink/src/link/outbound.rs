@@ -45,6 +45,10 @@ pub struct OutboundCommand {
 /// replaces the previous one; the link task encodes only the newest.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GimbalRateDemand {
+    /// Reference flags validated by the payload contract.
+    pub flags: u32,
+    /// Roll rate in radians per second; NaN omits the axis.
+    pub roll_rps: f32,
     /// Concrete device selected from the expected manager status.
     pub gimbal_device_id: u8,
     /// Complete-write receipt for stop ordering.
@@ -268,8 +272,8 @@ pub(super) async fn send_gimbal_rate(
     if let (Some(demand), Some(target)) = (demand, target) {
         let frame = crate::codec::encode_gimbal_rate_setpoint(
             *seq,
-            demand.pitch_rps,
-            demand.yaw_rps,
+            demand.flags,
+            [demand.roll_rps, demand.pitch_rps, demand.yaw_rps],
             demand.target_system,
             demand.target_component,
             demand.gimbal_device_id,

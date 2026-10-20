@@ -23,6 +23,12 @@ pub enum PayloadExecutionError {
     /// The endpoint clock cannot represent the requested instant.
     #[error("payload deadline is outside the endpoint clock")]
     Clock,
+    /// The caller must discharge earlier physical stop/cancel responsibilities.
+    #[error("payload stop or cancellation is unresolved")]
+    UnresolvedEffect,
+    /// An active partial-axis command must stop before changing its selected axes or frame.
+    #[error("payload replacement changes active axes or reference frame")]
+    AxisReplacement,
 }
 
 /// Absolute deadlines preserved across host and transport queues.
@@ -49,13 +55,23 @@ pub struct PayloadSnapshot {
     pub updated_at: Tick,
 }
 
+/// A physical stop/cancel responsibility bound to the command that caused it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PayloadEffect {
+    /// Actual sent or uncertain-write command, never an unrelated queued replacement.
+    pub command: Command,
+    /// Required action; completion still requires independent device observation.
+    pub effect: Effect,
+}
+
 #[derive(Debug)]
 struct State {
     executor: Executor,
     sequence: u64,
     command: Option<Command>,
+    active_command: Option<Command>,
     snapshot: Option<PayloadSnapshot>,
-    effect: Effect,
+    effects: [Option<PayloadEffect>; 2],
 }
 
 impl State {
@@ -76,9 +92,13 @@ impl State {
         }
     }
 
-    fn invalidated(&mut self, invalidation: turret_core::Invalidation, now: Tick) {
+    fn invalidated(
+        &mut self,
+        invalidation: turret_core::Invalidation,
+        now: Tick,
+    ) -> Result<(), PayloadExecutionError> {
         if let Some(active) = invalidation.active {
-            self.effect(active.effect);
+            self.effect(active)?;
         }
         self.note(now);
         if let Some(command) = self.command
@@ -92,12 +112,79 @@ impl State {
                 updated_at: now,
             });
         }
+        self.active_command = None;
+        Ok(())
     }
 
-    fn effect(&mut self, effect: Effect) {
-        if effect == Effect::StopContinuous || self.effect == Effect::None {
-            self.effect = effect;
+    fn effect(&mut self, event: turret_core::LifecycleEvent) -> Result<(), PayloadExecutionError> {
+        if event.effect == Effect::None
+            || self
+                .effects
+                .iter()
+                .flatten()
+                .any(|pending| pending.command.identity == event.progress.identity)
+        {
+            return Ok(());
         }
+        let command = self
+            .active_command
+            .filter(|command| command.identity == event.progress.identity)
+            .or_else(|| {
+                event
+                    .progress
+                    .sent_at
+                    .is_none()
+                    .then_some(self.command)
+                    .flatten()
+                    .filter(|command| command.identity == event.progress.identity)
+            });
+        let Some(command) = command else {
+            // An ended active record may be revoked again after its effect was discharged.
+            return Ok(());
+        };
+        let slot = self
+            .effects
+            .iter_mut()
+            .find(|slot| slot.is_none())
+            .ok_or(PayloadExecutionError::UnresolvedEffect)?;
+        *slot = Some(PayloadEffect {
+            command,
+            effect: event.effect,
+        });
+        Ok(())
+    }
+
+    fn has_effect(&self) -> bool {
+        self.effects.iter().any(Option::is_some)
+    }
+
+    fn validate_replacement(&self, payload: PayloadCommand) -> Result<(), PayloadExecutionError> {
+        let selected = |payload| match payload {
+            PayloadCommand::GimbalRate(rate) => Some((
+                rate.frame,
+                [
+                    rate.rates.pitch.is_some(),
+                    rate.rates.roll.is_some(),
+                    rate.rates.yaw.is_some(),
+                ],
+            )),
+            PayloadCommand::GimbalPosition(position) => Some((
+                position.frame,
+                [
+                    position.angles.pitch.is_some(),
+                    position.angles.roll.is_some(),
+                    position.angles.yaw.is_some(),
+                ],
+            )),
+            _ => None,
+        };
+        if let Some(active) = self.active_command
+            && let (Some(active), Some(next)) = (selected(active.payload), selected(payload))
+            && active != next
+        {
+            return Err(PayloadExecutionError::AxisReplacement);
+        }
+        Ok(())
     }
 }
 
@@ -117,8 +204,9 @@ impl PayloadChannel {
                 executor: Executor::new(capabilities, epoch, 0),
                 sequence: 0,
                 command: None,
+                active_command: None,
                 snapshot: None,
-                effect: Effect::None,
+                effects: [None, None],
             })),
             started,
         }
@@ -144,6 +232,10 @@ impl PayloadChannel {
             .state
             .lock()
             .map_err(|_| PayloadExecutionError::Poisoned)?;
+        if state.has_effect() {
+            return Err(PayloadExecutionError::UnresolvedEffect);
+        }
+        state.validate_replacement(payload)?;
         let now = self.tick(Instant::now())?;
         state.sequence = state.sequence.wrapping_add(1);
         let identity = CommandIdentity {
@@ -175,8 +267,7 @@ impl PayloadChannel {
             .map_err(|_| PayloadExecutionError::Poisoned)?;
         let now = self.tick(Instant::now())?;
         let invalidation = state.executor.revoke();
-        state.invalidated(invalidation, now);
-        Ok(())
+        state.invalidated(invalidation, now)
     }
 
     /// Replace a changed capability contract without inventing a connection reset.
@@ -193,22 +284,51 @@ impl PayloadChannel {
             return Ok(());
         }
         let invalidation = state.executor.update_capabilities(capabilities);
-        state.invalidated(invalidation, now);
-        Ok(())
+        state.invalidated(invalidation, now)
     }
 
-    /// Advance lifecycle deadlines and take the strongest pending device effect.
-    pub fn poll_effect(&self) -> Result<Effect, PayloadExecutionError> {
+    /// Advance deadlines and inspect the first unresolved command-bound effect.
+    ///
+    /// Inspection retains responsibility. Call `resolve_effect` only after the
+    /// complete stop write or an explicit handoff makes this owner's action inapplicable.
+    pub fn poll_effect(&self) -> Result<Option<PayloadEffect>, PayloadExecutionError> {
+        self.poll_effect_at(Instant::now())
+    }
+
+    fn poll_effect_at(&self, at: Instant) -> Result<Option<PayloadEffect>, PayloadExecutionError> {
         let mut state = self
             .state
             .lock()
             .map_err(|_| PayloadExecutionError::Poisoned)?;
-        let now = self.tick(Instant::now())?;
+        let now = self.tick(at)?;
         while let Some(event) = state.executor.poll(now)? {
-            state.effect(event.effect);
+            state.effect(event)?;
         }
         state.note(now);
-        Ok(std::mem::replace(&mut state.effect, Effect::None))
+        Ok(state.effects.iter().flatten().next().copied())
+    }
+
+    /// Discharge one effect after its physical action was written or ownership handed off.
+    ///
+    /// This records host responsibility only; it is not evidence of a measured stop.
+    pub fn resolve_effect(&self, identity: CommandIdentity) -> Result<(), PayloadExecutionError> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| PayloadExecutionError::Poisoned)?;
+        let slot = state
+            .effects
+            .iter_mut()
+            .find(|slot| slot.is_some_and(|effect| effect.command.identity == identity))
+            .ok_or(turret_core::Error::NotFound)?;
+        *slot = None;
+        if state
+            .active_command
+            .is_some_and(|command| command.identity == identity)
+        {
+            state.active_command = None;
+        }
+        Ok(())
     }
 
     /// Retained command evidence; reading it does not refresh any timestamp.
