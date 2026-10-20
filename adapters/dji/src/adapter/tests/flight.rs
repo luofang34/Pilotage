@@ -10,7 +10,7 @@ use super::harness::{Harness, captured_hex_frames, frame, packets, seal_duml};
 use crate::adapter::{DjiControlMode, FLIGHT_SCOPE, input::Framing};
 use crate::{DumlFrame, logiclink::LogicLinkParser};
 
-fn ready() -> Harness {
+pub(super) fn ready() -> Harness {
     let mut h = Harness::flight(DjiControlMode::Observed, Framing::LogicLink);
     feed(&mut h, &probe());
     feed_fc(&mut h, 1, 0);
@@ -19,7 +19,7 @@ fn ready() -> Harness {
     h
 }
 
-fn request(action: ControlAction, id: u32) -> ScopedControlFrame {
+pub(super) fn request(action: ControlAction, id: u32) -> ScopedControlFrame {
     let mut value = frame(0.0);
     value.scope = ScopeId::new(FLIGHT_SCOPE);
     value.sequence = SequenceNum::new(0);
@@ -29,11 +29,11 @@ fn request(action: ControlAction, id: u32) -> ScopedControlFrame {
     value
 }
 
-fn feed(h: &mut Harness, bytes: &[u8]) {
+pub(super) fn feed(h: &mut Harness, bytes: &[u8]) {
     h.feed(&crate::logiclink::encode_duml(bytes)).unwrap();
 }
 
-fn feed_fc(h: &mut Harness, sequence: u16, flags: u32) {
+pub(super) fn feed_fc(h: &mut Harness, sequence: u16, flags: u32) {
     let mut bytes = captured_hex_frames(include_str!(
         "../airframe/fixtures/mini3-reported-attitude.hex"
     ))
@@ -44,7 +44,7 @@ fn feed_fc(h: &mut Harness, sequence: u16, flags: u32) {
     feed(h, &bytes);
 }
 
-fn feed_battery(h: &mut Harness, sequence: u16, percent: u8) {
+pub(super) fn feed_battery(h: &mut Harness, sequence: u16, percent: u8) {
     let mut bytes =
         captured_hex_frames(include_str!("../battery/fixtures/mini3-battery-status.hex")).remove(0);
     bytes[6..8].copy_from_slice(&sequence.to_le_bytes());

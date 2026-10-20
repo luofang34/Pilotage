@@ -46,6 +46,12 @@ pub(super) struct FlightExecution {
 }
 
 impl FlightExecution {
+    pub(in crate::adapter) fn active(&self) -> bool {
+        self.procedure
+            .as_ref()
+            .is_some_and(|procedure| !terminal(procedure.sample.phase))
+    }
+
     pub(super) fn new(incarnation: SourceIncarnation) -> Self {
         Self {
             incarnation,

@@ -49,6 +49,10 @@ pub struct VirtualStickReport {
     pub sequence: u16,
     /// Whether the FC reports virtual-stick mode enabled.
     pub enabled: bool,
+    /// Whether multiple flight modes are enabled in the aircraft configuration.
+    pub multiple_flight_modes: bool,
+    /// Whether the aircraft reports novice mode enabled.
+    pub novice_mode: bool,
 }
 
 impl VirtualStickReport {
@@ -62,9 +66,12 @@ impl VirtualStickReport {
             return None;
         }
         let payload: &[u8; 78] = frame.payload().try_into().ok()?;
+        let configuration = u16::from_le_bytes([payload[20], payload[21]]);
         Some(Self {
             sequence: frame.sequence(),
             enabled: payload[32] & 2 != 0,
+            multiple_flight_modes: configuration & (1 << 6) != 0,
+            novice_mode: configuration & (1 << 11) != 0,
         })
     }
 }

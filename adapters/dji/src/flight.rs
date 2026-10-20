@@ -6,10 +6,14 @@
 
 mod command;
 mod report;
+mod virtual_stick;
 
 pub use command::{BasicFlightCommand, BasicFlightPacket};
 pub(crate) use report::osd_payload;
 pub use report::{Mini3FlightReport, VirtualStickReport};
+pub use virtual_stick::{
+    VirtualStickMode, VirtualStickModePacket, VirtualStickVelocity, VirtualStickVelocityError,
+};
 
 #[cfg(test)]
 mod tests;

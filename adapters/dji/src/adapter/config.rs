@@ -29,6 +29,9 @@ pub struct DjiConfig {
     /// Permit experimental discrete Takeoff and Land on the upper USB interface.
     /// This does not enable continuous flight control.
     pub experimental_flight: bool,
+    /// Allow one explicit, bounded virtual-stick enable-and-disable diagnostic.
+    /// This permits no velocity writes and starts no diagnostic automatically.
+    pub experimental_virtual_stick_diagnostic: bool,
 }
 
 /// A failure to start a DJI connection.

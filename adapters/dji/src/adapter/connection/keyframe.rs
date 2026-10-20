@@ -70,7 +70,10 @@ impl Connection {
         model_until: Option<Duration>,
         clock: &mut impl FnMut() -> Duration,
     ) {
-        if self.fault.is_some() || self.input.framing() != Framing::LogicLink {
+        if self.fault.is_some()
+            || self.input.framing() != Framing::LogicLink
+            || self.mode_diagnostic.active()
+        {
             return;
         }
         let Some(model_until) = model_until.filter(|until| now < *until) else {

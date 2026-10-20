@@ -13,6 +13,7 @@ mod model;
 mod observed;
 mod profile;
 mod recovery;
+mod virtual_stick;
 
 use std::time::Duration;
 
