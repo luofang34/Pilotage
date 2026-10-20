@@ -83,6 +83,7 @@ fn actions_round_trip_and_reject_the_unspecified_sentinel() {
     for action in [
         ControlAction::Arm,
         ControlAction::Disarm,
+        ControlAction::Takeoff,
         ControlAction::ModeRequest {
             target: crate::intent::ModeTarget::Hold,
         },
@@ -127,19 +128,21 @@ fn a_mode_request_requires_an_explicit_target() {
 
 #[test]
 fn a_stray_mode_target_on_a_non_mode_action_is_rejected() {
-    assert!(matches!(
-        action_from_wire(wire::ControlActionRequest {
-            zoom: None,
-            action: wire::ControlAction::Arm as i32,
-            mode_target: wire::ModeTarget::Hold as i32,
-            action_id: 0,
-            feel_target: wire::FeelTarget::Unspecified as i32,
-        }),
-        Err(ConvertError::UnknownEnum {
-            enum_name: "pilotage.v1.ControlActionRequest.mode_target",
-            ..
-        })
-    ));
+    for action in [wire::ControlAction::Arm, wire::ControlAction::Takeoff] {
+        assert!(matches!(
+            action_from_wire(wire::ControlActionRequest {
+                zoom: None,
+                action: action as i32,
+                mode_target: wire::ModeTarget::Hold as i32,
+                action_id: 0,
+                feel_target: wire::FeelTarget::Unspecified as i32,
+            }),
+            Err(ConvertError::UnknownEnum {
+                enum_name: "pilotage.v1.ControlActionRequest.mode_target",
+                ..
+            })
+        ));
+    }
 }
 
 #[test]

@@ -66,6 +66,34 @@ fn physical_embodiment_reaches_the_wire() {
 }
 
 #[test]
+fn takeoff_is_advertised_only_as_its_own_action() {
+    use pilotage_adapter_api::{ActionCapability, ScopeDescriptor};
+    use pilotage_protocol::{ActionKind, ScopeId};
+    let mut adapter = caps(VehicleClass::Multicopter, "quad", false);
+    adapter.vehicles[0].scopes.push(ScopeDescriptor {
+        payload: None,
+        authority_group: None,
+        scope: ScopeId::new("vehicle.motion"),
+        axes: vec![],
+        intents: vec![],
+        actions: vec![ActionCapability {
+            action: ActionKind::Takeoff,
+            mode_targets: vec![],
+            feel_targets: vec![],
+        }],
+        legacy: None,
+    });
+    let wire = host_capabilities(&adapter, "1.0");
+    let actions = &wire.vehicles[0].scopes[0].actions;
+    assert_eq!(actions.len(), 1);
+    assert_eq!(
+        actions[0].action,
+        pilotage_protocol::wire::ControlAction::Takeoff as i32
+    );
+    assert!(actions[0].mode_targets.is_empty());
+}
+
+#[test]
 fn each_scope_carries_its_authority_group_to_the_wire() {
     use pilotage_adapter_api::ScopeDescriptor;
     use pilotage_protocol::ScopeId;

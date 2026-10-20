@@ -75,6 +75,7 @@ pub(crate) fn action_to_wire(action: ControlAction, action_id: u32) -> wire::Con
     let (kind, target) = match action {
         ControlAction::Arm => (wire::ControlAction::Arm, wire::ModeTarget::Unspecified),
         ControlAction::Disarm => (wire::ControlAction::Disarm, wire::ModeTarget::Unspecified),
+        ControlAction::Takeoff => (wire::ControlAction::Takeoff, wire::ModeTarget::Unspecified),
         ControlAction::ModeRequest { target } => (
             wire::ControlAction::ModeRequest,
             mode_target_to_wire(target),
@@ -195,6 +196,7 @@ pub(crate) fn action_from_wire(
         }
         wire::ControlAction::Arm => Ok((ControlAction::Arm, request.action_id)),
         wire::ControlAction::Disarm => Ok((ControlAction::Disarm, request.action_id)),
+        wire::ControlAction::Takeoff => Ok((ControlAction::Takeoff, request.action_id)),
         wire::ControlAction::GimbalRecenter => {
             Ok((ControlAction::GimbalRecenter, request.action_id))
         }

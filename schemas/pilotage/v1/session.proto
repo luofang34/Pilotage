@@ -231,8 +231,8 @@ enum FrameRejectionReason {
   FRAME_REJECTION_REASON_UNSUPPORTED_ACTION = 8;
   // A typed intent component exceeds the scope's advertised magnitude limit.
   FRAME_REJECTION_REASON_LIMIT_EXCEEDED = 9;
-  // The frame's actions repeat or conflict (ARM together with DISARM); the
-  // frame is rejected whole, executing neither.
+  // The frame contains duplicate or conflicting actions. The whole frame is
+  // rejected, and no action is executed.
   FRAME_REJECTION_REASON_CONFLICTING_ACTIONS = 10;
   // A legacy payload omitted an axis its scope's translation routes. The
   // typed translation is structurally total, so a partial payload would
