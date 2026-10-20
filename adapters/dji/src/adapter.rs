@@ -1,6 +1,7 @@
 //! A single-writer connection with a bounded gimbal command envelope.
 
 mod attachment;
+mod battery;
 mod bench;
 mod capability;
 mod config;
@@ -256,6 +257,9 @@ impl VehicleAdapter for DjiAdapter {
         let progress = self.connection.execution.wire_progress();
         let revision = self.connection.execution.capabilities().revision;
         if let Some(sample) = batch.samples.first_mut() {
+            if sample.payload.is_none() && progress.is_some() {
+                sample.payload = Some(self.observations.empty_state());
+            }
             if let Some(payload) = sample.payload.as_mut() {
                 payload.command = progress;
                 payload.capability_revision = revision;
@@ -264,9 +268,11 @@ impl VehicleAdapter for DjiAdapter {
             let mut state = self.observations.empty_state();
             state.command = progress;
             state.capability_revision = revision;
-            batch
-                .samples
-                .push(observation::telemetry(self.vehicle, self.tick(), state));
+            batch.samples.push(observation::telemetry(
+                self.vehicle,
+                self.tick(),
+                Some(state),
+            ));
         }
         batch
     }

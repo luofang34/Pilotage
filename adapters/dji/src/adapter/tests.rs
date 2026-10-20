@@ -1,5 +1,6 @@
 use super::GIMBAL_SCOPE;
 mod acknowledgement;
+mod battery;
 mod bench;
 mod contract;
 mod harness;
