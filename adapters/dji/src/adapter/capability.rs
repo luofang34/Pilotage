@@ -36,12 +36,17 @@ pub(super) fn capabilities(
     profile: turret_dji::Mini3ControlProfile,
     payload: &turret_core::PayloadCapabilities,
     incarnation: pilotage_adapter_api::SourceIncarnation,
+    experimental_flight: bool,
 ) -> AdapterCapabilities {
     let mut payload =
         pilotage_adapter_api::payload_capabilities_to_wire("dji-camera", payload, &[GIMBAL_SCOPE]);
     payload.connection_incarnation = incarnation.into_bytes().to_vec();
     payload.connection_epoch = 0;
     payload.connection_role = pilotage_protocol::wire::PayloadConnectionRole::DirectDevice as i32;
+    let mut scopes = vec![gimbal_scope(payload, profile)];
+    if experimental_flight {
+        scopes.push(flight_scope());
+    }
     AdapterCapabilities {
         execution: ExecutionMode {
             real_time: true,
@@ -57,27 +62,7 @@ pub(super) fn capabilities(
                 DjiControlMode::BenchInitialHorizontal => "DJI Mini 3 · one-way bench",
             }
             .to_owned(),
-            scopes: vec![ScopeDescriptor {
-                payload: Some(payload),
-                authority_group: None,
-                scope: ScopeId::new(GIMBAL_SCOPE),
-                axes: Vec::new(),
-                intents: vec![IntentCapability {
-                    family: IntentFamily::GimbalRate,
-                    frames: Vec::new(),
-                    max_linear: 0.0,
-                    max_vertical: 0.0,
-                    max_angular: profile.rate_limit().as_radians_per_second(),
-                    max_yaw_rate: 0.0,
-                }],
-                actions: vec![ActionCapability {
-                    action: ActionKind::GimbalRecenter,
-                    mode_targets: Vec::new(),
-                    feel_targets: Vec::new(),
-                    takeoff_start_state: None,
-                }],
-                legacy: None,
-            }],
+            scopes,
             link_loss_actions: match mode {
                 DjiControlMode::Observed => vec![LinkLossPolicy::Neutralize],
                 DjiControlMode::BenchInitialHorizontal => Vec::new(),
@@ -85,5 +70,53 @@ pub(super) fn capabilities(
         }],
         adapter_version: env!("CARGO_PKG_VERSION").to_owned(),
         control_feel: None,
+    }
+}
+
+fn gimbal_scope(
+    payload: pilotage_protocol::wire::PayloadCapabilities,
+    profile: turret_dji::Mini3ControlProfile,
+) -> ScopeDescriptor {
+    ScopeDescriptor {
+        payload: Some(payload),
+        authority_group: None,
+        scope: ScopeId::new(GIMBAL_SCOPE),
+        axes: Vec::new(),
+        intents: vec![IntentCapability {
+            family: IntentFamily::GimbalRate,
+            frames: Vec::new(),
+            max_linear: 0.0,
+            max_vertical: 0.0,
+            max_angular: profile.rate_limit().as_radians_per_second(),
+            max_yaw_rate: 0.0,
+        }],
+        actions: vec![ActionCapability {
+            action: ActionKind::GimbalRecenter,
+            mode_targets: Vec::new(),
+            feel_targets: Vec::new(),
+            takeoff_start_state: None,
+        }],
+        legacy: None,
+    }
+}
+
+fn flight_scope() -> ScopeDescriptor {
+    ScopeDescriptor {
+        payload: None,
+        authority_group: None,
+        scope: ScopeId::new(super::FLIGHT_SCOPE),
+        axes: Vec::new(),
+        intents: Vec::new(),
+        actions: [ActionKind::Takeoff, ActionKind::Land]
+            .into_iter()
+            .map(|action| ActionCapability {
+                action,
+                mode_targets: Vec::new(),
+                feel_targets: Vec::new(),
+                takeoff_start_state: (action == ActionKind::Takeoff)
+                    .then_some(pilotage_protocol::TakeoffStartState::MotorsStopped),
+            })
+            .collect(),
+        legacy: None,
     }
 }

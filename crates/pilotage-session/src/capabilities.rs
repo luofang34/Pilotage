@@ -83,7 +83,7 @@ fn vehicle_descriptor(vehicle: &AdapterVehicle) -> wire::VehicleDescriptor {
         scopes: vehicle
             .scopes
             .iter()
-            .map(|scope| scope_descriptor(scope, link_loss))
+            .map(|scope| scope_descriptor(vehicle, scope, link_loss))
             .collect(),
         supported_modes: Vec::new(),
         vehicle_class: vehicle.class.to_wire() as i32,
@@ -94,10 +94,17 @@ fn vehicle_descriptor(vehicle: &AdapterVehicle) -> wire::VehicleDescriptor {
 }
 
 fn scope_descriptor(
+    vehicle: &AdapterVehicle,
     scope: &AdapterScope,
     link_loss: wire::LinkLossAction,
 ) -> wire::ScopeDescriptor {
     wire::ScopeDescriptor {
+        command_only: vehicle.is_command_only_group(&pilotage_protocol::ScopeId::new(
+            scope
+                .authority_group
+                .as_deref()
+                .unwrap_or(scope.scope.as_str()),
+        )),
         payload: scope.payload.clone(),
         scope: Some(wire::ScopeId {
             value: scope.scope.as_str().to_owned(),

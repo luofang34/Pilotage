@@ -75,10 +75,14 @@ impl Observations {
     }
 
     pub(super) fn receive(&mut self, frame: &DumlFrame, now: Duration) {
-        self.battery.receive(frame, now);
+        let binding = self.model_deadline(now).map(|_| self.model_revision());
+        self.battery.receive(frame, now, binding);
         let revision = self.model_revision();
         let was_identified = self.model_deadline(now).is_some();
         self.airframe.receive(frame, now);
+        if self.model_revision() != revision {
+            self.battery.invalidate_model();
+        }
         if self.model_revision() != revision
             || (!was_identified && self.model_deadline(now).is_some())
         {
@@ -149,11 +153,29 @@ impl Observations {
         self.airframe.binding_revision()
     }
 
+    pub(super) fn flight_deadline(
+        &self,
+        command: crate::flight::BasicFlightCommand,
+        now: Duration,
+    ) -> Option<Duration> {
+        let until = self.model_deadline(now)?;
+        if command == crate::flight::BasicFlightCommand::Takeoff {
+            let flight = self.airframe.flight_cached(now)?;
+            if flight.motors_running || flight.is_flying {
+                return None;
+            }
+            Some(until.min(self.battery.takeoff_deadline(now, self.model_revision())?))
+        } else {
+            Some(until)
+        }
+    }
+
     pub(super) fn expire_model(&mut self, now: Duration) {
         let revision = self.model_revision();
         self.airframe.expire_binding(now);
         if self.model_revision() != revision {
             self.invalidate_continuity();
+            self.battery.invalidate_model();
         }
     }
 

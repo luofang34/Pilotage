@@ -13,6 +13,11 @@ use turret_core::{CommandIdentity, PayloadCapabilities};
 use turret_dji::Mini3ControlProfile;
 
 mod keyframe;
+mod pending;
+mod writer;
+
+use super::flight::FlightExecution;
+use pending::{Pending, Purpose};
 
 const READ_BUDGET: usize = 64 * 1024;
 
@@ -42,17 +47,10 @@ impl Transport for RawSerial {
     }
 }
 
-struct Pending {
-    bytes: Vec<u8>,
-    offset: usize,
-    pitch: Option<GimbalPitchTarget>,
-    expires_at: Option<Duration>,
-    identity: Option<CommandIdentity>,
-}
-
 pub(super) struct Connection {
     origin: Instant,
     pub(super) execution: Execution,
+    pub(super) flight: FlightExecution,
     profile: Mini3ControlProfile,
     transport: Option<Box<dyn Transport>>,
     capture: Box<dyn Write + Send>,
@@ -82,6 +80,7 @@ impl Connection {
         Self {
             origin,
             execution: Execution::new(capabilities, 0),
+            flight: FlightExecution::new(incarnation),
             profile,
             transport: Some(transport),
             capture,
@@ -91,9 +90,8 @@ impl Connection {
             pending: Some(Pending {
                 bytes: framing.command(&turret_dji::rc_version_request()),
                 offset: 0,
-                pitch: None,
+                purpose: Purpose::Probe,
                 expires_at: None,
-                identity: None,
             }),
             written_pitch: None,
             drained: false,
@@ -144,21 +142,25 @@ impl Connection {
         self.pending = Some(Pending {
             bytes: self.input.framing().command(&command),
             offset: 0,
-            pitch: Some(pitch),
+            purpose: Purpose::Pitch {
+                target: pitch,
+                identity,
+            },
             expires_at: Some(expires_at),
-            identity: Some(identity),
         });
         true
     }
 
     pub(super) fn pending_pitch(&self) -> Option<GimbalPitchTarget> {
-        self.pending.as_ref().and_then(|pending| pending.pitch)
+        self.pending
+            .as_ref()
+            .and_then(|pending| pending.purpose.pitch().map(|(target, _)| target))
     }
 
     pub(super) fn pending_pitch_identity(&self) -> Option<CommandIdentity> {
         self.pending
             .as_ref()
-            .and_then(|pending| pending.pitch.and(pending.identity))
+            .and_then(|pending| pending.purpose.pitch().map(|(_, identity)| identity))
     }
 
     pub(super) fn cancel_movement(&mut self) -> bool {
@@ -167,11 +169,11 @@ impl Connection {
             return false;
         }
         if let Some(pending) = &self.pending {
-            if pending.pitch.is_some() && pending.offset > 0 {
+            if pending.purpose.pitch().is_some() && pending.offset > 0 {
                 self.fail(DjiFault::PartialCommand);
                 return false;
             }
-            if pending.pitch.is_some() {
+            if pending.purpose.pitch().is_some() {
                 self.pending = None;
             }
         }
@@ -189,6 +191,7 @@ impl Connection {
         now: Duration,
         observations: &mut Observations,
     ) {
+        self.flight.poll(now);
         self.drained = false;
         let mut read = 0;
         let mut buffer = [0; 4096];
@@ -248,6 +251,7 @@ impl Connection {
         };
         for frame in frames {
             self.execution.response(&frame, now);
+            self.flight.response(&frame, now);
             if frame.sender() == RouteAddress(6)
                 && frame.receiver() == RouteAddress(10)
                 && frame.sequence() == 1
@@ -258,95 +262,6 @@ impl Connection {
                 self.version_observed = true;
             }
             observations.receive(&frame, now);
-        }
-    }
-
-    pub(super) fn write_pending_blocking(
-        &mut self,
-        now: Duration,
-        movement_ready: bool,
-        completed_at: &mut impl FnMut() -> Duration,
-    ) {
-        let Some(pending) = &self.pending else { return };
-        if pending.pitch.is_some() {
-            if !movement_ready {
-                self.cancel_movement();
-                return;
-            }
-            if pending.offset > 0 && pending.expires_at.is_some_and(|until| now >= until) {
-                self.fail(DjiFault::PartialCommand);
-                return;
-            }
-            if let Err(error) = self.execution.prepare(now) {
-                tracing::debug!(%error, "DJI queued target expired before write");
-                self.pending = None;
-                return;
-            }
-        }
-        let Some(pending) = &self.pending else { return };
-        let until = pending
-            .expires_at
-            .unwrap_or_else(|| now.saturating_add(Duration::from_millis(50)));
-        let Some(send_before) = self.origin.checked_add(until) else {
-            self.fail(DjiFault::Transport {
-                operation: "compute write deadline",
-                source: io::ErrorKind::InvalidInput.into(),
-            });
-            return;
-        };
-        let Some(transport) = &mut self.transport else {
-            return;
-        };
-        let result = transport.write(&pending.bytes[pending.offset..], send_before);
-        match result {
-            Ok(0) => self.fail(DjiFault::Transport {
-                operation: "write",
-                source: io::ErrorKind::WriteZero.into(),
-            }),
-            Ok(count) => self.record_written_blocking(completed_at(), count),
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
-                ) => {}
-            Err(source) => {
-                // A failed write may have reached the device even without a receipt.
-                if let Some(identity) = self.pending.take().and_then(|pending| pending.identity) {
-                    self.execution.failed(identity);
-                }
-                self.fail(DjiFault::Transport {
-                    operation: "write",
-                    source,
-                });
-            }
-        }
-    }
-
-    fn record_written_blocking(&mut self, now: Duration, count: usize) {
-        let Some(pending) = &mut self.pending else {
-            return;
-        };
-        let actual = pending.bytes[pending.offset..pending.offset + count].to_vec();
-        pending.offset = pending.offset.wrapping_add(count);
-        let complete = pending.offset == pending.bytes.len();
-        let pitch = pending.pitch;
-        let identity = pending.identity;
-        self.written_bytes = self.written_bytes.wrapping_add(count as u64);
-        if complete {
-            self.pending = None;
-            if let Some(identity) = identity
-                && let Err(source) = self.execution.sent(identity, now)
-            {
-                self.fail(DjiFault::Execution { source });
-                return;
-            }
-        }
-        if !self.record_blocking(now, "tx", &actual) {
-            return;
-        }
-        if complete {
-            self.pending = None;
-            self.written_pitch = pitch.zip(identity);
         }
     }
 
@@ -371,7 +286,7 @@ impl Connection {
         error!(%fault, "DJI connection closed; explicit restart required");
         if let Some(pending) = &self.pending {
             if pending.offset > 0 {
-                if let Some(identity) = pending.identity {
+                if let Some((_, identity)) = pending.purpose.pitch() {
                     self.execution.failed(identity);
                 }
             } else {
@@ -380,6 +295,7 @@ impl Connection {
         } else {
             self.execution.cancel();
         }
+        self.flight.transport_failed();
         self.fault = Some(fault);
         self.pending = None;
         // Closing prevents a partial packet from being followed by a new command.

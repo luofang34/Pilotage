@@ -87,7 +87,6 @@ impl SessionEngine {
     fn register_catalog(&mut self, next: &AdapterCapabilities, now: MonoTimestamp) {
         self.groups.clear();
         self.command_only.clear();
-        let mut continuous = HashSet::new();
         for vehicle in &next.vehicles {
             for descriptor in &vehicle.scopes {
                 let group = descriptor.authority_group.as_ref().map_or_else(
@@ -97,12 +96,7 @@ impl SessionEngine {
                 let pair = (vehicle.id, group.clone());
                 self.groups
                     .insert((vehicle.id, descriptor.scope.clone()), group.clone());
-                let streams = !descriptor.intents.is_empty()
-                    || descriptor.legacy.is_some()
-                    || !descriptor.axes.is_empty();
-                if streams {
-                    continuous.insert(pair.clone());
-                } else {
+                if vehicle.is_command_only_group(&group) {
                     self.command_only.insert(pair.clone());
                 }
                 if !self.clients.is_registered(&pair) {
@@ -117,6 +111,5 @@ impl SessionEngine {
                 }
             }
         }
-        self.command_only.retain(|pair| !continuous.contains(pair));
     }
 }

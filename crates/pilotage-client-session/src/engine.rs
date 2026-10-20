@@ -2,6 +2,7 @@
 
 mod catalog;
 mod commands;
+mod window;
 
 use std::collections::BTreeMap;
 
@@ -59,9 +60,7 @@ pub struct ClientEngine {
     /// one would reuse an id the host already saw with different
     /// content, and the second press dies as a replay.
     next_action_id: u32,
-    control_window_id: u64,
-    window_received_at_ns: u64,
-    window_probe_at: Option<u64>,
+    window: window::ControlWindow,
     last_control_at: u64,
     reconnect: ReconnectState,
 }
@@ -94,9 +93,7 @@ impl ClientEngine {
             activation_announced: false,
             profile: bootstrap::ProfileIdentity::default(),
             next_action_id: 0,
-            control_window_id: 0,
-            window_received_at_ns: 0,
-            window_probe_at: None,
+            window: window::ControlWindow::default(),
             last_control_at: 0,
             reconnect: ReconnectState::default(),
         }
@@ -299,9 +296,7 @@ impl ClientEngine {
     }
 
     fn on_connected(&mut self) -> Vec<ClientAction> {
-        self.control_window_id = 0;
-        self.window_received_at_ns = 0;
-        self.window_probe_at = None;
+        self.window = window::ControlWindow::default();
         self.last_control_at = 0;
         self.phase = ClientPhase::AwaitingWelcome;
         self.bootstrap_pending.clear();
@@ -451,11 +446,7 @@ impl ClientEngine {
                 vec![ClientAction::Emit(ModuleEvent::Telemetry(Box::new(sample)))]
             }
             Some(wire::envelope::Payload::Pong(pong)) => {
-                let advance = pong.control_window_id.wrapping_sub(self.control_window_id);
-                if pong.control_window_id != 0 && advance != 0 && advance < (1_u64 << 63) {
-                    self.control_window_id = pong.control_window_id;
-                    self.window_received_at_ns = now_ms.saturating_mul(1_000_000);
-                }
+                self.window.receive(&pong, now_ms.saturating_mul(1_000_000));
                 vec![ClientAction::Emit(ModuleEvent::Pong(pong))]
             }
             Some(wire::envelope::Payload::FrameRejected(rejected)) => {
@@ -492,9 +483,7 @@ impl ClientEngine {
         self.streams.reset();
         self.bootstrap_pending.clear();
         self.authority = AuthorityMirror::default();
-        self.control_window_id = 0;
-        self.window_received_at_ns = 0;
-        self.window_probe_at = None;
+        self.window = window::ControlWindow::default();
         self.last_control_at = 0;
     }
 }

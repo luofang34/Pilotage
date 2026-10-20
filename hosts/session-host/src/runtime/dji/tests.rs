@@ -11,11 +11,19 @@ use super::{
 #[test]
 fn the_attachment_and_capture_are_explicit() {
     assert!(matches!(
-        config_from_values(None, None, None, None, None, None),
+        config_from_values(None, None, None, None, None, None, None),
         Err(DjiHostError::MissingAttachment)
     ));
     assert!(matches!(
-        config_from_values(Some(device_path().into()), None, None, None, None, None),
+        config_from_values(
+            Some(device_path().into()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None
+        ),
         Err(DjiHostError::Missing { variable: CAPTURE })
     ));
     assert!(matches!(
@@ -58,6 +66,7 @@ fn another_device_or_a_relative_path_is_refused() {
                 None,
                 Some(capture.into()),
                 None,
+                None,
                 None
             ),
             Err(DjiHostError::CapturePath { .. })
@@ -72,6 +81,7 @@ fn serial_configuration_reaches_the_adapter_without_opening_the_device() {
         None,
         None,
         Some("/tmp/capture.jsonl".into()),
+        None,
         None,
         None,
     )
@@ -95,6 +105,7 @@ fn usb_configuration_preserves_the_exact_current_registry_identity() {
             Some("/tmp/capture.jsonl".into()),
             None,
             Some("/opt/homebrew/bin/ffmpeg".into()),
+            None,
         )
         .expect("explicit USB configuration");
         assert!(matches!(
@@ -171,9 +182,41 @@ fn one_way_control_requires_an_explicit_mode() {
             Some("/tmp/capture.jsonl".into()),
             value.map(Into::into),
             None,
+            None,
         )
         .expect("valid explicit configuration");
         assert_eq!(config.control_mode, expected);
+    }
+}
+
+#[test]
+fn experimental_flight_requires_an_exact_opt_in() {
+    let configured = |value| {
+        config_from_values(
+            Some(device_path().into()),
+            None,
+            None,
+            Some("/tmp/capture.jsonl".into()),
+            None,
+            None,
+            value,
+        )
+    };
+    assert!(
+        !configured(None)
+            .expect("default disabled")
+            .experimental_flight
+    );
+    assert!(
+        configured(Some("1".into()))
+            .expect("explicit opt-in")
+            .experimental_flight
+    );
+    for value in ["", "0", "true", "yes", "1 ", " 1"] {
+        assert!(matches!(
+            configured(Some(value.into())),
+            Err(DjiHostError::ExperimentalFlight { .. })
+        ));
     }
 }
 
@@ -188,6 +231,7 @@ fn an_unknown_mode_cannot_enable_control() {
                 Some("/tmp/capture.jsonl".into()),
                 Some(value.into()),
                 None,
+                None
             ),
             Err(DjiHostError::ControlMode { .. })
         ));

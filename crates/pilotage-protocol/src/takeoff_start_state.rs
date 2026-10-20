@@ -14,6 +14,10 @@ pub enum TakeoffStartState {
     ///
     /// A disarmed report is not proof that the motors have stopped.
     MotorsStoppedOnGround,
+    /// The FC must report stopped motors and check its other start conditions.
+    ///
+    /// This requirement does not assert that a ground state was measured.
+    MotorsStopped,
 }
 
 impl TakeoffStartState {
@@ -23,6 +27,7 @@ impl TakeoffStartState {
         match self {
             Self::ArmedOnGround => wire::TakeoffStartState::ArmedOnGround,
             Self::MotorsStoppedOnGround => wire::TakeoffStartState::MotorsStoppedOnGround,
+            Self::MotorsStopped => wire::TakeoffStartState::MotorsStopped,
         }
     }
 
@@ -42,6 +47,7 @@ impl TakeoffStartState {
             wire::TakeoffStartState::Unspecified => None,
             wire::TakeoffStartState::ArmedOnGround => Some(Self::ArmedOnGround),
             wire::TakeoffStartState::MotorsStoppedOnGround => Some(Self::MotorsStoppedOnGround),
+            wire::TakeoffStartState::MotorsStopped => Some(Self::MotorsStopped),
         }
     }
 }

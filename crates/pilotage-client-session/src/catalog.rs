@@ -48,6 +48,10 @@ pub struct VehicleCatalog {
 /// One control scope, with the typed capabilities the host advertised.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScopeCatalog {
+    /// The host declares that this authority group has no continuous inputs.
+    ///
+    /// Unknown hosts default to false. This flag does not grant a lease.
+    pub command_only: bool,
     /// Payload operations and feedback declared by the host.
     pub payload: Option<wire::PayloadCapabilities>,
     /// The scope's identity string.
@@ -86,6 +90,7 @@ impl Admission {
                     .scopes
                     .iter()
                     .map(|scope| ScopeCatalog {
+                        command_only: scope.command_only,
                         payload: scope.payload.clone(),
                         scope: scope
                             .scope

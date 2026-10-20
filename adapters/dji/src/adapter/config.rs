@@ -26,6 +26,9 @@ pub struct DjiConfig {
     pub capture_path: PathBuf,
     /// The operator's explicit choice of command evidence.
     pub control_mode: DjiControlMode,
+    /// Permit experimental discrete Takeoff and Land on the upper USB interface.
+    /// This does not enable continuous flight control.
+    pub experimental_flight: bool,
 }
 
 /// A failure to start a DJI connection.

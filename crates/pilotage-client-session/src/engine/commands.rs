@@ -21,14 +21,7 @@ impl ClientEngine {
         let mut actions = self.probe_control_window(sampled_at_nanos);
         let required = self.requires_control_window();
         if let Some(lane) = self.lanes.get_mut(&(vehicle_id, scope.to_owned())) {
-            lane.set_control_window(
-                if sampled_at_nanos >= self.window_received_at_ns {
-                    self.control_window_id
-                } else {
-                    0
-                },
-                required,
-            );
+            lane.set_control_window(self.window.id_at(sampled_at_nanos), required);
             actions.push(ClientAction::SendDatagram(
                 lane.frame(command, sampled_at_nanos),
             ));
@@ -61,7 +54,8 @@ impl ClientEngine {
 
     /// Prepares an action and its exact request identity from the active lane.
     ///
-    /// Returns `None` when the lease is not held. A prepared action does not
+    /// Returns `None` when the lease or required validity window is absent.
+    /// No failed input is stored for later replay. A prepared action does not
     /// confirm a transport write, host acceptance, or procedure completion.
     pub fn prepare_control_action_at(
         &mut self,
@@ -70,7 +64,7 @@ impl ClientEngine {
         request: wire::ControlActionRequest,
         sampled_at_nanos: u64,
     ) -> Option<PreparedControlAction> {
-        if !self.holds(vehicle_id, scope) {
+        if !self.control_action_ready(vehicle_id, scope, sampled_at_nanos) {
             return None;
         }
         let mut actions = self.probe_control_window(sampled_at_nanos);
@@ -81,14 +75,7 @@ impl ClientEngine {
             self.next_action_id = self.next_action_id.wrapping_add(1).max(1);
             request.action_id = self.next_action_id;
         }
-        lane.set_control_window(
-            if sampled_at_nanos >= self.window_received_at_ns {
-                self.control_window_id
-            } else {
-                0
-            },
-            required,
-        );
+        lane.set_control_window(self.window.id_at(sampled_at_nanos), required);
         let (identity, bytes) = lane.prepare_action_at(request, sampled_at_nanos);
         actions.push(ClientAction::SendBootstrap(bytes));
         Some(PreparedControlAction { identity, actions })
@@ -98,25 +85,5 @@ impl ClientEngine {
         self.admission
             .as_ref()
             .is_some_and(|admission| admission.physically_embodied)
-    }
-
-    fn probe_control_window(&mut self, now_ns: u64) -> Vec<ClientAction> {
-        if !self.requires_control_window()
-            || self
-                .window_probe_at
-                .is_some_and(|previous| now_ns.saturating_sub(previous) < 100_000_000)
-        {
-            return Vec::new();
-        }
-        self.window_probe_at = Some(now_ns);
-        use prost::Message;
-        let envelope = wire::Envelope {
-            schema_version: pilotage_protocol::SCHEMA_VERSION,
-            payload: Some(wire::envelope::Payload::Ping(wire::Ping {
-                nonce: now_ns,
-                sender_sent_at: Some(wire::MonoTimestamp { nanos: now_ns }),
-            })),
-        };
-        vec![ClientAction::SendDatagram(envelope.encode_to_vec())]
     }
 }

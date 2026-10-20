@@ -116,11 +116,23 @@ impl Harness {
         Self::with_framing(super::super::DjiControlMode::Observed, Framing::LogicLink)
     }
 
+    pub(super) fn flight(mode: super::super::DjiControlMode, framing: Framing) -> Self {
+        Self::with_options(mode, framing, true)
+    }
+
     fn with_mode(control_mode: super::super::DjiControlMode) -> Self {
         Self::with_framing(control_mode, Framing::Duml)
     }
 
     fn with_framing(control_mode: super::super::DjiControlMode, framing: Framing) -> Self {
+        Self::with_options(control_mode, framing, false)
+    }
+
+    fn with_options(
+        control_mode: super::super::DjiControlMode,
+        framing: Framing,
+        experimental_flight: bool,
+    ) -> Self {
         let recording = Recording(
             Arc::new(Mutex::new(Wire {
                 write_limit: usize::MAX,
@@ -136,6 +148,7 @@ impl Harness {
             "injected-recording".into(),
             SourceIncarnation::new([42; 16]),
             control_mode,
+            experimental_flight,
         )
         .unwrap();
         Self { adapter, recording }

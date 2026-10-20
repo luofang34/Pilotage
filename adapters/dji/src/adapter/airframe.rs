@@ -17,6 +17,7 @@ const ESTIMATOR_QUALITY_UNUSABLE: u32 = 2;
 pub(super) struct AirframeReport {
     angles_tenths: [i16; 3],
     motor_state: MotorState,
+    flight: Mini3FlightReport,
 }
 
 impl AirframeReport {
@@ -39,6 +40,7 @@ impl AirframeReport {
         }
         Some(Self {
             angles_tenths,
+            flight,
             motor_state: if flight.motors_running {
                 MotorState::Running
             } else {
@@ -117,6 +119,11 @@ impl AirframeObservations {
         let (_, received) = self.latest?;
         let until = received.checked_add(MAX_AGE)?;
         (now >= received && now < until).then_some(until)
+    }
+
+    pub(super) fn flight_cached(&self, now: Duration) -> Option<Mini3FlightReport> {
+        self.model_deadline(now)?;
+        Some(self.latest?.0.flight)
     }
 
     pub(super) fn expire_binding(&mut self, now: Duration) {

@@ -8,6 +8,7 @@ use crate::sample::Mode;
 
 fn scope(scope: &str, families: &[wire::IntentFamily]) -> ScopeCatalog {
     ScopeCatalog {
+        command_only: false,
         payload: None,
         scope: scope.to_owned(),
         intents: families

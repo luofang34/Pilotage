@@ -8,6 +8,7 @@ fn declared_start_states_survive_capability_encoding() {
     for state in [
         TakeoffStartState::ArmedOnGround,
         TakeoffStartState::MotorsStoppedOnGround,
+        TakeoffStartState::MotorsStopped,
     ] {
         let capability = wire::ActionCapability {
             action: wire::ControlAction::Takeoff as i32,

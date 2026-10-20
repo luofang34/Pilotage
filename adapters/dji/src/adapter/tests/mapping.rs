@@ -9,6 +9,7 @@ pub(super) fn mapped_frame(harness: &Harness, pitch: f32, yaw: f32) -> TestResul
     let capabilities = harness.adapter.capabilities();
     let advertised = &capabilities.vehicles[0].scopes[0];
     let scope = pilotage_client_session::ScopeCatalog {
+        command_only: false,
         payload: advertised.payload.clone(),
         scope: advertised.scope.as_str().to_owned(),
         intents: vec![wire::IntentCapability {
