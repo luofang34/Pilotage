@@ -1,4 +1,7 @@
-use pilotage_mavlink::codec::{EKF_STATUS_REPORT_ID, GIMBAL_DEVICE_ATTITUDE_STATUS_ID};
+use pilotage_mavlink::codec::{
+    EKF_STATUS_REPORT_ID, EXTENDED_SYS_STATE_ID, GIMBAL_DEVICE_ATTITUDE_STATUS_ID,
+    GLOBAL_POSITION_INT_ID,
+};
 use pilotage_mavlink::{AuthorizationSource, CommandTarget, ResetPolicy};
 
 use super::{ArduPilotConfig, ArduPilotProfile};
@@ -24,6 +27,21 @@ fn the_ekf_report_is_requested_well_inside_the_authorization_lag() {
         .copied()
         .unwrap_or((0, u32::MAX));
     assert!(interval_us.saturating_mul(2) / 1_000 <= config.standard_status_max_lag_ms);
+}
+
+#[test]
+fn flight_procedures_request_landed_state_and_home_relative_altitude() {
+    let config = ArduPilotConfig::new(ArduPilotProfile::Simulation).link_config();
+    assert!(
+        config
+            .stream_interval_requests
+            .contains(&(EXTENDED_SYS_STATE_ID, 500_000))
+    );
+    assert!(
+        config
+            .stream_interval_requests
+            .contains(&(GLOBAL_POSITION_INT_ID, 200_000))
+    );
 }
 
 #[test]

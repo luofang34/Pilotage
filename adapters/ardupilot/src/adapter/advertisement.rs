@@ -124,7 +124,11 @@ fn flight_scope_descriptor() -> ScopeDescriptor {
             max_vertical: MAX_VERTICAL_MPS,
             max_angular: MAX_YAW_RATE_RPS,
         }],
-        actions: vec![action(ActionKind::Arm), action(ActionKind::Disarm)],
+        actions: vec![
+            action(ActionKind::Arm),
+            action(ActionKind::Disarm),
+            action(ActionKind::Takeoff),
+        ],
         legacy: Some(LegacyCommandMap::Velocity {
             vx: Some(LegacyAxisRoute {
                 axis: PITCH_AXIS,

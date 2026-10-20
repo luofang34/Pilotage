@@ -1,5 +1,6 @@
 //! The live flight's client: the portable client-session core over a
 //! WebTransport connection to the host, and the telemetry it decodes.
+#![allow(dead_code)]
 
 // Each live test is its own crate and uses a different subset of this
 // module.
@@ -14,6 +15,14 @@ use pilotage_client_session::{
 use pilotage_protocol::wire;
 use tokio::time::timeout;
 use wtransport::{ClientConfig as WtClientConfig, Connection, Endpoint};
+
+#[path = "observed.rs"]
+mod observed;
+#[path = "procedure.rs"]
+mod procedure;
+#[path = "transport.rs"]
+mod transport;
+pub(crate) use observed::FlightObservation;
 
 pub(crate) const STEP_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -40,6 +49,9 @@ pub(crate) struct Client {
     events: Vec<ModuleEvent>,
     reading: Option<Reading>,
     started: Instant,
+    authority_recv: Option<wtransport::RecvStream>,
+    next_neutral_at: Instant,
+    flight: FlightObservation,
 }
 
 impl Client {
@@ -65,12 +77,15 @@ impl Client {
             send,
             recv,
             engine: ClientEngine::new(ClientConfig {
-                client_name: "live-betaflight-flight".into(),
+                client_name: "live-simulator-flight".into(),
                 reconnect: ReconnectPolicy::default(),
             }),
             events: Vec::new(),
             reading: None,
             started: Instant::now(),
+            authority_recv: None,
+            next_neutral_at: Instant::now(),
+            flight: FlightObservation::default(),
         };
         let actions = client.engine.handle(TransportEvent::Connected, 0);
         client.execute(actions).await;
@@ -78,21 +93,13 @@ impl Client {
     }
 
     pub(crate) async fn execute(&mut self, actions: Vec<ClientAction>) {
-        for action in actions {
-            match action {
-                ClientAction::SendBootstrap(bytes) => {
-                    self.send.write_all(&bytes).await.expect("bootstrap write");
-                }
-                ClientAction::SendDatagram(bytes) => {
-                    self.connection.send_datagram(bytes).expect("datagram send");
-                }
-                ClientAction::Emit(event) => self.observe(event),
-                ClientAction::ScheduleReconnect { .. } | ClientAction::Stop(_) => {}
-            }
-        }
+        self.execute_checked(actions)
+            .await
+            .expect("client transport");
     }
 
     pub(crate) fn observe(&mut self, event: ModuleEvent) {
+        self.flight.observe(&event);
         if let ModuleEvent::Telemetry(sample) = &event
             && let (Some(avionics), Some(pose)) = (sample.avionics.as_ref(), sample.pose.as_ref())
         {

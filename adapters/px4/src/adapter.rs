@@ -16,7 +16,8 @@ use pilotage_protocol::{LogicalAxisId, ScopeId, ScopedControlFrame};
 use pilotage_timing::SimTick;
 
 use pilotage_mavlink::sampling::{
-    ArmTracker, VehicleReports, battery_sample, estimate_batch, fc_state_sample, report_only_sample,
+    ArmTracker, VehicleReports, battery_sample, estimate_batch, fc_state_sample,
+    landed_state_sample, report_only_sample,
 };
 use pilotage_mavlink::{LinkState, MavlinkLink, gimbal_endpoint};
 
@@ -356,8 +357,10 @@ impl VehicleAdapter for Px4Adapter {
         let fc_state = fc_state_sample(
             self.arm.report(),
             self.flight_arm_ack(),
-            self.arm_incarnation,
-            self.started_at,
+            self.estimate.as_ref().and_then(|source| {
+                let latest = source.state.lock().ok()?;
+                landed_state_sample(&latest, std::time::Instant::now())
+            }),
         );
         let gimbal = self
             .gimbal

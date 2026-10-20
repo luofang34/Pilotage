@@ -238,6 +238,7 @@ pub(super) fn telemetry(
     payload: Option<wire::PayloadState>,
 ) -> TelemetrySample {
     TelemetrySample {
+        flight_procedure: None,
         vehicle,
         tick,
         payload,

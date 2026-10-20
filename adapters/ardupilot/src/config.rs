@@ -3,8 +3,8 @@
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
 use pilotage_mavlink::codec::{
-    ATTITUDE_QUATERNION_ID, BATTERY_STATUS_ID, EKF_STATUS_REPORT_ID,
-    GIMBAL_DEVICE_ATTITUDE_STATUS_ID, GNSS_RAW_ID, LOCAL_POSITION_NED_ID,
+    ATTITUDE_QUATERNION_ID, BATTERY_STATUS_ID, EKF_STATUS_REPORT_ID, EXTENDED_SYS_STATE_ID,
+    GIMBAL_DEVICE_ATTITUDE_STATUS_ID, GLOBAL_POSITION_INT_ID, GNSS_RAW_ID, LOCAL_POSITION_NED_ID,
 };
 use pilotage_mavlink::{AuthorizationSource, CommandTarget, LinkConfig};
 
@@ -81,29 +81,34 @@ impl ArduPilotConfig {
         config.command_target = CommandTarget::FcSender;
         // ArduPilot streams sparse defaults on a serial port nobody has
         // configured, so every lane the samples read is requested:
-        // attitude and local position at 30 Hz, the receiver fix at 5 Hz,
-        // the EKF status that authorizes them, and the battery at 1 Hz.
+        // attitude and local position at 30 Hz, the receiver fix and
+        // home-relative altitude at 5 Hz, landed state at 2 Hz, EKF status
+        // at 10 Hz, and battery at 1 Hz.
         config.stream_interval_requests = stream_intervals(self.gimbal);
         config
     }
 }
 
 fn stream_intervals(gimbal: bool) -> &'static [(u32, u32)] {
-    const FLIGHT: [(u32, u32); 5] = [
+    const FLIGHT: [(u32, u32); 7] = [
         (ATTITUDE_QUATERNION_ID, 33_333),
         (LOCAL_POSITION_NED_ID, 33_333),
         (GNSS_RAW_ID, 200_000),
         (EKF_STATUS_REPORT_ID, EKF_STATUS_INTERVAL_US),
         (BATTERY_STATUS_ID, 1_000_000),
+        (GLOBAL_POSITION_INT_ID, 200_000),
+        (EXTENDED_SYS_STATE_ID, 500_000),
     ];
     // ManagerControl requests manager information and ownership status itself.
     // Device feedback needs a continuous stream for the operator's camera view.
-    const WITH_GIMBAL: [(u32, u32); 6] = [
+    const WITH_GIMBAL: [(u32, u32); 8] = [
         FLIGHT[0],
         FLIGHT[1],
         FLIGHT[2],
         FLIGHT[3],
         FLIGHT[4],
+        FLIGHT[5],
+        FLIGHT[6],
         (GIMBAL_DEVICE_ATTITUDE_STATUS_ID, 20_000),
     ];
     if gimbal { &WITH_GIMBAL } else { &FLIGHT }

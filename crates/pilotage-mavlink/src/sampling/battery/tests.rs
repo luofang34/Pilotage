@@ -2,7 +2,9 @@
 
 use std::time::{Duration, Instant};
 
-use pilotage_adapter_api::{MeasurementClock, SourceIncarnation, SourceRole};
+use pilotage_adapter_api::{
+    MeasurementClock, MeasurementStamp, SourceIncarnation, SourceIntegrity, SourceRole,
+};
 
 use super::{WITHHOLD_AFTER, battery_sample};
 use crate::BatteryReport;
@@ -40,12 +42,19 @@ fn a_report_becomes_an_si_sample_under_the_fc_state_role() {
     let fc_state = fc_state_sample(
         Some(ArmReport {
             armed: false,
-            sequence: 0,
-            acquired_at: started,
+            stamp: MeasurementStamp {
+                role: SourceRole::FcState,
+                integrity: SourceIntegrity::ChecksummedOnly,
+                source_id: 1,
+                source_incarnation: SourceIncarnation::new([7; 16]),
+                source_epoch: 1,
+                sequence: 0,
+                acquired_at_ns: 0,
+                clock: MeasurementClock::HostMonotonic,
+            },
         }),
         None,
-        SourceIncarnation::new([7; 16]),
-        started,
+        None,
     )
     .expect("fc state");
     assert_ne!(

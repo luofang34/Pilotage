@@ -282,6 +282,7 @@ impl VehicleAdapter for ReferenceAdapter {
     fn sample_telemetry(&mut self) -> TelemetryBatch {
         TelemetryBatch {
             samples: vec![TelemetrySample {
+                flight_procedure: None,
                 payload: None,
                 vehicle: self.vehicle,
                 tick: self.tick,

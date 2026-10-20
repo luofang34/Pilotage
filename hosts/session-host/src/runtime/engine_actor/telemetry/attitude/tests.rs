@@ -55,6 +55,7 @@ fn reported_roundtrip_has_no_canonical_measurement_or_position() {
     avionics.estimator_status_stamp = None;
     let sample = sample_to_wire(
         TelemetrySample {
+            flight_procedure: None,
             vehicle: VehicleId::new(1),
             tick: SimTick::new(0),
             pose: None,

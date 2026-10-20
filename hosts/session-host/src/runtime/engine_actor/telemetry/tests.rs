@@ -13,6 +13,7 @@ use super::{avionics_to_wire, sample_to_wire};
 /// One telemetry sample carrying only the estimate under test.
 fn one_vehicle_sample(avionics: AvionicsSample) -> TelemetrySample {
     TelemetrySample {
+        flight_procedure: None,
         payload: None,
         vehicle: VehicleId::new(9),
         tick: SimTick::new(42),
@@ -135,6 +136,7 @@ fn estimator_authorization_is_normalized_at_wire_boundary() {
 #[test]
 fn kinematics_only_omits_planar_projection_while_group_flows() {
     let sample = TelemetrySample {
+        flight_procedure: None,
         payload: None,
         vehicle: VehicleId::new(1),
         tick: SimTick::new(0),
@@ -179,6 +181,7 @@ fn kinematics_only_omits_planar_projection_while_group_flows() {
 #[test]
 fn attitude_only_omits_planar_projection_while_group_flows() {
     let sample = TelemetrySample {
+        flight_procedure: None,
         payload: None,
         vehicle: VehicleId::new(1),
         tick: SimTick::new(0),
@@ -236,6 +239,7 @@ fn truth_and_fc_sample() -> TelemetrySample {
         clock: MeasurementClock::HostMonotonic,
     };
     TelemetrySample {
+        flight_procedure: None,
         payload: None,
         vehicle: VehicleId::new(1),
         tick: SimTick::new(1_000_000),
@@ -252,6 +256,7 @@ fn truth_and_fc_sample() -> TelemetrySample {
             stamp: truth_stamp,
         }),
         fc_state: Some(FcStateSample {
+            landed_state: None,
             arm_state: 2,
             last_command: None,
             stamp: fc_stamp,
@@ -313,6 +318,7 @@ fn the_fc_command_verdict_crosses_the_wire() {
     };
     // A refused arm: kind 1 with the typed outcome.
     let refused = super::fc_state_to_wire(FcStateSample {
+        landed_state: None,
         arm_state: 1,
         last_command: Some(pilotage_adapter_api::FcCommandAck {
             arm: true,
@@ -334,6 +340,7 @@ fn the_fc_command_verdict_crosses_the_wire() {
     assert_eq!(legacy, 0, "the FC-specific result code is not written");
     // No verdict observed: the lane stays at kind 0.
     let none = super::fc_state_to_wire(FcStateSample {
+        landed_state: None,
         arm_state: 2,
         last_command: None,
         stamp,
@@ -346,6 +353,7 @@ fn the_fc_command_verdict_crosses_the_wire() {
 }
 
 mod geodetic;
+mod landed_state;
 mod magnetic_variation;
 
 #[test]
@@ -363,6 +371,7 @@ fn a_battery_sample_survives_the_wire_with_unknown_values_as_nan() {
         clock: MeasurementClock::HostMonotonic,
     };
     let sample = TelemetrySample {
+        flight_procedure: None,
         payload: None,
         vehicle: VehicleId::new(1),
         tick: SimTick::new(1),

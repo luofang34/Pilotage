@@ -182,8 +182,32 @@ fn decode_heartbeat(payload: &[u8]) -> FcMessage {
     }
 }
 
+fn decode_attitude(payload: &[u8]) -> FcMessage {
+    FcMessage::AttitudeQuaternion {
+        time_boot_ms: u32_at(payload, 0),
+        quat_wxyz: [
+            f32_at(payload, 4),
+            f32_at(payload, 8),
+            f32_at(payload, 12),
+            f32_at(payload, 16),
+        ],
+        rates_rps: [
+            f32_at(payload, 20),
+            f32_at(payload, 24),
+            f32_at(payload, 28),
+        ],
+    }
+}
+
 pub(super) fn decode_known(msg_id: u32, payload: &[u8]) -> Option<FcMessage> {
     match msg_id {
+        super::GLOBAL_POSITION_INT_ID => Some(FcMessage::RelativeAltitude {
+            time_boot_ms: u32_at(payload, 0),
+            altitude_mm: u32_at(payload, 16) as i32,
+        }),
+        super::EXTENDED_SYS_STATE_ID => Some(FcMessage::LandedState(super::LandedState::decode(
+            payload.get(1).copied().unwrap_or(0),
+        ))),
         super::GIMBAL_MANAGER_INFORMATION_ID => Some(FcMessage::GimbalManagerInformation(
             super::gimbal_manager::decode_information(payload),
         )),
@@ -210,20 +234,7 @@ pub(super) fn decode_known(msg_id: u32, payload: &[u8]) -> Option<FcMessage> {
             target_system: payload.get(8).copied().unwrap_or(0),
             target_component: payload.get(9).copied().unwrap_or(0),
         }),
-        ATTITUDE_QUATERNION_ID => Some(FcMessage::AttitudeQuaternion {
-            time_boot_ms: u32_at(payload, 0),
-            quat_wxyz: [
-                f32_at(payload, 4),
-                f32_at(payload, 8),
-                f32_at(payload, 12),
-                f32_at(payload, 16),
-            ],
-            rates_rps: [
-                f32_at(payload, 20),
-                f32_at(payload, 24),
-                f32_at(payload, 28),
-            ],
-        }),
+        ATTITUDE_QUATERNION_ID => Some(decode_attitude(payload)),
         SCALED_PRESSURE_ID => Some(FcMessage::ScaledPressure {
             time_boot_ms: u32_at(payload, 0),
             press_abs_hpa: f32_at(payload, 4),
