@@ -23,6 +23,7 @@ use super::driver::{Link, LinkStats};
 use super::observer::LinkObserver;
 use super::records::{LinkCatalog, LinkControlFeelMode, LinkEvent};
 
+mod catalog;
 mod lifecycle;
 
 struct SilentObserver;

@@ -449,6 +449,8 @@ final class HostLinkModel: ObservableObject {
             if LaunchRequest.autoControl {
                 requestLease()
             }
+        case .capabilitiesChanged(let catalog):
+            self.catalog = catalog
         case .leaseChanged(let held, let scope, let detail):
             // The gimbal lane is the runtime's own business: its grant
             // must not flip the shell into "controlling", nor its

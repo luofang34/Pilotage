@@ -24,6 +24,11 @@ impl Link {
             .as_ref()
             .map(|s| s.value.clone())
             .unwrap_or_default();
+        let vehicle = response.vehicle.as_ref().map_or(0, |value| value.value);
+        let generation = response.generation.as_ref().map_or(0, |g| g.value);
+        if response.granted && self.engine.control_generation(vehicle, &scope) != Some(generation) {
+            return;
+        }
         if scope == MOTION_SCOPE {
             // The answer arrived, whatever it says: the next press may
             // ask again.
@@ -36,7 +41,6 @@ impl Link {
             // go.
             self.pending_gimbal_engage = false;
         }
-        let generation = response.generation.as_ref().map_or(0, |g| g.value);
         self.mirror_authority(
             &scope,
             if response.granted {
@@ -240,6 +244,7 @@ impl Link {
                     catalog: LinkCatalog::from_admission(&admission),
                 });
             }
+            ModuleEvent::CapabilitiesChanged(admission) => self.emit_capabilities(&admission),
             ModuleEvent::Telemetry(sample) => self.emit_telemetry(&sample),
             ModuleEvent::Lease(response) => self.emit_lease(&response),
             ModuleEvent::LeaseReleased(released) => self.emit_lease_released(&released),
@@ -285,5 +290,46 @@ impl Link {
             }
             ModuleEvent::Pong(_) => {}
         }
+    }
+
+    fn emit_capabilities(&mut self, admission: &pilotage_client_session::Admission) {
+        use pilotage_control_web::AuthorityScope;
+
+        let vehicle = admission.vehicles.first().map(|value| value.vehicle_id);
+        for (scope, slot) in [
+            (MOTION_SCOPE, AuthorityScope::Motion),
+            (GIMBAL_SCOPE, AuthorityScope::Gimbal),
+        ] {
+            let held = vehicle.is_some_and(|id| self.engine.holds(id, scope));
+            let pending = vehicle.is_some_and(|id| {
+                self.engine.lease_pending(id, scope) || self.engine.takeover_pending(id, scope)
+            });
+            if !held && !pending {
+                if scope == MOTION_SCOPE {
+                    self.motion_request_pending = false;
+                } else {
+                    self.pending_gimbal_engage = false;
+                }
+            }
+            let state = self.control.authority_state(slot);
+            if state.granted() && !held {
+                // Catalog replacement closes changed lanes in the shared engine;
+                // the runtime and shell must stop presenting their grants too.
+                self.mirror_authority(
+                    scope,
+                    AuthorityEvent::Revoked {
+                        generation: state.generation(),
+                    },
+                );
+                self.delivery.event(LinkEvent::LeaseChanged {
+                    held: false,
+                    scope: scope.to_owned(),
+                    detail: "available controls changed".to_owned(),
+                });
+            }
+        }
+        self.delivery.event(LinkEvent::CapabilitiesChanged {
+            catalog: LinkCatalog::from_admission(admission),
+        });
     }
 }

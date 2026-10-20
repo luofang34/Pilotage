@@ -137,6 +137,21 @@ impl ClientEngine {
         self.lanes.contains_key(&(vehicle_id, scope.to_owned()))
     }
 
+    /// The generation of the open lane for this exact vehicle and scope.
+    #[must_use]
+    pub fn control_generation(&self, vehicle_id: u64, scope: &str) -> Option<u64> {
+        self.lanes
+            .get(&(vehicle_id, scope.to_owned()))
+            .map(ControlLane::generation)
+    }
+
+    /// Whether a lease request still awaits its response for this exact scope.
+    #[must_use]
+    pub fn lease_pending(&self, vehicle_id: u64, scope: &str) -> bool {
+        self.pending_leases
+            .contains_key(&(vehicle_id, scope.to_owned()))
+    }
+
     /// The (vehicle, scope) of the first open lane — the whole story for
     /// a single-lease client, and only a starting point for one holding
     /// several scopes.
