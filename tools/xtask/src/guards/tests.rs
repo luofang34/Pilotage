@@ -50,7 +50,6 @@ fn repository_guards_are_discovered() {
         "geodetic-datum-codes",
         "monotonic-counter-arithmetic",
         "navdata-tile-bundle",
-        "production-rust-lints",
         "situation-layer-controls",
         "situation-map-attribution",
         "situation-ownship-wiring",

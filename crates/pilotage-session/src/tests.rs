@@ -94,6 +94,7 @@ pub(crate) fn capabilities() -> AdapterCapabilities {
                 }),
             }],
             link_loss_actions: vec![LinkLossPolicy::Neutralize],
+            heading_reference: None,
         }],
         adapter_version: "test".to_owned(),
         control_feel: None,

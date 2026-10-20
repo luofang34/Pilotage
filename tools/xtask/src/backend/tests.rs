@@ -79,20 +79,15 @@ fn the_assembled_host_environment_carries_the_vehicles_law() {
         .expect("workspace root is two levels above tools/xtask")
         .to_path_buf();
     let ctx_for = |profile| SessionContext {
-        repo_root: repo_root.clone(),
-        host_port: 4433,
-        viewer_port: 8080,
         profile,
-        log_dir: repo_root.join("target/xtask-sim"),
-        lan: false,
         web_root: std::env::temp_dir(),
-        instance: 0,
-        ready_timeout_s: crate::backend::DEFAULT_READY_TIMEOUT_S,
+        ..SessionContext::for_test(repo_root.clone())
     };
 
     for (backend, vehicle) in [("aviate-gz", "x500"), ("aviate-xplane", "alia250")] {
         let sim = ctx_for(Profile::Simulation);
-        let stage = host_stage(&sim, backend_for(backend).expect("known backend").as_ref());
+        let stage = host_stage(&sim, backend_for(backend).expect("known backend").as_ref())
+            .expect("host stage");
         let env = &stage.spec.env;
         let named: Vec<_> = env
             .iter()
@@ -121,7 +116,8 @@ fn the_assembled_host_environment_carries_the_vehicles_law() {
         let stage = host_stage(
             &physical,
             backend_for(backend).expect("known backend").as_ref(),
-        );
+        )
+        .expect("host stage");
         let env = &stage.spec.env;
         assert!(
             !env.iter().any(|(key, _)| key == CONTROL_FEEL_ENV),
@@ -136,7 +132,8 @@ fn the_assembled_host_environment_carries_the_vehicles_law() {
         let stage = host_stage(
             &ctx_for(Profile::Simulation),
             backend_for(entry.name).expect("registered").as_ref(),
-        );
+        )
+        .expect("host stage");
         let env = &stage.spec.env;
         assert!(
             env.iter().filter(|(k, _)| k == CONTROL_FEEL_ENV).count() <= 1,
@@ -175,6 +172,7 @@ fn no_backend_writes_the_control_feel_variable_itself() {
                 web_root: std::env::temp_dir(),
                 instance: 0,
                 ready_timeout_s: crate::backend::DEFAULT_READY_TIMEOUT_S,
+                sim_camera: false,
             };
             let env = backend_for(backend).expect("known backend").host_env(&ctx);
             assert!(
@@ -212,6 +210,7 @@ fn a_physical_session_is_handed_no_control_feel_law() {
             web_root: std::env::temp_dir(),
             instance: 0,
             ready_timeout_s: crate::backend::DEFAULT_READY_TIMEOUT_S,
+            sim_camera: false,
         };
         let declared = backend_for(backend)
             .expect("known backend")
@@ -249,6 +248,7 @@ fn an_operators_own_control_feel_law_is_not_replaced() {
         web_root: std::env::temp_dir(),
         instance: 0,
         ready_timeout_s: crate::backend::DEFAULT_READY_TIMEOUT_S,
+        sim_camera: false,
     };
 
     let operators = std::ffi::OsString::from("/tmp/an-operators-own-tuning.json");
@@ -319,6 +319,10 @@ fn backend_selection_fails_closed() {
         backend_for("aviate-xplane").expect("known").name(),
         "aviate-xplane"
     );
-    let refusal = backend_for("px4-jsbsim");
+    assert_eq!(
+        backend_for("px4-jsbsim").expect("known").name(),
+        "px4-jsbsim"
+    );
+    let refusal = backend_for("px4-flightgear");
     assert!(matches!(refusal, Err(XtaskError::UnknownBackend { .. })));
 }

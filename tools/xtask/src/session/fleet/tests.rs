@@ -24,12 +24,13 @@ fn fleet(vehicles: &[&str]) -> FleetArgs {
         open: false,
         site: DEFAULT_SITE,
         ready_timeout_s: crate::backend::DEFAULT_READY_TIMEOUT_S,
+        sim_camera: false,
     }
 }
 
 /// Metres between two points on a sphere, flat at the default site's
 /// latitude: within half a metre over a layout.
-fn distance_m(a: &crate::backend::SpawnPoint, b: &crate::backend::SpawnPoint) -> f64 {
+fn distance_m(a: &crate::backend::Placement, b: &crate::backend::Placement) -> f64 {
     let north = (b.latitude_deg - a.latitude_deg) * 111_320.0;
     let east = (b.longitude_deg - a.longitude_deg)
         * 111_320.0

@@ -16,6 +16,7 @@ mod aviate_xplane;
 mod betaflight_sitl;
 pub(crate) mod gz;
 pub(crate) mod px4_gz;
+mod px4_jsbsim;
 mod px4_xplane;
 mod xplane_handshake;
 mod xplane_simulator;
@@ -48,6 +49,8 @@ pub struct SessionContext {
     /// prove it is up, s (`--ready-timeout`). One value for every
     /// backend: a loaded machine slows them all alike.
     pub ready_timeout_s: u64,
+    /// Add the world-model camera stage (`--camera maplibre`).
+    pub sim_camera: bool,
 }
 
 /// The `--ready-timeout` default, s. A PX4 SITL boots in about 20 s on an
@@ -70,24 +73,12 @@ impl SessionContext {
             lan: false,
             instance: 0,
             ready_timeout_s: DEFAULT_READY_TIMEOUT_S,
+            sim_camera: false,
         }
     }
 }
 
-/// Where a fleet puts one vehicle: a point on the WGS84 ellipsoid, the
-/// ground height there, and the way the vehicle faces.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SpawnPoint {
-    /// Latitude, degrees north.
-    pub latitude_deg: f64,
-    /// Longitude, degrees east.
-    pub longitude_deg: f64,
-    /// Ground elevation, metres above mean sea level. The vehicle stands
-    /// on the ground, so this is also its starting altitude.
-    pub elevation_m: f64,
-    /// True heading of the vehicle's nose, degrees clockwise from north.
-    pub heading_deg: f64,
-}
+pub use pilotage_world::Placement;
 
 /// One plannable launch step: a process and the signal proving it is up.
 #[derive(Debug)]
@@ -183,7 +174,7 @@ pub trait SimBackend {
     fn spawn(
         &self,
         _ctx: &SessionContext,
-        _point: &SpawnPoint,
+        _point: &Placement,
         _stages: &mut [Stage],
     ) -> Result<(), XtaskError> {
         Err(XtaskError::SpawnUnsupported {
@@ -334,7 +325,7 @@ pub(crate) fn host_env_for(
 /// but absent from the other is a backend nothing checks — and the
 /// direction that fails is the safe one, since a backend missing here
 /// cannot be selected at all.
-const BACKENDS: &[BackendEntry] = &[
+pub(crate) const BACKENDS: &[BackendEntry] = &[
     // Canonical names pair the FC family with the simulator behind it;
     // the bare FC name stays accepted as the family's default.
     BackendEntry {
@@ -346,6 +337,11 @@ const BACKENDS: &[BackendEntry] = &[
         name: "px4-gz",
         alias: Some("px4"),
         make: || Box::new(px4_gz::Px4Gz::default()),
+    },
+    BackendEntry {
+        name: "px4-jsbsim",
+        alias: None,
+        make: || Box::new(px4_jsbsim::Px4Jsbsim::default()),
     },
     BackendEntry {
         name: "px4-xplane",
@@ -369,8 +365,8 @@ const BACKENDS: &[BackendEntry] = &[
     },
 ];
 
-struct BackendEntry {
-    name: &'static str,
+pub(crate) struct BackendEntry {
+    pub(crate) name: &'static str,
     alias: Option<&'static str>,
     make: fn() -> Box<dyn SimBackend>,
 }

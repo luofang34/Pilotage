@@ -21,6 +21,8 @@ pilotage-control-feel = { workspace = true }
 pilotage-adapter-reference = { workspace = true, optional = true }
 pilotage-adapter-gazebo = { workspace = true, optional = true }
 pilotage-sim-video = { workspace = true, optional = true }
+pilotage-mavlink = { workspace = true, optional = true }
+pilotage-world = { workspace = true, optional = true }
 pilotage-adapter-aviate = { workspace = true }
 pilotage-adapter-px4 = { workspace = true }
 pilotage-adapter-ardupilot = { workspace = true }
@@ -49,6 +51,8 @@ sim = [
     "dep:pilotage-adapter-reference",
     "dep:pilotage-adapter-gazebo",
     "dep:pilotage-sim-video",
+    "dep:pilotage-mavlink",
+    "dep:pilotage-world",
     "pilotage-adapter-aviate/sim",
     "pilotage-adapter-px4/sim",
 ]

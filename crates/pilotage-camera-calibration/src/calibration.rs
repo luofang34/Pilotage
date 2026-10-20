@@ -49,7 +49,9 @@ pub use identity::{
     CalibrationIdentity, CalibrationVersion, EffectivePeriod, ProvenanceSource, Residuals,
     ToolVersion, ValidityStatus,
 };
-pub use recovery::{RecoveryReport, SyntheticTarget, recover_intrinsics, verify_sim_recovery};
+pub use recovery::{
+    RecoveryReport, SyntheticTarget, recover_intrinsics, recovery_report, verify_sim_recovery,
+};
 pub use sim::{
     SIM_FPV_CALIBRATION_HASH, SIM_FPV_CALIBRATION_ID, SIM_FPV_CAMERA_ID, sim_fpv_calibration,
 };

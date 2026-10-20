@@ -16,6 +16,7 @@ mod direct_flight;
 mod exact_direct;
 mod fixtures;
 mod flight_control;
+mod heading_reference;
 mod hid_pipeline;
 // The source-role suite exercises the simulation-truth oracle.
 #[cfg(feature = "sim")]

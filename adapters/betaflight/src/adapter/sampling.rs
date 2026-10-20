@@ -72,6 +72,7 @@ impl BetaflightAdapter {
             estimator_status_stamp: Some(estimate_stamp),
             valid_flags,
             quality: QUALITY_GOOD,
+            magnetic_variation: None,
         };
         let fc_state = FcStateSample {
             arm_state: if snapshot.armed { 2 } else { 1 },

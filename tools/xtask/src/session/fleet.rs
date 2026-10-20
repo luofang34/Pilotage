@@ -11,7 +11,7 @@ use super::{
     SUPERVISE_INTERVAL, prepared_log_dir, repo_root, spawn_cancel_listener, start_stages, teardown,
     verify_listening_port,
 };
-use crate::backend::{SessionContext, SimBackend, SpawnPoint, Stage, backend_for};
+use crate::backend::{Placement, SessionContext, SimBackend, Stage, backend_for};
 use crate::cli::FleetArgs;
 use crate::conflicts::{Claim, refuse_conflicts, session_claims};
 use crate::error::XtaskError;
@@ -32,7 +32,7 @@ const LOOPBACK: &str = "127.0.0.1";
 /// Where each vehicle spawns on `site`, in launch order: each backend
 /// says which ground it starts on, and vehicles on one ground stand in a
 /// row in launch order.
-pub(crate) fn spawn_points(site: &Site, grounds: &[Ground]) -> Vec<SpawnPoint> {
+pub(crate) fn spawn_points(site: &Site, grounds: &[Ground]) -> Vec<Placement> {
     grounds
         .iter()
         .enumerate()
@@ -42,7 +42,7 @@ pub(crate) fn spawn_points(site: &Site, grounds: &[Ground]) -> Vec<SpawnPoint> {
                 .take(index)
                 .filter(|other| *other == ground)
                 .count();
-            site.spawn_point(*ground, before)
+            site.placement(*ground, before)
         })
         .collect()
 }
@@ -145,6 +145,9 @@ pub async fn run_fleet(args: &FleetArgs) -> Result<(), XtaskError> {
     print_line(&format!("launching a fleet of {} vehicles", slots.len()));
     print_line("building session host (release)...");
     build_host(&repo_root)?;
+    if args.sim_camera {
+        crate::camera::build(&repo_root)?;
+    }
     prepare_web_assets(&repo_root)?;
     // After the viewer's runtime is built: a private web root links the
     // viewer tree's entries as they are now. The first vehicle owns
@@ -205,6 +208,7 @@ fn resolve_slots(args: &FleetArgs, repo_root: &Path) -> Result<Vec<Slot>, XtaskE
             lan: false,
             instance: args.instance_base.saturating_add(offset),
             ready_timeout_s: args.ready_timeout_s,
+            sim_camera: args.sim_camera,
         };
         slots.push(Slot {
             name,
@@ -218,7 +222,7 @@ fn resolve_slots(args: &FleetArgs, repo_root: &Path) -> Result<Vec<Slot>, XtaskE
 }
 
 /// Plans one vehicle's stages at its spawn point, host and viewer last.
-fn plan_slot(slot: &mut Slot, point: &SpawnPoint) -> Result<(), XtaskError> {
+fn plan_slot(slot: &mut Slot, point: &Placement) -> Result<(), XtaskError> {
     slot.backend.prepare(&slot.ctx)?;
     let mut planned = slot.backend.plan(&slot.ctx)?;
     slot.backend.spawn(&slot.ctx, point, &mut planned)?;
@@ -226,7 +230,13 @@ fn plan_slot(slot: &mut Slot, point: &SpawnPoint) -> Result<(), XtaskError> {
         "vehicle {} spawns at {:.7}, {:.7}, {:.1} m, heading {:.1}",
         slot.name, point.latitude_deg, point.longitude_deg, point.elevation_m, point.heading_deg
     ));
-    planned.push(stages::host_stage(&slot.ctx, slot.backend.as_ref()));
+    planned.push(stages::host_stage(&slot.ctx, slot.backend.as_ref())?);
+    if slot.ctx.sim_camera {
+        planned.push(crate::camera::stage(
+            &slot.ctx,
+            Some((point.latitude_deg, point.longitude_deg)),
+        )?);
+    }
     let xtask = std::env::current_exe().map_err(|source| XtaskError::Io {
         context: "locating the xtask executable for the viewer stage",
         source,

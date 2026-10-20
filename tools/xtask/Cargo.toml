@@ -10,6 +10,7 @@ workspace = true
 
 [dependencies]
 pilotage-trial = { workspace = true }
+pilotage-world = { workspace = true }
 pilotage-xplane-trial = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
