@@ -133,13 +133,13 @@ impl Recorder {
                     kinematics.vel_ned_mps[2],
                 ));
             }
-            if let Some(attitude) = &avionics.attitude {
+            if let Some(pilotage_adapter_api::AvionicsAttitudeSample::Canonical {
+                quat_wxyz, ..
+            }) = &avionics.attitude
+            {
                 line.push_str(&format!(
                     ",\"est_quat\":[{},{},{},{}]",
-                    attitude.quat_wxyz[0],
-                    attitude.quat_wxyz[1],
-                    attitude.quat_wxyz[2],
-                    attitude.quat_wxyz[3],
+                    quat_wxyz[0], quat_wxyz[1], quat_wxyz[2], quat_wxyz[3],
                 ));
             }
             if let Some(baro) = &avionics.baro {

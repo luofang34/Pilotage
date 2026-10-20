@@ -52,6 +52,7 @@ fn wire_sample(sequence: u32, yaw_rad: f64) -> wire::TelemetrySample {
         estimator_status_stamp: stamp(sequence),
         magnetic_variation: None,
         magnetic_variation_stamp: None,
+        reported_euler: None,
     };
     wire::TelemetrySample {
         payload: None,

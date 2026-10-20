@@ -158,6 +158,7 @@ fn envelope_roundtrips_for_telemetry_sample_arm() {
             estimator_status_stamp: Some(estimate_stamp(11, 1_000_000)),
             magnetic_variation: None,
             magnetic_variation_stamp: None,
+            reported_euler: None,
         }),
         sim_truth: None,
         fc_state: None,
