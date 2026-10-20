@@ -12,6 +12,7 @@ use crate::readiness::Readiness;
 
 mod ardupilot_sitl;
 pub(crate) mod aviate_gz;
+mod aviate_jsbsim;
 mod aviate_xplane;
 mod betaflight_sitl;
 pub(crate) mod gz;
@@ -332,6 +333,11 @@ pub(crate) const BACKENDS: &[BackendEntry] = &[
         name: "aviate-gz",
         alias: Some("aviate"),
         make: || Box::new(aviate_gz::AviateGz),
+    },
+    BackendEntry {
+        name: "aviate-jsbsim",
+        alias: None,
+        make: || Box::new(aviate_jsbsim::AviateJsbsim),
     },
     BackendEntry {
         name: "px4-gz",

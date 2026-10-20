@@ -62,6 +62,62 @@ pub(crate) fn restart_instance(
     Ok(())
 }
 
+/// Stops the `program` process of instance `instance` that holds UDP
+/// `port`, for a flight controller whose command line does not name its
+/// instance: the port it binds does. A peer that only talks to the port
+/// (the session host) is another program and stays. Its supervisor
+/// starts a fresh flight controller.
+///
+/// # Errors
+///
+/// Returns [`XtaskError::Unsupervised`] when no live xtask supervisor runs
+/// that instance: nothing would start the stopped process again.
+pub(crate) fn restart_port_holder(
+    repo_root: &Path,
+    instance: u16,
+    port: u16,
+    program: &str,
+) -> Result<(), XtaskError> {
+    if !supervisor_alive(&crate::session::supervisor_marker(repo_root, instance)) {
+        return Err(XtaskError::Unsupervised { instance });
+    }
+    let pids = Command::new("lsof")
+        .args(["-t", &format!("-iUDP:{port}")])
+        .output()
+        .map(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .split_whitespace()
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|pid| runs(pid, program))
+        .collect::<Vec<_>>();
+    for pid in &pids {
+        Command::new("kill").args(["-9", pid]).status().ok();
+    }
+    print_line(&format!(
+        "stopped {} flight controller process(es) of instance {instance}; the xtask \
+         supervisor restarts it",
+        pids.len()
+    ));
+    Ok(())
+}
+
+/// Whether process `pid` runs `program`.
+fn runs(pid: &str, program: &str) -> bool {
+    Command::new("ps")
+        .args(["-o", "command=", "-p", pid])
+        .output()
+        .is_ok_and(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .split_whitespace()
+                .next()
+                .is_some_and(|first| first.ends_with(program))
+        })
+}
+
 /// Whether the pid in `marker` names a live process.
 fn supervisor_alive(marker: &Path) -> bool {
     let Ok(pid) = std::fs::read_to_string(marker) else {

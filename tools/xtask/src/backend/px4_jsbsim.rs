@@ -25,7 +25,7 @@ pub(crate) use vehicle::JsbsimModel;
 /// This backend's `--fc` name.
 const BACKEND_NAME: &str = "px4-jsbsim";
 /// The sidecar's stage name, which [`Px4Jsbsim::spawn`] finds it by.
-const SIDECAR_STAGE: &str = "jsbsim";
+pub(super) const SIDECAR_STAGE: &str = "jsbsim";
 /// The line the sidecar logs once it listens for PX4.
 const SIDECAR_READY: &str = "jsbsim sidecar listening for PX4";
 /// The parameters every px4-jsbsim session sets. PX4's logger writes a
@@ -86,22 +86,7 @@ impl SimBackend for Px4Jsbsim {
     }
 
     fn prepare(&self, ctx: &SessionContext) -> Result<(), XtaskError> {
-        let status = std::process::Command::new("cargo")
-            .args(["build", "--release", "--manifest-path", SIDECAR_MANIFEST])
-            .current_dir(&ctx.repo_root)
-            .status()
-            .map_err(|source| XtaskError::Io {
-                context: "building the JSBSim sidecar",
-                source,
-            })?;
-        if status.success() {
-            Ok(())
-        } else {
-            Err(XtaskError::CommandFailed {
-                context: "cargo build --release --manifest-path sim/jsbsim-sidecar/Cargo.toml",
-                status: status.to_string(),
-            })
-        }
+        build_sidecar(ctx)
     }
 
     fn plan(&self, ctx: &SessionContext) -> Result<Vec<Stage>, XtaskError> {
@@ -115,16 +100,7 @@ impl SimBackend for Px4Jsbsim {
         point: &Placement,
         stages: &mut [Stage],
     ) -> Result<(), XtaskError> {
-        let stage = stages
-            .iter_mut()
-            .find(|stage| stage.spec.name == SIDECAR_STAGE)
-            .ok_or_else(|| XtaskError::Usage {
-                message: "the px4-jsbsim plan has no jsbsim stage".to_owned(),
-            })?;
-        for (flag, value) in placement_args(point) {
-            set_flag(&mut stage.spec.args, flag, value)?;
-        }
-        Ok(())
+        place_sidecar(point, stages)
     }
 
     fn ground(&self) -> crate::site::Ground {
@@ -165,6 +141,40 @@ impl SimBackend for Px4Jsbsim {
     fn reset_instance(&self, repo_root: &Path, instance: u16) -> Result<(), XtaskError> {
         super::px4_gz::reset::restart_instance(repo_root, &px4_dir(repo_root), instance)
     }
+}
+
+/// Builds the sidecar, which builds outside the workspace.
+pub(super) fn build_sidecar(ctx: &SessionContext) -> Result<(), XtaskError> {
+    let status = std::process::Command::new("cargo")
+        .args(["build", "--release", "--manifest-path", SIDECAR_MANIFEST])
+        .current_dir(&ctx.repo_root)
+        .status()
+        .map_err(|source| XtaskError::Io {
+            context: "building the JSBSim sidecar",
+            source,
+        })?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(XtaskError::CommandFailed {
+            context: "cargo build --release --manifest-path sim/jsbsim-sidecar/Cargo.toml",
+            status: status.to_string(),
+        })
+    }
+}
+
+/// Moves the planned sidecar's vehicle to `point`.
+pub(super) fn place_sidecar(point: &Placement, stages: &mut [Stage]) -> Result<(), XtaskError> {
+    let stage = stages
+        .iter_mut()
+        .find(|stage| stage.spec.name == SIDECAR_STAGE)
+        .ok_or_else(|| XtaskError::Usage {
+            message: "the plan has no jsbsim stage".to_owned(),
+        })?;
+    for (flag, value) in placement_args(point) {
+        set_flag(&mut stage.spec.args, flag, value)?;
+    }
+    Ok(())
 }
 
 /// The sidecar options that put the vehicle at `point`. The site's
@@ -225,15 +235,18 @@ fn plan_with_dirs(
     }
     let install = JsbsimInstall::validate(jsbsim)?;
     Ok(vec![
-        sidecar_stage(ctx, &install, model)?,
+        sidecar_stage(ctx, &install, model, model.gimbal())?,
         px4_stage(ctx, px4, &binary, model)?,
     ])
 }
 
-fn sidecar_stage(
+/// The sidecar flying `model` for instance `ctx.instance`, with the
+/// gimbal `gimbal` when the flight controller points one.
+pub(super) fn sidecar_stage(
     ctx: &SessionContext,
     install: &JsbsimInstall,
     model: JsbsimModel,
+    gimbal: Option<vehicle::GimbalTravel>,
 ) -> Result<Stage, XtaskError> {
     let mut args = vec![
         "--port".to_owned(),
@@ -256,7 +269,7 @@ fn sidecar_stage(
             "no simulator terrain (cargo xtask build-sim-terrain); standing on the stated elevation"
         );
     }
-    if let Some(travel) = model.gimbal() {
+    if let Some(travel) = gimbal {
         args.extend([
             "--gimbal".to_owned(),
             [
