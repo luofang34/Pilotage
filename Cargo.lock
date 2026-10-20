@@ -2218,6 +2218,7 @@ version = "0.1.0"
 dependencies = [
  "pilotage-adapter-api",
  "pilotage-geo",
+ "pilotage-mavlink-framing",
  "pilotage-protocol",
  "pilotage-timing",
  "thiserror",
@@ -2226,6 +2227,10 @@ dependencies = [
  "turret-core",
  "turret-mavlink",
 ]
+
+[[package]]
+name = "pilotage-mavlink-framing"
+version = "0.1.0"
 
 [[package]]
 name = "pilotage-mission"

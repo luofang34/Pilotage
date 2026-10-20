@@ -35,7 +35,7 @@ name = "pilotage-jsbsim-sidecar"
 path = "src/main.rs"
 
 [dependencies]
-pilotage-mavlink = { path = "../../crates/pilotage-mavlink" }
+pilotage-mavlink-framing = { path = "../../crates/pilotage-mavlink-framing" }
 pilotage-terrain-query = { path = "../../crates/pilotage-terrain-query" }
 pilotage-world = { path = "../../crates/pilotage-world", default-features = false, features = ["archive"] }
 thiserror = { version = "2.0.18", default-features = false }

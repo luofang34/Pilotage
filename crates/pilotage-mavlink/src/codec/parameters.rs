@@ -5,7 +5,8 @@
 //! write took effect. INT32 parameters travel bytewise in the `f32` wire
 //! field (the PX4 convention): the integer's bits, not its numeric value.
 
-use super::encoding::{encode_frame_v2, encode_frame_v2_from};
+use super::encode_frame_v2_from;
+use super::encoding::encode_frame_v2;
 use super::{FcMessage, PARAM_SET_ID, PARAM_VALUE_ID};
 
 /// PARAM_REQUEST_READ message id.
