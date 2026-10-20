@@ -126,7 +126,8 @@ function testResolutionPreservesTheSharedContract() {
   // Attribution is a licence condition of the tile sources; substitution
   // must never drop it.
   assert.deepEqual(sourceAttributions(style), sourceAttributions(sharedStyle));
-  assert.equal(sourceAttributions(style).length, 2);
+  // Terrain coverages share a provider; each source retains its attribution.
+  assert.equal(new Set(sourceAttributions(style)).size, 2);
   // The template itself stays untouched: it is the shared document.
   assert.equal(sharedStyle.sources["pilotage-coastline"].url, COASTLINE_TOKEN);
   assert.equal(sharedStyle.sources["pilotage-terrain"].url, TERRAIN_TOKEN);
