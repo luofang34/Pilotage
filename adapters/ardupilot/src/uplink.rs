@@ -1,5 +1,5 @@
 //! ArduCopter GUIDED-mode command path: mode changes, arm and disarm,
-//! the takeoff a climb intent starts, and body-frame velocity setpoints.
+//! explicit observed takeoff, and body-frame velocity setpoints.
 //!
 //! Every frame rides the link's own socket through its typed lanes: an
 //! ArduPilot SITL serial port answers only the address it sends to.
@@ -10,15 +10,13 @@
 //! runs switches the guided sub-mode and aborts it. So setpoints wait
 //! until the takeoff reaches its altitude.
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use tokio::sync::{mpsc, watch};
 use tracing::{info, warn};
 
 use pilotage_mavlink::ardupilot::ArduCopterMode;
-use pilotage_mavlink::codec::{
-    MAV_CMD_COMPONENT_ARM_DISARM, MAV_CMD_DO_SET_MODE, MAV_CMD_NAV_TAKEOFF,
-};
+use pilotage_mavlink::codec::{MAV_CMD_COMPONENT_ARM_DISARM, MAV_CMD_DO_SET_MODE};
 use pilotage_mavlink::{BodyVelocityDemand, OffboardSetpoint, OutboundCommand};
 
 /// Full-envelope horizontal velocity demand, the same as the PX4 and
@@ -31,14 +29,6 @@ pub const MAX_YAW_RATE_RPS: f32 = 0.9;
 /// Height above the arm point the takeoff climbs to before velocity
 /// control starts.
 pub const TAKEOFF_ALTITUDE_M: f32 = 2.5;
-/// A climb demand at or above this rate, while landed, starts a takeoff.
-/// A third of the envelope keeps a resting stick from lifting off.
-const CLIMB_INTENT_MPS: f32 = MAX_VERTICAL_MPS / 3.0;
-/// The takeoff counts as complete this close to its altitude.
-const TAKEOFF_MARGIN_M: f32 = 0.5;
-/// Velocity control starts after this long even if the takeoff altitude
-/// was not observed, so a stalled estimate cannot hold control forever.
-const TAKEOFF_TIMEOUT: Duration = Duration::from_secs(10);
 /// MAV_MODE_FLAG_CUSTOM_MODE_ENABLED: param 1 of MAV_CMD_DO_SET_MODE.
 const BASE_MODE_CUSTOM: f32 = 1.0;
 
@@ -46,13 +36,8 @@ const BASE_MODE_CUSTOM: f32 = 1.0;
 /// adapter commanded it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum FlightPhase {
-    /// On the ground: a climb intent starts a takeoff.
+    /// No airborne procedure or manual direct control has been established.
     Ground,
-    /// NAV_TAKEOFF is running; setpoints wait.
-    TakingOff {
-        started_at: Instant,
-        start_down_m: f32,
-    },
     /// Airborne under velocity control.
     Flying,
     /// LAND mode commanded; setpoints are not sent.
@@ -65,11 +50,11 @@ pub(crate) enum VelocityOutcome {
     /// A setpoint was published; `constrained` when the demand was clamped
     /// to the envelope.
     Streamed { constrained: bool },
-    /// The intent started a takeoff.
-    TakeoffCommanded,
     /// A takeoff is climbing; the intent waits.
     TakeoffInProgress,
-    /// Landed with no climb intent: nothing to send.
+    /// A failed or revoked procedure still blocks motion.
+    TakeoffBlocked,
+    /// Landed: only an explicit takeoff action may launch.
     HeldOnGround,
     /// Landing: the FC owns the descent.
     Landing,
@@ -97,6 +82,9 @@ pub struct ArduPilotUplink {
     system_id: u8,
     component_id: u8,
     phase: FlightPhase,
+    takeoff: Option<takeoff::TakeoffProcedure>,
+    takeoff_revision: u64,
+    flight_state: Option<std::sync::Arc<std::sync::Mutex<pilotage_mavlink::LinkState>>>,
     // The latest arm (true) or disarm (false) command and when it left,
     // so the verdict and the FC's status texts pair with it.
     last_arm_command: Option<(bool, Instant)>,
@@ -120,6 +108,9 @@ impl ArduPilotUplink {
             system_id,
             component_id,
             phase: FlightPhase::Ground,
+            takeoff: None,
+            takeoff_revision: 0,
+            flight_state: None,
             last_arm_command: None,
             send_failures: 0,
             direct_thrust: None,
@@ -136,7 +127,7 @@ impl ArduPilotUplink {
         self.last_arm_command
     }
 
-    fn command(&mut self, command: u16, params: [f32; 7]) {
+    fn command(&mut self, command: u16, params: [f32; 7]) -> bool {
         let outbound = OutboundCommand {
             payload_write: None,
             receipt: None,
@@ -150,7 +141,9 @@ impl ArduPilotUplink {
         if self.commands.try_send(outbound).is_err() {
             self.send_failures = self.send_failures.wrapping_add(1);
             warn!(command, "ArduPilot command lane refused a command");
+            return false;
         }
+        true
     }
 
     fn set_mode(&mut self, mode: ArduCopterMode) {
@@ -184,8 +177,15 @@ impl ArduPilotUplink {
     /// Disarms on the ground, or lands when airborne (see
     /// [`DisarmOutcome::LandCommanded`]).
     pub(crate) fn disarm(&mut self, now: Instant) -> DisarmOutcome {
+        self.interrupt_takeoff(now, pilotage_protocol::FlightProcedureReason::Interrupted);
+        let procedure_may_run = self.takeoff_may_have_written();
         match self.phase {
-            FlightPhase::TakingOff { .. } | FlightPhase::Flying | FlightPhase::Landing => {
+            _ if procedure_may_run => {
+                self.set_mode(ArduCopterMode::Land);
+                self.phase = FlightPhase::Landing;
+                DisarmOutcome::LandCommanded
+            }
+            FlightPhase::Flying | FlightPhase::Landing => {
                 self.set_mode(ArduCopterMode::Land);
                 self.phase = FlightPhase::Landing;
                 info!("disarm while airborne: LAND commanded");
@@ -214,53 +214,26 @@ impl ArduPilotUplink {
 
     /// Applies one body-frame velocity intent (m/s forward, right, down;
     /// rad/s clockwise), already clamped to the envelope by the caller.
-    /// `down_m` is the estimated NED down position.
     pub(crate) fn apply_velocity(
         &mut self,
         demand: [f32; 4],
         constrained: bool,
         armed: bool,
-        down_m: f32,
-        now: Instant,
     ) -> VelocityOutcome {
         self.observe_armed(armed);
         if !armed {
             return VelocityOutcome::NotArmed;
         }
+        if self.takeoff_blocks_motion() {
+            return if self.takeoff_active() {
+                VelocityOutcome::TakeoffInProgress
+            } else {
+                VelocityOutcome::TakeoffBlocked
+            };
+        }
         match self.phase {
             FlightPhase::Landing => VelocityOutcome::Landing,
-            FlightPhase::Ground => {
-                // + down is descent: a climb demand is negative.
-                if -demand[2] < CLIMB_INTENT_MPS {
-                    return VelocityOutcome::HeldOnGround;
-                }
-                self.command(
-                    MAV_CMD_NAV_TAKEOFF,
-                    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, TAKEOFF_ALTITUDE_M],
-                );
-                self.phase = FlightPhase::TakingOff {
-                    started_at: now,
-                    start_down_m: down_m,
-                };
-                info!(
-                    altitude_m = TAKEOFF_ALTITUDE_M,
-                    "climb intent on the ground: takeoff commanded"
-                );
-                VelocityOutcome::TakeoffCommanded
-            }
-            FlightPhase::TakingOff {
-                started_at,
-                start_down_m,
-            } => {
-                let climbed = start_down_m - down_m;
-                let reached = climbed >= TAKEOFF_ALTITUDE_M - TAKEOFF_MARGIN_M;
-                if !reached && now.duration_since(started_at) < TAKEOFF_TIMEOUT {
-                    return VelocityOutcome::TakeoffInProgress;
-                }
-                info!(climbed_m = climbed, "takeoff complete: velocity control");
-                self.phase = FlightPhase::Flying;
-                self.stream(demand, constrained)
-            }
+            FlightPhase::Ground => VelocityOutcome::HeldOnGround,
             FlightPhase::Flying => self.stream(demand, constrained),
         }
     }
@@ -282,20 +255,23 @@ impl ArduPilotUplink {
         VelocityOutcome::Streamed { constrained }
     }
 
-    /// Link-loss enactment: one zero setpoint when flying, then nothing.
-    /// ArduCopter holds the last setpoint for GUID_TIMEOUT (3 s by
-    /// default) and then stops by itself, so a zero setpoint makes the
-    /// hover immediate, and the silence that follows is the FC-side
-    /// guarantee. The parameter is left at its default.
+    /// Revokes queued launch work and publishes one zero-velocity attempt when
+    /// motion may remain active. Publication does not establish a physical stop.
     pub(crate) fn neutralize(&mut self) {
-        if self.phase == FlightPhase::Flying {
+        self.cancel_takeoff(Instant::now());
+        let procedure_may_run = self.takeoff_may_have_written();
+        if self.phase == FlightPhase::Flying || procedure_may_run {
             let outcome = self.stream([0.0; 4], false);
-            info!(?outcome, "neutralized: zero velocity sent, stream stopped");
+            info!(
+                ?outcome,
+                "zero velocity published for link-loss interruption"
+            );
         }
     }
 }
 
 mod direct;
+mod takeoff;
 pub(crate) use direct::DirectOutcome;
 pub use direct::{MAX_BODY_RATE_RPS, MAX_DIRECT_TILT_RAD};
 #[cfg(test)]

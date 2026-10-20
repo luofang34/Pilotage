@@ -317,6 +317,7 @@ mod tests {
     fn routes_telemetry_arm() {
         let bytes = encode(wire::envelope::Payload::TelemetrySample(
             wire::TelemetrySample {
+                flight_procedure: None,
                 payload: None,
                 vehicle: Some(wire::VehicleId { value: 1 }),
                 tick: Some(wire::SimTick { value: 0 }),
@@ -363,6 +364,7 @@ mod tests {
         };
         let bytes = encode(wire::envelope::Payload::TelemetrySample(
             wire::TelemetrySample {
+                flight_procedure: None,
                 payload: None,
                 vehicle: Some(wire::VehicleId { value: 1 }),
                 tick: Some(wire::SimTick { value: 1_000_000 }),

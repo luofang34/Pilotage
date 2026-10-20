@@ -184,6 +184,13 @@ fn decode_heartbeat(payload: &[u8]) -> FcMessage {
 
 pub(super) fn decode_known(msg_id: u32, payload: &[u8]) -> Option<FcMessage> {
     match msg_id {
+        super::GLOBAL_POSITION_INT_ID => Some(FcMessage::RelativeAltitude {
+            time_boot_ms: u32_at(payload, 0),
+            altitude_mm: u32_at(payload, 16) as i32,
+        }),
+        super::EXTENDED_SYS_STATE_ID => Some(FcMessage::LandedState(super::LandedState::decode(
+            payload.get(1).copied().unwrap_or(0),
+        ))),
         super::GIMBAL_MANAGER_INFORMATION_ID => Some(FcMessage::GimbalManagerInformation(
             super::gimbal_manager::decode_information(payload),
         )),

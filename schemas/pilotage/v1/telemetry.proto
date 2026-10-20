@@ -369,6 +369,8 @@ message NavGuidanceState {
 
 // A single best-effort telemetry sample for one vehicle.
 message TelemetrySample {
+  // Adapter-owned procedure progress. This is not an FC measurement.
+  FlightProcedureState flight_procedure = 13;
   PayloadState payload = 12;
   VehicleId vehicle = 1;
   SimTick tick = 2;
@@ -392,4 +394,66 @@ message TelemetrySample {
   NavGuidanceState nav_guidance = 10;
   // Battery state with its own provenance stamp.
   BatteryState battery = 11;
+}
+
+// The control request that started a flight procedure. Vehicle identity is
+// supplied by the enclosing telemetry sample.
+message FlightProcedureRequest {
+  SessionId session = 1;
+  ScopeId scope = 2;
+  Generation generation = 3;
+  SequenceNum sequence = 4;
+  uint32 action_id = 5;
+}
+
+// Progress owned by the adapter. Re-publication must preserve the revision
+// and change time; it must not imply a fresh vehicle observation. Unknown
+// enum values do not establish progress or completion.
+message FlightProcedureState {
+  FlightProcedureRequest request = 1;
+  // Exactly 16 bytes. Compare only for equality at an attachment boundary.
+  bytes adapter_incarnation = 2;
+  // Wrapping revision within this request, changed only on a status transition.
+  uint64 revision = 3;
+  // Monotonic time since adapter start, not vehicle boot or publication time.
+  MonoTimestamp changed_at = 4;
+  FlightProcedureKind kind = 5;
+  FlightProcedurePhase phase = 6;
+  FlightProcedureReason reason = 7;
+  // An FC acknowledgement is distinct from observed procedure completion.
+  CommandOutcome fc_outcome = 8;
+}
+
+enum FlightProcedureKind {
+  FLIGHT_PROCEDURE_KIND_UNSPECIFIED = 0;
+  FLIGHT_PROCEDURE_KIND_TAKEOFF = 1;
+}
+
+enum FlightProcedurePhase {
+  FLIGHT_PROCEDURE_PHASE_UNSPECIFIED = 0;
+  FLIGHT_PROCEDURE_PHASE_QUEUED = 1;
+  FLIGHT_PROCEDURE_PHASE_WRITTEN = 2;
+  FLIGHT_PROCEDURE_PHASE_IN_PROGRESS = 3;
+  // Only a fresh vehicle observation can establish completion.
+  FLIGHT_PROCEDURE_PHASE_COMPLETED = 4;
+  FLIGHT_PROCEDURE_PHASE_FAILED = 5;
+  // Completion was not established before the deadline. The vehicle can
+  // still be moving; this phase does not confirm a stop.
+  FLIGHT_PROCEDURE_PHASE_TIMED_OUT = 6;
+  // The adapter stopped tracking or issuing the procedure. This does not
+  // confirm that the vehicle stopped its autonomous motion.
+  FLIGHT_PROCEDURE_PHASE_CANCELLED = 7;
+}
+
+enum FlightProcedureReason {
+  FLIGHT_PROCEDURE_REASON_UNSPECIFIED = 0;
+  FLIGHT_PROCEDURE_REASON_COMMAND_REFUSED = 1;
+  FLIGHT_PROCEDURE_REASON_WRITE_FAILED = 2;
+  FLIGHT_PROCEDURE_REASON_DEADLINE_EXPIRED = 3;
+  FLIGHT_PROCEDURE_REASON_MEASUREMENT_UNAVAILABLE = 4;
+  FLIGHT_PROCEDURE_REASON_SOURCE_CHANGED = 5;
+  FLIGHT_PROCEDURE_REASON_AUTHORITY_LOST = 6;
+  FLIGHT_PROCEDURE_REASON_VEHICLE_DISARMED = 7;
+  FLIGHT_PROCEDURE_REASON_MODE_CHANGED = 8;
+  FLIGHT_PROCEDURE_REASON_INTERRUPTED = 9;
 }

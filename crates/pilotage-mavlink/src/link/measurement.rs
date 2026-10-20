@@ -19,6 +19,7 @@ pub(super) enum MeasurementGroup {
     Kinematics,
     EstimatorStatus,
     Baro,
+    RelativeAltitude,
 }
 
 /// A quarantined low-boot-clock candidate awaiting simulator-only
@@ -61,6 +62,14 @@ fn begin_source_epoch(latest: &mut LinkState, time_boot_ms: u32) {
     latest.truth_origin = None;
     latest.sim_truth = None;
     latest.gnss_fix = None;
+    latest.fc_reports.landed_state = None;
+    latest.fc_reports.relative_altitude = None;
+    // An armed state or mode received before the reset cannot authorize
+    // a procedure in the new source epoch.
+    latest.last_heartbeat = None;
+    latest.heartbeat_armed = None;
+    latest.fc_reports.custom_mode = None;
+    latest.fc_reports.autopilot = None;
     latest.source_resets = latest.source_resets.wrapping_add(1);
     warn!(
         source_epoch = latest.source_epoch,
@@ -223,6 +232,24 @@ pub(super) fn next_baro_stamp(
         .baro
         .map(|update| (update.time_boot_ms, update.stamp));
     next_group_stamp(current, latest, MeasurementGroup::Baro, time_boot_ms, now)
+}
+
+pub(super) fn next_relative_altitude_stamp(
+    latest: &mut LinkState,
+    time_boot_ms: u32,
+    now: Instant,
+) -> Option<MeasurementStamp> {
+    let current = latest
+        .fc_reports
+        .relative_altitude
+        .map(|update| (update.time_boot_ms, update.stamp));
+    next_group_stamp(
+        current,
+        latest,
+        MeasurementGroup::RelativeAltitude,
+        time_boot_ms,
+        now,
+    )
 }
 
 pub(super) fn next_estimator_status_stamp(

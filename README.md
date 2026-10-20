@@ -58,6 +58,11 @@ and start the session host with `--adapter ardupilot`. Set
 `127.0.0.1:14550`. To enable MAVLink gimbal discovery, set
 `PILOTAGE_ARDUPILOT_GIMBAL=1`. Discovery does not claim gimbal control.
 The device reports which axes and actions it supports.
+For native takeoff, send `Takeoff` on `vehicle.motion` after the FC reports
+armed, GUIDED mode, and on-ground state with valid position data. The target
+is 2.5 m above the measured starting altitude. A climb input does not start
+takeoff. The `flight_procedure` telemetry field reports progress separately
+from action acceptance. A timeout does not confirm that vehicle motion stopped.
 
 ## DJI USB bench connection on macOS
 

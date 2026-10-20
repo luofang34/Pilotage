@@ -269,6 +269,8 @@ pub struct BatterySample {
 /// A single vehicle's telemetry at one simulation tick.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TelemetrySample {
+    /// Adapter-owned flight procedure progress; separate from vehicle observations.
+    pub flight_procedure: Option<crate::FlightProcedureSample>,
     /// Independent payload observations and command progress.
     pub payload: Option<pilotage_protocol::wire::PayloadState>,
     /// Vehicle this sample describes.
@@ -330,6 +332,7 @@ mod tests {
     #[test]
     fn telemetry_sample_holds_pose_and_speed() {
         let sample = TelemetrySample {
+            flight_procedure: None,
             payload: None,
             vehicle: VehicleId::new(1),
             tick: SimTick::new(2),

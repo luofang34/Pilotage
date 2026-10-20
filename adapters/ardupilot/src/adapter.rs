@@ -36,6 +36,9 @@ mod gimbal_socket_tests;
 mod gimbal_tests;
 mod link_loss;
 mod params;
+mod takeoff;
+#[cfg(test)]
+mod takeoff_socket_tests;
 #[cfg(test)]
 mod tests;
 
@@ -145,10 +148,13 @@ impl ArduPilotAdapter {
         vehicle: VehicleId,
         state: Arc<Mutex<LinkState>>,
         link: Option<MavlinkLink>,
-        uplink: Option<ArduPilotUplink>,
+        mut uplink: Option<ArduPilotUplink>,
         direct: params::DirectParams,
         declination: declination::DeclinationParams,
     ) -> Self {
+        if let Some(uplink) = uplink.as_mut() {
+            uplink.bind_flight_state(state.clone());
+        }
         Self {
             vehicle,
             state,
@@ -211,6 +217,9 @@ impl ArduPilotAdapter {
             return;
         };
         self.arm.observe(&latest);
+        if let Some(uplink) = self.uplink.as_mut() {
+            uplink.observe_takeoff(&latest, Instant::now());
+        }
         if let Some(direct) = self.direct.as_mut() {
             direct.maintain(&latest, Instant::now());
         }
@@ -283,6 +292,12 @@ fn rand_incarnation() -> [u8; 16] {
 
 impl VehicleAdapter for ArduPilotAdapter {
     fn invalidate_pending_commands(&mut self, vehicle: VehicleId, scope: &ScopeId) {
+        if vehicle == self.vehicle
+            && matches!(scope.as_str(), FLIGHT_SCOPE | DIRECT_SCOPE)
+            && let Some(uplink) = self.uplink.as_mut()
+        {
+            uplink.cancel_takeoff(Instant::now());
+        }
         if vehicle == self.vehicle
             && scope.as_str() == GIMBAL_SCOPE
             && let Some(gimbal) = self.gimbal.as_mut()
@@ -357,6 +372,7 @@ impl VehicleAdapter for ArduPilotAdapter {
                 sample.payload = Some(payload);
             }
         }
+        self.attach_flight_procedure(&mut batch);
         batch
     }
 

@@ -7,6 +7,7 @@
 mod command_outcome;
 mod control;
 mod convert;
+mod flight_procedure;
 mod gimbal_reference;
 pub mod h264;
 mod heading;
@@ -29,6 +30,7 @@ pub use convert::{
     decode_control_frame_envelope, decode_envelope_length_delimited, encode_control_frame_envelope,
     encode_envelope_length_delimited,
 };
+pub use flight_procedure::{FlightProcedureKind, FlightProcedurePhase, FlightProcedureReason};
 pub use gimbal_reference::{GimbalAxisLocks, GimbalReference, GimbalYawFrame};
 pub use heading::{HeadingReference, MagneticVariationSource};
 pub use ids::{Generation, PrincipalId, ScopeId, SequenceNum, SessionId, VehicleId};

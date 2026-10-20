@@ -24,6 +24,8 @@ mod battery;
 mod fc_state;
 pub use battery::{BATTERY_SOURCE_ID, battery_sample};
 pub use fc_state::{ArmReport, ArmTracker, fc_state_sample};
+#[cfg(test)]
+mod tests;
 
 /// Data older than this is withheld from telemetry entirely, so
 /// downstream freshness models see the group's age grow instead of a
@@ -178,6 +180,7 @@ pub fn estimate_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -> Tele
         .unwrap_or_default();
     TelemetryBatch {
         samples: vec![TelemetrySample {
+            flight_procedure: None,
             payload: None,
             vehicle,
             tick: SimTick::new(u64::from(source_time_ms).wrapping_mul(1_000_000)),
@@ -206,7 +209,8 @@ pub struct OperationalPose {
 }
 
 /// The current operational pose, or `None` unless a fresh, coherent,
-/// authorized attitude and position pair of the current epoch exists.
+/// authorized, finite attitude and position pair of the current epoch exists.
+/// The quaternion must have unit norm within a tolerance of 0.1.
 #[must_use]
 pub fn operational_pose(latest: &LinkState) -> Option<OperationalPose> {
     let status_stamp = latest.estimator_status_stamp()?;
@@ -224,6 +228,7 @@ pub fn operational_pose(latest: &LinkState) -> Option<OperationalPose> {
         || kinematics.stamp.source_epoch != current_epoch
         || !measurement_pair_is_coherent(attitude, kinematics, latest.maximum_inter_group_skew_ms)
         || !measurement_pair_supports_pose(attitude, kinematics)
+        || !finite_pose(attitude, kinematics)
     {
         return None;
     }
@@ -232,6 +237,19 @@ pub fn operational_pose(latest: &LinkState) -> Option<OperationalPose> {
         pos_ned_m: kinematics.pos_ned_m,
         vel_ned_mps: validated_velocity(kinematics),
     })
+}
+
+fn finite_pose(attitude: AttitudeUpdate, kinematics: KinematicsUpdate) -> bool {
+    let norm = attitude
+        .quat_wxyz
+        .map(f64::from)
+        .iter()
+        .map(|component| component * component)
+        .sum::<f64>()
+        .sqrt();
+    norm.is_finite()
+        && (norm - 1.0).abs() <= 0.1
+        && kinematics.pos_ned_m.iter().all(|value| value.is_finite())
 }
 
 /// The kinematics velocity as independently validated data: present
@@ -275,6 +293,7 @@ impl VehicleReports {
 #[must_use]
 pub fn report_only_sample(vehicle: VehicleId, tick: SimTick) -> TelemetrySample {
     TelemetrySample {
+        flight_procedure: None,
         payload: None,
         vehicle,
         tick,

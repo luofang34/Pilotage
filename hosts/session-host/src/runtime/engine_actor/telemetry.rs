@@ -14,12 +14,16 @@ const ESTIMATOR_VALID_FLAGS_MASK: u32 = 0x0f;
 const ESTIMATOR_QUALITY_UNUSABLE: u32 = 2;
 
 mod attitude;
+mod flight_procedure;
 
 pub(super) fn sample_to_wire(
     sample: TelemetrySample,
     published_at: MonoTimestamp,
 ) -> wire::TelemetrySample {
     wire::TelemetrySample {
+        flight_procedure: sample
+            .flight_procedure
+            .map(|value| Box::new(flight_procedure::to_wire(value))),
         payload: sample.payload.map(Box::new),
         vehicle: Some(wire::VehicleId {
             value: sample.vehicle.as_u64(),

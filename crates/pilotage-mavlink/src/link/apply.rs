@@ -322,6 +322,13 @@ fn apply_kinematics(
 /// Applies one source-matched decoded message to the cache.
 fn apply_message(latest: &mut LinkState, message: FcMessage, now: Instant) {
     match message {
+        FcMessage::RelativeAltitude {
+            time_boot_ms,
+            altitude_mm,
+        } => super::flight_state::apply_relative_altitude(latest, time_boot_ms, altitude_mm, now),
+        FcMessage::LandedState(state) => {
+            super::flight_state::apply_landed_state(latest, state, now)
+        }
         FcMessage::Camera(_)
         | FcMessage::InvalidAviateEstimatorStatus
         | FcMessage::GimbalManagerInformation(_)

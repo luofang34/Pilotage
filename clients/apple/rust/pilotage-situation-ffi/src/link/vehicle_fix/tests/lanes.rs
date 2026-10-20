@@ -32,6 +32,7 @@ fn the_estimate_lane_needs_its_status_observation() {
     // The mask on the estimate lane is meaningless without the observation
     // backing it, so its directions are withheld rather than assumed good.
     let sample = wire::TelemetrySample {
+        flight_procedure: None,
         payload: None,
         avionics: Some(wire::AvionicsState {
             quat_w: 1.0,
@@ -70,6 +71,7 @@ fn the_fix_is_withheld_when_the_estimate_states_no_position() {
     // The geodetic fix carries its own stamp and advances on its own, so a
     // lane with attitude but no position draws no mark at all.
     let sample = wire::TelemetrySample {
+        flight_procedure: None,
         payload: None,
         avionics: Some(wire::AvionicsState {
             quat_w: 1.0,
@@ -89,6 +91,7 @@ fn an_estimator_that_calls_its_own_solution_unusable_is_believed() {
     // withholds them, so drawing them here would put the two clients on
     // different answers from one sample.
     let sample = wire::TelemetrySample {
+        flight_procedure: None,
         payload: None,
         avionics: Some(wire::AvionicsState {
             quat_w: 1.0,

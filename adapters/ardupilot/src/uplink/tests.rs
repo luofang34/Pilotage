@@ -1,15 +1,11 @@
-#![allow(clippy::expect_used)]
-
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use tokio::sync::{mpsc, watch};
 
-use pilotage_mavlink::codec::{
-    MAV_CMD_COMPONENT_ARM_DISARM, MAV_CMD_DO_SET_MODE, MAV_CMD_NAV_TAKEOFF,
-};
+use pilotage_mavlink::codec::{MAV_CMD_COMPONENT_ARM_DISARM, MAV_CMD_DO_SET_MODE};
 use pilotage_mavlink::{BodyVelocityDemand, OffboardSetpoint, OutboundCommand};
 
-use super::{ArduPilotUplink, DisarmOutcome, TAKEOFF_ALTITUDE_M, VelocityOutcome};
+use super::{ArduPilotUplink, DirectOutcome, DisarmOutcome, VelocityOutcome};
 
 /// The body velocity a setpoint lane holds, if it holds one.
 fn body_velocity(setpoint: Option<OffboardSetpoint>) -> Option<BodyVelocityDemand> {
@@ -19,12 +15,12 @@ fn body_velocity(setpoint: Option<OffboardSetpoint>) -> Option<BodyVelocityDeman
     }
 }
 
-struct Lanes {
-    commands: mpsc::Receiver<OutboundCommand>,
-    velocity: watch::Receiver<Option<OffboardSetpoint>>,
+pub(super) struct Lanes {
+    pub(super) commands: mpsc::Receiver<OutboundCommand>,
+    pub(super) velocity: watch::Receiver<Option<OffboardSetpoint>>,
 }
 
-fn uplink() -> (ArduPilotUplink, Lanes) {
+pub(super) fn uplink() -> (ArduPilotUplink, Lanes) {
     let (command_tx, commands) = mpsc::channel(16);
     let (velocity_tx, velocity) = watch::channel(None);
     (
@@ -44,15 +40,19 @@ fn drain(lanes: &mut Lanes) -> Vec<(u16, [f32; 7])> {
 const CLIMB: [f32; 4] = [0.0, 0.0, -1.0, 0.0];
 const FORWARD: [f32; 4] = [2.0, 0.0, 0.0, 0.0];
 
-/// Arms, then climbs through a takeoff to its altitude.
+/// Enters manually commanded direct flight, then returns to velocity control.
 fn airborne(uplink: &mut ArduPilotUplink, lanes: &mut Lanes, now: Instant) {
     uplink.arm(false, now);
     assert_eq!(
-        uplink.apply_velocity(CLIMB, false, true, 0.0, now),
-        VelocityOutcome::TakeoffCommanded
+        uplink.apply_direct(
+            pilotage_mavlink::codec::AttitudeTargetKind::BodyRates([0.0; 3]),
+            0.5,
+            true,
+            0.4,
+            now,
+        ),
+        DirectOutcome::Streamed { slewed: false }
     );
-    let done = uplink.apply_velocity(CLIMB, false, true, -TAKEOFF_ALTITUDE_M, now);
-    assert_eq!(done, VelocityOutcome::Streamed { constrained: false });
     drain(lanes);
 }
 
@@ -77,7 +77,7 @@ fn arm_selects_guided_before_arming() {
 fn a_disarmed_vehicle_streams_nothing() {
     let (mut uplink, mut lanes) = uplink();
     assert_eq!(
-        uplink.apply_velocity(FORWARD, false, false, 0.0, Instant::now()),
+        uplink.apply_velocity(FORWARD, false, false),
         VelocityOutcome::NotArmed
     );
     assert!(drain(&mut lanes).is_empty());
@@ -91,7 +91,7 @@ fn landed_without_a_climb_intent_holds() {
     uplink.arm(false, now);
     drain(&mut lanes);
     assert_eq!(
-        uplink.apply_velocity(FORWARD, false, true, 0.0, now),
+        uplink.apply_velocity(FORWARD, false, true),
         VelocityOutcome::HeldOnGround
     );
     assert!(drain(&mut lanes).is_empty());
@@ -99,47 +99,14 @@ fn landed_without_a_climb_intent_holds() {
 }
 
 #[test]
-fn a_climb_intent_on_the_ground_takes_off_and_setpoints_wait_for_it() {
+fn a_climb_intent_on_the_ground_does_not_take_off() {
     let (mut uplink, mut lanes) = uplink();
-    let now = Instant::now();
-    uplink.arm(false, now);
-    drain(&mut lanes);
     assert_eq!(
-        uplink.apply_velocity(CLIMB, false, true, 0.0, now),
-        VelocityOutcome::TakeoffCommanded
+        uplink.apply_velocity(CLIMB, false, true),
+        VelocityOutcome::HeldOnGround
     );
-    let sent = drain(&mut lanes);
-    assert_eq!(sent.len(), 1);
-    assert_eq!(sent[0].0, MAV_CMD_NAV_TAKEOFF);
-    assert_eq!(sent[0].1[6], TAKEOFF_ALTITUDE_M);
-
-    // Halfway up: a setpoint now would abort the takeoff.
-    assert_eq!(
-        uplink.apply_velocity(FORWARD, false, true, -1.0, now),
-        VelocityOutcome::TakeoffInProgress
-    );
+    assert!(drain(&mut lanes).is_empty());
     assert!(!lanes.velocity.has_changed().expect("lane open"));
-
-    assert_eq!(
-        uplink.apply_velocity(FORWARD, false, true, -2.1, now),
-        VelocityOutcome::Streamed { constrained: false }
-    );
-    let demand = body_velocity(*lanes.velocity.borrow_and_update()).expect("a setpoint");
-    assert_eq!(demand.vel_frd_mps, [2.0, 0.0, 0.0]);
-}
-
-#[test]
-fn a_stalled_takeoff_hands_over_after_its_timeout() {
-    let (mut uplink, mut lanes) = uplink();
-    let now = Instant::now();
-    uplink.arm(false, now);
-    uplink.apply_velocity(CLIMB, false, true, 0.0, now);
-    drain(&mut lanes);
-    let later = now + Duration::from_secs(11);
-    assert_eq!(
-        uplink.apply_velocity(FORWARD, false, true, 0.0, later),
-        VelocityOutcome::Streamed { constrained: false }
-    );
 }
 
 #[test]
@@ -153,7 +120,7 @@ fn disarm_in_flight_lands_and_on_the_ground_disarms() {
     assert_eq!(sent[0].0, MAV_CMD_DO_SET_MODE);
     assert_eq!(sent[0].1[1], 9.0, "LAND is ArduCopter mode 9");
     assert_eq!(
-        uplink.apply_velocity(FORWARD, false, true, -2.0, now),
+        uplink.apply_velocity(FORWARD, false, true),
         VelocityOutcome::Landing
     );
 
@@ -174,7 +141,7 @@ fn arm_while_landing_returns_to_velocity_control() {
     uplink.disarm(now);
     uplink.arm(true, now);
     assert_eq!(
-        uplink.apply_velocity(FORWARD, false, true, -2.0, now),
+        uplink.apply_velocity(FORWARD, false, true),
         VelocityOutcome::Streamed { constrained: false }
     );
 }
