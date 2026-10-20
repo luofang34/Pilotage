@@ -1,5 +1,5 @@
 use super::*;
-use pilotage_mavlink::codec::{
+use crate::codec::{
     ATTITUDE_QUATERNION_ID, CAMERA_INFORMATION_ID, CAMERA_SETTINGS_ID, encode_frame_v2_from,
 };
 
@@ -14,9 +14,9 @@ fn receive(
     let mut bytes = vec![0; payload.len() + 12];
     let size = encode_frame_v2_from(0, message, payload, crc, 1, component, &mut bytes);
     let mut messages = Vec::new();
-    let stats = pilotage_mavlink::parse_datagram(&bytes[..size], &mut messages);
+    let stats = crate::parse_datagram(&bytes[..size], &mut messages);
     assert_eq!(stats.decoded, 1);
-    pilotage_mavlink::link::apply_messages_at(state, &messages, 0, 0, at);
+    crate::link::apply_messages_at(state, &messages, 0, 0, at);
 }
 
 fn attitude(state: &Arc<Mutex<LinkState>>, time: u32, at: Instant) {
@@ -38,21 +38,25 @@ fn rediscover(state: &Arc<Mutex<LinkState>>, at: Instant) {
 }
 
 #[test]
-fn confirmed_source_reset_fences_zoom_and_progress_before_adapter_synchronizes() {
+fn rediscovery_cannot_relabel_old_progress_before_endpoint_synchronizes() {
     runtime().block_on(async {
         let (link, receiver) = transport().await;
         let state = link.state();
-        state.lock().unwrap().reset_policy = pilotage_mavlink::ResetPolicy::SimulatorHeuristic;
+        state.lock().unwrap().reset_policy = crate::ResetPolicy::SimulatorHeuristic;
         let now = Instant::now();
         attitude(&state, 120_000, now - Duration::from_secs(4));
         let (staging, mut queued) = tokio::sync::mpsc::channel(8);
-        let mut adapter = Px4Adapter::from_state(VehicleId::new(1), state.clone());
-        adapter.camera_control = Some(CameraControl::new(staging, 1));
+        let mut endpoint = CameraEndpoints::new(VehicleId::new(1), state.clone(), staging, 1, now);
         report(&state, now);
         let command = frame(ZoomCommand::Step(1));
-        assert!(adapter.apply_control(&command).action_results[0].accepted);
+        assert!(
+            endpoint
+                .apply_control(&command, SimTick::new(0))
+                .action_results[0]
+                .accepted
+        );
         let old_command = queued.try_recv().unwrap();
-        let old_requirement = requirement(&state);
+        let old_requirement = requirement(&endpoint, (100, 0));
         attitude(&state, 0, now - Duration::from_millis(300));
         attitude(&state, 250, now);
         assert_eq!(
@@ -60,13 +64,13 @@ fn confirmed_source_reset_fences_zoom_and_progress_before_adapter_synchronizes()
             old_requirement.source_epoch.wrapping_add(1)
         );
         let mut batch = TelemetryBatch::default();
-        adapter.append_camera_samples(&mut batch);
+        endpoint.append_samples(&mut batch);
         assert!(
             batch.samples.is_empty(),
             "old progress cannot acquire the reset identity"
         );
         rediscover(&state, Instant::now());
-        adapter.append_camera_samples(&mut batch);
+        endpoint.append_samples(&mut batch);
         let payload = batch.samples[0].payload.as_ref().unwrap();
         assert_eq!(payload.zoom.as_ref().unwrap().value, 0.25);
         assert!(
@@ -76,7 +80,7 @@ fn confirmed_source_reset_fences_zoom_and_progress_before_adapter_synchronizes()
         link.command_sender().send(old_command).await.unwrap();
         sentinel(&link).await;
         assert_eq!(receive_command(&receiver).await.0, 512);
-        let control = adapter.camera_control.as_ref().unwrap();
+        let control = &endpoint.control;
         assert!(
             control
                 .progress_cached(old_requirement)
@@ -84,14 +88,16 @@ fn confirmed_source_reset_fences_zoom_and_progress_before_adapter_synchronizes()
                 .sent_at
                 .is_none()
         );
-        assert!(control.progress_cached(requirement(&state)).is_none());
-        adapter.maintain_camera();
         assert!(
-            adapter
-                .camera_control
-                .as_ref()
-                .unwrap()
-                .progress_cached(requirement(&state))
+            control
+                .progress_cached(requirement(&endpoint, (100, 0)))
+                .is_none()
+        );
+        endpoint.maintain();
+        assert!(
+            endpoint
+                .control
+                .progress_cached(requirement(&endpoint, (100, 0)))
                 .is_none()
         );
     });
