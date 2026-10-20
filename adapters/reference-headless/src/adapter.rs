@@ -179,6 +179,7 @@ impl VehicleAdapter for ReferenceAdapter {
                         action: pilotage_protocol::ActionKind::Arm,
                         mode_targets: vec![],
                         feel_targets: vec![],
+                        takeoff_start_state: None,
                     }],
                     legacy: Some(LegacyCommandMap::Velocity {
                         vx: Some(LegacyAxisRoute {

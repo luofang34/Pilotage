@@ -11,6 +11,7 @@ fn takeoff_engine() -> (SessionEngine, ClientKey, SessionId, Generation) {
             action: ActionKind::Takeoff,
             mode_targets: vec![],
             feel_targets: vec![],
+            takeoff_start_state: Some(pilotage_protocol::TakeoffStartState::ArmedOnGround),
         });
     let mut engine = SessionEngine::new(
         capabilities,
@@ -33,6 +34,7 @@ fn arm_and_mode_support_do_not_admit_takeoff() {
             action: ActionKind::ModeRequest,
             mode_targets: vec![ModeTarget::CameraVelocity],
             feel_targets: vec![],
+            takeoff_start_state: None,
         });
     let mut engine = SessionEngine::new(
         capabilities,

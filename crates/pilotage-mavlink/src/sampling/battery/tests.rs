@@ -58,7 +58,8 @@ fn a_report_becomes_an_si_sample_under_the_fc_state_role() {
     )
     .expect("fc state");
     assert_ne!(
-        sample.stamp.source_id, fc_state.stamp.source_id,
+        sample.stamp.source_id,
+        fc_state.stamp.expect("arm stamp").source_id,
         "battery and FC state are separate lanes of one source"
     );
     assert_eq!(sample.stamp.clock, MeasurementClock::HostMonotonic);

@@ -65,11 +65,13 @@ fn capabilities() -> AdapterCapabilities {
                         action: pilotage_protocol::ActionKind::Arm,
                         mode_targets: vec![],
                         feel_targets: vec![],
+                        takeoff_start_state: None,
                     },
                     ActionCapability {
                         action: pilotage_protocol::ActionKind::ModeRequest,
                         mode_targets: vec![ModeTarget::FpvDirect],
                         feel_targets: vec![],
+                        takeoff_start_state: None,
                     },
                 ],
                 legacy: None,

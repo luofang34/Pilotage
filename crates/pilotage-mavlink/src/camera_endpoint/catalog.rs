@@ -62,6 +62,7 @@ pub(super) fn descriptor(
                 action: ActionKind::CameraZoom,
                 mode_targets: vec![],
                 feel_targets: vec![],
+                takeoff_start_state: None,
             }]
         } else {
             vec![]

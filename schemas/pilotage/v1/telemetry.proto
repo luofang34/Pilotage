@@ -237,6 +237,22 @@ message FcState {
   // The FC's landed detector. Its stamp advances independently of arm.
   // Absence does not mean on-ground or in-air.
   LandedStateObservation landed_state = 6;
+  // The FC's motor report, with an independent observation stamp.
+  // Absence does not mean stopped. Arm state cannot supply this report.
+  MotorStateObservation motor_state = 7;
+}
+
+// The FC's reported motor operation, not a measurement of rotor speed.
+enum MotorState {
+  MOTOR_STATE_UNSPECIFIED = 0;
+  MOTOR_STATE_STOPPED = 1;
+  MOTOR_STATE_RUNNING = 2;
+}
+
+message MotorStateObservation {
+  MotorState state = 1;
+  // Absence makes this observation unconsumable.
+  MeasurementStamp stamp = 2;
 }
 
 // A flight controller's report, not a command result or an altitude inference.
