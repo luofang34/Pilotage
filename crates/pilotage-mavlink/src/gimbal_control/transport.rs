@@ -82,7 +82,7 @@ impl ManagerControl {
                 self.claim_receipt = None;
             }
         }
-        if let Some(snapshot) = self.snapshot_cached()
+        if let Some(snapshot) = self.channel.snapshot_cached().ok().flatten()
             && self.last_sent != Some(snapshot.command.identity)
             && let Some(sent) = snapshot.progress.sent_at
         {

@@ -9,6 +9,33 @@ pub(super) struct OwnershipRelease {
 }
 
 impl ManagerControl {
+    pub(super) fn retire_attachment(
+        &mut self,
+        capabilities: turret_core::PayloadCapabilities,
+        epoch: u64,
+    ) {
+        self.clear_ownership_release();
+        self.release_after_stop = None;
+        self.last_sent = None;
+        // A new attachment cannot discharge the prior device's physical effects.
+        // Keep bounded terminal evidence and never feed these effects to its writer.
+        if let Ok(Some(effect)) = self.channel.poll_effect() {
+            warn!(
+                identity = ?effect.command.identity,
+                effect = ?effect.effect,
+                "detached gimbal effect remains physically unconfirmed"
+            );
+        }
+        let retired = std::mem::replace(
+            &mut self.channel,
+            PayloadChannel::new(capabilities, epoch, self.started),
+        );
+        if retired.snapshot_cached().ok().flatten().is_some() {
+            self.retired_channel = Some(retired);
+        }
+        self.connection_epoch = epoch;
+    }
+
     pub(super) fn request_ownership_release(&mut self) {
         if self.requested
             && self.ownership_release.is_none()

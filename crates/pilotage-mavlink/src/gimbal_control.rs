@@ -38,6 +38,8 @@ pub struct ManagerControl {
     preferred: Option<(u8, u8)>,
     policy: ManagerPolicy,
     channel: PayloadChannel,
+    retired_channel: Option<PayloadChannel>,
+    connection_epoch: u64,
     manager_state: Option<std::sync::Arc<std::sync::Mutex<crate::LinkState>>>,
     capabilities: turret_core::PayloadCapabilities,
     started: Instant,
@@ -78,6 +80,8 @@ impl ManagerControl {
             preferred,
             policy: ManagerPolicy::new(pitch, yaw)?,
             channel: PayloadChannel::new(capabilities, 1, started),
+            retired_channel: None,
+            connection_epoch: 1,
             manager_state: None,
             capabilities,
             started,
@@ -127,9 +131,20 @@ impl ManagerControl {
         self.started
     }
 
+    /// Current payload connection identity, shared by commands and projections.
+    pub fn connection_epoch(&self) -> u64 {
+        self.connection_epoch
+    }
+
     /// Read retained command evidence without changing its age.
     pub fn snapshot_cached(&self) -> Option<crate::PayloadSnapshot> {
-        self.channel.snapshot_cached().ok().flatten()
+        self.channel.snapshot_cached().ok().flatten().or_else(|| {
+            self.retired_channel
+                .as_ref()?
+                .snapshot_cached()
+                .ok()
+                .flatten()
+        })
     }
 
     /// Describe the most recent rejected operation.

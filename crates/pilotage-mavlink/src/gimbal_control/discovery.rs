@@ -88,12 +88,19 @@ impl ManagerControl {
                 )
             })
         });
+        let attachment_changed = self.selected.is_some_and(|previous| {
+            previous.component != selection.component
+                || previous.device != selection.device
+                || previous.epoch != selection.epoch
+        });
         self.invalidate_pending();
         self.manager_time = None;
         self.manager_received = None;
         match result {
             Ok(capabilities) => {
-                if let Err(error) = self.channel.update_capabilities(capabilities) {
+                if attachment_changed {
+                    self.retire_attachment(capabilities, selection.epoch);
+                } else if let Err(error) = self.channel.update_capabilities(capabilities) {
                     warn!(%error, "gimbal discovery contract update failed");
                     self.selected = None;
                     return;
@@ -165,8 +172,13 @@ impl ManagerControl {
 
     /// Read only the feedback that belongs to the selected manager and device.
     pub fn device_cached(&self) -> Option<crate::GimbalDeviceAttitude> {
-        let (component, device) = self.selected_device()?;
+        let selection = self.selected?;
+        let (component, device) = (selection.component, selection.device);
         let state = self.manager_state.as_ref()?.lock().ok()?;
+        let report = state.gimbals.managers.get(&(component, device))?;
+        if report.epoch != selection.epoch || report.capability_revision != selection.revision {
+            return None;
+        }
         state
             .gimbals
             .device_for_manager_cached(component, device)

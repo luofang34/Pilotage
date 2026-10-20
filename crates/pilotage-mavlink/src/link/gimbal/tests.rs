@@ -4,6 +4,8 @@ use std::time::{Duration, Instant};
 use super::*;
 use crate::codec::{GCS_COMPONENT_ID, GCS_SYSTEM_ID, encode_frame_v2_from};
 
+mod source_reset;
+
 fn receive(
     state: &Arc<Mutex<LinkState>>,
     source: (u8, u8),
