@@ -296,6 +296,7 @@ mod tests {
                     value: HOST_VEHICLE.as_u64(),
                 }),
                 scopes: vec![wire::ScopeDescriptor {
+                    payload: None,
                     scope: Some(wire::ScopeId {
                         value: MISSION_SCOPE.to_owned(),
                     }),

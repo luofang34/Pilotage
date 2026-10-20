@@ -34,6 +34,8 @@ fn velocity(vx: f32, yaw_rate: f32) -> VelocityIntent {
 
 fn frame(scope: &str, intent: Option<ControlIntent>, vehicle: VehicleId) -> ScopedControlFrame {
     ScopedControlFrame {
+        timing: None,
+        admitted_timing: None,
         action_ids: vec![],
         session: SessionId::new(1),
         vehicle,

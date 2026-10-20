@@ -69,6 +69,10 @@ async fn configure_reaches_the_wire_before_the_first_rate_frame() {
     // arbiter first runs, so only the biased ordering decides which wins.
     command_tx
         .send(OutboundCommand {
+            payload_write: None,
+            receipt: None,
+            fence: None,
+            send_before: None,
             command: MAV_CMD_DO_GIMBAL_MANAGER_CONFIGURE,
             params: [0.0; 7],
             target_system: 1,
@@ -78,6 +82,11 @@ async fn configure_reaches_the_wire_before_the_first_rate_frame() {
         .expect("the claim queues");
     rate_tx
         .send(Some(GimbalRateDemand {
+            gimbal_device_id: 1,
+            receipt: None,
+            payload_write: None,
+            fence: None,
+            send_before: None,
             pitch_rps: 0.2,
             yaw_rps: -0.1,
             target_system: 1,

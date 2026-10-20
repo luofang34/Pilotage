@@ -406,32 +406,32 @@ attr test the_reset_release_re_lease_cycle_stays_repeatable
 node RESULT-CTRL-ENGINE-ACTIONS verification-result
 title reliable action-command engine suite — recorded pass
 attr command cargo test -p pilotage-session --lib tests::action_command
-attr config-digest 967ed8a16d39148eeb7ea6dda426664e9404c9be
-attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
-attr source-digest git-blob:eb2fe718203f2c7db451a47f2ea46189d4d4d6b0
+attr config-digest 09532a92307a0f03e791cf535b03a9431f492ff2
+attr tool-version rustc 1.99.0 (b940084d7 2026-09-28)
+attr source-digest git-blob:a5ec82195e02dc716afbd390a9cbab2fdec8e199
 attr artifact docs/control/evidence-artifacts/ctrl01/engine-actions.run.txt
-attr output-digest sha256:8ef3b3e1995662b51d00df955fb8326edb60027f16aa814e8e9c524f626fd85f
-attr run-id local:967ed8a16d39148eeb7ea6dda426664e9404c9be
+attr output-digest sha256:3ddf360125ac350079c3e0cef40f0206edf9698ca3bc62c5fbd28d898209efdf
+attr run-id local:09532a92307a0f03e791cf535b03a9431f492ff2
 attr outcome pass
 node RESULT-CTRL-BINDING verification-result
 title profile-binding enforcement suite — recorded pass
 attr command cargo test -p pilotage-session --lib tests::profile_binding
-attr config-digest 967ed8a16d39148eeb7ea6dda426664e9404c9be
-attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
-attr source-digest git-blob:71e2840379186fa0796b1f04d0d33c29965d129e
+attr config-digest 09532a92307a0f03e791cf535b03a9431f492ff2
+attr tool-version rustc 1.99.0 (b940084d7 2026-09-28)
+attr source-digest git-blob:3c91291a09920cae5f6af6bf2157cbd5141e5e08
 attr artifact docs/control/evidence-artifacts/ctrl01/profile-binding.run.txt
-attr output-digest sha256:ab128b5e1e14342ac56dda7ccd382e595559b205a8052d9c32e52cf816100895
-attr run-id local:967ed8a16d39148eeb7ea6dda426664e9404c9be
+attr output-digest sha256:6813bf69d50b6c03d85f3baa25d7ff6d4e568f09548522c290038bb3c23ce952
+attr run-id local:09532a92307a0f03e791cf535b03a9431f492ff2
 attr outcome pass
 node RESULT-CTRL-GROUP verification-result
 title exclusive authority-group suite — recorded pass
 attr command cargo test -p pilotage-session --lib tests::authority_group
-attr config-digest 43cdcecaec6e8b8cdf5f5e6eb4a80d6f8dd7260d
+attr config-digest 09532a92307a0f03e791cf535b03a9431f492ff2
 attr tool-version rustc 1.99.0 (b940084d7 2026-09-28)
-attr source-digest git-blob:2c66890144cc41862f3779717b2eae2d14363673
+attr source-digest git-blob:b34d930b339feb924312a7b2fba2c28452357b06
 attr artifact docs/control/evidence-artifacts/ctrl01/authority-group.run.txt
-attr output-digest sha256:1ab1e10b142a3c93dc3456a7a8a3afdab9ed19ecc4211e77993227fb9f3154f6
-attr run-id local:43cdcecaec6e8b8cdf5f5e6eb4a80d6f8dd7260d
+attr output-digest sha256:22c59fe426e098d088cce9479bcd1241f5e20d5ec5c1c3678f9d99bb9a71c53b
+attr run-id local:09532a92307a0f03e791cf535b03a9431f492ff2
 attr outcome pass
 node RESULT-CTRL-DEDUP verification-result
 title actor exactly-once dedup suite — recorded pass
@@ -446,12 +446,12 @@ attr outcome pass
 node RESULT-CTRL-WIRE verification-result
 title reliable action chain over the real transport — recorded pass
 attr command cargo test -p pilotage-session-host --test reliable_actions_wire
-attr config-digest 27bc04929ec212d25e45a1cb9ca6ec7f5fc34e7f
+attr config-digest 09532a92307a0f03e791cf535b03a9431f492ff2
 attr tool-version rustc 1.99.0 (b940084d7 2026-09-28)
-attr source-digest git-blob:ea41d4527e07c4b1f93dd09028d049fcaa4adc91
+attr source-digest git-blob:45f6552d35aa32925b2ecb91a40ab5e8c96df23f
 attr artifact docs/control/evidence-artifacts/ctrl01/wire-chain.run.txt
-attr output-digest sha256:c5d9c92deade888904a5965c04433b2c14948157a3d3bba807f1d0eac46e3e57
-attr run-id local:27bc04929ec212d25e45a1cb9ca6ec7f5fc34e7f
+attr output-digest sha256:8fded180ca3fde421d3fcf7c3df2fa6456d8bf1abd31fdf56e2fb7a8217eeebc
+attr run-id local:09532a92307a0f03e791cf535b03a9431f492ff2
 attr outcome pass
 node RESULT-CTRL-SOURCE verification-result
 title input-source coordinator suite — recorded pass
@@ -476,12 +476,12 @@ attr outcome pass
 node RESULT-CTRL-FIXTURE verification-result
 title browser-encoded wire fixture suite — recorded pass
 attr command cargo test -p pilotage-session --test typed_wire_e2e
-attr config-digest 43cdcecaec6e8b8cdf5f5e6eb4a80d6f8dd7260d
+attr config-digest 09532a92307a0f03e791cf535b03a9431f492ff2
 attr tool-version rustc 1.99.0 (b940084d7 2026-09-28)
-attr source-digest git-blob:05ccde6d2e1543f31829d311ebfeee188c53bedc
+attr source-digest git-blob:c03ee3e68bac5beb9579e860dff1aa0b06981ed3
 attr artifact docs/control/evidence-artifacts/ctrl01/browser-fixture.run.txt
-attr output-digest sha256:c80f3b0153d0a0efeed9fd5b7d2828a950e0d7f8910847d10e2eaa4695d295a8
-attr run-id local:43cdcecaec6e8b8cdf5f5e6eb4a80d6f8dd7260d
+attr output-digest sha256:db7efe4530ec524f44cb47f9c85b87fd1210f744bb000a5d07492f80934c38e2
+attr run-id local:09532a92307a0f03e791cf535b03a9431f492ff2
 attr outcome pass
 
 node RESULT-CTRL-LIFECYCLE-PROFILE verification-result
@@ -509,12 +509,12 @@ attr outcome pass
 node RESULT-CTRL-LIFE-CYCLE verification-result
 title command-only lifecycle cycle suite — recorded pass
 attr command cargo test -p pilotage-session --lib tests::lifecycle
-attr config-digest 967ed8a16d39148eeb7ea6dda426664e9404c9be
-attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
-attr source-digest git-blob:58e798b63d9d23d5b4bd00a6df5e70c31bd5722b
+attr config-digest 09532a92307a0f03e791cf535b03a9431f492ff2
+attr tool-version rustc 1.99.0 (b940084d7 2026-09-28)
+attr source-digest git-blob:4aa028faa23170f665abc86c75282a4c5307f250
 attr artifact docs/control/evidence-artifacts/ctrl01/lifecycle-cycle.run.txt
-attr output-digest sha256:1649b4cfc1356c01d30b1fe803334b09b62db4e97e8d7cd6912485b6ae8b7516
-attr run-id local:967ed8a16d39148eeb7ea6dda426664e9404c9be
+attr output-digest sha256:ff6b75e1b70a51d25a4cd696625764d2cdc1ab16de7173d4f517f17cc4b6f1ba
+attr run-id local:09532a92307a0f03e791cf535b03a9431f492ff2
 attr outcome pass
 
 # --- Configuration and tool identity ---
@@ -531,11 +531,11 @@ attr scm git
 attr commit 00c701b8b932793eb242eb1a8325944187b2e622
 attr tree 8a89376eb3ad1dcaf764336dde5ce54a783fa1fd
 
-node CFG-CTRL-FEEL-MODE configuration-item
-title committed baseline for the results re-run when the operator feel-mode path changed their test sources
+node CFG-CTRL-PAYLOAD configuration-item
+title committed baseline for reliable action transport verification
 attr scm git
-attr commit 27bc04929ec212d25e45a1cb9ca6ec7f5fc34e7f
-attr tree 4f950ed3a499abe35ebe7c7bef6d0884ef410c9e
+attr commit 09532a92307a0f03e791cf535b03a9431f492ff2
+attr tree 8e8ae02bfbe55d1ace436737e879bab4a8db2a12
 
 node CFG-CTRL-HEADING-REFERENCE configuration-item
 title committed baseline for the results re-run when the vehicle descriptor gained its heading reference
@@ -714,20 +714,20 @@ edge RESULT-CTRL-ENGINE-ACTIONS result-of CASE-CTRL-DATAGRAM-ACTION
 edge RESULT-CTRL-ENGINE-ACTIONS result-of CASE-CTRL-LIFECYCLE
 edge RESULT-CTRL-ENGINE-ACTIONS covers CTRL-CHAN-002
 edge RESULT-CTRL-ENGINE-ACTIONS covers CTRL-LIFE-005
-edge RESULT-CTRL-ENGINE-ACTIONS justified-by CFG-CTRL01
+edge RESULT-CTRL-ENGINE-ACTIONS justified-by CFG-CTRL-PAYLOAD
 edge RESULT-CTRL-ENGINE-ACTIONS justified-by TOOL-CTRL-CARGO
 
 edge RESULT-CTRL-BINDING result-of CASE-CTRL-UNANNOUNCED
 edge RESULT-CTRL-BINDING result-of CASE-CTRL-NONMONOTONIC
 edge RESULT-CTRL-BINDING covers CTRL-BIND-001
-edge RESULT-CTRL-BINDING justified-by CFG-CTRL01
+edge RESULT-CTRL-BINDING justified-by CFG-CTRL-PAYLOAD
 edge RESULT-CTRL-BINDING justified-by TOOL-CTRL-CARGO
 
 edge RESULT-CTRL-GROUP result-of CASE-CTRL-GROUP-EXCL
 edge RESULT-CTRL-GROUP result-of CASE-CTRL-GROUP-GEN
 edge RESULT-CTRL-GROUP result-of CASE-CTRL-GROUP-LATCH
 edge RESULT-CTRL-GROUP covers CTRL-GROUP-003
-edge RESULT-CTRL-GROUP justified-by CFG-CTRL-HEADING-REFERENCE
+edge RESULT-CTRL-GROUP justified-by CFG-CTRL-PAYLOAD
 edge RESULT-CTRL-GROUP justified-by TOOL-CTRL-CARGO
 
 edge RESULT-CTRL-DEDUP result-of CASE-CTRL-ID-REUSE
@@ -737,7 +737,7 @@ edge RESULT-CTRL-DEDUP justified-by TOOL-CTRL-CARGO
 
 edge RESULT-CTRL-WIRE result-of CASE-CTRL-WIRE-CHAIN
 edge RESULT-CTRL-WIRE covers CTRL-CHAN-002
-edge RESULT-CTRL-WIRE justified-by CFG-CTRL-FEEL-MODE
+edge RESULT-CTRL-WIRE justified-by CFG-CTRL-PAYLOAD
 edge RESULT-CTRL-WIRE justified-by TOOL-CTRL-CARGO
 
 edge RESULT-CTRL-AGENT result-of CASE-CTRL-AGENT-PAD-RESUME
@@ -766,7 +766,7 @@ edge RESULT-CTRL-FIXTURE result-of CASE-CTRL-BROWSER-FRAME
 edge RESULT-CTRL-FIXTURE result-of CASE-CTRL-BROWSER-COMMAND
 edge RESULT-CTRL-FIXTURE covers CTRL-BIND-001
 edge RESULT-CTRL-FIXTURE covers CTRL-CHAN-002
-edge RESULT-CTRL-FIXTURE justified-by CFG-CTRL-HEADING-REFERENCE
+edge RESULT-CTRL-FIXTURE justified-by CFG-CTRL-PAYLOAD
 edge RESULT-CTRL-FIXTURE justified-by TOOL-CTRL-CARGO
 
 edge RESULT-CTRL-LIFECYCLE-PROFILE result-of CASE-CTRL-LIFE-PHYSICAL
@@ -797,7 +797,7 @@ edge RESULT-CTRL-INGRESS justified-by TOOL-CTRL-CARGO
 
 edge RESULT-CTRL-LIFE-CYCLE result-of CASE-CTRL-LIFE-CYCLE
 edge RESULT-CTRL-LIFE-CYCLE covers CTRL-LIFE-005
-edge RESULT-CTRL-LIFE-CYCLE justified-by CFG-CTRL01
+edge RESULT-CTRL-LIFE-CYCLE justified-by CFG-CTRL-PAYLOAD
 edge RESULT-CTRL-LIFE-CYCLE justified-by TOOL-CTRL-CARGO
 
 # --- Review coverage ---

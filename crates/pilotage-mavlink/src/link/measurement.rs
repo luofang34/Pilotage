@@ -61,6 +61,7 @@ fn begin_source_epoch(latest: &mut LinkState, time_boot_ms: u32) {
     latest.truth_origin = None;
     latest.sim_truth = None;
     latest.gnss_fix = None;
+    latest.invalidate_camera_reports();
     latest.source_resets = latest.source_resets.wrapping_add(1);
     warn!(
         source_epoch = latest.source_epoch,

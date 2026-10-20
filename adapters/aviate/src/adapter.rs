@@ -413,7 +413,9 @@ fn process_flight_actions(
                 ));
             }
             ControlAction::SimReset
+            | ControlAction::Takeoff
             | ControlAction::Disarm
+            | ControlAction::CameraZoom { .. }
             | ControlAction::GimbalRecenter
             | ControlAction::CameraZoomIn
             | ControlAction::CameraZoomOut => {

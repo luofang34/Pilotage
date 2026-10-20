@@ -28,6 +28,7 @@ impl GazeboAdapter {
                 class: pilotage_protocol::VehicleClass::GroundRover,
                 display_name: "Gazebo diff-drive rover".to_owned(),
                 scopes: vec![ScopeDescriptor {
+                    payload: None,
                     authority_group: None,
                     scope: ScopeId::new(MOTION_SCOPE),
                     axes: vec![

@@ -41,6 +41,7 @@ pub const SIM_LIFECYCLE_SCOPE: &str = "sim.lifecycle";
 #[must_use]
 pub fn sim_lifecycle_descriptor() -> ScopeDescriptor {
     ScopeDescriptor {
+        payload: None,
         authority_group: None,
         scope: pilotage_protocol::ScopeId::new(SIM_LIFECYCLE_SCOPE),
         axes: vec![],
@@ -163,6 +164,8 @@ pub enum LegacyCommandMap {
 /// string-backed `ScopeId` rather than a fixed enum.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScopeDescriptor {
+    /// Payload operations and feedback, or unknown when absent.
+    pub payload: Option<pilotage_protocol::wire::PayloadCapabilities>,
     /// The exclusive-authority group this scope belongs to (`None` = the
     /// scope is its own group). Scopes sharing a group drive the SAME
     /// actuator: the session engine leases, fences, watches, latches, and
@@ -281,6 +284,7 @@ mod tests {
                 class: pilotage_protocol::VehicleClass::GroundRover,
                 display_name: "test rover".to_owned(),
                 scopes: vec![ScopeDescriptor {
+                    payload: None,
                     authority_group: None,
                     scope: ScopeId::new("vehicle.motion"),
                     axes: vec![LogicalAxisId::new(2), LogicalAxisId::new(3)],

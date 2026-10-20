@@ -23,6 +23,7 @@ fn main() -> ExitCode {
 
     let protos = [
         "common.proto",
+        "payload.proto",
         "control.proto",
         "authority.proto",
         "telemetry.proto",
@@ -47,6 +48,7 @@ fn main() -> ExitCode {
         .boxed(".pilotage.v1.TelemetrySample.gimbal")
         .boxed(".pilotage.v1.TelemetrySample.nav_guidance")
         .boxed(".pilotage.v1.TelemetrySample.battery")
+        .boxed(".pilotage.v1.TelemetrySample.payload")
         .compile_protos(&protos, &[schema_root])
     {
         Ok(()) => ExitCode::SUCCESS,

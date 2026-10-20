@@ -173,6 +173,7 @@ mod tests {
     #[test]
     fn projects_pose_from_sample() {
         let sample = wire::TelemetrySample {
+            payload: None,
             vehicle: Some(wire::VehicleId { value: 1 }),
             tick: Some(wire::SimTick { value: 0 }),
             observed_at: Some(wire::MonoTimestamp { nanos: 0 }),
@@ -199,6 +200,7 @@ mod tests {
     #[test]
     fn missing_pose_stays_missing() {
         let sample = wire::TelemetrySample {
+            payload: None,
             vehicle: None,
             tick: None,
             observed_at: None,
@@ -218,6 +220,7 @@ mod tests {
     #[test]
     fn capture_retains_role_lanes_with_full_provenance() {
         let sample = wire::TelemetrySample {
+            payload: None,
             vehicle: Some(wire::VehicleId { value: 1 }),
             tick: Some(wire::SimTick { value: 1_000_000 }),
             observed_at: Some(wire::MonoTimestamp { nanos: 5 }),
@@ -269,6 +272,7 @@ mod tests {
     #[test]
     fn unstamped_lanes_are_dropped_not_defaulted() {
         let sample = wire::TelemetrySample {
+            payload: None,
             vehicle: Some(wire::VehicleId { value: 1 }),
             tick: None,
             observed_at: None,

@@ -19,6 +19,7 @@ fn stamp(role: wire::SourceRole) -> wire::MeasurementStamp {
 
 fn empty_sample() -> wire::TelemetrySample {
     wire::TelemetrySample {
+        payload: None,
         vehicle: Some(wire::VehicleId { value: 1 }),
         tick: Some(wire::SimTick { value: 5 }),
         observed_at: Some(wire::MonoTimestamp { nanos: 900 }),

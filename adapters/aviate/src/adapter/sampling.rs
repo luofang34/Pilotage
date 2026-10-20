@@ -303,6 +303,7 @@ pub(crate) fn mavlink_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -
         .unwrap_or_default();
     TelemetryBatch {
         samples: vec![TelemetrySample {
+            payload: None,
             vehicle,
             tick: SimTick::new(u64::from(source_time_ms).wrapping_mul(1_000_000)),
             pose: planar_pose,

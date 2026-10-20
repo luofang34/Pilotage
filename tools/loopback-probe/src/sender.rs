@@ -155,6 +155,8 @@ fn send_one_frame(
     let sampled_at = elapsed_to_timestamp(run_start.elapsed());
     let (payload, profile_revision) = build_payload(state, run_start)?;
     let frame = ScopedControlFrame {
+        timing: None,
+        admitted_timing: None,
         action_ids: vec![],
         session,
         vehicle: pilotage_protocol::VehicleId::new(1),

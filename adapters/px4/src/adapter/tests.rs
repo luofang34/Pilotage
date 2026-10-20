@@ -199,6 +199,8 @@ pub(super) fn frame(
         })
         .collect();
     pilotage_protocol::ScopedControlFrame {
+        timing: None,
+        admitted_timing: None,
         action_ids: vec![],
         session: pilotage_protocol::SessionId::new(1),
         vehicle: VehicleId::new(1),
@@ -342,6 +344,8 @@ fn sampled_telemetry_authorizes_from_the_standard_status() {
 /// the ONLY place a reset can arrive from.
 fn lifecycle_reset_frame() -> pilotage_protocol::ScopedControlFrame {
     pilotage_protocol::ScopedControlFrame {
+        timing: None,
+        admitted_timing: None,
         action_ids: vec![1],
         session: pilotage_protocol::SessionId::new(1),
         vehicle: VehicleId::new(1),

@@ -7,6 +7,8 @@ use pilotage_protocol::{HeadingReference, VehicleClass};
 
 use super::{admit, engine};
 
+mod refresh;
+
 #[test]
 fn the_admission_carries_the_advertised_vehicle_class_and_name() {
     let mut engine = engine();

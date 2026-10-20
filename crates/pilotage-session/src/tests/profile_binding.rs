@@ -29,6 +29,8 @@ fn activation(session: SessionId, activation_revision: u32) -> DomainEnvelope {
 /// A typed velocity frame (no legacy payload) carrying `activation_revision`.
 fn typed_frame(session: SessionId, activation_revision: u32) -> ScopedControlFrame {
     ScopedControlFrame {
+        timing: None,
+        admitted_timing: None,
         session,
         vehicle: VEHICLE,
         scope: motion(),

@@ -5,6 +5,7 @@ package pilotage.v1;
 
 import "pilotage/v1/common.proto";
 import "pilotage/v1/control.proto";
+import "pilotage/v1/payload.proto";
 
 // Bitwise-independent execution-mode flags a host may advertise or a
 // session may request. Modeled as an enum of named flags combined via
@@ -95,6 +96,7 @@ message ActionCapability {
 // A single independently assignable control scope published by a host for
 // a vehicle (ADR-0006).
 message ScopeDescriptor {
+  PayloadCapabilities payload = 7;
   ScopeId scope = 1;
   string display_name = 2;
   LinkLossAction link_loss_action = 3;
@@ -154,6 +156,7 @@ message VehicleDescriptor {
 
 // Describes what a session host can offer at session setup (ADR-0008).
 message HostCapabilities {
+  uint32 control_window_ms = 6;
   string host_version = 1;
   repeated VehicleDescriptor vehicles = 2;
   repeated ExecutionMode supported_modes = 3;

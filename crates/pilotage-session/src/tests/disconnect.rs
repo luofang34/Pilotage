@@ -116,6 +116,7 @@ fn scope_is_grantable_again_after_holder_disconnects() {
 fn many_scope_capabilities(scopes: usize) -> AdapterCapabilities {
     let scope_descriptors = (0..scopes)
         .map(|i| ScopeDescriptor {
+            payload: None,
             authority_group: None,
             scope: ScopeId::new(format!("vehicle.motion.{i}")),
             axes: vec![LogicalAxisId::new(0)],
@@ -184,9 +185,18 @@ fn disconnect_dropping_link_lost_broadcasts_is_reported_not_silent() {
         .filter(|a| matches!(a, SessionAction::EngageLinkLoss { .. }))
         .count();
     assert_eq!(engagements, scopes, "each lost scope engages independently");
+    let invalidations = outcome
+        .actions
+        .iter()
+        .filter(|action| matches!(action, SessionAction::InvalidatePendingCommands { .. }))
+        .count();
+    assert_eq!(
+        invalidations, scopes,
+        "queued commands are fenced for every lost scope"
+    );
     assert_eq!(
         outcome.actions.len(),
-        cap + engagements,
+        cap + engagements + invalidations,
         "ordinary actions stay capped: {:?}",
         outcome.actions
     );

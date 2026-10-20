@@ -26,6 +26,10 @@ pub(super) struct GimbalStamp {
 }
 
 impl GimbalStamp {
+    pub(super) fn identity(&self) -> (SourceIncarnation, u32) {
+        (self.incarnation, self.epoch)
+    }
+
     /// A fresh discipline for one gimbal source instance. The incarnation
     /// is this adapter session's gimbal identity, distinct from the FC
     /// arm incarnation so a re-arm never reads as a gimbal reboot.

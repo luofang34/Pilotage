@@ -60,6 +60,7 @@ fn capabilities() -> AdapterCapabilities {
             display_name: "test rover".to_owned(),
             scopes: vec![
                 ScopeDescriptor {
+                    payload: None,
                     authority_group: None,
                     scope: ScopeId::new("vehicle.motion"),
                     axes: vec![LogicalAxisId::new(0), LogicalAxisId::new(1)],
@@ -82,6 +83,7 @@ fn capabilities() -> AdapterCapabilities {
                     }),
                 },
                 ScopeDescriptor {
+                    payload: None,
                     authority_group: None,
                     scope: ScopeId::new("vehicle.motion.direct"),
                     axes: vec![],

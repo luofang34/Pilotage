@@ -5,9 +5,44 @@ use pilotage_adapter_api::{
 };
 use pilotage_protocol::{ActionKind, IntentFamily, ScopeId, VehicleClass, VehicleId};
 
-pub(super) const MAX_PITCH_RATE: f32 = std::f32::consts::PI / 36.0;
+pub(super) use turret_dji::MAX_PITCH_RATE;
 
-pub(super) fn capabilities(vehicle: VehicleId, mode: DjiControlMode) -> AdapterCapabilities {
+pub(super) fn set_availability(
+    contract: &mut turret_core::PayloadCapabilities,
+    reason: Option<turret_core::UnavailableReason>,
+) {
+    contract.gimbal.axes.pitch.position = availability(contract.gimbal.axes.pitch.position, reason);
+    contract.gimbal.axes.pitch.rate = availability(contract.gimbal.axes.pitch.rate, reason);
+    contract.gimbal.recenter = availability(contract.gimbal.recenter, reason);
+}
+
+fn availability<T>(
+    value: turret_core::Capability<T>,
+    reason: Option<turret_core::UnavailableReason>,
+) -> turret_core::Capability<T> {
+    use turret_core::Capability;
+    match value {
+        Capability::Available(capability) | Capability::Unavailable { capability, .. } => {
+            match reason {
+                Some(reason) => Capability::Unavailable { capability, reason },
+                None => Capability::Available(capability),
+            }
+        }
+        other => other,
+    }
+}
+
+pub(super) fn capabilities(
+    vehicle: VehicleId,
+    mode: DjiControlMode,
+    payload: &turret_core::PayloadCapabilities,
+    incarnation: pilotage_adapter_api::SourceIncarnation,
+) -> AdapterCapabilities {
+    let mut payload =
+        pilotage_adapter_api::payload_capabilities_to_wire("dji-camera", payload, &[GIMBAL_SCOPE]);
+    payload.connection_incarnation = incarnation.into_bytes().to_vec();
+    payload.connection_epoch = 0;
+    payload.connection_role = pilotage_protocol::wire::PayloadConnectionRole::DirectDevice as i32;
     AdapterCapabilities {
         execution: ExecutionMode {
             real_time: true,
@@ -24,6 +59,7 @@ pub(super) fn capabilities(vehicle: VehicleId, mode: DjiControlMode) -> AdapterC
             }
             .to_owned(),
             scopes: vec![ScopeDescriptor {
+                payload: Some(payload),
                 authority_group: None,
                 scope: ScopeId::new(GIMBAL_SCOPE),
                 axes: Vec::new(),
@@ -32,8 +68,6 @@ pub(super) fn capabilities(vehicle: VehicleId, mode: DjiControlMode) -> AdapterC
                     frames: Vec::new(),
                     max_linear: 0.0,
                     max_vertical: 0.0,
-                    // GimbalRate uses one bound for both input axes. Control
-                    // projects the demand onto pitch; yaw is not transmitted.
                     max_angular: MAX_PITCH_RATE,
                     max_yaw_rate: 0.0,
                 }],

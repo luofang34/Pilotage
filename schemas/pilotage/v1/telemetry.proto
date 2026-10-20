@@ -5,6 +5,7 @@ syntax = "proto3";
 package pilotage.v1;
 
 import "pilotage/v1/common.proto";
+import "pilotage/v1/payload.proto";
 
 // A planar pose: position in meters and heading in radians, in the vehicle's
 // local reference frame unless otherwise documented by the adapter
@@ -425,8 +426,42 @@ message NavGuidanceState {
   uint32 solution_quality = 10;
 }
 
+message PayloadAxisObservation {
+  PayloadObservationSource source = 5;
+  MonoTimestamp sampled_at = 6;
+  MonoTimestamp received_at = 7;
+  uint64 connection_epoch = 8;
+  optional float angle_rad = 1;
+  optional float rate_rad_s = 2;
+  MeasurementStamp stamp = 3;
+  PayloadReferenceFrame frame = 4;
+}
+
+message PayloadZoomObservation {
+  PayloadObservationSource source = 4;
+  MonoTimestamp sampled_at = 5;
+  MonoTimestamp received_at = 6;
+  uint64 connection_epoch = 7;
+  ZoomUnit unit = 1;
+  double value = 2;
+  MeasurementStamp stamp = 3;
+}
+
+message PayloadState {
+  bytes connection_incarnation = 8;
+  uint64 connection_epoch = 9;
+  string endpoint_id = 1;
+  uint64 capability_revision = 2;
+  PayloadAxisObservation pitch = 3;
+  PayloadAxisObservation roll = 4;
+  PayloadAxisObservation yaw = 5;
+  PayloadZoomObservation zoom = 6;
+  PayloadCommandProgress command = 7;
+}
+
 // A single best-effort telemetry sample for one vehicle.
 message TelemetrySample {
+  PayloadState payload = 12;
   VehicleId vehicle = 1;
   SimTick tick = 2;
   // Host publication time. This is transport metadata, not source

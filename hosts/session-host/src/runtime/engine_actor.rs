@@ -17,7 +17,6 @@ use tracing::{debug, error, info, warn};
 
 use crate::runtime::connection::{DatagramClass, ToConnection};
 use crate::runtime::registry::ClientRegistry;
-use crate::runtime::wire_codec::encode_telemetry_datagram;
 
 mod command;
 mod outbound;
@@ -28,7 +27,6 @@ mod sim_truth_lane;
 mod telemetry;
 pub use command::ToEngine;
 use outbound::{targets_reliable_stream, to_connection_message};
-use telemetry::sample_to_wire;
 
 #[cfg(test)]
 mod tests;
@@ -158,7 +156,10 @@ impl<A: VehicleAdapter> EngineActor<A> {
                 message,
                 now,
             } => {
-                self.on_client_message(client, message, now);
+                let current = MonoTimestamp::from_nanos(
+                    u64::try_from(self.start.elapsed().as_nanos()).unwrap_or(u64::MAX),
+                );
+                self.on_received_message(client, *message, now, current);
             }
             ToEngine::NavGuidance { vehicle, state } => match state {
                 Some(state) => {
@@ -175,6 +176,26 @@ impl<A: VehicleAdapter> EngineActor<A> {
                 reply.send(summary).ok();
             }
         }
+    }
+
+    fn on_received_message(
+        &mut self,
+        client: ClientKey,
+        message: DomainEnvelope,
+        received: MonoTimestamp,
+        current: MonoTimestamp,
+    ) {
+        let sampled = match &message {
+            DomainEnvelope::Frame(frame) => Some(frame.sampled_at),
+            DomainEnvelope::ActionCommand(command) if command.timing.is_some() => {
+                Some(command.sampled_at)
+            }
+            _ => None,
+        };
+        if let Some(sampled) = sampled {
+            self.engine.observe_receive_time(client, sampled, received);
+        }
+        self.on_client_message(client, message, current);
     }
 
     fn on_client_message(
@@ -222,43 +243,6 @@ impl<A: VehicleAdapter> EngineActor<A> {
         debug!(advanced = step_outcome.advanced, "adapter stepped");
 
         self.broadcast_telemetry(now);
-    }
-
-    fn broadcast_telemetry(&mut self, now: MonoTimestamp) {
-        let batch = self.adapter.sample_telemetry();
-        #[cfg(feature = "sim")]
-        let lane_truth = self
-            .truth_lane
-            .as_mut()
-            .and_then(sim_truth_lane::SimTruthLane::poll);
-        for sample in batch.samples {
-            #[cfg(feature = "sim")]
-            let sample = {
-                let mut sample = sample;
-                // The adapter's own truth, when it has one, wins: the lane
-                // stands in for a flight controller that relays none.
-                if sample.sim_truth.is_none() {
-                    sample.sim_truth = lane_truth;
-                }
-                sample
-            };
-            let vehicle = sample.vehicle;
-            #[cfg(feature = "sim")]
-            if let Some(recorder) = self.recorder.as_mut() {
-                recorder.record(&sample, now);
-            }
-            let mut wire_sample = sample_to_wire(sample, now);
-            // Guidance is a host-internal side input, not adapter output
-            // (ADR-0031): the assembly attaches the vehicle's latest
-            // state, re-publishing it unchanged until the navigation
-            // component supplies a new one.
-            wire_sample.nav_guidance = self
-                .nav_guidance
-                .get(&vehicle)
-                .map(|state| Box::new(state.clone()));
-            let bytes = encode_telemetry_datagram(wire_sample);
-            self.broadcast_datagram(bytes);
-        }
     }
 
     fn enact(&mut self, outcome: SessionOutcome) {
@@ -329,6 +313,9 @@ impl<A: VehicleAdapter> EngineActor<A> {
             }
             SessionAction::ApplyToAdapter { client, frame } => {
                 self.apply_to_adapter(client, frame);
+            }
+            SessionAction::InvalidatePendingCommands { vehicle, scope } => {
+                self.adapter.invalidate_pending_commands(vehicle, &scope);
             }
             action @ (SessionAction::EngageLinkLoss { .. }
             | SessionAction::ClearLinkLoss { .. }) => {

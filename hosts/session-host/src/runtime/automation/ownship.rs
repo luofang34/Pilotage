@@ -168,6 +168,7 @@ mod tests {
 
     fn stamped_kinematics(role: wire::SourceRole) -> wire::TelemetrySample {
         wire::TelemetrySample {
+            payload: None,
             avionics: Some(wire::AvionicsState {
                 baro_alt_m: 0.0,
                 baro_stamp: None,
@@ -202,6 +203,7 @@ mod tests {
     #[test]
     fn a_planar_pose_is_truth_only_by_declaration() {
         let sample = wire::TelemetrySample {
+            payload: None,
             pose: Some(wire::Pose2d {
                 x_m: 4.0,
                 y_m: 5.0,

@@ -19,7 +19,7 @@ impl SessionEngine {
     pub(super) fn on_frame(
         &mut self,
         client: ClientKey,
-        frame: ScopedControlFrame,
+        mut frame: ScopedControlFrame,
         now: MonoTimestamp,
         actions: &mut Actions,
     ) {
@@ -30,6 +30,9 @@ impl SessionEngine {
             return;
         }
         if self.frame_attribution_rejects(client, &frame, now, actions) {
+            return;
+        }
+        if !self.frame_timing_admits(client, &mut frame, now, actions) {
             return;
         }
         // Fence on the sender's identity, not just on generation. `verify_frame`
@@ -82,6 +85,41 @@ impl SessionEngine {
                 ));
             }
         }
+    }
+
+    fn frame_timing_admits(
+        &mut self,
+        client: ClientKey,
+        frame: &mut ScopedControlFrame,
+        now: MonoTimestamp,
+        actions: &mut Actions,
+    ) -> bool {
+        if self.capabilities.execution.physically_embodied
+            && !frame
+                .timing
+                .is_some_and(|timing| timing.require_control_window)
+        {
+            actions.push(reject_frame(
+                client,
+                frame,
+                FrameRejectionReason::TooOld,
+                self.frame_generation(frame),
+            ));
+            return false;
+        }
+        if let Some(timing) = frame.timing {
+            frame.admitted_timing = self.admit_timing(client, frame.sampled_at, timing, now);
+            if frame.admitted_timing.is_none() {
+                actions.push(reject_frame(
+                    client,
+                    frame,
+                    FrameRejectionReason::TooOld,
+                    self.frame_generation(frame),
+                ));
+                return false;
+            }
+        }
+        true
     }
 
     /// Session attribution, the typed-only production default, and

@@ -1,10 +1,7 @@
 use std::time::Duration;
 
-use pilotage_adapter_api::{
-    GimbalAttitudeSample, MeasurementClock, MeasurementStamp, SourceIncarnation, SourceIntegrity,
-    SourceRole, TelemetryBatch, TelemetrySample,
-};
-use pilotage_protocol::{GimbalAxisLocks, GimbalReference, GimbalYawFrame, VehicleId};
+use pilotage_adapter_api::{SourceIncarnation, TelemetryBatch, TelemetrySample};
+use pilotage_protocol::{VehicleId, wire};
 use pilotage_timing::SimTick;
 
 use crate::{DumlFrame, GimbalAngles, RouteAddress};
@@ -27,6 +24,37 @@ pub(super) struct Observations {
 }
 
 impl Observations {
+    pub(super) fn incarnation(&self) -> SourceIncarnation {
+        self.incarnation
+    }
+
+    pub(super) fn angle_feedback(
+        &self,
+        now: Duration,
+        connection_valid: bool,
+    ) -> turret_core::Capability<()> {
+        use turret_core::{Capability, UnavailableReason};
+        let Some(pose) = self.latest.filter(|pose| pose.yaw_follow) else {
+            return Capability::Unknown;
+        };
+        if !connection_valid {
+            Capability::Unavailable {
+                capability: (),
+                reason: UnavailableReason::Transport,
+            }
+        } else if now
+            .checked_sub(pose.received)
+            .is_some_and(|age| age <= MAX_AGE)
+        {
+            Capability::Available(())
+        } else {
+            Capability::Unavailable {
+                capability: (),
+                reason: UnavailableReason::MissingFeedback,
+            }
+        }
+    }
+
     pub(super) fn new(incarnation: SourceIncarnation) -> Self {
         Self {
             latest: None,
@@ -110,47 +138,61 @@ impl Observations {
             return TelemetryBatch::default();
         };
         self.published_sequence = self.sequence;
-        let sample = GimbalAttitudeSample {
-            quat_wxyz: quaternion(pose.angles),
-            rates_rps: [f32::NAN; 3],
-            // DJI KeyGimbalAttitude defines NED attitude. The DUML decoder
-            // DataGimbalGetPushParams uses offset 4 for yaw and offset 8 for
-            // vehicle-relative yaw. Its byte-6 mode 2 is yaw-follow. Mini 3
-            // captures match these fields; north has no independent calibration.
-            reference: GimbalReference {
-                yaw_frame: GimbalYawFrame::Earth,
-                locks: GimbalAxisLocks {
-                    roll: true,
-                    pitch: true,
-                    yaw: false,
-                },
+        match self.payload_observation(pose) {
+            Ok(payload) => TelemetryBatch {
+                samples: vec![telemetry(vehicle, tick, payload)],
             },
-            // No firmware fault bits have a verified mapping on this route.
-            failure_flags: 0,
-            stamp: MeasurementStamp {
-                role: SourceRole::PayloadDevice,
-                integrity: SourceIntegrity::ChecksummedOnly,
-                source_id: 4,
-                source_incarnation: self.incarnation,
-                source_epoch: 0,
-                sequence: self.sequence,
-                acquired_at_ns: pose.received.as_nanos().min(u128::from(u64::MAX)) as u64,
-                clock: MeasurementClock::HostMonotonic,
-            },
-        };
-        TelemetryBatch {
-            samples: vec![TelemetrySample {
-                vehicle,
-                tick,
-                pose: None,
-                speed: None,
-                avionics: None,
-                sim_truth: None,
-                fc_state: None,
-                gimbal: Some(sample),
-                battery: None,
-            }],
+            Err(error) => {
+                tracing::error!(%error, "DJI angle observation rejected");
+                TelemetryBatch::default()
+            }
         }
+    }
+
+    pub(super) fn empty_state(&self) -> wire::PayloadState {
+        wire::PayloadState {
+            endpoint_id: "dji-camera".to_owned(),
+            capability_revision: 1,
+            connection_incarnation: self.incarnation.into_bytes().to_vec(),
+            connection_epoch: 0,
+            ..Default::default()
+        }
+    }
+
+    fn payload_observation(&self, pose: Pose) -> Result<wire::PayloadState, turret_core::Error> {
+        let received = super::execution::tick(pose.received);
+        let stamp = wire::MeasurementStamp {
+            source_id: 4,
+            source_epoch: 0,
+            sequence: self.sequence,
+            acquired_at_ns: pose.received.as_nanos().min(u128::from(u64::MAX)) as u64,
+            clock: wire::MeasurementClock::HostMonotonic as i32,
+            source_incarnation: self.incarnation.into_bytes().to_vec(),
+            role: wire::SourceRole::PayloadDevice as i32,
+            integrity: wire::SourceIntegrity::ChecksummedOnly as i32,
+        };
+        let axis = |tenths: i16| -> Result<_, turret_core::Error> {
+            let observation = turret_core::Observation {
+                value: turret_core::Angle::radians(f32::from(tenths).to_radians() / 10.0)?,
+                source: turret_core::ObservationSource::DeviceMeasured,
+                // Neither an absolute north reference nor device sample time
+                // has been independently established for this captured route.
+                frame: None,
+                sampled_at: None,
+                received_at: received,
+                epoch: 0,
+            };
+            Ok(pilotage_adapter_api::payload_angle_observation_to_wire(
+                &observation,
+                stamp.clone(),
+            ))
+        };
+        Ok(wire::PayloadState {
+            pitch: Some(axis(pose.angles.pitch_tenths)?),
+            roll: Some(axis(pose.angles.roll_tenths)?),
+            yaw: Some(axis(pose.angles.yaw_tenths)?),
+            ..self.empty_state()
+        })
     }
 }
 
@@ -160,15 +202,21 @@ impl Pose {
     }
 }
 
-fn quaternion(angles: GimbalAngles) -> [f32; 4] {
-    let half_angle = std::f32::consts::PI / 3600.0;
-    let (sr, cr) = (f32::from(angles.roll_tenths) * half_angle).sin_cos();
-    let (sp, cp) = (f32::from(angles.pitch_tenths) * half_angle).sin_cos();
-    let (sy, cy) = (f32::from(angles.yaw_tenths) * half_angle).sin_cos();
-    [
-        cr * cp * cy + sr * sp * sy,
-        sr * cp * cy - cr * sp * sy,
-        cr * sp * cy + sr * cp * sy,
-        cr * cp * sy - sr * sp * cy,
-    ]
+pub(super) fn telemetry(
+    vehicle: VehicleId,
+    tick: SimTick,
+    payload: wire::PayloadState,
+) -> TelemetrySample {
+    TelemetrySample {
+        vehicle,
+        tick,
+        payload: Some(payload),
+        pose: None,
+        speed: None,
+        avionics: None,
+        sim_truth: None,
+        fc_state: None,
+        gimbal: None,
+        battery: None,
+    }
 }

@@ -32,6 +32,9 @@ pub struct ControlLane {
     profile_revision: u32,
     activation_revision: u32,
     next_action_id: u32,
+    last_sampled_at_nanos: u64,
+    control_window_id: u64,
+    require_control_window: bool,
 }
 
 impl ControlLane {
@@ -49,6 +52,9 @@ impl ControlLane {
             profile_revision: 0,
             activation_revision: 0,
             next_action_id: 0,
+            last_sampled_at_nanos: 0,
+            control_window_id: 0,
+            require_control_window: false,
         }
     }
 
@@ -78,11 +84,26 @@ impl ControlLane {
         self.vehicle_id
     }
 
+    pub(crate) fn set_control_window(&mut self, id: u64, required: bool) {
+        self.control_window_id = id;
+        self.require_control_window = required;
+    }
+
+    fn command_timing(&self) -> wire::CommandTiming {
+        let timing = pilotage_protocol::CommandTiming {
+            control_window_id: self.control_window_id,
+            require_control_window: self.require_control_window,
+            ..pilotage_protocol::CommandTiming::default()
+        };
+        timing.into()
+    }
+
     /// Builds the next control-frame datagram. The sequence advances by
     /// one per frame and wraps; the host's staleness window, not the
     /// counter range, is the real bound.
     #[must_use]
     pub fn frame(&mut self, command: ControlCommand, sampled_at_nanos: u64) -> Vec<u8> {
+        self.last_sampled_at_nanos = sampled_at_nanos;
         self.sequence = self.sequence.wrapping_add(1);
         let (payload, intent) = match command {
             ControlCommand::Intent(intent) => (None, Some(intent)),
@@ -91,6 +112,7 @@ impl ControlLane {
         let envelope = wire::Envelope {
             schema_version: SCHEMA_VERSION,
             payload: Some(wire::envelope::Payload::ControlFrame(wire::ControlFrame {
+                timing: self.require_control_window.then(|| self.command_timing()),
                 session: Some(wire::SessionId {
                     value: self.session_id,
                 }),
@@ -123,6 +145,16 @@ impl ControlLane {
     /// nonzero and advances per command, so every result correlates.
     #[must_use]
     pub fn action_command(&mut self, request: wire::ControlActionRequest) -> Vec<u8> {
+        self.action_command_at(request, self.last_sampled_at_nanos)
+    }
+
+    /// Build an action from a newly sampled input; transport retries retain its bytes.
+    #[must_use]
+    pub fn action_command_at(
+        &mut self,
+        request: wire::ControlActionRequest,
+        sampled_at_nanos: u64,
+    ) -> Vec<u8> {
         self.next_action_id = self.next_action_id.wrapping_add(1);
         let mut request = request;
         if request.action_id == 0 {
@@ -132,6 +164,10 @@ impl ControlLane {
             schema_version: SCHEMA_VERSION,
             payload: Some(wire::envelope::Payload::ControlActionCommand(
                 wire::ControlActionCommand {
+                    sampled_at: Some(wire::MonoTimestamp {
+                        nanos: sampled_at_nanos,
+                    }),
+                    timing: Some(self.command_timing()),
                     session: Some(wire::SessionId {
                         value: self.session_id,
                     }),

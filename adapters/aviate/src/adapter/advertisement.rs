@@ -163,6 +163,7 @@ fn flight_actions() -> Vec<ActionCapability> {
 /// flight.
 fn direct_scope_descriptor(envelope: pilotage_control_feel::DemandEnvelope) -> ScopeDescriptor {
     ScopeDescriptor {
+        payload: None,
         // One FC, one authority: velocity and direct flight can never be
         // held at once, and share generation, latch, and recovery.
         authority_group: Some(FLIGHT_SCOPE.to_owned()),
@@ -183,6 +184,7 @@ fn direct_scope_descriptor(envelope: pilotage_control_feel::DemandEnvelope) -> S
 
 fn flight_scope_descriptor(envelope: pilotage_control_feel::DemandEnvelope) -> ScopeDescriptor {
     ScopeDescriptor {
+        payload: None,
         authority_group: Some(FLIGHT_SCOPE.to_owned()),
         scope: ScopeId::new(FLIGHT_SCOPE),
         axes: vec![
@@ -233,6 +235,7 @@ fn flight_scope_descriptor(envelope: pilotage_control_feel::DemandEnvelope) -> S
 #[cfg(feature = "sim")]
 fn gimbal_scope_descriptor() -> ScopeDescriptor {
     ScopeDescriptor {
+        payload: None,
         // Its own authority group: pointing is leased and fenced apart
         // from flight, so losing one never disturbs the other.
         authority_group: None,

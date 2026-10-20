@@ -1,19 +1,25 @@
 use pilotage_adapter_api::{Disposition, RejectReason, VehicleAdapter};
-use pilotage_client_session::gimbal_rate_intent;
+use pilotage_client_session::payload_gimbal_rate_intent;
 use pilotage_protocol::{ControlIntent, GimbalRateIntent, ScopedControlFrame, wire};
 
 use super::TestResult;
 use super::harness::{Harness, frame, observed_poses, packets};
 
 pub(super) fn mapped_frame(harness: &Harness, pitch: f32, yaw: f32) -> TestResultFrame {
-    let advertised = &harness.adapter.capabilities().vehicles[0].scopes[0].intents[0];
-    let capability = wire::IntentCapability {
-        family: wire::IntentFamily::GimbalRate as i32,
-        max_angular: advertised.max_angular,
-        max_yaw_rate: advertised.max_yaw_rate,
-        ..wire::IntentCapability::default()
+    let capabilities = harness.adapter.capabilities();
+    let advertised = &capabilities.vehicles[0].scopes[0];
+    let scope = pilotage_client_session::ScopeCatalog {
+        payload: advertised.payload.clone(),
+        scope: advertised.scope.as_str().to_owned(),
+        intents: vec![wire::IntentCapability {
+            family: wire::IntentFamily::GimbalRate as i32,
+            max_angular: advertised.intents[0].max_angular,
+            ..Default::default()
+        }],
+        actions: Vec::new(),
+        authority_group: advertised.scope.as_str().to_owned(),
     };
-    let intent = gimbal_rate_intent(pitch, yaw, Some(&capability))
+    let intent = payload_gimbal_rate_intent(pitch, yaw, Some(&scope))
         .ok_or("advertised gimbal intent was not mapped")?;
     let Some(wire::control_intent::Family::GimbalRate(rate)) = intent.family else {
         return Err("gimbal mapping produced a different intent family".into());
@@ -46,14 +52,14 @@ fn a_diagonal_shared_mapping_commands_bounded_pitch_without_yaw() -> TestResult 
 }
 
 #[test]
-fn yaw_only_is_transformed_without_starting_motion_and_stops_active_pitch() -> TestResult {
+fn unsupported_yaw_maps_to_neutral_without_starting_motion_and_stops_active_pitch() -> TestResult {
     let mut harness = Harness::new();
     harness.prime()?;
     let before = harness.written()?;
     let request = mapped_frame(&harness, 0.0, 1.0)?;
     assert_eq!(
         harness.apply(request, 20).disposition,
-        Disposition::Transformed
+        Disposition::Accepted
     );
     harness.step(30);
     assert_eq!(harness.written()?, before);

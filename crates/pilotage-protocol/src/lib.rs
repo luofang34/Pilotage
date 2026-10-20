@@ -12,12 +12,15 @@ pub mod h264;
 mod heading;
 mod ids;
 mod intent;
+mod payload;
 mod scopes;
 mod session;
 mod session_convert;
+mod timing;
 mod vehicle_class;
 pub mod video_frame;
 pub mod wire;
+mod zoom;
 
 pub use command_outcome::{COMMAND_ANSWER_WINDOW_MS, CommandOutcome};
 pub use control::{ButtonEdge, ControlPayload, LogicalAxisId, LogicalButtonId, ScopedControlFrame};
@@ -45,3 +48,9 @@ pub use vehicle_class::VehicleClass;
 pub use video_frame::{
     CaptureHeader, ContractFault, DecodedFrame, Offsets, encode_v2 as encode_video_frame_v2,
 };
+
+pub use zoom::{ZoomCommand, ZoomUnit};
+
+pub use payload::{payload_rate_limit, payload_zoom_admits};
+
+pub use timing::{AdmittedTiming, CommandTiming};

@@ -27,6 +27,7 @@ const DIRECT: &str = "vehicle.motion.direct";
 /// family split is the gate's business; the group is authority's).
 fn grouped_engine() -> SessionEngine {
     let scope = |name: &str| ScopeDescriptor {
+        payload: None,
         authority_group: Some(MOTION.to_owned()),
         scope: ScopeId::new(name),
         axes: vec![],
@@ -145,6 +146,8 @@ fn neutral_typed_frame(
     at: u64,
 ) -> ScopedControlFrame {
     ScopedControlFrame {
+        timing: None,
+        admitted_timing: None,
         session,
         vehicle: VEHICLE,
         scope: ScopeId::new(scope),
@@ -290,6 +293,8 @@ fn an_action_command_on_the_unleased_sibling_is_rejected() {
     let outcome = engine.handle_client_message(
         client,
         DomainEnvelope::ActionCommand(pilotage_protocol::ControlActionCommand {
+            sampled_at: pilotage_timing::MonoTimestamp::from_nanos(0),
+            timing: None,
             session,
             vehicle: VEHICLE,
             scope: ScopeId::new(MOTION),

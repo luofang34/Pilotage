@@ -27,7 +27,7 @@ pub enum ToEngine {
         /// Sender of the message.
         client: ClientKey,
         /// The decoded message.
-        message: DomainEnvelope,
+        message: Box<DomainEnvelope>,
         /// The driver's receive timestamp, for staleness/latency accounting.
         now: MonoTimestamp,
     },

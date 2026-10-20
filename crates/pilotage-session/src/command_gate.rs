@@ -68,6 +68,18 @@ fn validate_typed(
             return Err(FrameRejectionReason::UnsupportedIntent);
         }
         check_limits(intent, capability)?;
+        if let (ControlIntent::GimbalRate(rate), Some(payload)) = (intent, &scope.payload) {
+            let gimbal = payload.gimbal.as_ref();
+            let pitch =
+                gimbal.and_then(|caps| pilotage_protocol::payload_rate_limit(caps.pitch.as_ref()));
+            let yaw =
+                gimbal.and_then(|caps| pilotage_protocol::payload_rate_limit(caps.yaw.as_ref()));
+            if rate.pitch_rate.abs() > pitch.unwrap_or(0.0)
+                || rate.yaw_rate.abs() > yaw.unwrap_or(0.0)
+            {
+                return Err(FrameRejectionReason::LimitExceeded);
+            }
+        }
     }
     Ok(())
 }
@@ -146,6 +158,15 @@ pub(crate) fn validate_action(
         && !capability.feel_targets.contains(&target)
     {
         return Err(FrameRejectionReason::UnsupportedAction);
+    }
+    if let ControlAction::CameraZoom { command } = action {
+        let zoom = scope
+            .payload
+            .as_ref()
+            .and_then(|payload| payload.zoom.as_ref());
+        if !pilotage_protocol::payload_zoom_admits(zoom, command) {
+            return Err(FrameRejectionReason::UnsupportedAction);
+        }
     }
     Ok(())
 }

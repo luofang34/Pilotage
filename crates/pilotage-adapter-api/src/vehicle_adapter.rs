@@ -31,6 +31,11 @@ pub trait VehicleAdapter {
     /// of and the simulation tick the outcome corresponds to.
     fn apply_control(&mut self, frame: &ScopedControlFrame) -> ApplyOutcome;
 
+    /// Cancel queued commands for this authority scope before they reach the transport.
+    /// This does not claim that commands already sent have physically stopped.
+    /// Adapters with asynchronous payload queues must override this hook.
+    fn invalidate_pending_commands(&mut self, _vehicle: VehicleId, _scope: &ScopeId) {}
+
     /// Samples current telemetry for all vehicles this adapter exposes.
     fn sample_telemetry(&mut self) -> TelemetryBatch;
 

@@ -22,6 +22,8 @@ use crate::snapshot::tests::sample_snapshot;
 
 fn frame(velocity: Option<[f32; 4]>, actions: Vec<ControlAction>) -> ScopedControlFrame {
     ScopedControlFrame {
+        timing: None,
+        admitted_timing: None,
         action_ids: vec![],
         session: SessionId::new(1),
         vehicle: VehicleId::new(1),
@@ -322,6 +324,8 @@ fn a_stale_poll_is_withheld() {
 
 fn direct_frame(intent: ControlIntent) -> ScopedControlFrame {
     ScopedControlFrame {
+        timing: None,
+        admitted_timing: None,
         scope: ScopeId::new(super::DIRECT_SCOPE),
         intent: Some(intent),
         ..frame(None, vec![])
@@ -392,6 +396,8 @@ fn an_attitude_on_the_direct_scope_becomes_angles_and_a_heading() {
 fn each_scope_takes_only_its_own_families() {
     let mut h = harness(Some(observation(true, 0, true)));
     let velocity_on_direct = ScopedControlFrame {
+        timing: None,
+        admitted_timing: None,
         scope: ScopeId::new(super::DIRECT_SCOPE),
         ..frame(Some([1.0, 0.0, 0.0, 0.0]), vec![])
     };
@@ -400,6 +406,8 @@ fn each_scope_takes_only_its_own_families() {
         Disposition::Rejected(RejectReason::Other(_))
     ));
     let rates_on_flight = ScopedControlFrame {
+        timing: None,
+        admitted_timing: None,
         scope: ScopeId::new(FLIGHT_SCOPE),
         ..direct_frame(ControlIntent::BodyRate(pilotage_protocol::BodyRateIntent {
             roll_rate: 0.0,

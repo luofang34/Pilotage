@@ -48,6 +48,8 @@ pub struct VehicleCatalog {
 /// One control scope, with the typed capabilities the host advertised.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScopeCatalog {
+    /// Payload operations and feedback declared by the host.
+    pub payload: Option<wire::PayloadCapabilities>,
     /// The scope's identity string.
     pub scope: String,
     /// The typed intent families this scope accepts. Empty on a scope that
@@ -84,6 +86,7 @@ impl Admission {
                     .scopes
                     .iter()
                     .map(|scope| ScopeCatalog {
+                        payload: scope.payload.clone(),
                         scope: scope
                             .scope
                             .as_ref()

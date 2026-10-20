@@ -203,6 +203,7 @@ impl AviateAdapter {
         if truth.is_some() || fc_state.is_some() {
             return TelemetryBatch {
                 samples: vec![TelemetrySample {
+                    payload: None,
                     vehicle: self.vehicle,
                     // Without a simulation clock the tick has no source;
                     // FC-state freshness reasoning uses its stamp, never
