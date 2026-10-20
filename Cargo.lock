@@ -2195,6 +2195,7 @@ dependencies = [
  "thiserror",
  "tracing",
  "tracing-subscriber",
+ "world-atmosphere",
  "world-core",
 ]
 

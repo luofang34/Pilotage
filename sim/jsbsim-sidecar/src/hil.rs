@@ -33,10 +33,9 @@ const COMPONENT_ID: u8 = 51;
 pub const FIELDS_IMU: u32 = 0x003f;
 /// The magnetometer bits.
 pub const FIELDS_MAG: u32 = 0x01c0;
-/// The barometer bits (pressure, temperature). The pressure-altitude bit
-/// stays clear: the world model gives pressure from altitude, not its
-/// inverse, and PX4 reads only the pressure.
-pub const FIELDS_BARO: u32 = 0x1200;
+/// The barometer bits: pressure, pressure altitude, temperature. PX4
+/// takes a barometer sample only when all three are set.
+pub const FIELDS_BARO: u32 = 0x1a00;
 /// The differential-pressure bit.
 pub const FIELDS_DIFF_PRESSURE: u32 = 0x0400;
 /// Standard gravity, m/s²: the unit HIL_STATE_QUATERNION's milli-g is
@@ -184,8 +183,7 @@ impl Encoder {
             .f32(mz)
             .f32(sample.pressure_hpa)
             .f32(sample.diff_pressure_hpa)
-            // Pressure altitude: not provided (its fields bit is clear).
-            .f32(0.0)
+            .f32(sample.pressure_altitude_m)
             .f32(sample.temperature_c)
             .u32(fields_updated)
             .u8(0);

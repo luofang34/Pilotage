@@ -5,6 +5,7 @@
 #![allow(clippy::unwrap_used)]
 
 use pilotage_world::{MagneticEpoch, N51, UniformTerrain, World};
+use world_atmosphere::{Altitude, Isa};
 
 use super::{DEFAULT_NOISE, Noise, NoiseLevels, Sensors, time_us};
 use crate::rotation::Euler;
@@ -102,6 +103,12 @@ fn the_sensors_read_the_world_model_at_every_position() {
             .unwrap();
         assert_eq!(sample.pressure_hpa, air.pressure_pa / 100.0);
         assert_eq!(sample.temperature_c, air.temperature_c());
+        // The pressure altitude is where the standard atmosphere has the
+        // air's pressure.
+        let standard = Isa
+            .at(Altitude::Geopotential(sample.pressure_altitude_m))
+            .unwrap();
+        assert!((standard.pressure_pa - air.pressure_pa).abs() < 1e-6);
         let field = world
             .magnetic_field(latitude_deg, longitude_deg, altitude_m)
             .unwrap();

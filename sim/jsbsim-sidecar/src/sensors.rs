@@ -12,6 +12,8 @@ pub use noise::Noise;
 
 use pilotage_world::{Ned, PositionError, TerrainSource, World, WorldError, local_plane};
 
+use world_atmosphere::Altitude;
+
 use crate::truth::Truth;
 
 /// One standard deviation of each sensor's white noise.
@@ -62,6 +64,8 @@ pub struct InertialSample {
     pub pressure_hpa: f64,
     /// Differential (pitot) pressure, hPa.
     pub diff_pressure_hpa: f64,
+    /// Pressure altitude, m.
+    pub pressure_altitude_m: f64,
     /// Air temperature, °C.
     pub temperature_c: f64,
 }
@@ -134,6 +138,9 @@ impl Sensors {
             mag_frd_gauss: add(mag_frd, mag_noise),
             pressure_hpa: pressure_pa / 100.0,
             diff_pressure_hpa: diff_pa / 100.0,
+            // The world's air is the standard atmosphere, whose pressure
+            // altitude is the geopotential altitude.
+            pressure_altitude_m: Altitude::GeometricMsl(truth.altitude_m).geopotential_m(),
             temperature_c: air.temperature_c(),
         })
     }
