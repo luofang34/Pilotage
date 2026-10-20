@@ -32,7 +32,7 @@ const SHIFTED_TELEMETRY_BASE: u16 = 14_700;
 /// block between the FC and the gz plugin does not move: the FC opens
 /// instance 0's block whatever the session's instance, so one Aviate
 /// session runs per machine (see the process claim).
-fn telemetry_port(instance: u16) -> u16 {
+pub(super) fn telemetry_port(instance: u16) -> u16 {
     if instance == 0 {
         DEFAULT_TELEMETRY_PORT
     } else {
@@ -52,7 +52,8 @@ fn telemetry_endpoint(ctx: &SessionContext) -> String {
 /// This binds the law the vehicle STARTS on. A runtime feel-mode request
 /// does not reach these files — it shapes one from the mode alone — so
 /// asking for another mode moves the vehicle off its fitted law.
-const CONTROL_FEEL_PROFILE: &str = "adapters/aviate/profiles/x500-shaped-balanced-v1.json";
+pub(super) const CONTROL_FEEL_PROFILE: &str =
+    "adapters/aviate/profiles/x500-shaped-balanced-v1.json";
 
 /// The Aviate + Gazebo SITL backend.
 #[derive(Debug)]

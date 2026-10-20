@@ -11,8 +11,8 @@ commands:
       tear it down on ctrl-c.
 
       --fc <name>          FC backend: aviate-gz (alias aviate, default),
-                           px4-gz (alias px4), px4-jsbsim, px4-xplane,
-                           aviate-xplane, ardupilot-sitl (alias
+                           aviate-jsbsim, px4-gz (alias px4), px4-jsbsim,
+                           px4-xplane, aviate-xplane, ardupilot-sitl (alias
                            ardupilot), or betaflight-sitl (alias
                            betaflight); px4-gz takes a vehicle model
                            as px4-gz:<model>: x500_gimbal (default) or
@@ -101,7 +101,7 @@ commands:
 
   build-sim-terrain
       Fetch AWS Terrain Tiles around N51 into target/sim-terrain/n51.mbtiles,
-      the ground px4-jsbsim sessions stand their vehicles on.
+      the ground px4-jsbsim and aviate-jsbsim sessions stand their vehicles on.
 
   help
       Print this help text.";

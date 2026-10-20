@@ -429,6 +429,7 @@ async fn a_physical_start_refuses_an_unqualified_control_feel_artifact() {
     let result = AviateAdapter::start_with_control_feel(
         VehicleId::new(1),
         AviateProfile::Physical,
+        crate::AviateTruth::SharedMemory,
         crate::LinkConfig::physical(),
         candidate("alia250-balanced-physical-start"),
     )

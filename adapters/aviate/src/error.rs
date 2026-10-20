@@ -46,6 +46,10 @@ pub enum AviateAdapterError {
         /// The refused profile.
         profile: crate::AviateProfile,
     },
+    /// An oracle-only session was told its truth comes from elsewhere: it
+    /// would carry nothing at all.
+    #[error("an oracle-only Aviate session needs the shm truth oracle")]
+    OracleOnlyWithoutOracle,
     /// Attaching to the XIL shm object failed at the operating-system
     /// level: the object does not exist (no simulation writer is up) or
     /// the kernel refused the read-only mapping.
