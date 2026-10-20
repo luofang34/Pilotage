@@ -7,9 +7,6 @@
 
 use crate::rotation::{Quat, Vec3};
 
-/// Standard gravity, m/s².
-pub const GRAVITY: f64 = 9.806_65;
-
 /// Airframe constants.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct QuadParams {
@@ -34,12 +31,15 @@ pub struct QuadParams {
     pub angular_damping: f64,
     /// Rate at which ground friction removes horizontal speed, 1/s.
     pub ground_friction: f64,
+    /// Gravity where the airframe flies, m/s².
+    pub gravity: f64,
 }
 
-impl Default for QuadParams {
+impl QuadParams {
     /// An 0.8 kg, 6-inch-class quad with a 3:1 thrust-to-weight ratio, so
-    /// it hovers near 57 % motor command.
-    fn default() -> Self {
+    /// it hovers near 57 % motor command, flying in `gravity` m/s².
+    #[must_use]
+    pub fn six_inch(gravity: f64) -> Self {
         Self {
             mass: 0.8,
             max_thrust: 6.0,
@@ -51,15 +51,14 @@ impl Default for QuadParams {
             quadratic_drag: 0.05,
             angular_damping: 0.000_5,
             ground_friction: 20.0,
+            gravity,
         }
     }
-}
 
-impl QuadParams {
     /// The motor command that holds the airframe in a level hover.
     #[must_use]
     pub fn hover_command(&self) -> f64 {
-        (self.mass * GRAVITY / (4.0 * self.max_thrust)).sqrt()
+        (self.mass * self.gravity / (4.0 * self.max_thrust)).sqrt()
     }
 
     /// Body positions of the four motors in mixer order (FRD, z = 0).
@@ -98,13 +97,14 @@ pub struct QuadState {
 }
 
 impl QuadState {
-    /// At rest on the ground at `position` with heading `yaw` (radians).
+    /// At rest on the ground at `position` with heading `yaw` (radians),
+    /// feeling `params`' gravity.
     #[must_use]
-    pub fn landed(position: Vec3, yaw: f64) -> Self {
+    pub fn landed(params: &QuadParams, position: Vec3, yaw: f64) -> Self {
         Self {
             position: Vec3::new(position.x, position.y, 0.0),
             attitude: Quat::from_euler(0.0, 0.0, yaw),
-            specific_force: Vec3::new(0.0, 0.0, -GRAVITY),
+            specific_force: Vec3::new(0.0, 0.0, -params.gravity),
             on_ground: true,
             ..Self::default()
         }
@@ -133,7 +133,7 @@ impl QuadState {
             self.integrate_rotation(params, &thrusts, dt);
         }
         let acceleration = (self.velocity - velocity_before) * (1.0 / dt);
-        let specific_force_world = acceleration - Vec3::new(0.0, 0.0, GRAVITY);
+        let specific_force_world = acceleration - Vec3::new(0.0, 0.0, params.gravity);
         self.specific_force = self.attitude.rotate_inverse(specific_force_world);
     }
 
@@ -141,7 +141,7 @@ impl QuadState {
         let thrust_world = self.attitude.rotate(Vec3::new(0.0, 0.0, -total_thrust));
         let speed = self.velocity.norm();
         let drag = -(self.velocity * (params.linear_drag + params.quadratic_drag * speed));
-        let force = thrust_world + drag + Vec3::new(0.0, 0.0, params.mass * GRAVITY);
+        let force = thrust_world + drag + Vec3::new(0.0, 0.0, params.mass * params.gravity);
         self.velocity = self.velocity + force * (dt / params.mass);
         self.position = self.position + self.velocity * dt;
     }
@@ -161,7 +161,7 @@ impl QuadState {
         let friction = (-params.ground_friction * dt).exp();
         self.velocity.x *= friction;
         self.velocity.y *= friction;
-        self.on_ground = total_thrust < params.mass * GRAVITY;
+        self.on_ground = total_thrust < params.mass * params.gravity;
         self.on_ground
     }
 

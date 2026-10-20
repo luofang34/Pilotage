@@ -1,6 +1,7 @@
 //! Command-line options. Defaults stand the vehicle on the runway 04
 //! threshold of Solberg-Hunterdon Airport (N51) and serve PX4 instance 0.
 
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -8,6 +9,7 @@ use pilotage_world::{DEFAULT_SITE, Site};
 
 use crate::aircraft::{AIRCRAFT_NAMES, Aircraft};
 use crate::gimbal::GimbalLimits;
+use crate::simulation::STEP_MS_CHOICES;
 
 /// Parsed options.
 #[derive(Debug, Clone, PartialEq)]
@@ -36,12 +38,19 @@ pub struct Args {
     pub epoch_unix_s: Option<i64>,
     /// The sensor noise seed.
     pub seed: u64,
-    /// Simulation seconds per wall second; 0 runs unpaced.
+    /// Simulation seconds per wall second; 0 runs unpaced, for CI: each
+    /// step then follows PX4's lockstep answer at once, so PX4 sets the
+    /// pace (the sidecar alone steps many times faster than real time).
     pub realtime_factor: f64,
     /// How long to wait for PX4's answer to a step.
     pub lockstep_timeout: Duration,
     /// The gimbal PX4 drives, from its `MNT_*` travel parameters.
     pub gimbal: Option<GimbalLimits>,
+    /// The state step, ms: one of 1, 2, 4.
+    pub step_ms: u32,
+    /// Where to send the truth every step, besides PX4: the session
+    /// host's simulator truth lane.
+    pub truth_addr: Option<SocketAddr>,
 }
 
 /// A malformed command line.
@@ -85,6 +94,8 @@ impl Default for Args {
             realtime_factor: 1.0,
             lockstep_timeout: Duration::from_secs(2),
             gimbal: None,
+            truth_addr: None,
+            step_ms: 4,
         }
     }
 }
@@ -180,6 +191,21 @@ impl Args {
                     args.lockstep_timeout =
                         Duration::from_secs_f64(finite(flag, value()?)?.clamp(0.001, 3_600.0));
                 }
+                "--step-ms" => {
+                    let value = value()?;
+                    let step: u32 = parse(flag, value.clone(), "1, 2, or 4")?;
+                    if !STEP_MS_CHOICES.contains(&step) {
+                        return Err(ArgsError::Invalid {
+                            flag: flag.clone(),
+                            value,
+                            reason: "1, 2, or 4",
+                        });
+                    }
+                    args.step_ms = step;
+                }
+                "--truth-addr" => {
+                    args.truth_addr = Some(parse(flag, value()?, "a socket address")?)
+                }
                 "--gimbal" => args.gimbal = Some(gimbal_limits(flag, value()?)?),
                 other => return Err(ArgsError::Unrecognized(other.to_owned())),
             }
@@ -202,7 +228,7 @@ pub fn usage() -> String {
          [--jsbsim-root DIR] [--latitude-deg D --longitude-deg D --heading-deg D] \
          [--site-elevation-m M] [--terrain ARCHIVE.mbtiles] [--epoch-unix-s S] [--seed N] \
          [--realtime-factor F] [--lockstep-timeout-s S] \
-         [--gimbal RANGE_ROLL,MAX_PITCH,MIN_PITCH,RANGE_YAW]",
+         [--gimbal RANGE_ROLL,MAX_PITCH,MIN_PITCH,RANGE_YAW] [--truth-addr HOST:PORT] [--step-ms 1|2|4]",
         AIRCRAFT_NAMES.join("|")
     )
 }

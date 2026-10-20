@@ -12,7 +12,9 @@ use crate::fixed_wing::sticks::{MAX_AIRSPEED_CHANGE_MPS, MAX_VERTICAL_MPS, max_t
 fn fixed_wing_adapter() -> Px4Adapter {
     let (_fc, addr) = fake_fc();
     let mut adapter = Px4Adapter::from_state(VehicleId::new(1), live_state());
-    adapter.fixed_wing = Some(FixedWingUplink::new(addr, 1, 1).expect("uplink"));
+    adapter.fixed_wing = Some(
+        FixedWingUplink::new(crate::config::Px4Profile::Simulation, addr, 1, 1).expect("uplink"),
+    );
     adapter
 }
 
@@ -54,7 +56,9 @@ fn fixed_wing_flight_frames_reach_the_fixed_wing_uplink() {
     let outcome = adapter.apply_control(&press);
     assert!(!outcome.action_results[0].accepted);
     assert!(
-        outcome.action_results[0].detail.contains("parameters"),
+        outcome.action_results[0]
+            .detail
+            .contains("waiting for PX4 to confirm COM_RC_IN_MODE = 1"),
         "{:?}",
         outcome.action_results[0]
     );

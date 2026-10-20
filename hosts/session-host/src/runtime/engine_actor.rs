@@ -23,6 +23,8 @@ mod command;
 mod outbound;
 #[cfg(feature = "sim")]
 mod recorder;
+#[cfg(feature = "sim")]
+mod sim_truth_lane;
 mod telemetry;
 pub use command::ToEngine;
 use outbound::{targets_reliable_stream, to_connection_message};
@@ -86,6 +88,10 @@ pub struct EngineActor<A: VehicleAdapter> {
     /// build does not carry the module, not merely leave it idle.
     #[cfg(feature = "sim")]
     recorder: Option<recorder::Recorder>,
+    /// The simulator's own truth, when `PILOTAGE_SIM_TRUTH_ADDR` names
+    /// where it arrives; simulation-only like the recorder.
+    #[cfg(feature = "sim")]
+    truth_lane: Option<sim_truth_lane::SimTruthLane>,
     /// The single monotonic origin shared with every connection task's
     /// client-message stamps (ADR-0009: one `host_time` reference domain).
     /// Passed in rather than sampled here so tick-driven timestamps and
@@ -115,6 +121,8 @@ impl<A: VehicleAdapter> EngineActor<A> {
             nav_guidance: BTreeMap::new(),
             #[cfg(feature = "sim")]
             recorder: recorder::Recorder::from_env(),
+            #[cfg(feature = "sim")]
+            truth_lane: sim_truth_lane::SimTruthLane::from_env(),
             start,
         }
     }
@@ -218,7 +226,22 @@ impl<A: VehicleAdapter> EngineActor<A> {
 
     fn broadcast_telemetry(&mut self, now: MonoTimestamp) {
         let batch = self.adapter.sample_telemetry();
+        #[cfg(feature = "sim")]
+        let lane_truth = self
+            .truth_lane
+            .as_mut()
+            .and_then(sim_truth_lane::SimTruthLane::poll);
         for sample in batch.samples {
+            #[cfg(feature = "sim")]
+            let sample = {
+                let mut sample = sample;
+                // The adapter's own truth, when it has one, wins: the lane
+                // stands in for a flight controller that relays none.
+                if sample.sim_truth.is_none() {
+                    sample.sim_truth = lane_truth;
+                }
+                sample
+            };
             let vehicle = sample.vehicle;
             #[cfg(feature = "sim")]
             if let Some(recorder) = self.recorder.as_mut() {

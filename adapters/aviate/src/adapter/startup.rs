@@ -9,7 +9,8 @@ use pilotage_protocol::VehicleId;
 #[cfg(feature = "sim")]
 use super::camera;
 use super::{
-    AviateAdapter, AviateProfile, control_feel::ControlFeelProfiles, sources::bind_sources,
+    AviateAdapter, AviateProfile, AviateTruth, control_feel::ControlFeelProfiles,
+    sources::bind_sources,
 };
 use crate::error::AviateAdapterError;
 use crate::incarnation::{IncarnationProvider, OsIncarnationProvider};
@@ -30,10 +31,18 @@ impl AviateAdapter {
         config: LinkConfig,
     ) -> Result<Self, AviateAdapterError> {
         let control_feel = compatibility_control_feel()?;
-        Self::start_with_control_feel(vehicle, profile, config, control_feel).await
+        Self::start_with_control_feel(
+            vehicle,
+            profile,
+            AviateTruth::SharedMemory,
+            config,
+            control_feel,
+        )
+        .await
     }
 
-    /// Binds the profile with a validated control-feel profile.
+    /// Binds the profile, its truth from `truth`, with a validated
+    /// control-feel profile.
     ///
     /// # Errors
     ///
@@ -41,18 +50,14 @@ impl AviateAdapter {
     pub async fn start_with_control_feel(
         vehicle: VehicleId,
         profile: AviateProfile,
+        truth: AviateTruth,
         config: LinkConfig,
         control_feel: ValidatedFlightFeelProfile,
     ) -> Result<Self, AviateAdapterError> {
         let mut provider = OsIncarnationProvider;
-        Self::start_with_control_feel_and_incarnation_provider(
-            vehicle,
-            profile,
-            config,
-            control_feel,
-            &mut provider,
-        )
-        .await
+        validate_adapter_control_feel(&control_feel)?;
+        validate_profile_control_feel(profile, &control_feel)?;
+        Self::start_bound(vehicle, profile, truth, config, control_feel, &mut provider).await
     }
 
     /// Binds the vehicle link using a caller-owned attachment identity source.
@@ -96,12 +101,21 @@ impl AviateAdapter {
     ) -> Result<Self, AviateAdapterError> {
         validate_adapter_control_feel(&control_feel)?;
         validate_profile_control_feel(profile, &control_feel)?;
-        Self::start_bound(vehicle, profile, config, control_feel, provider).await
+        Self::start_bound(
+            vehicle,
+            profile,
+            AviateTruth::SharedMemory,
+            config,
+            control_feel,
+            provider,
+        )
+        .await
     }
 
     async fn start_bound<P: IncarnationProvider>(
         vehicle: VehicleId,
         profile: AviateProfile,
+        truth: AviateTruth,
         config: LinkConfig,
         control_feel: ValidatedFlightFeelProfile,
         provider: &mut P,
@@ -115,7 +129,7 @@ impl AviateAdapter {
             "Aviate control-feel profile selected"
         );
         let arm_incarnation = provider.next_incarnation_blocking()?;
-        let (estimate, truth) = bind_sources(profile, config, provider).await?;
+        let (estimate, truth) = bind_sources(profile, truth, config, provider).await?;
         // Oracle-only sessions bind no uplink at all: with no motion
         // scope advertised, operational control is structurally absent
         // rather than rejected case by case. Elsewhere a failed uplink

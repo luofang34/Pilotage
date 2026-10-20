@@ -17,6 +17,7 @@ mod output;
 mod process;
 mod readiness;
 mod session;
+mod sim_terrain;
 mod site;
 mod viewer_server;
 
@@ -49,7 +50,8 @@ fn run(args: &[String]) -> Result<(), error::XtaskError> {
         Command::Guards => guards::run_guards(&session::repo_root()?),
         Command::Affected { base } => affected::run_affected(&base),
         Command::ServeViewer(serve) => viewer_server::run_serve_viewer(&serve),
-        Command::BuildJsbsim => jsbsim::run_build_jsbsim(),
+        Command::BuildJsbsim => jsbsim::run_build_jsbsim(&session::repo_root()?),
+        Command::BuildSimTerrain => sim_terrain::run_build_sim_terrain(&session::repo_root()?),
         Command::Sim(sim) => run_supervised(session::run_sim(&sim)),
         Command::Fleet(fleet) => run_supervised(session::fleet::run_fleet(&fleet)),
     }

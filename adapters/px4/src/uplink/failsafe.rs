@@ -1,4 +1,7 @@
-//! The offboard-loss hold the multicopter uplink pins at connect.
+//! The offboard-loss hold the multicopter uplink depends on: written at
+//! connect under [`crate::config::Px4Profile::Simulation`], only read on a
+//! physical vehicle ([`crate::pinning`]), and arming waits until PX4
+//! reports it.
 //!
 //! The uplink's link-loss enactment stops the offboard stream, so PX4's own
 //! offboard-loss failsafe takes the vehicle after `COM_OF_LOSS_T`. Its
@@ -10,7 +13,7 @@
 
 use std::time::Instant;
 
-use pilotage_mavlink::codec::{FcMessage, ParamValue, encode_param_set};
+use pilotage_mavlink::codec::{FcMessage, ParamValue};
 
 use super::Px4Uplink;
 
@@ -18,13 +21,12 @@ use super::Px4Uplink;
 pub(crate) const PINNED: [(&str, ParamValue); 1] = [("COM_OBL_RC_ACT", ParamValue::Int32(5))];
 
 impl Px4Uplink {
-    /// Sends the unconfirmed pinned writes that are due.
+    /// Sends the parameter requests that are due: writes under
+    /// simulation, reads on a physical vehicle ([`crate::pinning`]).
     pub(super) fn pin_failsafe(&mut self, now: Instant) {
-        for (name, value) in self.failsafe.due(now) {
-            let frame = encode_param_set(
+        for request in self.failsafe.due(now) {
+            let frame = request.encode(
                 self.seq,
-                name,
-                value,
                 self.expected_system_id,
                 self.expected_component_id,
             );
@@ -41,9 +43,9 @@ impl Px4Uplink {
         false
     }
 
-    /// Whether PX4 confirmed the offboard-loss Hold, which arming waits for.
-    pub(crate) fn failsafe_pinned(&self) -> bool {
-        self.failsafe.all_confirmed()
+    /// Why arming waits on the offboard-loss Hold, if it does.
+    pub(crate) fn failsafe_refusal(&self) -> Option<crate::pinning::ParamRefusal> {
+        self.failsafe.refusal()
     }
 }
 

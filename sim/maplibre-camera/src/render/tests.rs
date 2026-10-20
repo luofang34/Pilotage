@@ -122,3 +122,20 @@ fn a_height_above_unknown_ground_keeps_drawing_but_sends_nothing() {
         );
     }
 }
+
+#[test]
+fn a_lens_below_the_map_ground_is_raised_onto_it() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let _entered = runtime.enter();
+    let mut camera = camera(&runtime);
+    // A lens 0.1 m above a body origin 0.2 m under the ground stands 0.5 m
+    // above the ground.
+    let raised = camera.above_ground(99.8, 0.1, Some(100.0));
+    assert!((raised + 0.1 - 100.5).abs() < 1e-9, "{raised}");
+    // Clear of the ground, or with no ground known, nothing moves.
+    assert_eq!(camera.above_ground(120.0, 0.1, Some(100.0)), 120.0);
+    assert_eq!(camera.above_ground(50.0, 0.1, None), 50.0);
+}

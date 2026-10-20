@@ -246,6 +246,7 @@ async fn start_aviate() -> Result<pilotage_adapter_aviate::AviateAdapter, HostEr
     pilotage_adapter_aviate::AviateAdapter::start_with_control_feel(
         HOST_VEHICLE,
         profile,
+        aviate_profile::truth_from_env(std::env::var("PILOTAGE_AVIATE_TRUTH"))?,
         aviate_profile::link_config_from_env(profile, std::env::var("PILOTAGE_AVIATE_ADDR"))?,
         control_feel,
     )

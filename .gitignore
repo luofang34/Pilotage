@@ -1,6 +1,7 @@
 # Rust
 /target/
 /sim/maplibre-camera/target/
+/sim/jsbsim-sidecar/target/
 **/*.rs.bk
 # Cargo.lock is committed: the workspace ships binaries (hosts, services, clients).
 

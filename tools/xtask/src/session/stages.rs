@@ -27,7 +27,14 @@ pub(crate) fn host_stage(
     let adapter = backend.host_adapter();
     let mut env = crate::backend::host_env_for(backend, ctx);
     if ctx.sim_camera {
-        env.extend(crate::camera::host_env(crate::camera::port(ctx)?));
+        // The stage's camera settings replace the backend's own: one
+        // value per variable, so no reader depends on which write wins.
+        for (key, value) in crate::camera::host_env(crate::camera::port(ctx)?) {
+            match env.iter_mut().find(|(name, _)| *name == key) {
+                Some(slot) => slot.1 = value,
+                None => env.push((key, value)),
+            }
+        }
     }
     env.push((
         "PILOTAGE_AVIATE_PROFILE".to_owned(),

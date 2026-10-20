@@ -6,7 +6,10 @@
 //! the answer must be memory-only. The grid is sampled from the world
 //! once, and again when the vehicle has flown far from its centre.
 
-use pilotage_world::{TerrainSource, World, WorldError, metres_per_degree};
+use pilotage_world::{
+    LocalTangentPlane, Ned, TerrainSource, World, WorldError, local_plane, world_position,
+};
+use world_core::WGS84;
 
 /// The terrain under one point.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -17,6 +20,37 @@ pub struct GroundAnswer {
     pub slope_north: f64,
     /// Rise per metre eastward.
     pub slope_east: f64,
+    /// The unit normal to the surface there, pointing up, in the
+    /// Earth-centred (ECEF) frame JSBSim's contacts work in.
+    pub normal_ecef: [f64; 3],
+}
+
+/// The upward unit normal, in ECEF, of ground at a point rising
+/// `slope_north` and `slope_east` metres per metre: the local vector
+/// (-slope_north, -slope_east, -1) in north-east-down, carried to ECEF by
+/// the world model's tangent plane there.
+pub fn surface_normal_ecef(
+    lat_deg: f64,
+    lon_deg: f64,
+    height_m: f64,
+    slope_north: f64,
+    slope_east: f64,
+) -> Option<[f64; 3]> {
+    let plane = local_plane(lat_deg, lon_deg, height_m).ok()?;
+    let tip = plane.to_geodetic(Ned {
+        north_m: -slope_north,
+        east_m: -slope_east,
+        down_m: -1.0,
+    });
+    let base = WGS84.to_ecef(lat_deg, lon_deg, height_m);
+    let tip = WGS84.to_ecef(
+        tip.latitude_deg,
+        tip.longitude_deg,
+        tip.ellipsoidal_height_m,
+    );
+    let v = [tip.x_m - base.x_m, tip.y_m - base.y_m, tip.z_m - base.z_m];
+    let norm = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    (norm > 0.0 && norm.is_finite()).then(|| v.map(|c| c / norm))
 }
 
 /// A terrain model JSBSim can ask during a step.
@@ -38,12 +72,11 @@ const UNIFORM_SPACING_M: f64 = 10.0;
 /// A square grid of terrain heights centred on one point.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GroundPatch {
-    centre_lat_deg: f64,
-    centre_lon_deg: f64,
     spacing_m: f64,
     half: usize,
-    /// Metres per degree of latitude and of longitude at the centre.
-    per_degree: (f64, f64),
+    /// The world model's tangent plane at the centre: grid offsets are
+    /// north and east on it.
+    plane: LocalTangentPlane,
     /// Row-major from south-west, `(2 * half + 1)` squared.
     heights_m: Vec<f64>,
 }
@@ -69,28 +102,28 @@ impl GroundPatch {
             }
             _ => UNIFORM_SPACING_M,
         };
-        let per_degree = metres_per_degree(lat_deg);
+        let plane = world.local_plane(lat_deg, lon_deg, declared_m)?;
         let side = 2 * half + 1;
         let mut heights_m = Vec::with_capacity(side * side);
         for row in 0..side {
             let north_m = (row as f64 - half as f64) * spacing_m;
             for column in 0..side {
                 let east_m = (column as f64 - half as f64) * spacing_m;
+                let node = plane.to_geodetic(Ned {
+                    north_m,
+                    east_m,
+                    down_m: 0.0,
+                });
                 let height = world
-                    .elevation_blocking(
-                        lat_deg + north_m / per_degree.0,
-                        lon_deg + east_m / per_degree.1,
-                    )?
+                    .elevation_blocking(node.latitude_deg, node.longitude_deg)?
                     .map_or(declared_m, |sample| sample.elevation_m());
                 heights_m.push(height);
             }
         }
         Ok(Self {
-            centre_lat_deg: lat_deg,
-            centre_lon_deg: lon_deg,
             spacing_m,
             half,
-            per_degree,
+            plane,
             heights_m,
         })
     }
@@ -108,11 +141,14 @@ impl GroundPatch {
         north_m.abs() > reach_m || east_m.abs() > reach_m
     }
 
+    /// North and east metres of a point from the centre, on the plane;
+    /// NaN for a point the world model refuses.
     fn offset_m(&self, lat_deg: f64, lon_deg: f64) -> (f64, f64) {
-        (
-            (lat_deg - self.centre_lat_deg) * self.per_degree.0,
-            (lon_deg - self.centre_lon_deg) * self.per_degree.1,
-        )
+        let height = self.plane.origin().ellipsoidal_height_m;
+        match self.plane.to_ned(world_position(lat_deg, lon_deg, height)) {
+            Ok(offset) => (offset.north_m, offset.east_m),
+            Err(_) => (f64::NAN, f64::NAN),
+        }
     }
 
     fn at(&self, row: usize, column: usize) -> f64 {
@@ -137,10 +173,15 @@ impl GroundPatch {
         let (h10, h11) = (self.at(row + 1, column), self.at(row + 1, column + 1));
         let south = h00 + (h01 - h00) * fc;
         let north = h10 + (h11 - h10) * fc;
+        let height_m = south + (north - south) * fr;
+        let slope_north = ((h10 - h00) * (1.0 - fc) + (h11 - h01) * fc) / self.spacing_m;
+        let slope_east = ((h01 - h00) * (1.0 - fr) + (h11 - h10) * fr) / self.spacing_m;
         GroundAnswer {
-            height_m: south + (north - south) * fr,
-            slope_north: ((h10 - h00) * (1.0 - fc) + (h11 - h01) * fc) / self.spacing_m,
-            slope_east: ((h01 - h00) * (1.0 - fr) + (h11 - h10) * fr) / self.spacing_m,
+            height_m,
+            slope_north,
+            slope_east,
+            normal_ecef: surface_normal_ecef(lat_deg, lon_deg, height_m, slope_north, slope_east)
+                .unwrap_or([f64::NAN; 3]),
         }
     }
 }
@@ -148,7 +189,8 @@ impl GroundPatch {
 impl GroundModel for GroundPatch {
     fn height(&self, lat_rad: f64, lon_rad: f64) -> Option<GroundAnswer> {
         let answer = self.answer(lat_rad.to_degrees(), lon_rad.to_degrees());
-        answer.height_m.is_finite().then_some(answer)
+        (answer.height_m.is_finite() && answer.normal_ecef.iter().all(|c| c.is_finite()))
+            .then_some(answer)
     }
 }
 

@@ -25,12 +25,11 @@ namespace {
 
 constexpr double kFeetPerMetre = 1.0 / 0.3048;
 
-// Answers the terrain height under (latitude, longitude) in radians:
-// metres above the ellipsoid, and its slope north and east (m/m).
-// Returns 0 when it has no answer.
+// Answers the terrain under (latitude, longitude) in radians: its height,
+// metres above the ellipsoid, and its unit surface normal in the
+// Earth-centred frame (x, y, z). Returns 0 when it has no answer.
 using GroundFn = int (*)(void* ctx, double lat_rad, double lon_rad,
-                         double* height_m, double* slope_north,
-                         double* slope_east);
+                         double* height_m, double* normal_ecef);
 
 class RustGround : public JSBSim::FGGroundCallback {
  public:
@@ -49,22 +48,15 @@ class RustGround : public JSBSim::FGGroundCallback {
     const double lat = l.GetGeodLatitudeRad();
     const double lon = l.GetLongitude();
     double height_m = last_height_m_;
-    double slope_n = 0.0;
-    double slope_e = 0.0;
-    if (fn_(ctx_, lat, lon, &height_m, &slope_n, &slope_e) != 0) {
+    double n[3] = {last_normal_[0], last_normal_[1], last_normal_[2]};
+    if (fn_(ctx_, lat, lon, &height_m, n) != 0) {
       last_height_m_ = height_m;
+      last_normal_[0] = n[0];
+      last_normal_[1] = n[1];
+      last_normal_[2] = n[2];
     }
     const double h_ft = height_m * kFeetPerMetre;
-    const double sin_lat = std::sin(lat), cos_lat = std::cos(lat);
-    const double sin_lon = std::sin(lon), cos_lon = std::cos(lon);
-    // Local up, north, and east in the Earth-centred frame.
-    const JSBSim::FGColumnVector3 up(cos_lat * cos_lon, cos_lat * sin_lon,
-                                     sin_lat);
-    const JSBSim::FGColumnVector3 north(-sin_lat * cos_lon,
-                                        -sin_lat * sin_lon, cos_lat);
-    const JSBSim::FGColumnVector3 east(-sin_lon, cos_lon, 0.0);
-    normal = up - slope_n * north - slope_e * east;
-    normal.Normalize();
+    normal = JSBSim::FGColumnVector3(n[0], n[1], n[2]);
     contact.SetEllipse(a_, b_);
     contact.SetPositionGeodetic(lon, lat, h_ft);
     return l.GetGeodAltitude() - h_ft;
@@ -83,6 +75,8 @@ class RustGround : public JSBSim::FGGroundCallback {
   // The height to keep when Rust has no answer: a missing tile must not
   // drop the ground from under the vehicle.
   mutable double last_height_m_ = 0.0;
+  // The normal kept with it.
+  mutable double last_normal_[3] = {0.0, 0.0, 1.0};
 };
 
 void write_error(char* err, std::size_t err_len, const char* message) {

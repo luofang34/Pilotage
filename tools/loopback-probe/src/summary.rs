@@ -68,9 +68,20 @@ fn print_video(video: &VideoStats, elapsed: Duration) {
         video.frames_received, video.frames_decoded, video.frames_decode_failed
     ));
     print_line(&format!(
-        "video frames by source: fpv={} chase={}",
-        video.fpv_received, video.chase_received
+        "video frames by source: fpv={} chase={} gimbal={}",
+        video.fpv_received, video.chase_received, video.gimbal_received
     ));
+    for (source_id, name) in [(0, "fpv"), (1, "chase"), (2, "gimbal")] {
+        if let Some((p50, p95, max, count)) = video.pose_to_frame.summary(source_id) {
+            print_line(&format!(
+                "pose->frame at client ({name}, truth receipt to frame receipt): \
+                 p50={:.1}ms p95={:.1}ms max={:.1}ms (n={count})",
+                p50.as_secs_f64() * 1e3,
+                p95.as_secs_f64() * 1e3,
+                max.as_secs_f64() * 1e3,
+            ));
+        }
+    }
     match video.avg_fps(elapsed) {
         Some(fps) => print_line(&format!("video avg fps:       {fps:.2}")),
         None => print_line("video avg fps:       no frames decoded"),

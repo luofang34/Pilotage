@@ -1,9 +1,11 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use super::{GRAVITY, QuadParams, QuadState};
+use super::{QuadParams, QuadState};
 use crate::rotation::{Quat, Vec3};
 
 const DT: f64 = 0.001;
+/// Not standard gravity, so a model that ignores its parameter fails.
+const GRAVITY: f64 = 9.79;
 
 fn run(state: &mut QuadState, params: &QuadParams, commands: [f64; 4], seconds: f64) {
     for _ in 0..(seconds / DT).round() as u32 {
@@ -16,13 +18,13 @@ fn airborne(motors: f64) -> QuadState {
         position: Vec3::new(0.0, 0.0, -50.0),
         motors: [motors; 4],
         on_ground: false,
-        ..QuadState::landed(Vec3::ZERO, 0.0)
+        ..QuadState::landed(&QuadParams::six_inch(GRAVITY), Vec3::ZERO, 0.0)
     }
 }
 
 #[test]
 fn hover_command_holds_altitude_and_reads_one_g() {
-    let params = QuadParams::default();
+    let params = QuadParams::six_inch(GRAVITY);
     let hover = params.hover_command();
     assert!((0.5..0.65).contains(&hover), "hover at {hover}");
     let mut state = airborne(hover);
@@ -42,7 +44,7 @@ fn free_fall_follows_gravity_and_reads_weightless() {
     let params = QuadParams {
         linear_drag: 0.0,
         quadratic_drag: 0.0,
-        ..QuadParams::default()
+        ..QuadParams::six_inch(GRAVITY)
     };
     let mut state = airborne(0.0);
     run(&mut state, &params, [0.0; 4], 1.0);
@@ -54,7 +56,7 @@ fn free_fall_follows_gravity_and_reads_weightless() {
 
 #[test]
 fn drag_bounds_the_fall_speed() {
-    let params = QuadParams::default();
+    let params = QuadParams::six_inch(GRAVITY);
     let mut state = airborne(0.0);
     state.position.z = -5_000.0;
     run(&mut state, &params, [0.0; 4], 30.0);
@@ -66,8 +68,8 @@ fn drag_bounds_the_fall_speed() {
 
 #[test]
 fn the_ground_holds_a_quad_below_hover_thrust() {
-    let params = QuadParams::default();
-    let mut state = QuadState::landed(Vec3::new(3.0, 4.0, 0.0), 1.0);
+    let params = QuadParams::six_inch(GRAVITY);
+    let mut state = QuadState::landed(&params, Vec3::new(3.0, 4.0, 0.0), 1.0);
     run(&mut state, &params, [0.3; 4], 2.0);
     assert!(state.on_ground);
     assert_eq!(state.position, Vec3::new(3.0, 4.0, 0.0));
@@ -81,8 +83,8 @@ fn the_ground_holds_a_quad_below_hover_thrust() {
 
 #[test]
 fn thrust_above_weight_lifts_off_and_landing_stops_on_the_ground() {
-    let params = QuadParams::default();
-    let mut state = QuadState::landed(Vec3::ZERO, 0.0);
+    let params = QuadParams::six_inch(GRAVITY);
+    let mut state = QuadState::landed(&params, Vec3::ZERO, 0.0);
     run(&mut state, &params, [0.7; 4], 1.0);
     assert!(!state.on_ground);
     assert!(state.position.z < -0.5, "climbed to {}", -state.position.z);
@@ -94,8 +96,8 @@ fn thrust_above_weight_lifts_off_and_landing_stops_on_the_ground() {
 
 #[test]
 fn ground_friction_stops_a_sliding_quad() {
-    let params = QuadParams::default();
-    let mut state = QuadState::landed(Vec3::ZERO, 0.0);
+    let params = QuadParams::six_inch(GRAVITY);
+    let mut state = QuadState::landed(&params, Vec3::ZERO, 0.0);
     state.velocity = Vec3::new(2.0, 0.0, 0.0);
     state.on_ground = false;
     run(&mut state, &params, [0.0; 4], 1.0);
@@ -104,7 +106,7 @@ fn ground_friction_stops_a_sliding_quad() {
 
 #[test]
 fn motor_differences_torque_the_body_like_the_betaflight_mixer() {
-    let params = QuadParams::default();
+    let params = QuadParams::six_inch(GRAVITY);
     let hover = params.hover_command();
     let d = 0.05;
     // Mixer order: rear right, front right, rear left, front left.
@@ -138,7 +140,7 @@ fn motor_differences_torque_the_body_like_the_betaflight_mixer() {
 
 #[test]
 fn a_nose_down_tilt_accelerates_forward() {
-    let params = QuadParams::default();
+    let params = QuadParams::six_inch(GRAVITY);
     let hover = params.hover_command();
     let mut state = airborne(hover);
     state.attitude = Quat::from_euler(0.0, (-10.0f64).to_radians(), 90f64.to_radians());
@@ -153,8 +155,8 @@ fn a_nose_down_tilt_accelerates_forward() {
 
 #[test]
 fn motor_lag_is_first_order() {
-    let params = QuadParams::default();
-    let mut state = QuadState::landed(Vec3::ZERO, 0.0);
+    let params = QuadParams::six_inch(GRAVITY);
+    let mut state = QuadState::landed(&params, Vec3::ZERO, 0.0);
     run(&mut state, &params, [1.0; 4], params.motor_time_constant);
     let reached = state.motors[0];
     assert!(
@@ -165,8 +167,8 @@ fn motor_lag_is_first_order() {
 
 #[test]
 fn non_finite_and_out_of_range_commands_are_contained() {
-    let params = QuadParams::default();
-    let mut state = QuadState::landed(Vec3::ZERO, 0.0);
+    let params = QuadParams::six_inch(GRAVITY);
+    let mut state = QuadState::landed(&params, Vec3::ZERO, 0.0);
     run(
         &mut state,
         &params,

@@ -14,6 +14,7 @@ mod hid_decode;
 mod metrics;
 mod output;
 mod pipeline;
+mod pose_frame;
 mod receiver;
 mod run;
 mod save_frames;

@@ -18,10 +18,10 @@ use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
 use pilotage_multirotor_fdm::msp_watch::{MspWatch, WATCH_PORT};
-use pilotage_multirotor_fdm::quad::GRAVITY;
 use pilotage_multirotor_fdm::supervisor::{Action, Event, Supervisor};
 use pilotage_multirotor_fdm::{
-    FdmPacket, Origin, PacketClock, QuadParams, QuadState, Vec3, decode_servo_packet,
+    Environment, EnvironmentError, FdmPacket, PacketClock, QuadParams, QuadState, Vec3,
+    decode_servo_packet,
 };
 
 mod args;
@@ -48,6 +48,8 @@ enum FdmError {
         #[source]
         source: std::io::Error,
     },
+    #[error(transparent)]
+    Environment(#[from] EnvironmentError),
     #[error("gave up on Betaflight SITL: {reason}")]
     GaveUp { reason: &'static str },
 }
@@ -75,22 +77,28 @@ struct Model {
     params: QuadParams,
     spawn: QuadState,
     state: QuadState,
-    origin: Origin,
+    environment: Environment,
     commands: [f64; 4],
     clock: PacketClock,
 }
 
 impl Model {
-    fn new(args: &Args) -> Self {
-        let spawn = QuadState::landed(Vec3::new(args.north_m, args.east_m, 0.0), args.heading_rad);
-        Self {
-            params: QuadParams::default(),
+    fn new(args: &Args) -> Result<Self, EnvironmentError> {
+        let environment = Environment::new(args.origin)?;
+        let params = QuadParams::six_inch(environment.gravity_mps2());
+        let spawn = QuadState::landed(
+            &params,
+            Vec3::new(args.north_m, args.east_m, 0.0),
+            args.heading_rad,
+        );
+        Ok(Self {
+            params,
             spawn,
             state: spawn,
-            origin: args.origin,
+            environment,
             commands: [0.0; 4],
             clock: PacketClock::default(),
-        }
+        })
     }
 
     /// Back on the ground at the spawn point, motors off: a new Betaflight
@@ -110,7 +118,7 @@ fn run_blocking(args: &Args) -> Result<(), FdmError> {
     socket
         .set_nonblocking(true)
         .map_err(|source| FdmError::Configure { source })?;
-    let mut model = Model::new(args);
+    let mut model = Model::new(args)?;
     let mut sitl = args.betaflight.clone().map(Sitl::new).transpose()?;
     let mut supervisor = sitl.as_ref().map(|sitl| Supervisor::new(sitl.provisions()));
     let mut watch = MspWatch::new(SocketAddr::from(([127, 0, 0, 1], WATCH_PORT)));
@@ -122,8 +130,9 @@ fn run_blocking(args: &Args) -> Result<(), FdmError> {
         fc = %args.state_target,
         rate_hz = args.rate_hz,
         hover_command = model.params.hover_command(),
-        lat = model.origin.lat_deg,
-        lon = model.origin.lon_deg,
+        lat = args.origin.lat_deg,
+        lon = args.origin.lon_deg,
+        gravity_mps2 = model.params.gravity,
         north_m = args.north_m,
         east_m = args.east_m,
         "multirotor FDM running"
@@ -162,14 +171,15 @@ fn run_blocking(args: &Args) -> Result<(), FdmError> {
             caught_up = caught_up.wrapping_add(1);
         }
         if streaming {
-            let packet = FdmPacket::from_state(model.clock.tick(), &model.state, &model.origin);
+            let packet =
+                FdmPacket::from_state(model.clock.tick(), &model.state, &model.environment)?;
             if let Err(error) = socket.send_to(&packet.to_bytes(), args.state_target) {
                 tracing::debug!(%error, "state packet not sent");
             }
         }
         if last_log.elapsed() >= LOG_PERIOD {
             last_log = Instant::now();
-            log_truth(&model.state, &model.commands, packets_in);
+            log_truth(&model, packets_in);
         }
         let next = start + step.saturating_mul(u32::try_from(steps).unwrap_or(u32::MAX));
         if let Some(wait) = next.checked_duration_since(Instant::now()) {
@@ -233,7 +243,8 @@ fn drain_motor_packets(socket: &UdpSocket, commands: &mut [f64; 4]) -> u64 {
     received
 }
 
-fn log_truth(state: &QuadState, commands: &[f64; 4], packets_in: u64) {
+fn log_truth(model: &Model, packets_in: u64) {
+    let (state, commands) = (&model.state, &model.commands);
     let (roll, pitch, yaw) = state.attitude.to_euler();
     let rates = [state.rates.x, state.rates.y, state.rates.z].map(|r| r.to_degrees().round());
     tracing::info!(
@@ -245,7 +256,7 @@ fn log_truth(state: &QuadState, commands: &[f64; 4], packets_in: u64) {
         pitch_deg = format_args!("{:.1}", pitch.to_degrees()),
         yaw_deg = format_args!("{:.1}", yaw.to_degrees()),
         rates_dps = ?rates,
-        load_g = format_args!("{:.2}", state.specific_force.norm() / GRAVITY),
+        load_g = format_args!("{:.2}", state.specific_force.norm() / model.params.gravity),
         motors = ?commands.map(|c| (c * 1000.0).round() / 1000.0),
         on_ground = state.on_ground,
         packets_in,

@@ -25,7 +25,7 @@ pub(crate) enum JsbsimModel {
 /// (which describes PX4's larger `quadrotor_x` JSBSim model): the Gazebo
 /// x500 airframe's rotor positions and the sidecar motor model's hover
 /// command.
-const X500_PARAMS: [(&str, &str); 23] = [
+const X500_PARAMS: [(&str, &str); 24] = [
     ("CA_ROTOR0_PX", "0.174"),
     ("CA_ROTOR0_PY", "0.174"),
     ("CA_ROTOR1_PX", "-0.174"),
@@ -51,6 +51,12 @@ const X500_PARAMS: [(&str, &str); 23] = [
     ("MNT_MAX_PITCH", X500_GIMBAL.max_pitch),
     ("MNT_MIN_PITCH", X500_GIMBAL.min_pitch),
     ("MNT_RANGE_YAW", X500_GIMBAL.range_yaw),
+    // No output filter in PX4: its open-loop AUX filter (MNT_TAU, 0.3 s by
+    // default) sits inside the rate integration, because each step starts
+    // from the filtered angle, so a rate demand moves the gimbal at only
+    // dt / (MNT_TAU + dt) of itself (about 1/26 at the module's ~80 Hz).
+    // The sidecar's gimbal model carries the servo's own lag.
+    ("MNT_TAU", "0"),
     ("PWM_MAIN_FUNC5", "420"),
     ("PWM_MAIN_FUNC6", "421"),
     ("PWM_MAIN_FUNC7", "422"),

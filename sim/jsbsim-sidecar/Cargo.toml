@@ -2,11 +2,17 @@
 name = "pilotage-jsbsim-sidecar"
 description = "JSBSim flight-dynamics sidecar: rigid-body truth on the shared world, synthetic sensors, and PX4's MAVLink simulator link"
 version = "0.1.0"
-edition.workspace = true
+edition = "2024"
 publish = false
 build = "build.rs"
 
-# The workspace table, repeated, with one change: unsafe code is denied
+# Built on its own, with its own lockfile and only public dependencies,
+# so a checkout without access to the workspace's private git
+# dependencies (Aviate's CI) builds it. See the root manifest's
+# `exclude`.
+[workspace]
+
+# The Pilotage workspace lint table, repeated, with one change: unsafe code is denied
 # instead of forbidden. Calling JSBSim's C++ library needs it; every
 # unsafe use sits in src/engine/ffi.rs, and the production-rust-lints
 # guard refuses it anywhere else in this crate.
@@ -29,15 +35,19 @@ name = "pilotage-jsbsim-sidecar"
 path = "src/main.rs"
 
 [dependencies]
-pilotage-mavlink = { workspace = true }
-pilotage-terrain-query = { workspace = true }
-pilotage-world = { workspace = true, features = ["archive"] }
-thiserror = { workspace = true }
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true, features = ["env-filter"] }
+pilotage-mavlink = { path = "../../crates/pilotage-mavlink" }
+pilotage-terrain-query = { path = "../../crates/pilotage-terrain-query" }
+pilotage-world = { path = "../../crates/pilotage-world", default-features = false, features = ["archive"] }
+thiserror = { version = "2.0.18", default-features = false }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+# The rev the root manifest pins for the shared world model; xtask's
+# tests hold the two equal.
+world-atmosphere = { git = "https://github.com/luofang34/world", rev = "8da6f84c0959d13b4554ade6e0fb166dfe8e2236" }
+world-core = { git = "https://github.com/luofang34/world", rev = "8da6f84c0959d13b4554ade6e0fb166dfe8e2236" }
 
 [dev-dependencies]
-pilotage-geo = { workspace = true }
+pilotage-geo = { path = "../../crates/pilotage-geo" }
 
 [build-dependencies]
 cc = "1.2.66"
