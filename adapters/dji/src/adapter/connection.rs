@@ -179,6 +179,11 @@ impl Connection {
         true
     }
 
+    pub(super) fn invalidate_model(&mut self) {
+        self.cancel_movement();
+        self.keyframes.close();
+    }
+
     pub(super) fn read_available_blocking(
         &mut self,
         now: Duration,

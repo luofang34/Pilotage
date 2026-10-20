@@ -8,6 +8,7 @@ mod harness;
 mod keyframe;
 mod mapping;
 mod mobile;
+mod model;
 mod observed;
 mod profile;
 mod recovery;

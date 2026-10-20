@@ -142,11 +142,26 @@ impl Harness {
     }
 
     pub(super) fn prime(&mut self) -> io::Result<()> {
+        self.feed_model(87, 0)?;
+        self.step(0);
+        self.telemetry(0);
         for (index, pose) in observed_poses().into_iter().enumerate() {
             self.feed(&pose)?;
             self.step(index as u64 * 10);
         }
         Ok(())
+    }
+
+    pub(super) fn feed_model(&mut self, fc_type: u8, sequence: u16) -> io::Result<()> {
+        let mut bytes = captured_hex_frames(include_str!(
+            "../airframe/fixtures/mini3-reported-attitude.hex"
+        ))
+        .remove(0);
+        bytes[6..8].copy_from_slice(&sequence.to_le_bytes());
+        bytes[59] = fc_type;
+        seal_duml(&mut bytes);
+        let packet = packets(&bytes).remove(0);
+        self.feed(&self.recording.1.command(packet.raw()))
     }
 
     pub(super) fn select_profile(&mut self, profile: turret_dji::Mini3ControlProfile) {

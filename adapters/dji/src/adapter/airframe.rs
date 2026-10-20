@@ -9,28 +9,23 @@ use pilotage_protocol::MotorState;
 use crate::{DumlFrame, RouteAddress};
 
 const MAX_AGE: Duration = Duration::from_millis(300);
+const MINI3_FC_TYPE: u8 = 87;
 const SOURCE_ID: u64 = 0x0e_03_43;
 const ESTIMATOR_QUALITY_UNUSABLE: u32 = 2;
 
 #[derive(Clone, Copy)]
 pub(super) struct AirframeReport {
-    sequence: u16,
     angles_tenths: [i16; 3],
     motor_state: MotorState,
 }
 
 impl AirframeReport {
     pub(super) fn from_push(frame: &DumlFrame) -> Option<Self> {
-        if frame.version() != 1
-            || frame.sender() != RouteAddress(14)
-            || frame.receiver() != RouteAddress(2)
-            || frame.flags() != 0
-            || frame.command_set() != 3
-            || frame.command_id() != 0x43
-        {
+        let payload = osd_payload(frame)?;
+        // The SDK selects the Mini 3 FC from this OSD product discriminator.
+        if payload[48] != MINI3_FC_TYPE {
             return None;
         }
-        let payload: &[u8; 70] = frame.payload().try_into().ok()?;
         // This Mini 3 profile infers the legacy OSD angle prefix. It does not
         // establish axis directions or a north reference.
         // https://github.com/o-gs/dji-firmware-tools/blob/195692263c2684cf1ddc4995f2736be6c0fb135e/comm_dissector/wireshark/dji-dumlv1-flyc.lua#L886-L912
@@ -46,7 +41,6 @@ impl AirframeReport {
             return None;
         }
         Some(Self {
-            sequence: frame.sequence(),
             angles_tenths,
             // The SDK's fc_osd_push / KeyAreMotorsOnPush reads bit 3 at
             // byte 32. This reports motor operation, not arm or landed state.
@@ -81,6 +75,19 @@ impl AirframeReport {
     }
 }
 
+fn osd_payload(frame: &DumlFrame) -> Option<&[u8; 70]> {
+    if frame.version() != 1
+        || frame.sender() != RouteAddress(14)
+        || frame.receiver() != RouteAddress(2)
+        || frame.flags() != 0
+        || frame.command_set() != 3
+        || frame.command_id() != 0x43
+    {
+        return None;
+    }
+    frame.payload().try_into().ok()
+}
+
 pub(super) struct AirframeSample {
     pub(super) avionics: AvionicsSample,
     pub(super) fc_state: FcStateSample,
@@ -89,23 +96,57 @@ pub(super) struct AirframeSample {
 #[derive(Default)]
 pub(super) struct AirframeObservations {
     latest: Option<(AirframeReport, Duration)>,
+    last_sequence: Option<u16>,
+    binding_revision: u64,
     sequence: u32,
     published_sequence: u32,
 }
 
 impl AirframeObservations {
     pub(super) fn receive(&mut self, frame: &DumlFrame, now: Duration) {
-        let Some(report) = AirframeReport::from_push(frame) else {
+        let Some(payload) = osd_payload(frame) else {
             return;
         };
-        if let Some((previous, _)) = self.latest {
-            let delta = report.sequence.wrapping_sub(previous.sequence);
+        // A replacement FC can restart its sequence. Negative identity evidence
+        // closes the binding even when it cannot advance the stream watermark.
+        if payload[48] != MINI3_FC_TYPE {
+            self.invalidate_binding();
+        }
+        if let Some(previous) = self.last_sequence {
+            let delta = frame.sequence().wrapping_sub(previous);
             if delta == 0 || delta >= 0x8000 {
                 return;
             }
         }
+        self.last_sequence = Some(frame.sequence());
+        let Some(report) = AirframeReport::from_push(frame) else {
+            self.invalidate_binding();
+            return;
+        };
         self.sequence = self.sequence.wrapping_add(1);
         self.latest = Some((report, now));
+    }
+
+    pub(super) fn binding_revision(&self) -> u64 {
+        self.binding_revision
+    }
+
+    pub(super) fn model_deadline(&self, now: Duration) -> Option<Duration> {
+        let (_, received) = self.latest?;
+        let until = received.checked_add(MAX_AGE)?;
+        (now >= received && now < until).then_some(until)
+    }
+
+    pub(super) fn expire_binding(&mut self, now: Duration) {
+        if self.model_deadline(now).is_none() {
+            self.invalidate_binding();
+        }
+    }
+
+    fn invalidate_binding(&mut self) {
+        if self.latest.take().is_some() {
+            self.binding_revision = self.binding_revision.wrapping_add(1);
+        }
     }
 
     pub(super) fn sample(
