@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use pilotage_adapter_api::{ApplyOutcome, Disposition, RejectReason};
 use pilotage_protocol::{
-    ActionKind, ControlIntent, LogicalAxisId, ScopedControlFrame, VelocityIntent,
+    ActionKind, ControlIntent, LogicalAxisId, ReferenceFrame, ScopedControlFrame, VelocityIntent,
 };
 use pilotage_timing::SimTick;
 
@@ -82,6 +82,9 @@ fn direct_disposition(outcome: DirectOutcome, clamped: bool) -> Disposition {
         DirectOutcome::Streamed { slewed } if slewed || clamped => Disposition::Transformed,
         DirectOutcome::Streamed { .. } => Disposition::Accepted,
         DirectOutcome::Landing => Disposition::Constrained,
+        DirectOutcome::TakeoffBlocked => Disposition::Rejected(RejectReason::Other(
+            "the takeoff procedure has not released motion control".to_owned(),
+        )),
         DirectOutcome::NotArmed => Disposition::Rejected(RejectReason::UplinkIdle),
         DirectOutcome::LaneClosed => Disposition::Rejected(RejectReason::Other(
             "the ArduPilot setpoint lane is closed".to_owned(),
@@ -92,16 +95,16 @@ fn direct_disposition(outcome: DirectOutcome, clamped: bool) -> Disposition {
 fn disposition(outcome: VelocityOutcome) -> Disposition {
     match outcome {
         VelocityOutcome::Streamed { constrained: false } => Disposition::Accepted,
-        // The intent became a clamped setpoint, or a takeoff.
-        VelocityOutcome::Streamed { constrained: true } | VelocityOutcome::TakeoffCommanded => {
-            Disposition::Transformed
-        }
+        VelocityOutcome::Streamed { constrained: true } => Disposition::Transformed,
         // The FC owns the motion for now: takeoff climb, landing, or a
-        // landed vehicle with no climb demand.
+        // landed vehicle awaiting an explicit takeoff.
         VelocityOutcome::TakeoffInProgress
         | VelocityOutcome::Landing
         | VelocityOutcome::HeldOnGround => Disposition::Constrained,
         VelocityOutcome::NotArmed => Disposition::Rejected(RejectReason::UplinkIdle),
+        VelocityOutcome::TakeoffBlocked => Disposition::Rejected(RejectReason::Other(
+            "the takeoff procedure has not released motion control".to_owned(),
+        )),
         VelocityOutcome::LaneClosed => Disposition::Rejected(RejectReason::Other(
             "the ArduPilot setpoint lane is closed".to_owned(),
         )),
@@ -132,13 +135,70 @@ impl ArduPilotAdapter {
                 "the flight scope consumes typed commands only".to_owned(),
             ));
         }
+        self.validate_flight_actions(frame)?;
+        match (frame.scope.as_str(), frame.intent) {
+            (_, None) => {}
+            (FLIGHT_SCOPE, Some(ControlIntent::Velocity(velocity)))
+                if velocity.frame == ReferenceFrame::BodyFrd => {}
+            (DIRECT_SCOPE, Some(intent)) if direct_target(&intent).is_some() => {}
+            _ => return Err(wrong_family()),
+        }
         Ok(())
+    }
+
+    fn validate_flight_actions(&self, frame: &ScopedControlFrame) -> Result<(), RejectReason> {
+        let unsupported = frame.actions.iter().any(|action| match action.kind() {
+            ActionKind::Arm | ActionKind::Disarm => false,
+            ActionKind::Takeoff => frame.scope.as_str() != FLIGHT_SCOPE || frame.intent.is_some(),
+            _ => true,
+        });
+        if unsupported || pilotage_protocol::actions_conflict(&frame.actions) {
+            return Err(RejectReason::Other(
+                "flight actions are unsupported or conflict".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn apply_flight_action(
+        &mut self,
+        frame: &ScopedControlFrame,
+        tick: SimTick,
+    ) -> Option<ApplyOutcome> {
+        let action = frame.actions.first()?.kind();
+        if action == ActionKind::Takeoff {
+            return Some(self.apply_takeoff(frame, tick));
+        }
+        let armed = self.fc_armed();
+        let Some(uplink) = self.uplink.as_mut() else {
+            return Some(rejected(tick, RejectReason::UnknownScope));
+        };
+        let failures = uplink.send_failures();
+        match action {
+            ActionKind::Arm => uplink.arm(armed, Instant::now()),
+            ActionKind::Disarm => {
+                let outcome = uplink.disarm(Instant::now());
+                tracing::info!(?outcome, "disarm action");
+            }
+            _ => return Some(rejected(tick, wrong_family())),
+        }
+        if failures != uplink.send_failures() {
+            return Some(rejected(
+                tick,
+                RejectReason::Other("the ArduPilot command lane refused the action".to_owned()),
+            ));
+        }
+        (action == ActionKind::Disarm).then(|| ApplyOutcome {
+            tick,
+            disposition: Disposition::Accepted,
+            action_results: action_results(frame, &[ActionKind::Disarm]),
+        })
     }
 
     /// Applies one flight-scope frame. Disarm short-circuits the frame;
     /// arm goes to the FC whatever the estimate says, because ArduCopter's
     /// pre-arm checks decide and say why. A velocity intent needs a
-    /// current pose: the takeoff phase is judged on the estimated height.
+    /// current pose. Takeoff uses a separate action and observation path.
     pub(super) fn apply_flight(
         &mut self,
         frame: &ScopedControlFrame,
@@ -146,6 +206,9 @@ impl ArduPilotAdapter {
     ) -> ApplyOutcome {
         if let Err(reason) = self.validate_flight_frame(frame) {
             return rejected(tick, reason);
+        }
+        if let Some(outcome) = self.apply_flight_action(frame, tick) {
+            return outcome;
         }
         let armed = self.fc_armed();
         let pose = self.current_pose();
@@ -157,39 +220,13 @@ impl ArduPilotAdapter {
             return rejected(tick, RejectReason::UnknownScope);
         };
         let now = Instant::now();
-        if frame
-            .actions
-            .iter()
-            .any(|action| action.kind() == ActionKind::Disarm)
-        {
-            let outcome = uplink.disarm(now);
-            tracing::info!(?outcome, "disarm action");
-            return ApplyOutcome {
-                tick,
-                disposition: Disposition::Accepted,
-                action_results: action_results(frame, &[ActionKind::Disarm]),
-            };
-        }
-        if frame
-            .actions
-            .iter()
-            .any(|action| action.kind() == ActionKind::Arm)
-        {
-            uplink.arm(armed, now);
-        }
         let action_results = action_results(frame, &[ActionKind::Arm]);
         let disposition = match (frame.scope.as_str(), frame.intent) {
             (_, None) => Disposition::Accepted,
             (FLIGHT_SCOPE, Some(ControlIntent::Velocity(velocity))) => match pose {
-                Some(pose) => {
+                Some(_) => {
                     let (demand, constrained) = clamp_to_envelope(&velocity);
-                    disposition(uplink.apply_velocity(
-                        demand,
-                        constrained,
-                        armed,
-                        pose.pos_ned_m[2],
-                        now,
-                    ))
+                    disposition(uplink.apply_velocity(demand, constrained, armed))
                 }
                 None => Disposition::Rejected(RejectReason::MeasurementUnavailable),
             },

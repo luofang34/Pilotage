@@ -89,6 +89,7 @@ fn stamp_seq(sequence: u32) -> wire::MeasurementStamp {
 /// group stamped separately so one can be frozen while another advances.
 fn estimate(attitude: u32, kinematics: u32, geodetic: u32) -> wire::TelemetrySample {
     wire::TelemetrySample {
+        flight_procedure: None,
         payload: None,
         avionics: Some(wire::AvionicsState {
             quat_w: 1.0,

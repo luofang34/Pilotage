@@ -7,7 +7,7 @@ use super::{
     TestResult,
     harness::{Harness, frame},
 };
-use crate::adapter::capability::MAX_PITCH_RATE;
+use crate::adapter::BENCH_PITCH_RATE_LIMIT_RPS;
 
 fn initialized() -> TestResultHarness {
     let mut harness = Harness::bench();
@@ -21,7 +21,7 @@ type TestResultHarness = Result<Harness, Box<dyn std::error::Error>>;
 #[test]
 fn a_host_budget_is_consumed_at_the_final_writer() -> TestResult {
     let mut harness = initialized()?;
-    let mut request = frame(-MAX_PITCH_RATE);
+    let mut request = frame(-BENCH_PITCH_RATE_LIMIT_RPS);
     request.admitted_timing.as_mut().unwrap().send_remaining = Duration::from_millis(5);
     harness.apply(request, 20);
     let before = harness.written()?;
@@ -42,12 +42,12 @@ fn a_host_budget_is_consumed_at_the_final_writer() -> TestResult {
 fn unadmitted_input_and_unimplemented_yaw_never_write() -> TestResult {
     let mut harness = initialized()?;
     let before = harness.written()?;
-    let mut missing = frame(-MAX_PITCH_RATE);
+    let mut missing = frame(-BENCH_PITCH_RATE_LIMIT_RPS);
     missing.admitted_timing = None;
     let mut yaw = frame(0.0);
     yaw.intent = Some(ControlIntent::GimbalRate(GimbalRateIntent {
         pitch_rate: 0.0,
-        yaw_rate: MAX_PITCH_RATE / 2.0,
+        yaw_rate: BENCH_PITCH_RATE_LIMIT_RPS / 2.0,
     }));
     for request in [missing, yaw] {
         assert!(matches!(
@@ -63,7 +63,7 @@ fn unadmitted_input_and_unimplemented_yaw_never_write() -> TestResult {
 #[test]
 fn a_capture_failure_preserves_the_fact_that_bytes_were_sent() -> TestResult {
     let mut harness = initialized()?;
-    harness.apply(frame(-MAX_PITCH_RATE), 20);
+    harness.apply(frame(-BENCH_PITCH_RATE_LIMIT_RPS), 20);
     harness.fail_capture()?;
     harness.step(20);
     let progress = harness
@@ -83,7 +83,7 @@ fn a_capture_failure_preserves_the_fact_that_bytes_were_sent() -> TestResult {
 #[test]
 fn command_telemetry_never_invents_a_measured_axis() -> TestResult {
     let mut harness = initialized()?;
-    harness.apply(frame(-MAX_PITCH_RATE), 20);
+    harness.apply(frame(-BENCH_PITCH_RATE_LIMIT_RPS), 20);
     harness.step(20);
     let telemetry = harness.adapter.sample_telemetry();
     let sample = &telemetry.samples[0];
@@ -100,7 +100,7 @@ fn command_telemetry_never_invents_a_measured_axis() -> TestResult {
 #[test]
 fn a_new_authority_fences_an_unsent_old_target() -> TestResult {
     let mut harness = initialized()?;
-    harness.apply(frame(-MAX_PITCH_RATE), 20);
+    harness.apply(frame(-BENCH_PITCH_RATE_LIMIT_RPS), 20);
     let before = harness.written()?;
     let mut new_owner = frame(0.0);
     new_owner.generation = Generation::new(2);
@@ -108,7 +108,9 @@ fn a_new_authority_fences_an_unsent_old_target() -> TestResult {
     harness.step(30);
     assert_eq!(harness.written()?, before);
     assert!(matches!(
-        harness.apply(frame(-MAX_PITCH_RATE), 40).disposition,
+        harness
+            .apply(frame(-BENCH_PITCH_RATE_LIMIT_RPS), 40)
+            .disposition,
         Disposition::Rejected(_)
     ));
     harness.step(40);
@@ -119,7 +121,7 @@ fn a_new_authority_fences_an_unsent_old_target() -> TestResult {
 #[test]
 fn the_catalog_and_state_share_the_attachment_identity() -> TestResult {
     let mut harness = initialized()?;
-    harness.apply(frame(-MAX_PITCH_RATE), 20);
+    harness.apply(frame(-BENCH_PITCH_RATE_LIMIT_RPS), 20);
     harness.step(20);
     let catalog = harness.adapter.capabilities();
     let capability = catalog.vehicles[0].scopes[0].payload.as_ref().unwrap();
@@ -172,5 +174,35 @@ fn feedback_availability_does_not_invent_yaw_control() -> TestResult {
             reason: turret_core::UnavailableReason::MissingFeedback,
         }
     );
+    Ok(())
+}
+
+#[test]
+fn missing_write_receipt_is_unknown_not_a_claim_of_unsent_cancellation() -> TestResult {
+    let mut harness = initialized()?;
+    harness.apply(frame(-BENCH_PITCH_RATE_LIMIT_RPS), 20);
+    let before = harness.written()?.len();
+    harness.lose_write_receipt()?;
+    harness.step(20);
+    assert!(harness.written()?.len() > before);
+    let progress = harness
+        .adapter
+        .connection
+        .execution
+        .wire_progress()
+        .unwrap();
+    assert_eq!(
+        progress.stage,
+        wire::PayloadCommandStage::OutcomeUnknown as i32
+    );
+    assert_eq!(
+        progress.end_reason,
+        wire::PayloadEndReason::TransportFailure as i32
+    );
+    assert!(progress.sent_at.is_none());
+    assert!(harness.adapter.status_cached().control_locked);
+    let written = harness.written()?;
+    harness.step(30);
+    assert_eq!(harness.written()?, written);
     Ok(())
 }

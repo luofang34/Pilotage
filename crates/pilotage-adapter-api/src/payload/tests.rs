@@ -3,6 +3,8 @@ use turret_core::{
     Angle, CommandIdentity, CommandProgress, EndReason, Observation, ObservationSource, Tick,
 };
 
+mod rejection;
+
 #[test]
 fn receipt_does_not_become_sample_time_or_reference_frame() {
     let value = Observation {
@@ -35,6 +37,7 @@ fn cancelled_command_retains_sent_and_acknowledged_evidence() {
         prepared_at: Some(Tick(20)),
         sent_at: Some(Tick(30)),
         acknowledged_at: Some(Tick(40)),
+        rejected_at: None,
         acknowledgement_timed_out: false,
         observed_complete_at: None,
         ended: Some(EndReason::Revoked),

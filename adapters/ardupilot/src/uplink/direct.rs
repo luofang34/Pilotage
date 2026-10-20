@@ -42,6 +42,8 @@ pub(crate) enum DirectOutcome {
     Streamed { slewed: bool },
     /// Landing: the FC owns the descent.
     Landing,
+    /// An unresolved takeoff procedure blocks direct control.
+    TakeoffBlocked,
     /// The FC reports itself disarmed.
     NotArmed,
     /// The lane to the link is gone.
@@ -76,6 +78,9 @@ impl ArduPilotUplink {
         self.observe_armed(armed);
         if !armed {
             return DirectOutcome::NotArmed;
+        }
+        if self.takeoff_blocks_motion() {
+            return DirectOutcome::TakeoffBlocked;
         }
         if self.phase == FlightPhase::Landing {
             return DirectOutcome::Landing;

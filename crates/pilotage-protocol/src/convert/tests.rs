@@ -118,6 +118,7 @@ fn estimate_stamp(sequence: u32, acquired_at_ns: u64) -> wire::MeasurementStamp 
 #[allow(deprecated)]
 fn envelope_roundtrips_for_telemetry_sample_arm() {
     let sample = wire::TelemetrySample {
+        flight_procedure: None,
         payload: None,
         vehicle: Some(wire::VehicleId { value: 2 }),
         tick: Some(wire::SimTick { value: 42 }),
@@ -158,6 +159,7 @@ fn envelope_roundtrips_for_telemetry_sample_arm() {
             estimator_status_stamp: Some(estimate_stamp(11, 1_000_000)),
             magnetic_variation: None,
             magnetic_variation_stamp: None,
+            reported_euler: None,
         }),
         sim_truth: None,
         fc_state: None,

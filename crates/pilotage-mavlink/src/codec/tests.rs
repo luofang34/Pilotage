@@ -364,7 +364,7 @@ fn truncated_tail_is_garbage_not_panic() {
 }
 
 /// Full 49-byte GIMBAL_DEVICE_ATTITUDE_STATUS payload: base fields
-/// through the targets, then the v2 extension tail the decoder ignores.
+/// through the targets and the v2 attached-device extension.
 fn gimbal_status_payload(
     q: [f32; 4],
     rates: [f32; 3],
@@ -408,6 +408,9 @@ fn decodes_gimbal_device_attitude_status() {
                 rates_rps: rates,
                 flags: 12,
                 failure_flags: 0,
+                target_system: 255,
+                target_component: 190,
+                device_id: 0,
             }
         )]
     );

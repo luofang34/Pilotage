@@ -68,9 +68,8 @@ fn decode_sim_truth(payload: &[u8]) -> FcMessage {
 
 /// Wire order: time_boot_ms u32 @0, q[4] @4..20, angular
 /// velocity x/y/z @20..32, failure_flags u32 @32, flags u16
-/// @36, targets @38..40, then v2 extension fields this decoder
-/// ignores (zero-truncated payloads shorter than 40 still
-/// decode via the zero-extending accessors).
+/// @36, targets @38..40, and attached-device identity at extension @48.
+/// Zero-truncated fields are decoded using the zero-extending accessors.
 fn decode_gimbal_status(payload: &[u8]) -> FcMessage {
     FcMessage::GimbalDeviceAttitudeStatus {
         time_boot_ms: u32_at(payload, 0),
@@ -87,6 +86,9 @@ fn decode_gimbal_status(payload: &[u8]) -> FcMessage {
         ],
         failure_flags: u32_at(payload, 32),
         flags: u16_at(payload, 36),
+        target_system: payload.get(38).copied().unwrap_or(0),
+        target_component: payload.get(39).copied().unwrap_or(0),
+        device_id: payload.get(48).copied().unwrap_or(0),
     }
 }
 
@@ -180,8 +182,35 @@ fn decode_heartbeat(payload: &[u8]) -> FcMessage {
     }
 }
 
+fn decode_attitude(payload: &[u8]) -> FcMessage {
+    FcMessage::AttitudeQuaternion {
+        time_boot_ms: u32_at(payload, 0),
+        quat_wxyz: [
+            f32_at(payload, 4),
+            f32_at(payload, 8),
+            f32_at(payload, 12),
+            f32_at(payload, 16),
+        ],
+        rates_rps: [
+            f32_at(payload, 20),
+            f32_at(payload, 24),
+            f32_at(payload, 28),
+        ],
+    }
+}
+
 pub(super) fn decode_known(msg_id: u32, payload: &[u8]) -> Option<FcMessage> {
     match msg_id {
+        super::GLOBAL_POSITION_INT_ID => Some(FcMessage::RelativeAltitude {
+            time_boot_ms: u32_at(payload, 0),
+            altitude_mm: u32_at(payload, 16) as i32,
+        }),
+        super::EXTENDED_SYS_STATE_ID => Some(FcMessage::LandedState(super::LandedState::decode(
+            payload.get(1).copied().unwrap_or(0),
+        ))),
+        super::GIMBAL_MANAGER_INFORMATION_ID => Some(FcMessage::GimbalManagerInformation(
+            super::gimbal_manager::decode_information(payload),
+        )),
         super::GIMBAL_MANAGER_STATUS_ID => Some(FcMessage::GimbalManagerStatus(
             super::gimbal_manager::decode(payload),
         )),
@@ -205,20 +234,7 @@ pub(super) fn decode_known(msg_id: u32, payload: &[u8]) -> Option<FcMessage> {
             target_system: payload.get(8).copied().unwrap_or(0),
             target_component: payload.get(9).copied().unwrap_or(0),
         }),
-        ATTITUDE_QUATERNION_ID => Some(FcMessage::AttitudeQuaternion {
-            time_boot_ms: u32_at(payload, 0),
-            quat_wxyz: [
-                f32_at(payload, 4),
-                f32_at(payload, 8),
-                f32_at(payload, 12),
-                f32_at(payload, 16),
-            ],
-            rates_rps: [
-                f32_at(payload, 20),
-                f32_at(payload, 24),
-                f32_at(payload, 28),
-            ],
-        }),
+        ATTITUDE_QUATERNION_ID => Some(decode_attitude(payload)),
         SCALED_PRESSURE_ID => Some(FcMessage::ScaledPressure {
             time_boot_ms: u32_at(payload, 0),
             press_abs_hpa: f32_at(payload, 4),

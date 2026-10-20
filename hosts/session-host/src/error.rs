@@ -6,6 +6,9 @@ use crate::cli::CliError;
 /// Failures that can prevent the session host from starting or running.
 #[derive(Debug, thiserror::Error)]
 pub enum HostError {
+    /// Bind or admission configuration is invalid.
+    #[error(transparent)]
+    Network(#[from] crate::runtime::NetworkError),
     /// Command-line arguments were malformed.
     #[error("invalid command-line arguments: {0}")]
     Cli(#[source] CliError),

@@ -1348,6 +1348,7 @@ dependencies = [
  "pilotage-timing",
  "prost",
  "prost-build",
+ "subtle",
  "thiserror",
 ]
 

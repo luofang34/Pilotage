@@ -141,6 +141,9 @@ fn action_capability(action: &pilotage_adapter_api::ActionCapability) -> wire::A
             .iter()
             .map(|target| feel_target(*target) as i32)
             .collect(),
+        takeoff_start_state: pilotage_protocol::TakeoffStartState::option_to_wire(
+            action.takeoff_start_state,
+        ) as i32,
     }
 }
 
@@ -170,6 +173,7 @@ fn action_kind(kind: pilotage_protocol::ActionKind) -> wire::ControlAction {
         Domain::Arm => wire::ControlAction::Arm,
         Domain::Disarm => wire::ControlAction::Disarm,
         Domain::Takeoff => wire::ControlAction::Takeoff,
+        Domain::Land => wire::ControlAction::Land,
         Domain::ModeRequest => wire::ControlAction::ModeRequest,
         Domain::GimbalRecenter => wire::ControlAction::GimbalRecenter,
         Domain::CameraZoomIn => wire::ControlAction::CameraZoomIn,

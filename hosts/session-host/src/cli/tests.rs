@@ -5,6 +5,8 @@ fn no_args_defaults_to_ephemeral_port() {
     let parsed = parse_args(&[]).expect("empty args parse");
     assert_eq!(parsed.port, 0);
     assert_eq!(parsed.adapter, AdapterKind::Reference);
+    assert_eq!(parsed.bind_ip, std::net::Ipv4Addr::LOCALHOST);
+    assert!(parsed.join_token_file.is_none());
 }
 
 #[test]
@@ -100,4 +102,32 @@ fn dji_adapter_parses() {
     let args = vec!["--adapter".to_owned(), "dji".to_owned()];
     let parsed = parse_args(&args);
     assert!(matches!(parsed, Ok(value) if value.adapter == AdapterKind::Dji));
+}
+
+#[test]
+fn explicit_remote_network_flags_parse_without_embedding_a_secret() {
+    let args = [
+        "--bind",
+        "0.0.0.0",
+        "--join-token-file",
+        "/tmp/pilotage-token",
+    ]
+    .map(str::to_owned);
+    let parsed = parse_args(&args).unwrap();
+    assert_eq!(parsed.bind_ip, std::net::Ipv4Addr::UNSPECIFIED);
+    assert_eq!(parsed.join_token_file, Some("/tmp/pilotage-token".into()));
+}
+
+#[test]
+fn malformed_network_flags_are_rejected() {
+    for flag in ["--bind", "--join-token-file"] {
+        assert_eq!(
+            parse_args(&[flag.to_owned()]),
+            Err(CliError::MissingNetworkValue(flag.to_owned()))
+        );
+    }
+    assert!(matches!(
+        parse_args(&["--bind".into(), "not-an-address".into()]),
+        Err(CliError::InvalidBind(_))
+    ));
 }

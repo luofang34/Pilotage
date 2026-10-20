@@ -66,6 +66,11 @@ pub enum ControlAction {
     /// support. Acceptance does not confirm flight. The adapter checks the
     /// procedure's conditions and reports the vehicle's observed state.
     Takeoff,
+    /// Request the vehicle's native landing procedure.
+    ///
+    /// The scope must advertise landing support. Acceptance does not confirm
+    /// a landing. This action does not request disarm or cancel tracking.
+    Land,
     /// Request a flight-mode change to an explicit typed target.
     ModeRequest {
         /// The mode being requested.
@@ -106,6 +111,8 @@ pub enum ActionKind {
     Disarm,
     /// Request the vehicle's native takeoff procedure.
     Takeoff,
+    /// Request the vehicle's native landing procedure.
+    Land,
     /// Request a flight-mode change.
     ModeRequest,
     /// Recenter the gimbal.
@@ -130,6 +137,7 @@ impl ControlAction {
             Self::Arm => ActionKind::Arm,
             Self::Disarm => ActionKind::Disarm,
             Self::Takeoff => ActionKind::Takeoff,
+            Self::Land => ActionKind::Land,
             Self::ModeRequest { .. } => ActionKind::ModeRequest,
             Self::GimbalRecenter => ActionKind::GimbalRecenter,
             Self::CameraZoomIn => ActionKind::CameraZoomIn,
@@ -143,19 +151,22 @@ impl ControlAction {
 
 /// Whether a frame's action set is self-contradictory: any action kind
 /// repeated (two mode requests with different targets are still one kind —
-/// ambiguous, not a sequence), `Arm` with `Disarm`, or `Takeoff` with an
-/// arm, disarm or mode request. A conflicting set executes none of its actions.
+/// ambiguous, not a sequence), `Arm` with `Disarm`, or a flight procedure
+/// with another procedure, arm, disarm or mode request.
+/// A conflicting set executes none of its actions.
 #[must_use]
 pub fn actions_conflict(actions: &[ControlAction]) -> bool {
     let mut arm = false;
     let mut disarm = false;
     let mut takeoff = false;
+    let mut land = false;
     let mut mode = false;
     for (index, action) in actions.iter().enumerate() {
         match action.kind() {
             ActionKind::Arm => arm = true,
             ActionKind::Disarm => disarm = true,
             ActionKind::Takeoff => takeoff = true,
+            ActionKind::Land => land = true,
             ActionKind::ModeRequest => mode = true,
             _ => {}
         }
@@ -166,7 +177,7 @@ pub fn actions_conflict(actions: &[ControlAction]) -> bool {
             return true;
         }
     }
-    (arm && disarm) || (takeoff && (arm || disarm || mode))
+    (arm && disarm) || (takeoff && land) || ((takeoff || land) && (arm || disarm || mode))
 }
 
 /// Linear velocity (metres per second) plus yaw rate (radians per second) in a
@@ -302,6 +313,10 @@ impl ControlIntent {
 #[cfg(test)]
 #[path = "intent/takeoff_tests.rs"]
 mod takeoff_tests;
+
+#[cfg(test)]
+#[path = "intent/land_tests.rs"]
+mod land_tests;
 
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]

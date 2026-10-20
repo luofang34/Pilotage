@@ -8,10 +8,10 @@ use std::time::Instant;
 use super::estimator::{accept_status, authorization_at, invalidate_cached_authorization};
 use super::measurement::{next_attitude_stamp, next_baro_stamp, next_kinematics_stamp};
 use super::{
-    AttitudeUpdate, AuthorizationSource, BatteryReport, CommandAckReport, GimbalDeviceAttitude,
-    KinematicsUpdate, LinkState, estimator,
+    AttitudeUpdate, AuthorizationSource, BatteryReport, CommandAckReport, KinematicsUpdate,
+    LinkState, estimator,
 };
-use crate::codec::{FcMessage, FrameSource, GimbalManagerStatus};
+use crate::codec::{FcMessage, FrameSource};
 
 /// Folds decoded messages into the shared cache. Kept synchronous and
 /// lock-scoped: the lock is never held across an await.
@@ -69,17 +69,17 @@ fn note_command_ack(command: u16, result: u8) {
 /// Caches one command acknowledgement addressed to this GCS identity.
 /// Acks for another endpoint prove nothing about our commands; zero
 /// targets mean the sender omitted the v2 extension fields (accepted as
-/// unaddressed). The gimbal CONFIGURE verdict is tracked apart from the
-/// general slot so a later, unrelated ack (e.g. periodic
-/// SET_MESSAGE_INTERVAL) cannot bury a claim denial.
-fn apply_command_ack(
-    latest: &mut LinkState,
-    command: u16,
-    result: u8,
-    target_system: u8,
-    target_component: u8,
-    now: Instant,
-) {
+/// unaddressed).
+fn apply_command_ack(latest: &mut LinkState, message: FcMessage, now: Instant) {
+    let FcMessage::CommandAck {
+        command,
+        result,
+        target_system,
+        target_component,
+    } = message
+    else {
+        return;
+    };
     let addressed_to_us = (target_system == 0 && target_component == 0)
         || (target_system == crate::codec::GCS_SYSTEM_ID
             && target_component == crate::codec::GCS_COMPONENT_ID);
@@ -94,9 +94,6 @@ fn apply_command_ack(
     };
     latest.last_command_ack = Some(report);
     latest.fc_reports.command_acks.insert(command, report);
-    if command == crate::codec::MAV_CMD_DO_GIMBAL_MANAGER_CONFIGURE {
-        latest.gimbal_configure_ack = Some(report);
-    }
 }
 
 /// Folds decoded messages into the shared cache at an explicit receive
@@ -115,6 +112,9 @@ pub fn apply_messages_at(
     latest.crc_failures = latest.crc_failures.wrapping_add(u64::from(crc_failures));
     latest.unknown_ids = latest.unknown_ids.wrapping_add(u64::from(unknown_ids));
     for &(source, message) in messages {
+        if super::gimbal::apply(&mut latest, source, message, now) {
+            continue;
+        }
         if let FcMessage::Camera(report) = message {
             if source.system_id == latest.system_id {
                 super::camera::apply(&mut latest, source.component_id, report, now);
@@ -321,21 +321,21 @@ fn apply_kinematics(
     }
 }
 
-fn apply_gimbal_manager_status(latest: &mut LinkState, report: GimbalManagerStatus, now: Instant) {
-    if latest
-        .fc_reports
-        .gimbal_manager
-        .is_none_or(|(previous, _)| report.time_boot_ms > previous.time_boot_ms)
-    {
-        latest.fc_reports.gimbal_manager = Some((report, now));
-    }
-}
-
 /// Applies one source-matched decoded message to the cache.
 fn apply_message(latest: &mut LinkState, message: FcMessage, now: Instant) {
     match message {
-        FcMessage::Camera(_) | FcMessage::InvalidAviateEstimatorStatus => {}
-        FcMessage::GimbalManagerStatus(report) => apply_gimbal_manager_status(latest, report, now),
+        FcMessage::RelativeAltitude {
+            time_boot_ms,
+            altitude_mm,
+        } => super::flight_state::apply_relative_altitude(latest, time_boot_ms, altitude_mm, now),
+        FcMessage::LandedState(state) => {
+            super::flight_state::apply_landed_state(latest, state, now)
+        }
+        FcMessage::Camera(_)
+        | FcMessage::InvalidAviateEstimatorStatus
+        | FcMessage::GimbalManagerInformation(_)
+        | FcMessage::GimbalManagerStatus(_)
+        | FcMessage::GimbalDeviceAttitudeStatus { .. } => {}
         FcMessage::Heartbeat {
             armed,
             custom_mode,
@@ -350,19 +350,7 @@ fn apply_message(latest: &mut LinkState, message: FcMessage, now: Instant) {
         FcMessage::StatusText { severity, text } => {
             latest.fc_reports.push_status_text(severity, &text, now);
         }
-        FcMessage::CommandAck {
-            command,
-            result,
-            target_system,
-            target_component,
-        } => apply_command_ack(
-            latest,
-            command,
-            result,
-            target_system,
-            target_component,
-            now,
-        ),
+        FcMessage::CommandAck { .. } => apply_command_ack(latest, message, now),
         FcMessage::EstimatorStatus { time_usec, flags } => {
             apply_standard_status(latest, time_usec, flags, now);
         }
@@ -399,7 +387,6 @@ fn apply_message(latest: &mut LinkState, message: FcMessage, now: Instant) {
             lat_lon_alt,
         } => apply_sim_truth(latest, time_usec, quat_wxyz, vel_ned_mps, lat_lon_alt, now),
         FcMessage::BatteryStatus { .. } => apply_battery(latest, message, now),
-        FcMessage::GimbalDeviceAttitudeStatus { .. } => apply_gimbal(latest, message, now),
         // Parameter echoes answer the adapter's own reads and writes.
         FcMessage::ParamValue { param_id, value } => {
             latest.fc_reports.record_param(&param_id, value, now);
@@ -443,30 +430,6 @@ fn apply_battery(latest: &mut LinkState, message: FcMessage, now: Instant) {
         energy_consumed_hj,
         time_remaining_s,
         sequence,
-        received_at: now,
-    });
-}
-
-fn apply_gimbal(latest: &mut LinkState, message: FcMessage, now: Instant) {
-    let FcMessage::GimbalDeviceAttitudeStatus {
-        time_boot_ms,
-        quat_wxyz,
-        rates_rps,
-        flags,
-        failure_flags,
-    } = message
-    else {
-        return;
-    };
-    if failure_flags != 0 {
-        tracing::warn!(failure_flags, "gimbal device reports a failure condition");
-    }
-    latest.gimbal_device = Some(GimbalDeviceAttitude {
-        quat_wxyz,
-        rates_rps,
-        time_boot_ms,
-        flags,
-        failure_flags,
         received_at: now,
     });
 }

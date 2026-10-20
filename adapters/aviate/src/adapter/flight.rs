@@ -203,6 +203,7 @@ impl AviateAdapter {
         if truth.is_some() || fc_state.is_some() {
             return TelemetryBatch {
                 samples: vec![TelemetrySample {
+                    flight_procedure: None,
                     payload: None,
                     vehicle: self.vehicle,
                     // Without a simulation clock the tick has no source;

@@ -1,6 +1,5 @@
-//! FC-owned reports cached outside the estimate measurement discipline:
-//! the flight mode, the verdict on each command, and recent status text.
-//! None of them is an estimate, and none can authorize one.
+//! FC-owned reports for procedures, command verdicts, and operator feedback.
+//! These reports do not authorize navigation estimates.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::time::Instant;
@@ -57,8 +56,10 @@ pub struct ParamReport {
 /// FC-owned reports from the selected source.
 #[derive(Debug, Default)]
 pub struct FcReports {
-    /// Latest independent manager ownership report and its local receive time.
-    pub gimbal_manager: Option<(crate::codec::GimbalManagerStatus, Instant)>,
+    /// Latest landed detector report from the selected flight controller.
+    pub landed_state: Option<super::LandedStateReport>,
+    /// Latest altitude above the selected flight controller's home position.
+    pub relative_altitude: Option<super::RelativeAltitudeReport>,
     /// Cameras discovered on the selected vehicle, keyed by component and attached-device id.
     pub cameras: BTreeMap<(u8, u8), super::CameraReport>,
     /// HEARTBEAT `custom_mode` of the last FC heartbeat.

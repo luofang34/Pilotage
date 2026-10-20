@@ -46,6 +46,8 @@ pub const DEFAULT_MISSION_ANCHOR: GeoPointDegrees = GeoPointDegrees {
 /// them directly through [`super::start_with_options`].
 #[derive(Debug, Clone, Default)]
 pub struct RuntimeOptions {
+    /// Bind address and transport admission credentials.
+    pub network: super::NetworkOptions,
     /// SIMULATION compatibility: admit numeric legacy payload frames at the
     /// gate's translation boundary. Production control is TYPED-ONLY —
     /// legacy payloads bypass profile-activation binding and carry
@@ -99,6 +101,7 @@ impl RuntimeOptions {
             Ok("1" | "true")
         );
         Ok(Self {
+            network: super::NetworkOptions::default(),
             legacy_compatibility,
             mission: mission_from_env()?,
             sim_camera_port: env_var("PILOTAGE_SIM_CAMERA_PORT")?

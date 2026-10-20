@@ -179,6 +179,7 @@ impl VehicleAdapter for ReferenceAdapter {
                         action: pilotage_protocol::ActionKind::Arm,
                         mode_targets: vec![],
                         feel_targets: vec![],
+                        takeoff_start_state: None,
                     }],
                     legacy: Some(LegacyCommandMap::Velocity {
                         vx: Some(LegacyAxisRoute {
@@ -282,6 +283,7 @@ impl VehicleAdapter for ReferenceAdapter {
     fn sample_telemetry(&mut self) -> TelemetryBatch {
         TelemetryBatch {
             samples: vec![TelemetrySample {
+                flight_procedure: None,
                 payload: None,
                 vehicle: self.vehicle,
                 tick: self.tick,

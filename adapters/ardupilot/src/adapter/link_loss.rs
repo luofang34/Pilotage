@@ -5,7 +5,7 @@
 use pilotage_adapter_api::{LinkLossEnactError, LinkLossPolicy};
 use pilotage_protocol::{ScopeId, VehicleId};
 
-use super::{ArduPilotAdapter, DIRECT_SCOPE, FLIGHT_SCOPE};
+use super::{ArduPilotAdapter, DIRECT_SCOPE, FLIGHT_SCOPE, GIMBAL_SCOPE};
 
 impl ArduPilotAdapter {
     /// Sets or clears one scope's link-loss policy. An engage records the
@@ -25,6 +25,21 @@ impl ArduPilotAdapter {
             return Ok(());
         };
         self.link_loss_policy.insert(scope.clone(), policy);
+        if let Some(camera) = self.camera.as_mut() {
+            camera.invalidate_pending_commands(vehicle, scope);
+        }
+        if scope.as_str() == GIMBAL_SCOPE {
+            let Some(gimbal) = self.gimbal.as_mut() else {
+                return Err(LinkLossEnactError::NoActuationChannel);
+            };
+            return if gimbal.queue_link_loss_stop() {
+                Ok(())
+            } else {
+                Err(LinkLossEnactError::ChannelRejected {
+                    detail: "the gimbal stop could not be queued".to_owned(),
+                })
+            };
+        }
         if scope.as_str() != FLIGHT_SCOPE && scope.as_str() != DIRECT_SCOPE {
             return Ok(());
         }

@@ -26,6 +26,9 @@ impl PayloadWrite {
             .state
             .lock()
             .map_err(|_| std::io::Error::other("payload executor lock poisoned"))?;
+        if state.has_effect() {
+            return Ok(false);
+        }
         if state
             .command
             .is_none_or(|command| command.identity != self.identity)
@@ -53,7 +56,8 @@ impl PayloadWrite {
                     .executor
                     .record_sent(self.identity, now)
                     .map_err(std::io::Error::other)?;
-                state.effect(sent.current.effect);
+                state.active_command = state.command;
+                state.effect(sent.current).map_err(std::io::Error::other)?;
                 state.note(now);
                 Ok(true)
             }
@@ -67,10 +71,13 @@ impl PayloadWrite {
                     .executor
                     .record_write_failure(self.identity, now)
                     .map_err(std::io::Error::other)?;
-                state.effect(failure.attempted.effect);
                 if let Some(active) = failure.active {
-                    state.effect(active.effect);
+                    state.effect(active).map_err(std::io::Error::other)?;
                 }
+                state
+                    .effect(failure.attempted)
+                    .map_err(std::io::Error::other)?;
+                state.active_command = None;
                 state.note(now);
                 Err(result.err().unwrap_or_else(|| {
                     std::io::Error::new(std::io::ErrorKind::WriteZero, "partial MAVLink datagram")

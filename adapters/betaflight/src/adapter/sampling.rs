@@ -61,9 +61,9 @@ impl BetaflightAdapter {
                 0
             };
         let avionics = AvionicsSample {
-            attitude: Some(AvionicsAttitudeSample {
+            attitude: Some(AvionicsAttitudeSample::Canonical {
                 quat_wxyz: snapshot.quaternion().map(|q| q as f32),
-                rates_rps: snapshot.rates_frd.map(|r| r as f32),
+                rates_rps: Some(snapshot.rates_frd.map(|r| r as f32)),
                 stamp: estimate_stamp,
             }),
             kinematics,
@@ -75,9 +75,11 @@ impl BetaflightAdapter {
             magnetic_variation: None,
         };
         let fc_state = FcStateSample {
+            landed_state: None,
+            motor_state: None,
             arm_state: if snapshot.armed { 2 } else { 1 },
             last_command,
-            stamp: self.stamp(&observed, SourceRole::FcState, FC_STATE_SOURCE_ID),
+            stamp: Some(self.stamp(&observed, SourceRole::FcState, FC_STATE_SOURCE_ID)),
         };
         let pose = observed.north_east.map(|[north, east]| Pose2d {
             x: north,
@@ -89,6 +91,7 @@ impl BetaflightAdapter {
             .map(|fix| fix.velocity_ne[0].hypot(fix.velocity_ne[1]));
         TelemetryBatch {
             samples: vec![TelemetrySample {
+                flight_procedure: None,
                 payload: None,
                 vehicle: self.vehicle,
                 tick: self.tick_of(snapshot.received_at),

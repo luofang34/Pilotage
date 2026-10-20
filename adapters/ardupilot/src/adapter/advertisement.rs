@@ -37,10 +37,22 @@ impl ArduPilotAdapter {
                 id: self.vehicle,
                 class: VehicleClass::Multicopter,
                 display_name: DISPLAY_NAME.to_owned(),
-                scopes: if flying {
-                    vec![flight_scope_descriptor(), direct_scope_descriptor()]
-                } else {
-                    vec![]
+                scopes: {
+                    let mut scopes = if flying {
+                        vec![flight_scope_descriptor(), direct_scope_descriptor()]
+                    } else {
+                        vec![]
+                    };
+                    if let Some(gimbal) = self.gimbal.as_ref() {
+                        scopes.push(pilotage_mavlink::gimbal_endpoint::scope_descriptor(
+                            gimbal,
+                            &self.gimbal_stamp,
+                        ));
+                    }
+                    if let Some(camera) = self.camera.as_ref() {
+                        scopes.extend(camera.scopes());
+                    }
+                    scopes
                 },
                 link_loss_actions: if flying {
                     vec![LinkLossPolicy::Neutralize]
@@ -63,6 +75,8 @@ fn action(action: ActionKind) -> ActionCapability {
         action,
         mode_targets: vec![],
         feel_targets: vec![],
+        takeoff_start_state: (action == ActionKind::Takeoff)
+            .then_some(pilotage_protocol::TakeoffStartState::ArmedOnGround),
     }
 }
 
@@ -115,7 +129,11 @@ fn flight_scope_descriptor() -> ScopeDescriptor {
             max_vertical: MAX_VERTICAL_MPS,
             max_angular: MAX_YAW_RATE_RPS,
         }],
-        actions: vec![action(ActionKind::Arm), action(ActionKind::Disarm)],
+        actions: vec![
+            action(ActionKind::Arm),
+            action(ActionKind::Disarm),
+            action(ActionKind::Takeoff),
+        ],
         legacy: Some(LegacyCommandMap::Velocity {
             vx: Some(LegacyAxisRoute {
                 axis: PITCH_AXIS,

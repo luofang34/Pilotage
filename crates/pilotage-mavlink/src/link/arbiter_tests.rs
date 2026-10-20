@@ -82,6 +82,8 @@ async fn configure_reaches_the_wire_before_the_first_rate_frame() {
         .expect("the claim queues");
     rate_tx
         .send(Some(GimbalRateDemand {
+            flags: 12,
+            roll_rps: f32::NAN,
             gimbal_device_id: 1,
             receipt: None,
             payload_write: None,

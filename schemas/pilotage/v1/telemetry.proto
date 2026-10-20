@@ -99,12 +99,9 @@ message MeasurementStamp {
   SourceIntegrity integrity = 8;
 }
 
-// Raw avionics state estimate for flight vehicles (ADR-0018): attitude
-// quaternion (body FRD → world NED), body rates, NED position/velocity,
-// and the adapter's effective latched validity/quality authorization. Numeric
-// values are the estimator's output, not display-ready numbers — display
-// derivation (altitude, groundspeed, Euler angles) happens in the instrument
-// runtime (ADR-0017). Ground vehicles never set this field.
+// Aircraft avionics observations and separate estimator authorization.
+// Canonical attitude is body FRD → world NED. A reported Euler attitude has
+// unverified axis directions and reference. Neither grants authorization.
 message AvionicsState {
   // Fields 1–7 are meaningful only when attitude_stamp is present. Proto3
   // scalar defaults are not measurements and must not be displayed as such.
@@ -112,6 +109,8 @@ message AvionicsState {
   float quat_x = 2;
   float quat_y = 3;
   float quat_z = 4;
+  // Unknown body rates are NaN, including when an attitude quaternion is present.
+  // Rates must also have estimator authorization before use in prediction.
   float rate_p_rad_s = 5;
   float rate_q_rad_s = 6;
   float rate_r_rad_s = 7;
@@ -129,7 +128,8 @@ message AvionicsState {
   uint32 valid_flags = 14;
   // Effective latched quality: 0 good, 1 degraded, 2 unusable. It can include
   // fail-closed downgrades relative to the raw status observation and is
-  // meaningful only when estimator_status_stamp is present.
+  // meaningful only when estimator_status_stamp is present. This does not
+  // rate reported_euler or device health.
   uint32 quality = 15;
   // 0 unknown, 1 disarmed, 2 armed (from the vehicle's own report).
   // FC-owned arm state with provenance is published as
@@ -164,6 +164,22 @@ message AvionicsState {
   // both are meaningful only when that stamp is present.
   MagneticVariation magnetic_variation = 24;
   MeasurementStamp magnetic_variation_stamp = 25;
+  // Mutually exclusive with attitude_stamp. This representation cannot supply
+  // canonical attitude/rates authorization or a north reference. Its numeric
+  // values do not require canonical estimator quality to be present or usable.
+  ReportedEulerAttitude reported_euler = 26;
+}
+
+// Device-reported aircraft Euler angles, for numeric display only.
+// Axis directions and the horizontal reference are unverified. Consumers must
+// not convert these values to a canonical quaternion or use them for navigation,
+// control, horizon graphics, or prediction. A report is absent without its stamp.
+message ReportedEulerAttitude {
+  // Each angle uses the protocol's sign convention, in radians.
+  float pitch_rad = 1;
+  float roll_rad = 2;
+  float yaw_rad = 3;
+  MeasurementStamp stamp = 4;
 }
 
 // Where a magnetic variation value comes from.
@@ -275,14 +291,12 @@ message SimTruthState {
   GeodeticFix geodetic = 13;
 }
 
-// FC-owned vehicle state (arm today; mode/failsafe belong here as they
-// arrive) under its own provenance stamp: the FC is the only author, and
-// the stamp records the link observation that reported it.
+// FC-owned vehicle state. Each report has its own observation stamp.
 message FcState {
   // 0 unknown, 1 disarmed, 2 armed.
   uint32 arm_state = 1;
-  // Identity and acquisition of the FC report carrying this state.
-  // Absence makes the sample unconsumable.
+  // Identity and acquisition of the arm report.
+  // Absence makes the arm fields unconsumable.
   MeasurementStamp stamp = 2;
   // The FC's acknowledgement of the most recent commanded arm or disarm:
   // 0 none observed, 1 the command was an arm, 2 a disarm. Enactment
@@ -295,6 +309,40 @@ message FcState {
   // The typed answer to that command; meaningful only when
   // last_command_kind is non-zero.
   CommandOutcome last_command_outcome = 5;
+  // The FC's landed detector. Its stamp advances independently of arm.
+  // Absence does not mean on-ground or in-air.
+  LandedStateObservation landed_state = 6;
+  // The FC's motor report, with an independent observation stamp.
+  // Absence does not mean stopped. Arm state cannot supply this report.
+  MotorStateObservation motor_state = 7;
+}
+
+// The FC's reported motor operation, not a measurement of rotor speed.
+enum MotorState {
+  MOTOR_STATE_UNSPECIFIED = 0;
+  MOTOR_STATE_STOPPED = 1;
+  MOTOR_STATE_RUNNING = 2;
+}
+
+message MotorStateObservation {
+  MotorState state = 1;
+  // Absence makes this observation unconsumable.
+  MeasurementStamp stamp = 2;
+}
+
+// A flight controller's report, not a command result or an altitude inference.
+enum LandedState {
+  LANDED_STATE_UNSPECIFIED = 0;
+  LANDED_STATE_ON_GROUND = 1;
+  LANDED_STATE_IN_AIR = 2;
+  LANDED_STATE_TAKING_OFF = 3;
+  LANDED_STATE_LANDING = 4;
+}
+
+message LandedStateObservation {
+  LandedState state = 1;
+  // Absence makes this observation unconsumable.
+  MeasurementStamp stamp = 2;
 }
 
 // The vehicle's answer to one discrete command, independent of the flight
@@ -461,6 +509,8 @@ message PayloadState {
 
 // A single best-effort telemetry sample for one vehicle.
 message TelemetrySample {
+  // Adapter-owned procedure progress. This is not an FC measurement.
+  FlightProcedureState flight_procedure = 13;
   PayloadState payload = 12;
   VehicleId vehicle = 1;
   SimTick tick = 2;
@@ -484,4 +534,67 @@ message TelemetrySample {
   NavGuidanceState nav_guidance = 10;
   // Battery state with its own provenance stamp.
   BatteryState battery = 11;
+}
+
+// The control request that started a flight procedure. Vehicle identity is
+// supplied by the enclosing telemetry sample.
+message FlightProcedureRequest {
+  SessionId session = 1;
+  ScopeId scope = 2;
+  Generation generation = 3;
+  SequenceNum sequence = 4;
+  uint32 action_id = 5;
+}
+
+// Progress owned by the adapter. Re-publication must preserve the revision
+// and change time; it must not imply a fresh vehicle observation. Unknown
+// enum values do not establish progress or completion.
+message FlightProcedureState {
+  FlightProcedureRequest request = 1;
+  // Exactly 16 bytes. Compare only for equality at an attachment boundary.
+  bytes adapter_incarnation = 2;
+  // Wrapping revision within this request, changed only on a status transition.
+  uint64 revision = 3;
+  // Monotonic time since adapter start, not vehicle boot or publication time.
+  MonoTimestamp changed_at = 4;
+  FlightProcedureKind kind = 5;
+  FlightProcedurePhase phase = 6;
+  FlightProcedureReason reason = 7;
+  // An FC acknowledgement is distinct from observed procedure completion.
+  CommandOutcome fc_outcome = 8;
+}
+
+enum FlightProcedureKind {
+  FLIGHT_PROCEDURE_KIND_UNSPECIFIED = 0;
+  FLIGHT_PROCEDURE_KIND_TAKEOFF = 1;
+  FLIGHT_PROCEDURE_KIND_LAND = 2;
+}
+
+enum FlightProcedurePhase {
+  FLIGHT_PROCEDURE_PHASE_UNSPECIFIED = 0;
+  FLIGHT_PROCEDURE_PHASE_QUEUED = 1;
+  FLIGHT_PROCEDURE_PHASE_WRITTEN = 2;
+  FLIGHT_PROCEDURE_PHASE_IN_PROGRESS = 3;
+  // Only a fresh vehicle observation can establish completion.
+  FLIGHT_PROCEDURE_PHASE_COMPLETED = 4;
+  FLIGHT_PROCEDURE_PHASE_FAILED = 5;
+  // Completion was not established before the deadline. The vehicle can
+  // still be moving; this phase does not confirm a stop.
+  FLIGHT_PROCEDURE_PHASE_TIMED_OUT = 6;
+  // The adapter stopped tracking or issuing the procedure. This does not
+  // confirm that the vehicle stopped its autonomous motion.
+  FLIGHT_PROCEDURE_PHASE_CANCELLED = 7;
+}
+
+enum FlightProcedureReason {
+  FLIGHT_PROCEDURE_REASON_UNSPECIFIED = 0;
+  FLIGHT_PROCEDURE_REASON_COMMAND_REFUSED = 1;
+  FLIGHT_PROCEDURE_REASON_WRITE_FAILED = 2;
+  FLIGHT_PROCEDURE_REASON_DEADLINE_EXPIRED = 3;
+  FLIGHT_PROCEDURE_REASON_MEASUREMENT_UNAVAILABLE = 4;
+  FLIGHT_PROCEDURE_REASON_SOURCE_CHANGED = 5;
+  FLIGHT_PROCEDURE_REASON_AUTHORITY_LOST = 6;
+  FLIGHT_PROCEDURE_REASON_VEHICLE_DISARMED = 7;
+  FLIGHT_PROCEDURE_REASON_MODE_CHANGED = 8;
+  FLIGHT_PROCEDURE_REASON_INTERRUPTED = 9;
 }

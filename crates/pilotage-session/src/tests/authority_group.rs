@@ -43,6 +43,7 @@ fn grouped_engine() -> SessionEngine {
             action: pilotage_protocol::ActionKind::Arm,
             mode_targets: vec![],
             feel_targets: vec![],
+            takeoff_start_state: None,
         }],
         legacy: None,
     };

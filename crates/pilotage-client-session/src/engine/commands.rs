@@ -1,6 +1,7 @@
 //! Fenced command construction and host-issued validity windows.
 
 use super::*;
+use crate::PreparedControlAction;
 
 impl ClientEngine {
     /// Builds the next fenced control-frame datagram on the named lane,
@@ -54,17 +55,30 @@ impl ClientEngine {
         request: wire::ControlActionRequest,
         sampled_at_nanos: u64,
     ) -> Vec<ClientAction> {
+        self.prepare_control_action_at(vehicle_id, scope, request, sampled_at_nanos)
+            .map_or_else(Vec::new, |prepared| prepared.actions)
+    }
+
+    /// Prepares an action and its exact request identity from the active lane.
+    ///
+    /// Returns `None` when the lease is not held. A prepared action does not
+    /// confirm a transport write, host acceptance, or procedure completion.
+    pub fn prepare_control_action_at(
+        &mut self,
+        vehicle_id: u64,
+        scope: &str,
+        request: wire::ControlActionRequest,
+        sampled_at_nanos: u64,
+    ) -> Option<PreparedControlAction> {
         if !self.holds(vehicle_id, scope) {
-            return Vec::new();
+            return None;
         }
         let mut actions = self.probe_control_window(sampled_at_nanos);
         let required = self.requires_control_window();
-        let Some(lane) = self.lanes.get_mut(&(vehicle_id, scope.to_owned())) else {
-            return Vec::new();
-        };
+        let lane = self.lanes.get_mut(&(vehicle_id, scope.to_owned()))?;
         let mut request = request;
         if request.action_id == 0 {
-            self.next_action_id = self.next_action_id.wrapping_add(1);
+            self.next_action_id = self.next_action_id.wrapping_add(1).max(1);
             request.action_id = self.next_action_id;
         }
         lane.set_control_window(
@@ -75,10 +89,9 @@ impl ClientEngine {
             },
             required,
         );
-        actions.push(ClientAction::SendBootstrap(
-            lane.action_command_at(request, sampled_at_nanos),
-        ));
-        actions
+        let (identity, bytes) = lane.prepare_action_at(request, sampled_at_nanos);
+        actions.push(ClientAction::SendBootstrap(bytes));
+        Some(PreparedControlAction { identity, actions })
     }
 
     pub(super) fn requires_control_window(&self) -> bool {

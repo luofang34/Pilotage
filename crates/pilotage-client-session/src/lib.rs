@@ -14,6 +14,7 @@
 //! is never requested during recovery (ADR-0037).
 
 mod action;
+mod action_request;
 mod authority;
 mod bootstrap;
 mod catalog;
@@ -31,6 +32,7 @@ pub mod telemetry;
 mod tests;
 
 pub use action::{ClientAction, ClientFault, ModuleEvent};
+pub use action_request::{ActionRequestIdentity, PreparedControlAction};
 pub use authority::AuthorityMirror;
 pub use bootstrap::ProfileIdentity;
 pub use catalog::{Admission, ScopeCatalog, VehicleCatalog};

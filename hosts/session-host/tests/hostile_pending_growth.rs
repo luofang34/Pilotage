@@ -128,15 +128,14 @@ async fn oversized_bootstrap_frame_is_rejected_and_host_survives() {
         .expect("second bootstrap stream opens")
         .await
         .expect("second bootstrap stream finishes opening");
-    let _authority = timeout(TEST_TIMEOUT, honest.accept_uni())
-        .await
-        .expect("accept_uni does not time out")
-        .expect("authority stream is accepted for the honest client");
-
     honest_send
         .write_all(&hello_bytes())
         .await
         .expect("honest hello write succeeds");
+    let _authority = timeout(TEST_TIMEOUT, honest.accept_uni())
+        .await
+        .expect("accept_uni does not time out")
+        .expect("authority stream is accepted for the honest client");
     let welcome = read_welcome(&mut honest_recv).await;
     assert!(
         welcome.session.is_some(),

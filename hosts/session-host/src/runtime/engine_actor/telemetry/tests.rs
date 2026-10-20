@@ -13,6 +13,7 @@ use super::{avionics_to_wire, sample_to_wire};
 /// One telemetry sample carrying only the estimate under test.
 fn one_vehicle_sample(avionics: AvionicsSample) -> TelemetrySample {
     TelemetrySample {
+        flight_procedure: None,
         payload: None,
         vehicle: VehicleId::new(9),
         tick: SimTick::new(42),
@@ -52,9 +53,9 @@ fn publication_time_and_source_acquisition_stamps_stay_distinct() {
     let avionics = AvionicsSample {
         geodetic: None,
         baro: None,
-        attitude: Some(AvionicsAttitudeSample {
+        attitude: Some(AvionicsAttitudeSample::Canonical {
             quat_wxyz: [1.0, 0.0, 0.0, 0.0],
-            rates_rps: [0.0; 3],
+            rates_rps: Some([0.0; 3]),
             stamp: attitude,
         }),
         kinematics: Some(AvionicsKinematicsSample {
@@ -135,6 +136,7 @@ fn estimator_authorization_is_normalized_at_wire_boundary() {
 #[test]
 fn kinematics_only_omits_planar_projection_while_group_flows() {
     let sample = TelemetrySample {
+        flight_procedure: None,
         payload: None,
         vehicle: VehicleId::new(1),
         tick: SimTick::new(0),
@@ -179,6 +181,7 @@ fn kinematics_only_omits_planar_projection_while_group_flows() {
 #[test]
 fn attitude_only_omits_planar_projection_while_group_flows() {
     let sample = TelemetrySample {
+        flight_procedure: None,
         payload: None,
         vehicle: VehicleId::new(1),
         tick: SimTick::new(0),
@@ -187,9 +190,9 @@ fn attitude_only_omits_planar_projection_while_group_flows() {
         avionics: Some(AvionicsSample {
             geodetic: None,
             baro: None,
-            attitude: Some(AvionicsAttitudeSample {
+            attitude: Some(AvionicsAttitudeSample::Canonical {
                 quat_wxyz: [0.7, 0.0, 0.0, 0.7],
-                rates_rps: [0.1, 0.2, 0.3],
+                rates_rps: Some([0.1, 0.2, 0.3]),
                 stamp: simulation_stamp(9),
             }),
             kinematics: None,
@@ -236,6 +239,7 @@ fn truth_and_fc_sample() -> TelemetrySample {
         clock: MeasurementClock::HostMonotonic,
     };
     TelemetrySample {
+        flight_procedure: None,
         payload: None,
         vehicle: VehicleId::new(1),
         tick: SimTick::new(1_000_000),
@@ -252,9 +256,11 @@ fn truth_and_fc_sample() -> TelemetrySample {
             stamp: truth_stamp,
         }),
         fc_state: Some(FcStateSample {
+            landed_state: None,
+            motor_state: None,
             arm_state: 2,
             last_command: None,
-            stamp: fc_stamp,
+            stamp: Some(fc_stamp),
         }),
         gimbal: None,
         battery: None,
@@ -313,12 +319,14 @@ fn the_fc_command_verdict_crosses_the_wire() {
     };
     // A refused arm: kind 1 with the typed outcome.
     let refused = super::fc_state_to_wire(FcStateSample {
+        landed_state: None,
+        motor_state: None,
         arm_state: 1,
         last_command: Some(pilotage_adapter_api::FcCommandAck {
             arm: true,
             outcome: pilotage_adapter_api::CommandOutcome::Failed,
         }),
-        stamp,
+        stamp: Some(stamp),
     });
     assert_eq!(
         refused.last_command_kind, 1,
@@ -334,9 +342,11 @@ fn the_fc_command_verdict_crosses_the_wire() {
     assert_eq!(legacy, 0, "the FC-specific result code is not written");
     // No verdict observed: the lane stays at kind 0.
     let none = super::fc_state_to_wire(FcStateSample {
+        landed_state: None,
+        motor_state: None,
         arm_state: 2,
         last_command: None,
-        stamp,
+        stamp: Some(stamp),
     });
     assert_eq!(none.last_command_kind, 0);
     assert_eq!(
@@ -346,7 +356,9 @@ fn the_fc_command_verdict_crosses_the_wire() {
 }
 
 mod geodetic;
+mod landed_state;
 mod magnetic_variation;
+mod motor_state;
 
 #[test]
 fn a_battery_sample_survives_the_wire_with_unknown_values_as_nan() {
@@ -363,6 +375,7 @@ fn a_battery_sample_survives_the_wire_with_unknown_values_as_nan() {
         clock: MeasurementClock::HostMonotonic,
     };
     let sample = TelemetrySample {
+        flight_procedure: None,
         payload: None,
         vehicle: VehicleId::new(1),
         tick: SimTick::new(1),

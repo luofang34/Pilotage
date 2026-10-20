@@ -4,10 +4,11 @@
 //! EKF_STATUS_REPORT as the authorization source, sampled by the same
 //! [`pilotage_mavlink::sampling`] code every MAVLink adapter uses. Control
 //! is ArduCopter's GUIDED mode: the canonical body-frame velocity intent
-//! maps directly onto a body-frame velocity and yaw-rate setpoint, a climb
-//! intent while landed becomes a takeoff, and ArduCopter's own guided
-//! timeout is the FC-side twin of the host's link-loss policy. A second
-//! scope in the same authority group flies direct: body rates or attitude
+//! maps directly onto a body-frame velocity and yaw-rate setpoint. An
+//! explicit Takeoff action starts takeoff. Completion requires measured
+//! climb and an in-air report. ArduCopter's guided timeout supports the
+//! host's link-loss policy. A second scope in the same authority group
+//! flies direct: body rates or attitude
 //! with collective thrust, as GUIDED SET_ATTITUDE_TARGET.
 //!
 //! This crate owns I/O (`adapters/` is exempt from the sans-IO rule,
@@ -19,8 +20,8 @@ mod error;
 mod uplink;
 
 pub use adapter::{
-    ARM_BUTTON, ArduPilotAdapter, DIRECT_SCOPE, DISARM_BUTTON, FLIGHT_SCOPE, PITCH_AXIS, ROLL_AXIS,
-    THROTTLE_AXIS, YAW_AXIS,
+    ARM_BUTTON, ArduPilotAdapter, DIRECT_SCOPE, DISARM_BUTTON, FLIGHT_SCOPE, GIMBAL_SCOPE,
+    PITCH_AXIS, ROLL_AXIS, THROTTLE_AXIS, YAW_AXIS,
 };
 pub use config::{ArduPilotConfig, ArduPilotProfile};
 pub use error::ArduPilotAdapterError;

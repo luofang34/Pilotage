@@ -87,6 +87,10 @@ enum ControlAction {
   // adapter implements that procedure. Arm or mode support does not imply
   // takeoff support. Command acceptance does not prove that the vehicle flew.
   CONTROL_ACTION_TAKEOFF = 10;
+  // Request the vehicle's native landing procedure. Advertise only when the
+  // adapter implements that procedure. Acceptance does not confirm a landing.
+  // This action does not request disarm or cancel tracking.
+  CONTROL_ACTION_LAND = 11;
 }
 
 // The explicit target of a FEEL_MODE_REQUEST action. Targets are typed
@@ -222,8 +226,9 @@ message ControlFrame {
   // family the vehicle advertises for `scope`.
   ControlIntent intent = 9;
   // Typed discrete actions carried by this frame, as one-shot events. No
-  // action may repeat within a frame. ARM with DISARM, or TAKEOFF with ARM,
-  // DISARM or MODE_REQUEST, is rejected whole. An action set is not a sequence.
+  // action may repeat within a frame. ARM with DISARM, TAKEOFF with LAND, or
+  // either procedure with ARM, DISARM or MODE_REQUEST, is rejected whole.
+  // An action set is not a sequence.
   repeated ControlActionRequest actions = 10;
   // The sender's monotonic profile ACTIVATION revision (advances on every
   // profile install), binding each frame to the exact activation announced

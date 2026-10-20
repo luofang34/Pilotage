@@ -6,24 +6,27 @@ use pilotage_adapter_api::{
 };
 use pilotage_protocol::{ControlAction, ControlIntent, ScopeId, ScopedControlFrame, VehicleId};
 
-use super::{DjiAdapter, DjiControlMode, bench::BenchState, capability::MAX_PITCH_RATE};
-use crate::GimbalPitchTarget;
+use super::{DjiAdapter, DjiControlMode, bench::BenchState};
+use turret_dji::{Mini3ControlProfile, ObservedPitchPlan, ObservedPitchPlanner};
 
 #[derive(Default)]
 pub(super) struct ControlState {
     pub(super) link_loss: bool,
     authority: Option<(u64, u64)>,
-    active_rate: bool,
-    recenter_until: Option<Duration>,
+    pub(super) observed: Option<ObservedPitchPlanner>,
+    pub(super) observed_write: Option<(turret_core::CommandIdentity, ObservedPitchPlan)>,
     pub(super) sequence: u16,
     pub(super) bench: Option<BenchState>,
 }
 
 impl ControlState {
-    pub(super) fn new(mode: DjiControlMode) -> Self {
+    pub(super) fn new(mode: DjiControlMode, profile: Mini3ControlProfile) -> Self {
         Self {
+            sequence: 2,
             bench: (mode == DjiControlMode::BenchInitialHorizontal)
-                .then(BenchState::from_confirmed_horizontal),
+                .then(|| BenchState::from_confirmed_horizontal(profile)),
+            observed: (mode == DjiControlMode::Observed)
+                .then(|| ObservedPitchPlanner::new(profile)),
             ..Self::default()
         }
     }
@@ -35,6 +38,13 @@ impl ControlState {
             DjiControlMode::Observed
         }
     }
+
+    pub(super) fn cancel_observed(&mut self) {
+        if let Some(planner) = &mut self.observed {
+            planner.cancel();
+        }
+        self.observed_write = None;
+    }
 }
 
 impl DjiAdapter {
@@ -44,6 +54,14 @@ impl DjiAdapter {
             && let Some(bench) = &mut self.control.bench
         {
             bench.discard_elapsed(now);
+        } else if result.is_err()
+            && !self.control.link_loss
+            && frame.vehicle == self.vehicle
+            && frame.scope.as_str() == GIMBAL_SCOPE
+            && self.control.authority == Some((frame.session.as_u64(), frame.generation.as_u64()))
+        {
+            self.control.cancel_observed();
+            self.connection.cancel_movement();
         }
         tracing::debug!(
             elapsed_ns = now.as_nanos(),
@@ -87,41 +105,85 @@ impl DjiAdapter {
         if self.control.link_loss {
             return Err(RejectReason::LinkLossEngaged);
         }
-        let (rate, recenter) = demand(frame)?;
+        let (rate, recenter) = demand(frame, self.profile)?;
         let deadline = write_deadline(frame, now)?;
         self.bind_authority(frame, now)?;
         if self.control.bench.is_some() {
             return self.apply_bench(rate, recenter, now, deadline);
         }
         if !self.ready(now) {
+            self.control.cancel_observed();
+            self.connection.cancel_movement();
             return Err(RejectReason::MeasurementUnavailable);
         }
+        let deadline = deadline.min(
+            self.observations
+                .model_deadline(now)
+                .ok_or(RejectReason::MeasurementUnavailable)?,
+        );
         let Some(pose) = self.observations.latest else {
             return Err(RejectReason::MeasurementUnavailable);
         };
-        if !recenter && rate == 0.0 {
-            if self.control.recenter_until.is_some_and(|until| now < until)
-                || !self.control.active_rate
-            {
-                return Ok(false);
+        let plan = self
+            .control
+            .observed
+            .as_mut()
+            .ok_or(RejectReason::MeasurementUnavailable)?
+            .plan(pose.angles.pitch_tenths, rate, recenter, now)
+            .map_err(|error| RejectReason::Other(error.to_string()))?;
+        if rate == 0.0
+            && !recenter
+            && plan.is_some()
+            && self.connection.pending_pitch().is_none()
+            && !self.connection.cancel_movement()
+        {
+            self.control.cancel_observed();
+            return Err(RejectReason::MeasurementUnavailable);
+        }
+        self.queue_observed(plan, recenter, now, deadline)
+    }
+
+    fn queue_observed(
+        &mut self,
+        plan: Option<ObservedPitchPlan>,
+        recenter: bool,
+        now: Duration,
+        deadline: Duration,
+    ) -> Result<bool, RejectReason> {
+        if let Some(pending) = self.connection.pending_pitch() {
+            let same_plan = self
+                .control
+                .observed_write
+                .is_some_and(|(identity, prior)| {
+                    Some(prior) == plan
+                        && self.connection.pending_pitch_identity() == Some(identity)
+                        && prior.target() == pending
+                });
+            if same_plan {
+                return Ok(!recenter);
             }
+            self.control.observed_write = None;
             if !self.connection.cancel_movement() {
+                self.control.cancel_observed();
                 return Err(RejectReason::MeasurementUnavailable);
             }
         }
-        let pitch = turret_dji::observed_pitch_target(pose.angles.pitch_tenths, rate, recenter)
-            .map_err(|error| RejectReason::Other(error.to_string()))?;
+        let Some(plan) = plan else {
+            return Ok(false);
+        };
         if !self
             .connection
-            .queue_pitch_until(pitch, self.control.sequence, now, deadline)
+            .queue_pitch_until(plan.target(), self.control.sequence, now, deadline)
         {
             return Err(RejectReason::Other(
-                "DJI serial packet is still pending".to_owned(),
+                "DJI transport packet is still pending".to_owned(),
             ));
         }
+        let identity = self.connection.pending_pitch_identity().ok_or_else(|| {
+            RejectReason::Other("DJI queued pitch has no command identity".to_owned())
+        })?;
+        self.control.observed_write = Some((identity, plan));
         self.control.sequence = self.control.sequence.wrapping_add(1);
-        self.control.active_rate = rate != 0.0 && !recenter;
-        self.control.recenter_until = recenter.then_some(now + Duration::from_secs(1));
         Ok(!recenter)
     }
 
@@ -143,8 +205,7 @@ impl DjiAdapter {
             if !self.connection.cancel_movement() {
                 return Err(RejectReason::MeasurementUnavailable);
             }
-            self.control.active_rate = false;
-            self.control.recenter_until = None;
+            self.control.cancel_observed();
             if let Some(bench) = &mut self.control.bench {
                 bench.cancel(now);
             }
@@ -183,6 +244,7 @@ impl DjiAdapter {
         }
         if let Some(policy) = policy {
             self.control.link_loss = true;
+            self.control.cancel_observed();
             if !self.connection.cancel_movement() {
                 return Err(rejected("partial DJI command closed the connection"));
             }
@@ -191,8 +253,7 @@ impl DjiAdapter {
             }
         }
         // A cached pose cannot authorize a stop or clear a safety latch.
-        self.connection
-            .read_available_blocking(clock(), &mut self.observations);
+        self.read_available_blocking(clock());
         let now = clock();
         if !self.ready(now) {
             return Err(rejected("fresh continuous gimbal observations are absent"));
@@ -207,31 +268,39 @@ impl DjiAdapter {
         let Some(pose) = self.observations.latest else {
             return Err(rejected("gimbal observation is absent"));
         };
-        let pitch = GimbalPitchTarget::from_tenths(pose.angles.pitch_tenths)
+        let pitch = self
+            .profile
+            .pitch_target(pose.angles.pitch_tenths)
             .map_err(|error| rejected(&error.to_string()))?;
         if !self.connection.queue_pitch_until(
             pitch,
             self.control.sequence,
             now,
-            now.saturating_add(turret_dji::MAX_INPUT_INTERVAL),
+            now.saturating_add(turret_dji::MAX_INPUT_INTERVAL).min(
+                self.observations
+                    .model_deadline(now)
+                    .ok_or_else(|| rejected("fresh Mini 3 identification is absent"))?,
+            ),
         ) {
             return Err(rejected("a DJI packet is still pending"));
         }
         self.control.sequence = self.control.sequence.wrapping_add(1);
-        self.control.active_rate = false;
-        self.control.recenter_until = None;
+        self.control.cancel_observed();
         self.connection
             .write_pending_blocking(now, true, &mut clock);
         if self.connection.fault.is_some() || self.connection.pending_bytes() != 0 {
             return Err(rejected(
-                "the DJI hold command did not reach the complete serial write",
+                "the DJI hold command did not reach the complete transport write",
             ));
         }
         Ok(())
     }
 }
 
-fn demand(frame: &ScopedControlFrame) -> Result<(f32, bool), RejectReason> {
+fn demand(
+    frame: &ScopedControlFrame,
+    profile: Mini3ControlProfile,
+) -> Result<(f32, bool), RejectReason> {
     if frame.carries_payload()
         || !frame.carries_typed()
         || frame.actions.len() > 1
@@ -249,7 +318,7 @@ fn demand(frame: &ScopedControlFrame) -> Result<(f32, bool), RejectReason> {
             if rate.pitch_rate.is_finite()
                 && rate.yaw_rate.is_finite()
                 && rate.yaw_rate == 0.0
-                && rate.pitch_rate.abs() <= MAX_PITCH_RATE =>
+                && rate.pitch_rate.abs() <= profile.rate_limit().as_radians_per_second() =>
         {
             rate.pitch_rate
         }

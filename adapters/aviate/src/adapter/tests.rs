@@ -185,7 +185,7 @@ fn fresh_state_samples_pose_speed_and_avionics() {
         Some(7)
     );
     assert_eq!(
-        avionics.attitude.map(|group| group.stamp.sequence),
+        avionics.attitude.map(|group| group.stamp().sequence),
         Some(10)
     );
     assert_eq!(
@@ -280,13 +280,16 @@ fn stale_kinematics_is_withheld_but_attitude_still_flows() {
     assert!(sample.speed.is_none());
     let avionics = sample.avionics.expect("attitude attached");
     assert_eq!(
-        avionics.attitude.map(|group| group.stamp.sequence),
+        avionics.attitude.map(|group| group.stamp().sequence),
         Some(10)
     );
-    assert_eq!(
-        avionics.attitude.expect("attitude").rates_rps,
-        [0.0, 0.0, 0.1]
-    );
+    assert!(matches!(
+        avionics.attitude,
+        Some(pilotage_adapter_api::AvionicsAttitudeSample::Canonical {
+            rates_rps: Some([0.0, 0.0, 0.1]),
+            ..
+        })
+    ));
     assert!(avionics.kinematics.is_none());
     assert_eq!(avionics.valid_flags, 0b0011);
 }

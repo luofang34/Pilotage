@@ -14,6 +14,9 @@ pub struct StreamId(pub u64);
 /// One thing the transport observed, in the order it was observed.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TransportEvent {
+    /// The host closed with [`pilotage_protocol::ADMISSION_REJECTED_CLOSE_CODE`].
+    /// A credential change requires a new client engine.
+    AdmissionRejected,
     /// The connection is up and the bootstrap bidirectional stream is open
     /// for writing.
     Connected,

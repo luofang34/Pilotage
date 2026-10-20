@@ -71,6 +71,9 @@ pub enum ModuleEvent {
 /// Why the engine stopped for good.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ClientFault {
+    /// The host refused this connection's admission credentials.
+    #[error("session admission rejected")]
+    AdmissionRejected,
     /// The host speaks a schema this client does not.
     #[error("host schema version {host} is not the supported {supported}")]
     SchemaMismatch {

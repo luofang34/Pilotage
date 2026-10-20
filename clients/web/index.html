@@ -81,6 +81,9 @@
   #certHash {
     width: 28rem;
   }
+  #joinCode {
+    width: 16rem;
+  }
   button {
     padding: 0.4rem 0.9rem;
     cursor: pointer;
@@ -307,6 +310,8 @@
   <label>host <input id="host" value="127.0.0.1" /></label>
   <label>port <input id="port" placeholder="4433" /></label>
   <label>cert hash <input id="certHash" placeholder="hex from LISTENING line" /></label>
+  <label>Join code <input id="joinCode" type="password" autocomplete="off"
+    spellcheck="false" placeholder="64 characters; remote hosts require this" /></label>
   <button id="connectBtn">Connect</button>
   <button id="resumeBtn" hidden>Resume control</button>
   <label>controls

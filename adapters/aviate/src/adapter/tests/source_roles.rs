@@ -152,16 +152,17 @@ fn fc_state_publishes_standalone_with_host_receive_provenance() {
     assert!(sample.sim_truth.is_none());
     let fc_state = sample.fc_state.expect("stamped FC state");
     assert_eq!(fc_state.arm_state, 1, "heartbeat reports disarmed");
-    assert_eq!(fc_state.stamp.role, SourceRole::FcState);
-    assert_eq!(fc_state.stamp.clock, MeasurementClock::HostMonotonic);
-    assert_eq!(fc_state.stamp.sequence, 0);
+    let stamp = fc_state.stamp.expect("arm stamp");
+    assert_eq!(stamp.role, SourceRole::FcState);
+    assert_eq!(stamp.clock, MeasurementClock::HostMonotonic);
+    assert_eq!(stamp.sequence, 0);
     assert_eq!(
-        fc_state.stamp.source_id,
+        stamp.source_id,
         (255 << 8) | 190,
         "source id carries the configured FC (system, component) identity"
     );
     assert_eq!(
-        fc_state.stamp.integrity,
+        stamp.integrity,
         pilotage_adapter_api::SourceIntegrity::ChecksummedOnly,
         "CRC-only MAVLink is never labeled authenticated"
     );

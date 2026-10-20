@@ -1,6 +1,68 @@
 use super::*;
 
 #[test]
+fn revocation_observes_the_complete_write_receipt() {
+    let fence = crate::SendFence::default();
+    let receipt = crate::WriteReceipt::default();
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let writer_fence = fence.clone();
+    let writer_receipt = receipt.clone();
+    let writer = std::thread::spawn(move || {
+        WriteContext {
+            send_before: None,
+            fence: Some(&writer_fence),
+            payload_write: None,
+            receipt: Some(&writer_receipt),
+        }
+        .write(|| {
+            entered_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            Ok(true)
+        })
+        .unwrap()
+    });
+    entered_rx.recv().unwrap();
+    let (revoke_tx, revoke_rx) = std::sync::mpsc::channel();
+    let revoker = std::thread::spawn(move || {
+        revoke_tx.send(()).unwrap();
+        fence.invalidate();
+        receipt.sent_at_cached()
+    });
+    revoke_rx.recv().unwrap();
+    release_tx.send(()).unwrap();
+    assert!(writer.join().unwrap());
+    assert!(revoker.join().unwrap().is_some());
+}
+
+#[test]
+fn incomplete_or_refused_writes_do_not_create_complete_write_receipts() {
+    let receipt = crate::WriteReceipt::default();
+    let fence = crate::SendFence::default();
+    let context = WriteContext {
+        send_before: None,
+        fence: Some(&fence),
+        payload_write: None,
+        receipt: Some(&receipt),
+    };
+    assert!(!context.write(|| Ok(false)).unwrap());
+    assert!(receipt.sent_at_cached().is_none());
+    assert!(
+        context
+            .write(|| Err(std::io::ErrorKind::WouldBlock.into()))
+            .is_err()
+    );
+    assert!(receipt.sent_at_cached().is_none());
+    fence.invalidate();
+    assert!(
+        !context
+            .write(|| panic!("revoked write must not run"))
+            .unwrap()
+    );
+    assert!(receipt.sent_at_cached().is_none());
+}
+
+#[test]
 fn queued_expired_and_revoked_commands_do_not_reach_the_socket() {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()

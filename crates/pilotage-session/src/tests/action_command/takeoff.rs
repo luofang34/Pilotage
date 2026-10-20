@@ -2,7 +2,7 @@ use super::*;
 use pilotage_adapter_api::ActionCapability;
 use pilotage_protocol::{ActionKind, ModeTarget};
 
-fn takeoff_engine() -> (SessionEngine, ClientKey, SessionId, Generation) {
+pub(super) fn takeoff_engine() -> (SessionEngine, ClientKey, SessionId, Generation) {
     let mut capabilities = super::super::capabilities();
     capabilities.vehicles[0].class = pilotage_protocol::VehicleClass::Multicopter;
     capabilities.vehicles[0].scopes[0]
@@ -11,6 +11,7 @@ fn takeoff_engine() -> (SessionEngine, ClientKey, SessionId, Generation) {
             action: ActionKind::Takeoff,
             mode_targets: vec![],
             feel_targets: vec![],
+            takeoff_start_state: Some(pilotage_protocol::TakeoffStartState::ArmedOnGround),
         });
     let mut engine = SessionEngine::new(
         capabilities,
@@ -33,6 +34,7 @@ fn arm_and_mode_support_do_not_admit_takeoff() {
             action: ActionKind::ModeRequest,
             mode_targets: vec![ModeTarget::CameraVelocity],
             feel_targets: vec![],
+            takeoff_start_state: None,
         });
     let mut engine = SessionEngine::new(
         capabilities,

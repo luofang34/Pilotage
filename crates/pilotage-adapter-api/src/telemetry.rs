@@ -23,15 +23,41 @@ pub struct Pose2d {
     pub heading: f64,
 }
 
-/// One independently published attitude/rates measurement group.
+/// One independently published aircraft attitude observation.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct AvionicsAttitudeSample {
-    /// Attitude quaternion (w, x, y, z), body FRD → world NED.
-    pub quat_wxyz: [f32; 4],
-    /// Body rates (p, q, r) in radians/second.
-    pub rates_rps: [f32; 3],
-    /// Identity and acquisition time of this group measurement.
-    pub stamp: MeasurementStamp,
+pub enum AvionicsAttitudeSample {
+    /// A normalized frame definition. Estimator authorization remains separate.
+    Canonical {
+        /// Attitude quaternion (w, x, y, z), body FRD → world NED.
+        quat_wxyz: [f32; 4],
+        /// Body rates (p, q, r), radians/second, or `None` when unknown.
+        rates_rps: Option<[f32; 3]>,
+        /// Identity and acquisition time of this observation.
+        stamp: MeasurementStamp,
+    },
+    /// Device-reported Euler angles with unverified axis directions and reference.
+    ///
+    /// These values support numeric display only. They must not be converted to
+    /// a canonical quaternion or used for navigation, control, or prediction.
+    ReportedEuler {
+        /// Pitch in radians, with the protocol's sign convention.
+        pitch_rad: f32,
+        /// Roll in radians, with the protocol's sign convention.
+        roll_rad: f32,
+        /// Yaw in radians. Its zero direction and north reference are unverified.
+        yaw_rad: f32,
+        /// Identity and observation time of the device report.
+        stamp: MeasurementStamp,
+    },
+}
+
+impl AvionicsAttitudeSample {
+    /// Returns the identity and time of this observation.
+    pub const fn stamp(self) -> MeasurementStamp {
+        match self {
+            Self::Canonical { stamp, .. } | Self::ReportedEuler { stamp, .. } => stamp,
+        }
+    }
 }
 
 /// One geodetic fix: where the vehicle is on the Earth, with the datum the
@@ -87,14 +113,14 @@ pub struct AvionicsKinematicsSample {
     pub stamp: MeasurementStamp,
 }
 
-/// Raw avionics state estimate for flight vehicles (ADR-0018): the FC
-/// estimator's output, not display-ready numbers and never simulator
-/// truth — a simulator oracle publishes [`SimTruthSample`] instead, and
-/// the two are not interchangeable. Ground vehicles leave
-/// [`TelemetrySample::avionics`] as `None`.
+/// Aircraft avionics observations and separate estimator authorization.
+///
+/// An attitude can be canonical or a device report with an unverified reference.
+/// Neither representation grants estimator authorization. Simulator truth uses
+/// [`SimTruthSample`] and cannot replace these observations.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AvionicsSample {
-    /// Attitude/rates group, or `None` when it was not supplied.
+    /// Aircraft attitude observation, or `None` when it was not supplied.
     pub attitude: Option<AvionicsAttitudeSample>,
     /// Position/velocity group, or `None` when it was not supplied.
     pub kinematics: Option<AvionicsKinematicsSample>,
@@ -121,6 +147,7 @@ pub struct AvionicsSample {
     /// This can include fail-closed downgrades relative to the raw status
     /// observation and is meaningful only when
     /// [`Self::estimator_status_stamp`] is present.
+    /// This does not rate a reported Euler observation or device health.
     pub quality: u32,
 }
 
@@ -179,10 +206,25 @@ pub struct FcCommandAck {
     pub outcome: pilotage_protocol::CommandOutcome,
 }
 
-/// FC-owned vehicle state (arm today; mode/failsafe belong here as they
-/// arrive) with its own provenance: the FC is the only author, and the
-/// stamp records which link observation reported it — it is never merged
-/// unstamped into an estimate or truth sample.
+/// The flight controller's landed detector with independent provenance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LandedStateSample {
+    /// State reported by the detector, not inferred from a command or altitude.
+    pub state: pilotage_protocol::LandedState,
+    /// Identity and acquisition time of this detector report.
+    pub stamp: MeasurementStamp,
+}
+
+/// The flight controller's motor operation report with independent provenance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MotorStateSample {
+    /// FC-reported motor operation, not inferred from arm state or a command.
+    pub state: pilotage_protocol::MotorState,
+    /// Identity and acquisition time of this motor report.
+    pub stamp: MeasurementStamp,
+}
+
+/// FC-owned vehicle state with independently stamped reports.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FcStateSample {
     /// Arm state as the FC reports it: 0 unknown, 1 disarmed, 2 armed.
@@ -191,8 +233,14 @@ pub struct FcStateSample {
     /// has been observed. A refusal here is the only signal that turns
     /// "the command was taken" into "the FC did not do it".
     pub last_command: Option<FcCommandAck>,
-    /// Identity and acquisition time of the FC report carrying this state.
-    pub stamp: MeasurementStamp,
+    /// Landed detector report, or `None` when unavailable.
+    pub landed_state: Option<LandedStateSample>,
+    /// Motor operation report, or `None` when unavailable.
+    pub motor_state: Option<MotorStateSample>,
+    /// Identity and acquisition time of the arm report, or `None` when absent.
+    ///
+    /// Independent motor or landed reports do not supply an arm stamp.
+    pub stamp: Option<MeasurementStamp>,
 }
 
 /// Gimbal payload-device orientation (Gimbal Protocol v2 attitude
@@ -242,6 +290,8 @@ pub struct BatterySample {
 /// A single vehicle's telemetry at one simulation tick.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TelemetrySample {
+    /// Adapter-owned flight procedure progress; separate from vehicle observations.
+    pub flight_procedure: Option<crate::FlightProcedureSample>,
     /// Independent payload observations and command progress.
     pub payload: Option<pilotage_protocol::wire::PayloadState>,
     /// Vehicle this sample describes.
@@ -303,6 +353,7 @@ mod tests {
     #[test]
     fn telemetry_sample_holds_pose_and_speed() {
         let sample = TelemetrySample {
+            flight_procedure: None,
             payload: None,
             vehicle: VehicleId::new(1),
             tick: SimTick::new(2),

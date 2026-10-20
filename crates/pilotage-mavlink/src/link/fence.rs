@@ -3,12 +3,17 @@ use std::sync::{Arc, Mutex};
 
 use pilotage_adapter_api::SourceIncarnation;
 
+mod flight;
+use flight::FlightGuard;
+pub use flight::TakeoffWriteRequirement;
+
 /// Shared validity of one local command generation.
 #[derive(Debug, Clone)]
 pub struct SendFence {
     valid: Arc<Mutex<bool>>,
     manager: Option<ManagerGuard>,
     camera: Option<CameraGuard>,
+    flight: Option<FlightGuard>,
 }
 
 #[derive(Debug, Clone)]
@@ -74,12 +79,16 @@ pub enum ManagerWriteRequirement {
     Primary,
     /// A best-effort stop may outlive status freshness but cannot control another owner.
     Stop,
+    /// Remove only this sender's ownership; an unclaimed manager is also safe.
+    Release,
 }
 
 #[derive(Debug, Clone)]
 struct ManagerGuard {
     state: Arc<Mutex<super::LinkState>>,
-    device: u8,
+    key: (u8, u8),
+    epoch: u64,
+    revision: u64,
     requirement: ManagerWriteRequirement,
 }
 
@@ -89,19 +98,31 @@ impl ManagerGuard {
             .state
             .lock()
             .map_err(|_| std::io::Error::other("manager state lock poisoned"))?;
-        let Some((report, received)) = state.fc_reports.gimbal_manager else {
+        let Some(manager) = state.gimbals.managers.get(&self.key) else {
             return Ok(false);
         };
-        if self.device == 0 || report.device_id != self.device {
+        if manager.information.is_none()
+            || manager.epoch != self.epoch
+            || manager.capability_revision != self.revision
+        {
+            return Ok(false);
+        }
+        let Some((report, received)) = manager.status else {
+            return Ok(false);
+        };
+        if self.key.1 == 0 || report.device_id != self.key.1 {
             return Ok(false);
         }
         let owner = (report.primary_system, report.primary_component);
-        let fresh = received.elapsed() < std::time::Duration::from_secs(1);
+        let fresh = std::time::Instant::now()
+            .checked_duration_since(received)
+            .is_some_and(|age| age < std::time::Duration::from_secs(1));
         let primary = owner == (crate::codec::GCS_SYSTEM_ID, crate::codec::GCS_COMPONENT_ID);
         let allowed = match self.requirement {
             ManagerWriteRequirement::Unclaimed => fresh && owner == (0, 0),
             ManagerWriteRequirement::Primary => fresh && primary,
             ManagerWriteRequirement::Stop => primary,
+            ManagerWriteRequirement::Release => primary || owner == (0, 0),
         };
         if !allowed {
             return Ok(false);
@@ -116,6 +137,7 @@ impl Default for SendFence {
             valid: Arc::new(Mutex::new(true)),
             manager: None,
             camera: None,
+            flight: None,
         }
     }
 }
@@ -130,17 +152,22 @@ impl SendFence {
     pub fn for_manager(
         &self,
         state: Arc<Mutex<super::LinkState>>,
-        device: u8,
+        key: (u8, u8),
+        epoch: u64,
+        revision: u64,
         requirement: ManagerWriteRequirement,
     ) -> Self {
         Self {
             valid: self.valid.clone(),
             manager: Some(ManagerGuard {
                 state,
-                device,
+                key,
+                epoch,
+                revision,
                 requirement,
             }),
             camera: None,
+            flight: None,
         }
     }
 
@@ -155,6 +182,22 @@ impl SendFence {
             valid: self.valid.clone(),
             manager: None,
             camera: Some(CameraGuard { state, requirement }),
+            flight: None,
+        }
+    }
+
+    /// Require selected-source takeoff observations at the actual transport write.
+    #[must_use]
+    pub fn for_takeoff(
+        &self,
+        state: Arc<Mutex<super::LinkState>>,
+        requirement: TakeoffWriteRequirement,
+    ) -> Self {
+        Self {
+            valid: self.valid.clone(),
+            manager: None,
+            camera: None,
+            flight: Some(FlightGuard { state, requirement }),
         }
     }
 
@@ -189,6 +232,8 @@ impl SendFence {
             manager.write(write)
         } else if let Some(camera) = self.camera.as_ref() {
             camera.write(write)
+        } else if let Some(flight) = self.flight.as_ref() {
+            flight.write(write)
         } else {
             write()
         }

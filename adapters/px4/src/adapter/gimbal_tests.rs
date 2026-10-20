@@ -1,5 +1,3 @@
-#![allow(clippy::expect_used, clippy::panic)]
-
 //! Gimbal-scope (vehicle.gimbal) adapter behavior: capability
 //! advertisement, pointing that works where flight is rejected, the
 //! recenter command, axis validation, and the durable claim-denial
@@ -61,21 +59,11 @@ pub(super) struct GimbalLanes {
     pub(super) rates: tokio::sync::watch::Receiver<Option<pilotage_mavlink::GimbalRateDemand>>,
 }
 
-pub(super) fn gimbal_control() -> (crate::gimbal::Px4GimbalControl, GimbalLanes) {
+pub(super) fn gimbal_control() -> (pilotage_mavlink::ManagerControl, GimbalLanes) {
     let (command_tx, command_rx) = tokio::sync::mpsc::channel(16);
     let (rate_tx, rate_rx) = tokio::sync::watch::channel(None);
-    let mut control =
-        crate::gimbal::Px4GimbalControl::new(command_tx, rate_tx, 1, 1).expect("manager profile");
-    control.observe_manager(
-        pilotage_mavlink::codec::GimbalManagerStatus {
-            time_boot_ms: 1,
-            flags: 0,
-            device_id: 2,
-            primary_system: pilotage_mavlink::codec::GCS_SYSTEM_ID,
-            primary_component: pilotage_mavlink::codec::GCS_COMPONENT_ID,
-        },
-        Instant::now(),
-    );
+    let control = pilotage_mavlink::ManagerControl::new(command_tx, rate_tx, 1, Some((1, 2)))
+        .expect("manager profile");
     (
         control,
         GimbalLanes {
@@ -232,6 +220,7 @@ fn a_velocity_intent_on_the_gimbal_scope_is_rejected() {
 #[test]
 fn fresh_claim_denial_rejects_pointing_frames_loudly() {
     let state = live_state();
+    discover_gimbal(&state);
     apply_messages_at(
         &state,
         &[(
@@ -271,6 +260,7 @@ fn an_unrelated_ack_does_not_bury_a_gimbal_claim_denial() {
     // tracked separately, so the denial must still reject pointing
     // frames — otherwise ignored gimbal demands would report accepted.
     let state = live_state();
+    discover_gimbal(&state);
     let deny = |c: u16, r: u8| {
         (
             SOURCE,
@@ -305,6 +295,7 @@ fn an_ack_addressed_to_another_endpoint_is_ignored() {
     // A CONFIGURE denial addressed to a different component proves
     // nothing about our claim; it must not reject our pointing frames.
     let state = live_state();
+    discover_gimbal(&state);
     apply_messages_at(
         &state,
         &[(
@@ -336,11 +327,15 @@ fn an_ack_addressed_to_another_endpoint_is_ignored() {
 /// Feeds a gimbal-device attitude status into the shared cache at the
 /// given receive instant, the way a live PX4 stream populates it.
 fn feed_gimbal(state: &Arc<Mutex<LinkState>>, time_boot_ms: u32, failure_flags: u32, now: Instant) {
+    discover_gimbal(state);
     apply_messages_at(
         state,
         &[(
             SOURCE,
             FcMessage::GimbalDeviceAttitudeStatus {
+                target_system: 0,
+                target_component: 0,
+                device_id: 2,
                 time_boot_ms,
                 quat_wxyz: [0.98, 0.0, -0.19, 0.0],
                 rates_rps: [0.0, 0.05, -0.02],
@@ -425,58 +420,64 @@ fn a_gimbal_failure_flag_reaches_telemetry() {
     );
 }
 
-/// A gimbal (or FC) reboot regresses the device's `time_boot_ms`. The
-/// stamp must open a NEW epoch under a stable identity so acquisition
-/// time never runs backwards within one (identity, epoch) — otherwise a
-/// reboot is indistinguishable from a stale replay.
 #[test]
-fn a_gimbal_reboot_opens_a_new_epoch_instead_of_regressing_time() {
+fn late_gimbal_feedback_does_not_restart_the_source_clock() {
     let state = live_state();
     let (control, _lanes) = gimbal_control();
     let mut adapter = Px4Adapter::from_state(VehicleId::new(1), state.clone()).with_gimbal(control);
-
-    let stamp_now = |adapter: &mut Px4Adapter| {
-        adapter.sample_telemetry().samples[0]
-            .gimbal
-            .expect("gimbal sample present")
-            .stamp
-    };
-
-    // One boot session: two reports with rising device boot time.
-    feed_gimbal(&state, 5_000, 0, Instant::now());
-    let first = stamp_now(&mut adapter);
     feed_gimbal(&state, 6_000, 0, Instant::now());
-    let later = stamp_now(&mut adapter);
-    assert_eq!(
-        first.source_epoch, later.source_epoch,
-        "no reboot within one boot session"
-    );
-    assert!(
-        later.acquired_at_ns > first.acquired_at_ns,
-        "acquisition time advances within an epoch"
-    );
-
-    // Reboot: the device's boot time regresses 6000 -> 10 ms.
+    let first = adapter.sample_telemetry().samples[0]
+        .gimbal
+        .expect("feedback")
+        .stamp;
     feed_gimbal(&state, 10, 0, Instant::now());
-    let after = stamp_now(&mut adapter);
-    assert_eq!(
-        after.source_epoch,
-        later.source_epoch.wrapping_add(1),
-        "a reboot opens the next epoch"
-    );
-    assert_eq!(
-        after.source_incarnation, later.source_incarnation,
-        "the same gimbal source identity spans the reboot; only the epoch turns over"
-    );
-    // The small post-reboot boot time lives under the NEW epoch, so no
-    // consumer ever sees time regress within one (identity, epoch).
+    let later = adapter.sample_telemetry().samples[0]
+        .gimbal
+        .expect("feedback")
+        .stamp;
+    assert_eq!(first, later);
+}
 
-    // Re-sampling the same post-reboot report is not a second reboot.
-    let resample = stamp_now(&mut adapter);
-    assert_eq!(
-        resample.source_epoch, after.source_epoch,
-        "re-observing the same boot time keeps the epoch"
-    );
+pub(super) fn discover_gimbal(state: &Arc<Mutex<LinkState>>) {
+    let mut messages = vec![];
+    let known = state
+        .lock()
+        .expect("state")
+        .gimbals
+        .managers
+        .get(&(1, 2))
+        .copied();
+    if known.is_none_or(|report| report.information.is_none()) {
+        messages.push((
+            SOURCE,
+            FcMessage::GimbalManagerInformation(
+                pilotage_mavlink::codec::GimbalManagerInformation {
+                    time_boot_ms: 1,
+                    cap_flags: 2 | 32 | 64 | 128 | 256 | 512,
+                    roll_min: f32::NAN,
+                    roll_max: f32::NAN,
+                    pitch_min: -1.5,
+                    pitch_max: 1.5,
+                    yaw_min: -3.0,
+                    yaw_max: 3.0,
+                    device_id: 2,
+                },
+            ),
+        ));
+    }
+    if known.is_none_or(|report| report.status.is_none()) {
+        messages.push((
+            SOURCE,
+            FcMessage::GimbalManagerStatus(pilotage_mavlink::codec::GimbalManagerStatus {
+                time_boot_ms: 1,
+                flags: 0,
+                device_id: 2,
+                primary_system: pilotage_mavlink::codec::GCS_SYSTEM_ID,
+                primary_component: pilotage_mavlink::codec::GCS_COMPONENT_ID,
+            }),
+        ));
+    }
+    apply_messages_at(state, &messages, 0, 0, Instant::now());
 }
 
 mod identity;

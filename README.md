@@ -52,11 +52,91 @@ You provide the pieces git does not vendor:
   Gazebo dev libraries (camera sidecar, optional). Each build script prints its
   own install hint on failure.
 
+For an ArduPilot SITL connection, set `PILOTAGE_ARDUPILOT_PROFILE=simulation`
+and start the session host with `--adapter ardupilot`. Set
+`PILOTAGE_ARDUPILOT_ADDR` to the local UDP endpoint, or use the default
+`127.0.0.1:14550`. To enable MAVLink gimbal discovery, set
+`PILOTAGE_ARDUPILOT_GIMBAL=1`. Discovery does not claim gimbal control.
+The device reports which axes and actions it supports.
+PX4 and ArduPilot also discover MAVLink cameras on the same link.
+Each camera has an independent `vehicle.camera.<component>.<device>` scope.
+Zoom controls require a current camera capability report. Zoom targets do
+not replace the reported zoom setting. A sent command does not confirm
+that the camera reached its target.
+After a camera restarts or its boot clock wraps, restart the session host
+to establish a new connection. Lower camera timestamps do not establish
+a new camera identity.
+For native takeoff, send `Takeoff` on `vehicle.motion` after the FC reports
+armed, GUIDED mode, and on-ground state with valid position data. The target
+is 2.5 m above the measured starting altitude. A climb input does not start
+takeoff. The `flight_procedure` telemetry field reports progress separately
+from action acceptance. A timeout does not confirm that vehicle motion stopped.
+
+## Remote session access
+
+The session host listens on `127.0.0.1` by default for all adapters.
+Run the host on the computer connected to the device. To accept remote
+clients, set `--bind` to a network interface address and supply
+`--join-token-file` with an absolute path. The file must contain a shared
+secret with 64 hexadecimal digits. Generate one on the host:
+
+```sh
+umask 077
+openssl rand -hex 32 > "$HOME/pilotage-join-token"
+cargo run --release -p pilotage-session-host -- \
+  --adapter reference --bind 0.0.0.0 --port 4433 \
+  --join-token-file "$HOME/pilotage-join-token"
+```
+
+Provide the secret to each operator through a trusted channel. Keep it out
+of the public session file and URL. Clients must also verify the host's
+certificate SHA-256 from its `LISTENING` line. In the browser viewer, enter
+the secret in **Join code**, then select **Connect**. For the simulator
+launcher, use `cargo xtask sim --lan --join-token-file /absolute/token-file`.
+Sokoly-App accepts a local token file for each named session. The Apple
+client and command-line probe do not accept a token and cannot join a
+protected host.
+
+The host checks the first client message before it sends capabilities,
+telemetry, or video. A missing or invalid secret closes the connection.
+The client stops automatic connection attempts after admission is rejected.
+Admission does not grant a control lease. Connection recovery restores
+observation only; the operator must request control again. Network delay
+does not extend command deadlines.
+
 ## DJI USB bench connection on macOS
 
-Select the RC-N1 USB CDC callout path and a new capture file. The capture
-directory must exist. The host refuses to overwrite a capture.
-The DJI host listens on the local loopback interface.
+Select one RC-N1 attachment and a new capture file. The capture directory
+must exist. The host refuses to overwrite a capture.
+The host uses the session access settings above.
+
+For the upper USB port, set `PILOTAGE_DJI_USB=auto` to select the only matching
+DJI C5 device in the macOS I/O Registry. The device must already expose the
+iAP and `com.dji.logiclink` interfaces. Discovery only reads registry properties.
+The host stops if no device or more than one device matches. It checks the
+full USB descriptors when it opens the selected device.
+The host does not run the upper-port bootstrap procedure or change the USB
+role or device configuration. Connecting the cable alone does not ensure
+that the required profile is present.
+
+```sh
+PILOTAGE_DJI_USB=auto \
+PILOTAGE_DJI_CAPTURE=/tmp/dji-session-01.jsonl \
+cargo run --release -p pilotage-session-host --no-default-features -- --adapter dji
+```
+
+To select an explicit attachment for diagnostics, use
+`PILOTAGE_DJI_USB_REGISTRY_ID` instead of `PILOTAGE_DJI_USB`. Use the current
+device registry ID as a nonzero decimal value or a hexadecimal value with
+a `0x` prefix. The registry ID can change when the cable is disconnected.
+
+The upper interface supplies telemetry and H.264 video from one connection.
+Video decoding requires `ffmpeg` on `PATH`. Set `PILOTAGE_DJI_FFMPEG` to an
+absolute executable path to select another installation. A decoder that
+cannot start prevents host startup. Camera capture time and calibration
+remain unknown.
+
+For the lower USB CDC port, select its callout path instead:
 
 ```sh
 PILOTAGE_DJI_SERIAL=/dev/cu.usbmodemDEVICE \
@@ -64,10 +144,19 @@ PILOTAGE_DJI_CAPTURE=/tmp/dji-session-01.jsonl \
 cargo run --release -p pilotage-session-host --no-default-features -- --adapter dji
 ```
 
-This adapter exposes a DJI Mini 3 bench object with gimbal control. Flight,
-positioning, and video are not implemented. Keep the propellers removed.
+Set only one of `PILOTAGE_DJI_SERIAL`, `PILOTAGE_DJI_USB_REGISTRY_ID`, or
+`PILOTAGE_DJI_USB`.
+An invalid attachment or an unsupported platform fails startup. The host
+does not select another device or transport.
+
+This adapter exposes a DJI Mini 3 bench object with gimbal control. Flight
+and positioning control are not implemented. Keep the propellers removed.
 The default `observed` control mode requires fresh gimbal observations before
-it sends a pitch command. Pitch targets are limited to -5 through 0 degrees.
+it sends a pitch command. Pitch targets are limited to -90 through 0 degrees.
+The host limits target planning to 30 degrees per second. This is not a
+measured device speed limit. Recenter continues while control input and
+feedback remain valid. The host does not repeat an unchanged target after
+a full write.
 The adapter ignores horizontal gimbal input because yaw control is not
 implemented.
 An RC version response alone does not establish the aircraft route.

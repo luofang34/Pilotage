@@ -3,7 +3,6 @@ use std::time::Duration;
 use pilotage_adapter_api::{LinkLossEnactError, LinkLossPolicy, RejectReason};
 
 use super::DjiAdapter;
-use crate::GimbalPitchTarget;
 
 use turret_dji::PitchPlanner;
 
@@ -52,11 +51,9 @@ impl DjiAdapter {
         else {
             return Ok(true);
         };
-        let pitch = GimbalPitchTarget::from_tenths(target)
-            .map_err(|error| RejectReason::Other(error.to_string()))?;
         if !self
             .connection
-            .queue_pitch_until(pitch, self.control.sequence, now, deadline)
+            .queue_pitch_until(target, self.control.sequence, now, deadline)
         {
             return Err(RejectReason::Other(
                 "DJI serial packet is still pending".to_owned(),

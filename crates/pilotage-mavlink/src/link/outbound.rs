@@ -45,6 +45,10 @@ pub struct OutboundCommand {
 /// replaces the previous one; the link task encodes only the newest.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GimbalRateDemand {
+    /// Reference flags validated by the payload contract.
+    pub flags: u32,
+    /// Roll rate in radians per second; NaN omits the axis.
+    pub roll_rps: f32,
     /// Concrete device selected from the expected manager status.
     pub gimbal_device_id: u8,
     /// Complete-write receipt for stop ordering.
@@ -150,6 +154,31 @@ struct WriteContext<'a> {
     receipt: Option<&'a crate::WriteReceipt>,
 }
 
+impl WriteContext<'_> {
+    fn write(&self, operation: impl FnOnce() -> std::io::Result<bool>) -> std::io::Result<bool> {
+        let write = || {
+            if self
+                .send_before
+                .is_some_and(|deadline| Instant::now() >= deadline)
+            {
+                return Ok(false);
+            }
+            let sent = operation()?;
+            // A revoker must see the complete-write fact when invalidate returns.
+            // Record it before releasing the same fence that protects the write.
+            if sent && let Some(receipt) = self.receipt {
+                receipt.record_sent(Instant::now());
+            }
+            Ok(sent)
+        };
+        if let Some(fence) = self.fence {
+            fence.with_valid_write(write)
+        } else {
+            write()
+        }
+    }
+}
+
 /// Readiness waits consume the original deadline before the actual socket write.
 async fn send_frame_until(
     socket: &UdpSocket,
@@ -162,7 +191,7 @@ async fn send_frame_until(
         send_before,
         fence,
         payload_write,
-        receipt,
+        receipt: _,
     } = context;
     loop {
         if fence.is_some_and(|fence| !fence.is_valid())
@@ -180,10 +209,7 @@ async fn send_frame_until(
         {
             return;
         }
-        let write = || {
-            if send_before.is_some_and(|deadline| Instant::now() >= deadline) {
-                return Ok(false);
-            }
+        let result = context.write(|| {
             if let Some(write) = payload_write {
                 write.write(frame.len(), || socket.try_send_to(frame, target))
             } else {
@@ -191,19 +217,9 @@ async fn send_frame_until(
                     .try_send_to(frame, target)
                     .map(|written| written == frame.len())
             }
-        };
-        let result = if let Some(fence) = fence {
-            fence.with_valid_write(write)
-        } else {
-            write()
-        };
+        });
         match result {
-            Ok(sent) => {
-                if sent && let Some(receipt) = receipt {
-                    receipt.record_sent(Instant::now());
-                }
-                return;
-            }
+            Ok(_) => return,
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => continue,
             Err(error) => {
                 warn!(%error, what, "outbound send failed");
@@ -268,8 +284,8 @@ pub(super) async fn send_gimbal_rate(
     if let (Some(demand), Some(target)) = (demand, target) {
         let frame = crate::codec::encode_gimbal_rate_setpoint(
             *seq,
-            demand.pitch_rps,
-            demand.yaw_rps,
+            demand.flags,
+            [demand.roll_rps, demand.pitch_rps, demand.yaw_rps],
             demand.target_system,
             demand.target_component,
             demand.gimbal_device_id,

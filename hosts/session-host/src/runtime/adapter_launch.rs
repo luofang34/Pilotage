@@ -25,6 +25,7 @@ use super::{MAX_CONTROL_AGE, build_reference, gazebo_launch};
 /// The host side of a session runtime: what every adapter path hands to
 /// [`spawn_runtime`] besides the adapter itself.
 struct HostSide {
+    join_token: Option<pilotage_protocol::JoinToken>,
     endpoint: Endpoint<wtransport::endpoint::endpoint_side::Server>,
     engine_tx: mpsc::Sender<ToEngine>,
     engine_rx: mpsc::Receiver<ToEngine>,
@@ -36,7 +37,7 @@ struct HostSide {
 /// that feeds it when that is not the adapter.
 struct SessionVideo {
     frames: Option<mpsc::Receiver<RawVideoFrame>>,
-    producer: Option<JoinHandle<()>>,
+    producer: Option<(&'static str, JoinHandle<()>)>,
 }
 
 /// Builds the chosen adapter and spawns the per-adapter
@@ -52,12 +53,22 @@ pub(super) async fn spawn_adapter_runtime(
 ) -> Result<JoinHandle<()>, HostError> {
     let sim_camera_port = options.sim_camera_port.take();
     let host = HostSide {
+        join_token: options.network.join_token.clone(),
         endpoint,
         engine_tx,
         engine_rx,
         shutdown_rx,
         start,
     };
+    launch_adapter(adapter, options, sim_camera_port, host).await
+}
+
+async fn launch_adapter(
+    adapter: AdapterKind,
+    options: RuntimeOptions,
+    sim_camera_port: Option<u16>,
+    host: HostSide,
+) -> Result<JoinHandle<()>, HostError> {
     match adapter {
         #[cfg(feature = "sim")]
         AdapterKind::Reference => {
@@ -131,11 +142,15 @@ fn spawn_dji_runtime_blocking(
     if sim_camera_port.is_some() {
         return Err(HostError::SimCameraConflict { adapter: "dji" });
     }
-    let adapter = super::dji::start_blocking(HOST_VEHICLE)?;
+    let super::dji::DjiRuntime {
+        adapter,
+        frames,
+        producer,
+    } = super::dji::start_blocking(HOST_VEHICLE)?;
     let engine = build_engine(&adapter, options);
     let video = SessionVideo {
-        frames: None,
-        producer: None,
+        frames,
+        producer: producer.map(|task| ("dji-video-decoder", task)),
     };
     Ok(spawn_runtime(engine, adapter, video, host))
 }
@@ -171,7 +186,7 @@ async fn attach_sim_camera(
     let (frames, producer) = sim_camera::spawn(listener, engine_tx);
     Ok(SessionVideo {
         frames: Some(frames),
-        producer: Some(producer),
+        producer: Some(("sim-camera", producer)),
     })
 }
 
@@ -195,6 +210,7 @@ where
     A: VehicleAdapter + Send + 'static,
 {
     let HostSide {
+        join_token,
         endpoint,
         engine_tx,
         engine_rx,
@@ -211,28 +227,24 @@ where
             engine_rx,
             shutdown_rx,
             start,
+            join_token,
         ));
     };
     let (media, media_task) = media::spawn_media_task(frames, start);
-    // The media task ends once its frame source closes; a host-side
-    // producer closes it when the engine actor ends, so both are joined.
-    let media_task = match video.producer {
-        None => media_task,
-        Some(producer) => tokio::spawn(async move {
-            producer.await.ok();
-            media_task.await.ok();
-        }),
-    };
+    // Own the tasks before spawning the future so cancellation before its
+    // first poll also stops the decoder and media tasks.
+    let media_tasks = super::video_lifecycle::VideoTasks::new(media_task, video.producer);
     tokio::spawn(run_with_media_until_shutdown(
         endpoint,
         engine,
         adapter,
         media,
-        media_task,
+        media_tasks,
         engine_tx,
         engine_rx,
         shutdown_rx,
         start,
+        join_token,
     ))
 }
 

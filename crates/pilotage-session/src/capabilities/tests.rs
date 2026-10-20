@@ -80,6 +80,7 @@ fn takeoff_is_advertised_only_as_its_own_action() {
             action: ActionKind::Takeoff,
             mode_targets: vec![],
             feel_targets: vec![],
+            takeoff_start_state: None,
         }],
         legacy: None,
     });
@@ -91,6 +92,37 @@ fn takeoff_is_advertised_only_as_its_own_action() {
         pilotage_protocol::wire::ControlAction::Takeoff as i32
     );
     assert!(actions[0].mode_targets.is_empty());
+}
+
+#[test]
+fn land_is_advertised_without_takeoff_or_disarm_support() {
+    use pilotage_adapter_api::{ActionCapability, ScopeDescriptor};
+    use pilotage_protocol::{ActionKind, ScopeId};
+    let mut adapter = caps(VehicleClass::Multicopter, "quad", true);
+    adapter.vehicles[0].scopes.push(ScopeDescriptor {
+        payload: None,
+        authority_group: None,
+        scope: ScopeId::new("vehicle.motion"),
+        axes: vec![],
+        intents: vec![],
+        actions: vec![ActionCapability {
+            action: ActionKind::Land,
+            mode_targets: vec![],
+            feel_targets: vec![],
+            takeoff_start_state: None,
+        }],
+        legacy: None,
+    });
+    let wire = host_capabilities(&adapter, "1.0");
+    let scope = &wire.vehicles[0].scopes[0];
+    assert_eq!(scope.actions.len(), 1);
+    assert_eq!(
+        scope.actions[0].action,
+        pilotage_protocol::wire::ControlAction::Land as i32
+    );
+    assert_eq!(scope.actions[0].takeoff_start_state, 0);
+    assert!(scope.intents.is_empty());
+    assert!(scope.actions[0].mode_targets.is_empty());
 }
 
 #[test]

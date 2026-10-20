@@ -12,12 +12,14 @@ use pilotage_adapter_api::{
     TelemetryBatch, VehicleAdapter, VideoSource,
 };
 use pilotage_mavlink::ardupilot::ArduCopterMode;
+use pilotage_mavlink::camera_endpoint;
 use pilotage_mavlink::codec::MAV_CMD_COMPONENT_ARM_DISARM;
+use pilotage_mavlink::gimbal_endpoint::{self, GimbalStamp};
 use pilotage_mavlink::sampling::{
     ArmTracker, OperationalPose, VehicleReports, battery_sample, estimate_batch, fc_state_sample,
-    operational_pose, report_only_sample,
+    landed_state_sample, operational_pose, report_only_sample,
 };
-use pilotage_mavlink::{LinkState, MavlinkLink, command_outcome};
+use pilotage_mavlink::{CameraEndpoints, LinkState, ManagerControl, MavlinkLink, command_outcome};
 use pilotage_protocol::{ActionKind, ScopeId, ScopedControlFrame, VehicleId};
 use pilotage_timing::SimTick;
 use tracing::{info, warn};
@@ -27,10 +29,19 @@ use crate::error::ArduPilotAdapterError;
 use crate::uplink::ArduPilotUplink;
 
 mod advertisement;
+#[cfg(test)]
+mod camera_socket_tests;
 mod control;
 mod declination;
+#[cfg(test)]
+mod gimbal_socket_tests;
+#[cfg(test)]
+mod gimbal_tests;
 mod link_loss;
 mod params;
+mod takeoff;
+#[cfg(test)]
+mod takeoff_socket_tests;
 #[cfg(test)]
 mod tests;
 
@@ -40,6 +51,8 @@ pub const FLIGHT_SCOPE: &str = pilotage_protocol::MOTION_SCOPE;
 /// thrust, under its own lease in the same authority group as
 /// [`FLIGHT_SCOPE`], so only one of the two is held at a time.
 pub const DIRECT_SCOPE: &str = pilotage_protocol::DIRECT_SCOPE;
+/// Independent payload pointing scope.
+pub const GIMBAL_SCOPE: &str = gimbal_endpoint::SCOPE;
 /// Canonical `roll` axis (0): lateral velocity, + = right.
 pub const ROLL_AXIS: u16 = 0;
 /// Canonical `pitch` axis (1): forward velocity, + = forward.
@@ -64,6 +77,9 @@ pub struct ArduPilotAdapter {
     _link: Option<MavlinkLink>,
     uplink: Option<ArduPilotUplink>,
     direct: Option<params::DirectParams>,
+    gimbal: Option<ManagerControl>,
+    gimbal_stamp: GimbalStamp,
+    camera: Option<CameraEndpoints>,
     declination: declination::DeclinationParams,
     arm: ArmTracker,
     incarnation: SourceIncarnation,
@@ -109,25 +125,54 @@ impl ArduPilotAdapter {
             link_config.system_id,
             link_config.component_id,
         );
+        let gimbal = if config.gimbal {
+            link.take_gimbal_rate_sender()
+                .map(|rates| {
+                    ManagerControl::new(link.command_sender(), rates, link_config.system_id, None)
+                        .map(|control| control.with_manager_state(link.state()))
+                })
+                .transpose()
+                .map_err(pilotage_mavlink::LinkError::from)?
+        } else {
+            None
+        };
         info!(endpoint = %config.endpoint, "ArduPilot adapter started");
-        Ok(Self::assemble(
+        let mut adapter = Self::assemble(
             vehicle,
             link.state(),
             Some(link),
             uplink,
             direct,
             declination,
-        ))
+        );
+        adapter.gimbal = gimbal;
+        adapter.attach_camera(link_config.system_id);
+        Ok(adapter)
+    }
+
+    fn attach_camera(&mut self, system_id: u8) {
+        self.camera = self._link.as_ref().map(|link| {
+            CameraEndpoints::new(
+                self.vehicle,
+                self.state.clone(),
+                link.command_sender(),
+                system_id,
+                self.started_at,
+            )
+        });
     }
 
     fn assemble(
         vehicle: VehicleId,
         state: Arc<Mutex<LinkState>>,
         link: Option<MavlinkLink>,
-        uplink: Option<ArduPilotUplink>,
+        mut uplink: Option<ArduPilotUplink>,
         direct: params::DirectParams,
         declination: declination::DeclinationParams,
     ) -> Self {
+        if let Some(uplink) = uplink.as_mut() {
+            uplink.bind_flight_state(state.clone());
+        }
         Self {
             vehicle,
             state,
@@ -135,6 +180,9 @@ impl ArduPilotAdapter {
             direct: uplink.is_some().then_some(direct),
             declination,
             uplink,
+            gimbal: None,
+            gimbal_stamp: GimbalStamp::new(SourceIncarnation::new(rand_incarnation())),
+            camera: None,
             arm: ArmTracker::default(),
             incarnation: SourceIncarnation::new(rand_incarnation()),
             started_at: Instant::now(),
@@ -189,6 +237,9 @@ impl ArduPilotAdapter {
             return;
         };
         self.arm.observe(&latest);
+        if let Some(uplink) = self.uplink.as_mut() {
+            uplink.observe_takeoff(&latest, Instant::now());
+        }
         if let Some(direct) = self.direct.as_mut() {
             direct.maintain(&latest, Instant::now());
         }
@@ -260,6 +311,24 @@ fn rand_incarnation() -> [u8; 16] {
 }
 
 impl VehicleAdapter for ArduPilotAdapter {
+    fn invalidate_pending_commands(&mut self, vehicle: VehicleId, scope: &ScopeId) {
+        if let Some(camera) = self.camera.as_mut() {
+            camera.invalidate_pending_commands(vehicle, scope);
+        }
+        if vehicle == self.vehicle
+            && matches!(scope.as_str(), FLIGHT_SCOPE | DIRECT_SCOPE)
+            && let Some(uplink) = self.uplink.as_mut()
+        {
+            uplink.cancel_takeoff(Instant::now());
+        }
+        if vehicle == self.vehicle
+            && scope.as_str() == GIMBAL_SCOPE
+            && let Some(gimbal) = self.gimbal.as_mut()
+        {
+            gimbal.invalidate_pending();
+        }
+    }
+
     fn capabilities(&self) -> AdapterCapabilities {
         self.advertised_capabilities()
     }
@@ -268,6 +337,22 @@ impl VehicleAdapter for ArduPilotAdapter {
         let tick = self.step(StepBudget { ticks: 0 }).now;
         if pilotage_adapter_api::link_loss_latch_engaged(&self.link_loss_policy, &frame.scope) {
             return ApplyOutcome::new(tick, Disposition::Rejected(RejectReason::LinkLossEngaged));
+        }
+        if frame
+            .scope
+            .as_str()
+            .starts_with(camera_endpoint::SCOPE_PREFIX)
+        {
+            return match self.camera.as_mut() {
+                Some(camera) => camera.apply_control(frame, tick),
+                None => ApplyOutcome::new(tick, Disposition::Rejected(RejectReason::UnknownScope)),
+            };
+        }
+        if frame.scope.as_str() == GIMBAL_SCOPE {
+            return match self.gimbal.as_mut() {
+                Some(gimbal) => gimbal_endpoint::apply_control(gimbal, self.vehicle, frame, tick),
+                None => ApplyOutcome::new(tick, Disposition::Rejected(RejectReason::UnknownScope)),
+            };
         }
         self.observe_fc();
         self.apply_flight(frame, tick)
@@ -281,8 +366,10 @@ impl VehicleAdapter for ArduPilotAdapter {
         let fc_state = fc_state_sample(
             self.arm.report(),
             self.last_arm_ack(),
-            self.incarnation,
-            self.started_at,
+            self.state
+                .lock()
+                .ok()
+                .and_then(|latest| landed_state_sample(&latest, Instant::now())),
         );
         let battery = battery_sample(
             self.state.lock().ok().and_then(|latest| latest.battery),
@@ -291,9 +378,18 @@ impl VehicleAdapter for ArduPilotAdapter {
         );
         let mut batch = estimate_batch(self.vehicle, &self.state);
         self.attach_declination(&mut batch);
+        if let Some(gimbal) = self.gimbal.as_mut() {
+            gimbal.maintain();
+        }
+        let observation = self
+            .gimbal
+            .as_ref()
+            .map(|gimbal| gimbal_endpoint::sample(gimbal, &self.gimbal_stamp));
         let reports = VehicleReports {
             fc_state,
-            gimbal: None,
+            gimbal: observation
+                .as_ref()
+                .and_then(|observation| observation.attitude),
             battery,
         };
         if batch.samples.is_empty() && reports.any() {
@@ -301,6 +397,20 @@ impl VehicleAdapter for ArduPilotAdapter {
             batch.samples.push(report_only_sample(self.vehicle, tick));
         }
         reports.attach(&mut batch);
+        if let Some(payload) = observation.and_then(|observation| observation.payload) {
+            if batch.samples.is_empty() {
+                batch
+                    .samples
+                    .push(report_only_sample(self.vehicle, SimTick::new(0)));
+            }
+            if let Some(sample) = batch.samples.first_mut() {
+                sample.payload = Some(payload);
+            }
+        }
+        self.attach_flight_procedure(&mut batch);
+        if let Some(camera) = self.camera.as_mut() {
+            camera.sample_telemetry(&mut batch);
+        }
         batch
     }
 

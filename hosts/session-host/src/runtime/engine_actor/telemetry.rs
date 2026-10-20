@@ -13,11 +13,17 @@ use tracing::warn;
 const ESTIMATOR_VALID_FLAGS_MASK: u32 = 0x0f;
 const ESTIMATOR_QUALITY_UNUSABLE: u32 = 2;
 
+mod attitude;
+mod flight_procedure;
+
 pub(super) fn sample_to_wire(
     sample: TelemetrySample,
     published_at: MonoTimestamp,
 ) -> wire::TelemetrySample {
     wire::TelemetrySample {
+        flight_procedure: sample
+            .flight_procedure
+            .map(|value| Box::new(flight_procedure::to_wire(value))),
         payload: sample.payload.map(Box::new),
         vehicle: Some(wire::VehicleId {
             value: sample.vehicle.as_u64(),
@@ -122,7 +128,6 @@ fn measurement_stamp_to_wire(stamp: MeasurementStamp) -> wire::MeasurementStamp 
 // never populated: FC-owned arm state travels as TelemetrySample.fc_state.
 #[allow(deprecated)]
 fn avionics_to_wire(sample: AvionicsSample) -> wire::AvionicsState {
-    let attitude = sample.attitude;
     let kinematics = sample.kinematics;
     let (valid_flags, quality) = if sample.estimator_status_stamp.is_some() {
         (
@@ -145,14 +150,10 @@ fn avionics_to_wire(sample: AvionicsSample) -> wire::AvionicsState {
     let magnetic_variation = sample
         .magnetic_variation
         .and_then(magnetic_variation_to_wire);
-    wire::AvionicsState {
-        quat_w: attitude.map_or(0.0, |group| group.quat_wxyz[0]),
-        quat_x: attitude.map_or(0.0, |group| group.quat_wxyz[1]),
-        quat_y: attitude.map_or(0.0, |group| group.quat_wxyz[2]),
-        quat_z: attitude.map_or(0.0, |group| group.quat_wxyz[3]),
-        rate_p_rad_s: attitude.map_or(0.0, |group| group.rates_rps[0]),
-        rate_q_rad_s: attitude.map_or(0.0, |group| group.rates_rps[1]),
-        rate_r_rad_s: attitude.map_or(0.0, |group| group.rates_rps[2]),
+    let mut state = wire::AvionicsState {
+        rate_p_rad_s: f32::NAN,
+        rate_q_rad_s: f32::NAN,
+        rate_r_rad_s: f32::NAN,
         pos_n_m: kinematics.map_or(0.0, |group| group.pos_ned_m[0]),
         pos_e_m: kinematics.map_or(0.0, |group| group.pos_ned_m[1]),
         pos_d_m: kinematics.map_or(0.0, |group| group.pos_ned_m[2]),
@@ -165,7 +166,6 @@ fn avionics_to_wire(sample: AvionicsSample) -> wire::AvionicsState {
         // own provenance; this legacy lane stays at 0 (unknown) so an
         // unstamped copy is never merged into the estimate.
         arm_state: 0,
-        attitude_stamp: attitude.map(|group| measurement_stamp_to_wire(group.stamp)),
         kinematics_stamp: kinematics.map(|group| measurement_stamp_to_wire(group.stamp)),
         estimator_status_stamp: sample.estimator_status_stamp.map(measurement_stamp_to_wire),
         baro_alt_m: sample.baro.map_or(0.0, |group| group.pressure_alt_m),
@@ -187,7 +187,10 @@ fn avionics_to_wire(sample: AvionicsSample) -> wire::AvionicsState {
             .and(sample.magnetic_variation.as_ref())
             .map(|variation| measurement_stamp_to_wire(variation.stamp)),
         magnetic_variation,
-    }
+        ..wire::AvionicsState::default()
+    };
+    attitude::apply(sample.attitude, &mut state);
+    state
 }
 
 /// Maps a stated variation onto the wire. A declination that is not a
@@ -298,6 +301,16 @@ fn sim_truth_to_wire(sample: SimTruthSample) -> wire::SimTruthState {
 fn fc_state_to_wire(sample: FcStateSample) -> wire::FcState {
     wire::FcState {
         arm_state: sample.arm_state,
+        landed_state: sample
+            .landed_state
+            .map(|landed| wire::LandedStateObservation {
+                state: landed.state.to_wire() as i32,
+                stamp: Some(measurement_stamp_to_wire(landed.stamp)),
+            }),
+        motor_state: sample.motor_state.map(|motor| wire::MotorStateObservation {
+            state: motor.state.to_wire() as i32,
+            stamp: Some(measurement_stamp_to_wire(motor.stamp)),
+        }),
         // 0 none observed, 1 arm, 2 disarm — the FC's verdict for the most
         // recent commanded arm/disarm (enactment truth).
         last_command_kind: sample
@@ -308,7 +321,7 @@ fn fc_state_to_wire(sample: FcStateSample) -> wire::FcState {
             .map_or(wire::CommandOutcome::Unspecified, |ack| {
                 ack.outcome.to_wire()
             }) as i32,
-        stamp: Some(measurement_stamp_to_wire(sample.stamp)),
+        stamp: sample.stamp.map(measurement_stamp_to_wire),
         // The FC-specific result code stays unwritten: the typed outcome
         // is the only answer a client reads.
         ..wire::FcState::default()
