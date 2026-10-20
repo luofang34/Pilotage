@@ -8,8 +8,8 @@ mod profile;
 mod sim;
 pub use profile::Profile;
 mod usage;
-pub use usage::USAGE;
 use sim::parse_sim;
+pub use usage::USAGE;
 
 /// Options for `cargo xtask sim`.
 #[derive(Debug, PartialEq, Eq)]
