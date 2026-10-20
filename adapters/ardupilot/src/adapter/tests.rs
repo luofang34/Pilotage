@@ -1,5 +1,3 @@
-#![allow(clippy::expect_used, clippy::panic)]
-
 //! Adapter-boundary behavior over a fed link cache and in-memory lanes:
 //! EKF-authorized sampling, the arm path, the velocity gate, the airborne
 //! disarm, and the per-scope link-loss latch.
@@ -13,8 +11,7 @@ use pilotage_adapter_api::{
     CommandOutcome, Disposition, LinkLossPolicy, RejectReason, VehicleAdapter,
 };
 use pilotage_mavlink::codec::{
-    FcMessage, FrameSource, MAV_CMD_COMPONENT_ARM_DISARM, MAV_CMD_DO_SET_MODE, MAV_CMD_NAV_TAKEOFF,
-    STATUS_TEXT_LEN,
+    FcMessage, FrameSource, MAV_CMD_COMPONENT_ARM_DISARM, MAV_CMD_DO_SET_MODE, STATUS_TEXT_LEN,
 };
 use pilotage_mavlink::link::apply_messages_at;
 use pilotage_mavlink::{
@@ -37,6 +34,7 @@ pub(super) fn body_velocity(setpoint: Option<OffboardSetpoint>) -> Option<BodyVe
 }
 
 mod direct;
+mod takeoff;
 
 const SOURCE: FrameSource = FrameSource {
     system_id: 1,
@@ -88,7 +86,7 @@ impl Harness {
 
     /// One healthy estimate at `down_m`, plus a heartbeat.
     pub(super) fn estimate(&mut self, down_m: f32, armed: bool) {
-        self.time_boot_ms += 50;
+        self.time_boot_ms = self.time_boot_ms.wrapping_add(50);
         let t = self.time_boot_ms;
         self.feed(&[
             FcMessage::Heartbeat {
@@ -109,7 +107,7 @@ impl Harness {
             FcMessage::EkfStatusReport { flags: HEALTHY_EKF },
         ]);
         // The report authorizes the NEXT numeric pair.
-        self.time_boot_ms += 10;
+        self.time_boot_ms = self.time_boot_ms.wrapping_add(10);
         let t = self.time_boot_ms;
         self.feed(&[
             FcMessage::AttitudeQuaternion {
@@ -266,41 +264,22 @@ fn velocity_without_a_pose_is_refused() {
 }
 
 #[test]
-fn climb_takes_off_then_velocity_streams_body_frame_and_disarm_lands() {
+fn climb_input_on_the_ground_does_not_start_a_takeoff() {
     let mut harness = Harness::new();
     harness.estimate(0.0, true);
-    let takeoff = harness
+    let outcome = harness
         .adapter
         .apply_control(&frame(velocity(0.0, -1.5, 0.0), vec![]));
-    assert_eq!(takeoff.disposition, Disposition::Transformed);
-    assert_eq!(harness.commands(), vec![MAV_CMD_NAV_TAKEOFF]);
-
-    harness.estimate(-2.4, true);
-    let flying = harness
-        .adapter
-        .apply_control(&frame(velocity(9.0, 0.0, 0.5), vec![]));
-    assert_eq!(flying.disposition, Disposition::Transformed, "9 m/s clamps");
-    let demand = body_velocity(*harness.velocity.borrow_and_update()).expect("a setpoint");
-    assert_eq!(demand.vel_frd_mps, [3.0, 0.0, 0.0]);
-    assert_eq!(demand.yaw_rate_rps, 0.5);
-
-    harness
-        .adapter
-        .apply_control(&frame(None, vec![ControlAction::Disarm]));
-    assert_eq!(
-        harness.commands(),
-        vec![MAV_CMD_DO_SET_MODE],
-        "LAND, not disarm"
-    );
+    assert_eq!(outcome.disposition, Disposition::Constrained);
+    assert!(harness.commands().is_empty());
+    assert!(!harness.velocity.has_changed().expect("lane open"));
 }
 
 #[test]
 fn link_loss_zeroes_the_setpoint_and_rejects_until_cleared() {
     let mut harness = Harness::new();
     harness.estimate(0.0, true);
-    harness
-        .adapter
-        .apply_control(&frame(velocity(0.0, -1.5, 0.0), vec![]));
+    direct::enter_direct_flight(&mut harness);
     harness.estimate(-2.5, true);
     harness
         .adapter

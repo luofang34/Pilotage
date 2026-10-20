@@ -1,5 +1,3 @@
-#![allow(clippy::expect_used, clippy::panic)]
-
 use std::time::{Duration, Instant};
 
 use tokio::sync::{mpsc, watch};
@@ -47,7 +45,7 @@ fn a_switch_into_direct_starts_from_hover_and_slews() {
     let streamed = uplink.apply_direct(RATES, 0.5, true, HOVER, now);
     assert_eq!(streamed, DirectOutcome::Streamed { slewed: false });
     assert_eq!(
-        uplink.apply_velocity([0.0; 4], false, true, -3.0, now),
+        uplink.apply_velocity([0.0; 4], false, true),
         VelocityOutcome::Streamed { constrained: false }
     );
     setpoints.borrow_and_update();

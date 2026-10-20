@@ -206,10 +206,16 @@ pub struct FcCommandAck {
     pub outcome: pilotage_protocol::CommandOutcome,
 }
 
-/// FC-owned vehicle state (arm today; mode/failsafe belong here as they
-/// arrive) with its own provenance: the FC is the only author, and the
-/// stamp records which link observation reported it — it is never merged
-/// unstamped into an estimate or truth sample.
+/// The flight controller's landed detector with independent provenance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LandedStateSample {
+    /// State reported by the detector, not inferred from a command or altitude.
+    pub state: pilotage_protocol::LandedState,
+    /// Identity and acquisition time of this detector report.
+    pub stamp: MeasurementStamp,
+}
+
+/// FC-owned vehicle state with separately stamped arm and landed reports.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FcStateSample {
     /// Arm state as the FC reports it: 0 unknown, 1 disarmed, 2 armed.
@@ -218,7 +224,9 @@ pub struct FcStateSample {
     /// has been observed. A refusal here is the only signal that turns
     /// "the command was taken" into "the FC did not do it".
     pub last_command: Option<FcCommandAck>,
-    /// Identity and acquisition time of the FC report carrying this state.
+    /// Landed detector report, or `None` when unavailable.
+    pub landed_state: Option<LandedStateSample>,
+    /// Identity and acquisition time of the arm report.
     pub stamp: MeasurementStamp,
 }
 
@@ -269,6 +277,8 @@ pub struct BatterySample {
 /// A single vehicle's telemetry at one simulation tick.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TelemetrySample {
+    /// Adapter-owned flight procedure progress; separate from vehicle observations.
+    pub flight_procedure: Option<crate::FlightProcedureSample>,
     /// Independent payload observations and command progress.
     pub payload: Option<pilotage_protocol::wire::PayloadState>,
     /// Vehicle this sample describes.
@@ -330,6 +340,7 @@ mod tests {
     #[test]
     fn telemetry_sample_holds_pose_and_speed() {
         let sample = TelemetrySample {
+            flight_procedure: None,
             payload: None,
             vehicle: VehicleId::new(1),
             tick: SimTick::new(2),

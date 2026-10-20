@@ -7,6 +7,7 @@
 
 mod capability;
 mod control;
+mod flight_procedure;
 mod payload;
 mod step;
 mod telemetry;
@@ -22,6 +23,10 @@ pub use control::{
     ActionResult, ApplyOutcome, Disposition, LinkLossEnactError, LinkLossPolicy, RejectReason,
     attitude_euler, intent_satisfies_neutral_activation, link_loss_latch_engaged,
     payload_satisfies_neutral_activation,
+};
+pub use flight_procedure::{
+    FlightProcedureKind, FlightProcedurePhase, FlightProcedureReason, FlightProcedureRequest,
+    FlightProcedureSample,
 };
 // CAL-01 (#90): the camera calibration contract moved to
 // `pilotage-camera-calibration`; re-export it so `pilotage_adapter_api::…` paths
@@ -39,14 +44,15 @@ pub use pilotage_camera_calibration::{
 // The typed vocabulary an adapter reports, shared with clients.
 pub use pilotage_protocol::{
     CommandOutcome, GimbalAxisLocks, GimbalReference, GimbalYawFrame, HeadingReference,
-    MagneticVariationSource, VehicleClass,
+    LandedState, MagneticVariationSource, VehicleClass,
 };
 pub use step::{StepBudget, StepOutcome};
 pub use telemetry::{
     AvionicsAttitudeSample, AvionicsBaroSample, AvionicsKinematicsSample, AvionicsSample,
     BatterySample, FcCommandAck, FcStateSample, GeodeticFixSample, GimbalAttitudeSample,
-    MagneticVariationSample, MeasurementClock, MeasurementStamp, Pose2d, SimTruthSample,
-    SourceIncarnation, SourceIntegrity, SourceRole, TelemetryBatch, TelemetrySample, VideoSource,
+    LandedStateSample, MagneticVariationSample, MeasurementClock, MeasurementStamp, Pose2d,
+    SimTruthSample, SourceIncarnation, SourceIntegrity, SourceRole, TelemetryBatch,
+    TelemetrySample, VideoSource,
 };
 pub use vehicle_adapter::VehicleAdapter;
 pub use video::stamping::{

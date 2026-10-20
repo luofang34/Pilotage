@@ -3,12 +3,17 @@ use std::sync::{Arc, Mutex};
 
 use pilotage_adapter_api::SourceIncarnation;
 
+mod flight;
+use flight::FlightGuard;
+pub use flight::TakeoffWriteRequirement;
+
 /// Shared validity of one local command generation.
 #[derive(Debug, Clone)]
 pub struct SendFence {
     valid: Arc<Mutex<bool>>,
     manager: Option<ManagerGuard>,
     camera: Option<CameraGuard>,
+    flight: Option<FlightGuard>,
 }
 
 #[derive(Debug, Clone)]
@@ -132,6 +137,7 @@ impl Default for SendFence {
             valid: Arc::new(Mutex::new(true)),
             manager: None,
             camera: None,
+            flight: None,
         }
     }
 }
@@ -161,6 +167,7 @@ impl SendFence {
                 requirement,
             }),
             camera: None,
+            flight: None,
         }
     }
 
@@ -175,6 +182,22 @@ impl SendFence {
             valid: self.valid.clone(),
             manager: None,
             camera: Some(CameraGuard { state, requirement }),
+            flight: None,
+        }
+    }
+
+    /// Require selected-source takeoff observations at the actual transport write.
+    #[must_use]
+    pub fn for_takeoff(
+        &self,
+        state: Arc<Mutex<super::LinkState>>,
+        requirement: TakeoffWriteRequirement,
+    ) -> Self {
+        Self {
+            valid: self.valid.clone(),
+            manager: None,
+            camera: None,
+            flight: Some(FlightGuard { state, requirement }),
         }
     }
 
@@ -209,6 +232,8 @@ impl SendFence {
             manager.write(write)
         } else if let Some(camera) = self.camera.as_ref() {
             camera.write(write)
+        } else if let Some(flight) = self.flight.as_ref() {
+            flight.write(write)
         } else {
             write()
         }

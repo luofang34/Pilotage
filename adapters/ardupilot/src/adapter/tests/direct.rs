@@ -35,6 +35,14 @@ fn confirm_parameters(harness: &mut Harness) {
     harness.adapter.sample_telemetry();
 }
 
+pub(super) fn enter_direct_flight(harness: &mut Harness) {
+    confirm_parameters(harness);
+    let outcome = harness
+        .adapter
+        .apply_control(&scoped(DIRECT_SCOPE, rates(0.0, 0.5), vec![]));
+    assert_eq!(outcome.disposition, Disposition::Accepted);
+}
+
 #[test]
 fn both_flight_scopes_share_one_authority_group() {
     let harness = Harness::new();

@@ -195,45 +195,45 @@ attr outcome pass
 node RESULT-LINK-WIRE verification-result
 title host wire-mapping suite — recorded pass
 attr command cargo test -p pilotage-session-host --lib engine_actor::telemetry
-attr config-digest 592d102fa791d03a29144be2372aeb4934158772
+attr config-digest df2aef7d4c23b9008e7fbee3568e376142c7bab2
 attr tool-version rustc 1.99.0 (b940084d7 2026-09-28)
-attr source-digest git-blob:b6818f380c70ab139c88d2270c8a86cc82135fcf
+attr source-digest git-blob:dd3741b3aa2a98152055259601f7abd9aa3e0207
 attr artifact docs/link/evidence-artifacts/link04/host-wire.run.txt
-attr output-digest sha256:d4102099e476b2889012229a06880e43c829a2a6bb94d74fe7c2d6ffa0cb09f1
-attr run-id local:592d102fa791d03a29144be2372aeb4934158772
+attr output-digest sha256:8c0ce0a8f2e4017671133b790531c7c47082218e8390928c1e4ab919fda5ad53
+attr run-id local:df2aef7d4c23b9008e7fbee3568e376142c7bab2
 attr outcome pass
 
 node RESULT-LINK-CAPTURE verification-result
 title loopback-probe capture projection suite — recorded pass
 attr command cargo test -p loopback-probe telemetry::
-attr config-digest 09532a92307a0f03e791cf535b03a9431f492ff2
+attr config-digest df2aef7d4c23b9008e7fbee3568e376142c7bab2
 attr tool-version rustc 1.99.0 (b940084d7 2026-09-28)
-attr source-digest git-blob:93250d9e0d3c6deb0e5c4553cf3140def062598c
+attr source-digest git-blob:3a8c198c69f7263215fc8d109681008421263360
 attr artifact docs/link/evidence-artifacts/link04/capture.run.txt
-attr output-digest sha256:aa5d62242506379657e1a708624c870972a8a9468dba0407bba904020a01bbdf
-attr run-id local:09532a92307a0f03e791cf535b03a9431f492ff2
+attr output-digest sha256:11855ed47181cf1de2e934d30df270a3272846f810aaa3a25ed6df65c5bf6e4c
+attr run-id local:df2aef7d4c23b9008e7fbee3568e376142c7bab2
 attr outcome pass
 
 node RESULT-LINK-CAPTURE-RT verification-result
 title loopback-probe receiver round-trip suite — recorded pass
 attr command cargo test -p loopback-probe receiver::
-attr config-digest 09532a92307a0f03e791cf535b03a9431f492ff2
+attr config-digest df2aef7d4c23b9008e7fbee3568e376142c7bab2
 attr tool-version rustc 1.99.0 (b940084d7 2026-09-28)
-attr source-digest git-blob:025c142bc195575c06f66b7db1f3870ec94afd44
+attr source-digest git-blob:65088b83dcd7e30b39c87bf1047798c18fc3fe34
 attr artifact docs/link/evidence-artifacts/link04/capture-rt.run.txt
-attr output-digest sha256:3fd8fc46708a2b016de955e40d40faae8f953f33f63c23f4570432c46a2d4493
-attr run-id local:09532a92307a0f03e791cf535b03a9431f492ff2
+attr output-digest sha256:db9fd1b43bd66cd187cfcdd959030b0543a928152212299ba3bd1bd1dd7531a6
+attr run-id local:df2aef7d4c23b9008e7fbee3568e376142c7bab2
 attr outcome pass
 
 node RESULT-LINK-CAPTURE-SINK verification-result
 title loopback-probe capture sink suite — recorded pass
 attr command cargo test -p loopback-probe capture::
-attr config-digest 09532a92307a0f03e791cf535b03a9431f492ff2
+attr config-digest df2aef7d4c23b9008e7fbee3568e376142c7bab2
 attr tool-version rustc 1.99.0 (b940084d7 2026-09-28)
-attr source-digest git-blob:30373da64bdd210a92b059e4fa4d1e01f00fba9b
+attr source-digest git-blob:df7bcb3b25f8c533297eadc18e0104df31e84b5f
 attr artifact docs/link/evidence-artifacts/link04/capture-sink.run.txt
-attr output-digest sha256:5ddaed6b3c0f7a47771b7297a5f2470f6debb694b738709cb872e4fe396dd7b7
-attr run-id local:09532a92307a0f03e791cf535b03a9431f492ff2
+attr output-digest sha256:2b2da80a044f4647f845c81e1cecd0dc6d72f7fe770274bc532d8303d53e3d98
+attr run-id local:df2aef7d4c23b9008e7fbee3568e376142c7bab2
 attr outcome pass
 
 # --- Configuration and tool identity ---
@@ -248,6 +248,12 @@ attr artifact docs/link/evidence-artifacts/link05/authz-regime.run.txt
 attr output-digest sha256:ec85ba6fcf019599b4ece6546859e854ec254478c5457fb29a8316b4fa8bf9ee
 attr run-id local:27bc04929ec212d25e45a1cb9ca6ec7f5fc34e7f
 attr outcome pass
+
+node CFG-LINK-OBSERVED-TAKEOFF configuration-item
+title committed baseline for observed takeoff telemetry verification
+attr scm git
+attr commit df2aef7d4c23b9008e7fbee3568e376142c7bab2
+attr tree 73d25096e884c5291e5b2b6d694dfa8d08737570
 
 node CFG-LINK-NATIVE-USB configuration-item
 title committed baseline for native device telemetry verification
@@ -379,24 +385,24 @@ edge RESULT-LINK-ADAPTER justified-by TOOL-LINK-CARGO
 
 edge RESULT-LINK-WIRE result-of CASE-LINK-WIRE
 edge RESULT-LINK-WIRE covers LINK-PROV-003
-edge RESULT-LINK-WIRE justified-by CFG-LINK-NATIVE-USB
+edge RESULT-LINK-WIRE justified-by CFG-LINK-OBSERVED-TAKEOFF
 edge RESULT-LINK-WIRE justified-by TOOL-LINK-CARGO
 
 edge RESULT-LINK-CAPTURE result-of CASE-LINK-CAPTURE
 edge RESULT-LINK-CAPTURE result-of CASE-LINK-UNSTAMPED
 edge RESULT-LINK-CAPTURE covers LINK-PROV-003
 edge RESULT-LINK-CAPTURE covers LINK-ROLE-001
-edge RESULT-LINK-CAPTURE justified-by CFG-LINK-PAYLOAD
+edge RESULT-LINK-CAPTURE justified-by CFG-LINK-OBSERVED-TAKEOFF
 edge RESULT-LINK-CAPTURE justified-by TOOL-LINK-CARGO
 
 edge RESULT-LINK-CAPTURE-RT result-of CASE-LINK-CAPTURE-RT
 edge RESULT-LINK-CAPTURE-RT covers LINK-PROV-003
-edge RESULT-LINK-CAPTURE-RT justified-by CFG-LINK-PAYLOAD
+edge RESULT-LINK-CAPTURE-RT justified-by CFG-LINK-OBSERVED-TAKEOFF
 edge RESULT-LINK-CAPTURE-RT justified-by TOOL-LINK-CARGO
 
 edge RESULT-LINK-CAPTURE-SINK result-of CASE-LINK-CAPTURE-SINK
 edge RESULT-LINK-CAPTURE-SINK covers LINK-PROV-003
-edge RESULT-LINK-CAPTURE-SINK justified-by CFG-LINK-PAYLOAD
+edge RESULT-LINK-CAPTURE-SINK justified-by CFG-LINK-OBSERVED-TAKEOFF
 edge RESULT-LINK-CAPTURE-SINK justified-by TOOL-LINK-CARGO
 
 edge RESULT-LINK-AUTHZ result-of CASE-LINK-AUTHZ

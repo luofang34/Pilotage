@@ -123,6 +123,7 @@ pub(super) fn fc_state_sample(
         .checked_duration_since(started_at)
         .unwrap_or_default();
     Some(FcStateSample {
+        landed_state: None,
         arm_state: if report.armed { 2 } else { 1 },
         // The Aviate uplink logs COMMAND_ACKs but does not yet pair them
         // with the command they answer; the enactment lane stays empty

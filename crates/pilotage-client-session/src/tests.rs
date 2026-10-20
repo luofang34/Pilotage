@@ -4,6 +4,7 @@
 //! execute (`clients/web-control/*.json`), so the native and web paths
 //! cannot drift: a divergence reddens exactly one of them.
 
+mod action_request;
 mod catalog;
 mod groups;
 mod lanes;
