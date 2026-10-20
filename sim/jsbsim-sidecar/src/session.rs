@@ -15,31 +15,19 @@ use std::time::{Duration, Instant};
 
 use pilotage_world::{TerrainSource, World};
 
-use crate::aircraft::Aircraft;
-use crate::engine::ModelPaths;
-use crate::gimbal::GimbalLimits;
 use crate::hil::{ActuatorControls, Encoder, FrameReader};
 use crate::pacer::Pacer;
-use crate::sensors::NoiseLevels;
-use crate::simulation::{Simulation, SimulationError, Start};
+use crate::simulation::{Simulation, SimulationError, Vehicle};
 
 /// How a session runs.
 #[derive(Debug, Clone)]
 pub struct SessionConfig {
     /// The loopback TCP port PX4 connects to (4560 + PX4 instance).
     pub port: u16,
-    /// The aircraft.
-    pub aircraft: Aircraft,
-    /// Where its model lives.
-    pub paths: ModelPaths,
-    /// Where it starts.
-    pub start: Start,
-    /// The sensor noise seed.
-    pub seed: u64,
-    /// The sensor noise.
-    pub noise: NoiseLevels,
-    /// The gimbal's travel, when the vehicle carries one.
-    pub gimbal: Option<GimbalLimits>,
+    /// The vehicle each connection gets afresh.
+    pub vehicle: Vehicle,
+    /// Where the truth also goes every step (the host's truth lane).
+    pub truth_addr: Option<std::net::SocketAddr>,
     /// Simulation seconds per wall second; 0 runs unpaced.
     pub realtime_factor: f64,
     /// How long to wait for PX4's answer to a step before stepping on.
@@ -82,20 +70,12 @@ pub fn serve_blocking<T: TerrainSource>(
             port: config.port,
             source,
         })?;
-    tracing::info!(port = config.port, aircraft = ?config.aircraft, "{LISTENING}");
+    tracing::info!(port = config.port, aircraft = ?config.vehicle.aircraft, step_ms = config.vehicle.step_ms, "{LISTENING}");
     let mut connection: u64 = 0;
     loop {
         // A vehicle is built before PX4 connects, so a model error shows
         // at start-up rather than at PX4's first step.
-        let simulation = Simulation::new(
-            config.aircraft,
-            &config.paths,
-            world,
-            config.start,
-            config.seed,
-            config.noise,
-            config.gimbal,
-        )?;
+        let simulation = Simulation::new(&config.vehicle, world)?;
         let truth = simulation.truth();
         tracing::info!(
             latitude_deg = truth.latitude_deg,
@@ -139,6 +119,8 @@ fn run_connection<T: TerrainSource>(
 ) -> Result<(), ConnectionError> {
     stream.set_nodelay(true)?;
     let mut encoder = Encoder::default();
+    let mut truth_encoder = Encoder::default();
+    let truth_lane = config.truth_addr.and_then(TruthLane::open);
     let mut reader = FrameReader::default();
     let mut controls: Option<ActuatorControls> = None;
     let mut lockstep = false;
@@ -149,6 +131,9 @@ fn run_connection<T: TerrainSource>(
     loop {
         for frame in simulation.step(controls.as_ref(), world, &mut encoder)? {
             stream.write_all(&frame)?;
+        }
+        if let Some(lane) = &truth_lane {
+            lane.send(&truth_encoder.hil_state_quaternion(&simulation.truth()));
         }
         let wait = if lockstep {
             config.lockstep_timeout
@@ -231,6 +216,35 @@ fn receive(
                 return Ok(Received::Closed);
             }
             Err(error) => return Err(error),
+        }
+    }
+}
+
+/// The truth's second destination: a UDP datagram per step to the host.
+struct TruthLane {
+    socket: std::net::UdpSocket,
+    to: std::net::SocketAddr,
+}
+
+impl TruthLane {
+    fn open(to: std::net::SocketAddr) -> Option<Self> {
+        match std::net::UdpSocket::bind(("127.0.0.1", 0)) {
+            Ok(socket) => {
+                tracing::info!(%to, "sending truth to the host");
+                Some(Self { socket, to })
+            }
+            Err(error) => {
+                tracing::warn!(%error, "the truth lane could not open; PX4 alone gets truth");
+                None
+            }
+        }
+    }
+
+    /// Sends one frame. A host not listening yet costs nothing: the
+    /// datagram is dropped and the next step sends a newer one.
+    fn send(&self, frame: &[u8]) {
+        if let Err(error) = self.socket.send_to(frame, self.to) {
+            tracing::debug!(%error, "truth datagram not sent");
         }
     }
 }

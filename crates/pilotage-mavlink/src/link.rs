@@ -19,7 +19,7 @@ mod fc_reports;
 mod fence;
 pub mod measurement;
 mod outbound;
-pub use fence::{ManagerWriteRequirement, SendFence};
+pub use fence::{CameraWriteRequirement, ManagerWriteRequirement, SendFence};
 mod task;
 mod updates;
 pub use apply::apply_messages_at;

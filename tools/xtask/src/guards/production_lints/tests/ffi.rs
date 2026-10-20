@@ -4,9 +4,10 @@ use std::path::{Path, PathBuf};
 use std::process::Output;
 
 use super::super::{FFI_CRATES, FfiCrate, clippy_invocations, unsafe_findings};
+use super::BINDING;
 
 const USB: FfiCrate = FfiCrate {
-    package: "pilotage-dji-usb",
+    workspace_package: Some("pilotage-dji-usb"),
     dir: "adapters/dji-usb",
     unsafe_module: "src/ffi.rs",
 };
@@ -27,7 +28,7 @@ fn dji_usb_registers_only_its_ffi_source_file() {
     assert_eq!(
         FFI_CRATES
             .iter()
-            .filter(|entry| entry.package == USB.package)
+            .filter(|entry| entry.workspace_package == USB.workspace_package)
             .count(),
         1
     );
@@ -40,8 +41,8 @@ fn dji_usb_registers_only_its_ffi_source_file() {
 fn ffi_plan_accepts_its_boundary_but_refuses_other_unsafe_and_panic_exemptions() {
     let root = fixture();
     let usb_source = root.join(USB.dir).join("src/lib.rs");
-    let plan = clippy_invocations(&[USB]);
-    assert!(unsafe_findings(&root, &[USB]).unwrap().is_empty());
+    let plan = clippy_invocations(&[USB, BINDING]);
+    assert!(unsafe_findings(&root, &[USB, BINDING]).unwrap().is_empty());
     for args in &plan {
         let output = run_clippy(&root, args);
         assert!(
@@ -111,9 +112,10 @@ fn fixture() -> PathBuf {
     let source = root.join(USB.dir).join("src");
     std::fs::create_dir_all(&source).unwrap();
     std::fs::create_dir_all(root.join("consumer/src")).unwrap();
+    standalone_fixture(&root);
     std::fs::write(
         root.join("Cargo.toml"),
-        "[workspace]\nmembers = [\"adapters/dji-usb\", \"consumer\"]\nresolver = \"2\"\n",
+        "[workspace]\nmembers = [\"adapters/dji-usb\", \"consumer\"]\nexclude = [\"sim/binding\"]\nresolver = \"2\"\n",
     )
     .unwrap();
     std::fs::write(
@@ -135,6 +137,19 @@ fn fixture() -> PathBuf {
     )
     .unwrap();
     root
+}
+
+#[cfg(test)]
+fn standalone_fixture(root: &Path) {
+    let source = root.join(BINDING.dir).join("src");
+    std::fs::create_dir_all(&source).unwrap();
+    std::fs::write(
+        root.join(BINDING.dir).join("Cargo.toml"),
+        "[package]\nname = \"binding\"\nversion = \"0.0.0\"\nedition = \"2024\"\n[workspace]\n",
+    )
+    .unwrap();
+    std::fs::write(source.join("lib.rs"), "mod ffi;\npub use ffi::value;\n").unwrap();
+    std::fs::write(source.join("ffi.rs"), FFI_SOURCE).unwrap();
 }
 
 #[cfg(test)]

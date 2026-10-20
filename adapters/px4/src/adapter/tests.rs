@@ -85,7 +85,7 @@ pub(super) fn fake_fc() -> (UdpSocket, std::net::SocketAddr) {
 
 /// An uplink whose offboard-loss Hold PX4 has already confirmed.
 pub(super) fn uplink_to(addr: std::net::SocketAddr) -> Px4Uplink {
-    let mut uplink = Px4Uplink::new(addr).expect("uplink");
+    let mut uplink = Px4Uplink::new(crate::config::Px4Profile::Simulation, addr).expect("uplink");
     uplink.confirm_failsafe();
     uplink
 }

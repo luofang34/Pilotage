@@ -1,6 +1,10 @@
 //! The live flight's client: the portable client-session core over a
 //! WebTransport connection to the host, and the telemetry it decodes.
 
+// Each live test is its own crate and uses a different subset of this
+// module.
+#![allow(dead_code)]
+
 use std::time::{Duration, Instant};
 
 use pilotage_client_session::{
@@ -23,6 +27,9 @@ pub(crate) struct Reading {
     pub(crate) heading: f64,
     pub(crate) tilt_deg: f64,
     pub(crate) roll_rate: f64,
+    /// The gimbal pitch the vehicle reports, radians, + up, when it has a
+    /// gimbal.
+    pub(crate) gimbal_pitch: Option<f64>,
 }
 
 pub(crate) struct Client {
@@ -101,6 +108,11 @@ impl Client {
                     .acos()
                     .to_degrees(),
                 roll_rate: f64::from(avionics.rate_p_rad_s),
+                gimbal_pitch: sample.gimbal.as_deref().map(|gimbal| {
+                    let [w, x, y, z] =
+                        [gimbal.quat_w, gimbal.quat_x, gimbal.quat_y, gimbal.quat_z].map(f64::from);
+                    (2.0 * (w * y - z * x)).clamp(-1.0, 1.0).asin()
+                }),
             });
         }
         self.events.push(event);
@@ -227,6 +239,33 @@ impl Client {
 }
 
 impl Client {
+    /// The host's admission catalog.
+    pub(crate) fn admission(&self) -> &pilotage_client_session::Admission {
+        self.engine.admission().expect("admitted")
+    }
+
+    /// Recenters the held gimbal scope through the reliable action path,
+    /// pressing again while a previous holder's link-loss latch is still
+    /// clearing.
+    pub(crate) async fn recenter(&mut self) {
+        let started = Instant::now();
+        loop {
+            let (accepted, detail) = self
+                .action(wire::ControlAction::GimbalRecenter as u32)
+                .await;
+            if accepted {
+                return;
+            }
+            assert!(
+                started.elapsed() < Duration::from_secs(15),
+                "recenter refused: {detail}"
+            );
+            for _ in 0..20 {
+                self.pump_datagram().await;
+            }
+        }
+    }
+
     /// Swaps the held flight scope for `scope`, as a scheme switch does.
     pub(crate) async fn switch_to(&mut self, scope: &str) {
         let (vehicle, held) = self.engine.control_target().expect("holds control");

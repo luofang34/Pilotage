@@ -8,9 +8,6 @@ use pilotage_terrain_query::{TerrainArchive, TerrainQueryError};
 use super::{TerrainSample, TerrainSource, msl_height};
 use crate::error::TerrainError;
 
-/// WGS84 equatorial circumference, m: the Web Mercator tile scale.
-const EQUATOR_M: f64 = 2.0 * core::f64::consts::PI * 6_378_137.0;
-
 /// A Terrarium archive as the world's terrain.
 pub struct ArchiveTerrain {
     archive: TerrainArchive,
@@ -52,10 +49,12 @@ pub(crate) fn archive_id(name: &str, version: Option<&str>) -> TerrainRefId {
 }
 
 /// The ground size of one pixel of a `tile_size` tile at `zoom`, at
-/// `latitude_deg`, m.
+/// `latitude_deg`, m: Web Mercator spreads the WGS-84 equator over the
+/// tile pyramid's width.
 pub(crate) fn pixel_size_m(latitude_deg: f64, zoom: u8, tile_size: u32) -> f64 {
+    let equator_m = 2.0 * core::f64::consts::PI * world_core::WGS84.semi_major_m;
     let pixels = f64::from(tile_size) * libm::pow(2.0, f64::from(zoom));
-    EQUATOR_M * libm::cos(latitude_deg.to_radians()) / pixels
+    equator_m * libm::cos(latitude_deg.to_radians()) / pixels
 }
 
 impl TerrainSource for ArchiveTerrain {

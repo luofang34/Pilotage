@@ -48,8 +48,8 @@ fn mavlink_port(instance: u16) -> u16 {
 /// A plain `sim` session's home: the first place on the grass of
 /// Zurich, where PX4's own worlds stand, apart from a vehicle at the
 /// origin.
-fn default_home() -> Placement {
-    crate::site::ZURICH.placement(crate::site::Ground::Field, 0)
+fn default_home() -> Result<Placement, XtaskError> {
+    crate::site::place(&crate::site::ZURICH, crate::site::Ground::Field, 0)
 }
 
 /// SITL's `--home latitude,longitude,altitude_msl,heading`.
@@ -192,7 +192,7 @@ fn plan_with_ardupilot_dir(
                 defaults.display().to_string(),
                 format!("-I{}", ctx.instance),
                 "--home".to_owned(),
-                home_arg(&default_home()),
+                home_arg(&default_home()?),
                 "--serial0".to_owned(),
                 format!("udpclient:127.0.0.1:{}", mavlink_port(ctx.instance)),
             ],

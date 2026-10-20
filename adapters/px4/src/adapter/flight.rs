@@ -21,14 +21,19 @@ pub(super) fn flight_uplinks(
     link: &LinkConfig,
 ) -> (Option<Px4Uplink>, Option<FixedWingUplink>) {
     let bound = match config.airframe {
-        Px4Airframe::Multicopter => Px4Uplink::new(config.command_endpoint).map(|mut uplink| {
-            uplink.set_expected_source(link.system_id, link.component_id);
-            (Some(uplink), None)
-        }),
-        Px4Airframe::FixedWing => {
-            FixedWingUplink::new(config.command_endpoint, link.system_id, link.component_id)
-                .map(|uplink| (None, Some(uplink)))
+        Px4Airframe::Multicopter => {
+            Px4Uplink::new(config.profile(), config.command_endpoint).map(|mut uplink| {
+                uplink.set_expected_source(link.system_id, link.component_id);
+                (Some(uplink), None)
+            })
         }
+        Px4Airframe::FixedWing => FixedWingUplink::new(
+            config.profile(),
+            config.command_endpoint,
+            link.system_id,
+            link.component_id,
+        )
+        .map(|uplink| (None, Some(uplink))),
     };
     bound.unwrap_or_else(|error| {
         tracing::warn!(%error, "PX4 uplink unavailable; telemetry-only");
@@ -81,10 +86,9 @@ impl Px4Adapter {
             .map(|action| match action.kind() {
                 ActionKind::Arm => match uplink.begin_arm(pos[2]) {
                     Ok(()) => ActionResult::accepted(*action),
-                    Err(ArmRefusal::ParametersUnconfirmed) => ActionResult::rejected(
-                        *action,
-                        "PX4 has not yet confirmed the fixed-wing parameters",
-                    ),
+                    Err(ArmRefusal::Parameter(refusal)) => {
+                        ActionResult::rejected(*action, refusal.to_string())
+                    }
                 },
                 _ => ActionResult::rejected(*action, "not supported on the flight scope"),
             })

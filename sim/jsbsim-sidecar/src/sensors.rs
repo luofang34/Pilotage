@@ -10,7 +10,9 @@ mod noise;
 
 pub use noise::Noise;
 
-use pilotage_world::{TerrainSource, World, WorldError};
+use pilotage_world::{Ned, PositionError, TerrainSource, World, WorldError, local_plane};
+
+use world_atmosphere::Altitude;
 
 use crate::truth::Truth;
 
@@ -60,10 +62,10 @@ pub struct InertialSample {
     pub mag_frd_gauss: [f64; 3],
     /// Static pressure, hPa.
     pub pressure_hpa: f64,
-    /// Pressure altitude from the measured pressure, m.
-    pub pressure_altitude_m: f64,
     /// Differential (pitot) pressure, hPa.
     pub diff_pressure_hpa: f64,
+    /// Pressure altitude, m.
+    pub pressure_altitude_m: f64,
     /// Air temperature, °C.
     pub temperature_c: f64,
 }
@@ -87,11 +89,6 @@ pub struct GnssSample {
     pub vertical_accuracy_m: f64,
 }
 
-/// Pressure altitude of the ISA troposphere, m, from static pressure.
-pub fn pressure_altitude_m(pressure_pa: f64) -> f64 {
-    44_330.769_230_8 * (1.0 - (pressure_pa / 101_325.0).powf(0.190_263_2))
-}
-
 /// The sensors of one vehicle.
 #[derive(Debug, Clone)]
 pub struct Sensors {
@@ -113,7 +110,7 @@ impl Sensors {
     /// # Errors
     ///
     /// Returns [`WorldError`] when the world cannot give the magnetic
-    /// field at the vehicle's position.
+    /// field or the air at the vehicle's position.
     pub fn inertial<T: TerrainSource>(
         &mut self,
         truth: &Truth,
@@ -128,7 +125,10 @@ impl Sensors {
         let accel_noise = self.noise.gaussian3(levels.accel_mps2);
         let gyro_noise = self.noise.gaussian3(levels.gyro_rad_s);
         let mag_noise = self.noise.gaussian3(levels.mag_gauss);
-        let pressure_pa = truth.pressure_pa + self.noise.gaussian(levels.baro_pa);
+        // The barometer reads the world's air, the same model every
+        // simulated vehicle and flight controller of the world shares.
+        let air = world.atmosphere(truth.latitude_deg, truth.longitude_deg, truth.altitude_m)?;
+        let pressure_pa = air.pressure_pa + self.noise.gaussian(levels.baro_pa);
         let diff_pa =
             (truth.dynamic_pressure_pa + self.noise.gaussian(levels.diff_pressure_pa)).max(0.0);
         Ok(InertialSample {
@@ -137,28 +137,39 @@ impl Sensors {
             gyro_frd: add(truth.rates_frd, gyro_noise),
             mag_frd_gauss: add(mag_frd, mag_noise),
             pressure_hpa: pressure_pa / 100.0,
-            pressure_altitude_m: pressure_altitude_m(pressure_pa),
             diff_pressure_hpa: diff_pa / 100.0,
-            temperature_c: truth.temperature_c,
+            // The world's air is the standard atmosphere, whose pressure
+            // altitude is the geopotential altitude.
+            pressure_altitude_m: Altitude::GeometricMsl(truth.altitude_m).geopotential_m(),
+            temperature_c: air.temperature_c(),
         })
     }
 
-    /// A GNSS fix at `truth`.
-    pub fn gnss(&mut self, truth: &Truth) -> GnssSample {
+    /// A GNSS fix at `truth`: the truth moved by the receiver's noise in
+    /// the world model's local frame there.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PositionError`] for a truth position not well formed.
+    pub fn gnss(&mut self, truth: &Truth) -> Result<GnssSample, PositionError> {
         let levels = self.levels;
-        let (per_lat, per_lon) = pilotage_world::metres_per_degree(truth.latitude_deg);
-        let north_m = self.noise.gaussian(levels.gnss_horizontal_m);
-        let east_m = self.noise.gaussian(levels.gnss_horizontal_m);
+        let plane = local_plane(truth.latitude_deg, truth.longitude_deg, truth.altitude_m)?;
+        let fix = plane.to_geodetic(Ned {
+            north_m: self.noise.gaussian(levels.gnss_horizontal_m),
+            east_m: self.noise.gaussian(levels.gnss_horizontal_m),
+            down_m: -self.noise.gaussian(levels.gnss_vertical_m),
+        });
         let velocity_noise = self.noise.gaussian3(levels.gnss_velocity_mps);
-        GnssSample {
+        Ok(GnssSample {
             time_us: time_us(truth.time_s),
-            latitude_deg: truth.latitude_deg + north_m / per_lat,
-            longitude_deg: truth.longitude_deg + east_m / per_lon,
-            altitude_m: truth.altitude_m + self.noise.gaussian(levels.gnss_vertical_m),
+            latitude_deg: fix.latitude_deg,
+            longitude_deg: fix.longitude_deg,
+            // The world's MSL heights are its ellipsoidal heights.
+            altitude_m: fix.ellipsoidal_height_m,
             velocity_ned: [0, 1, 2].map(|i| truth.velocity_ned[i] + velocity_noise[i]),
             horizontal_accuracy_m: 3.0 * levels.gnss_horizontal_m,
             vertical_accuracy_m: 3.0 * levels.gnss_vertical_m,
-        }
+        })
     }
 }
 

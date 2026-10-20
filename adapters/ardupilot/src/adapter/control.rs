@@ -9,7 +9,7 @@ use pilotage_protocol::{
 };
 use pilotage_timing::SimTick;
 
-use super::params::DirectParams;
+use super::params::{DirectParams, DirectRefusal};
 use super::{
     ArduPilotAdapter, DIRECT_SCOPE, FLIGHT_SCOPE, PITCH_AXIS, ROLL_AXIS, THROTTLE_AXIS, YAW_AXIS,
     action_results,
@@ -149,7 +149,10 @@ impl ArduPilotAdapter {
         }
         let armed = self.fc_armed();
         let pose = self.current_pose();
-        let hover = self.direct.as_ref().and_then(DirectParams::ready_hover);
+        let hover = self
+            .direct
+            .as_ref()
+            .map_or(Err(DirectRefusal::Unconfirmed), DirectParams::ready_hover);
         let Some(uplink) = self.uplink.as_mut() else {
             return rejected(tick, RejectReason::UnknownScope);
         };
@@ -192,10 +195,10 @@ impl ArduPilotAdapter {
             },
             (DIRECT_SCOPE, Some(intent)) => match (direct_target(&intent), hover) {
                 (None, _) => Disposition::Rejected(wrong_family()),
-                (Some(_), None) => Disposition::Rejected(RejectReason::Other(
-                    "ArduCopter hover thrust or GUID_OPTIONS not confirmed yet".to_owned(),
-                )),
-                (Some((kind, thrust, clamped)), Some(hover)) => direct_disposition(
+                (Some(_), Err(refusal)) => {
+                    Disposition::Rejected(RejectReason::Other(refusal.to_string()))
+                }
+                (Some((kind, thrust, clamped)), Ok(hover)) => direct_disposition(
                     uplink.apply_direct(kind, thrust, armed, hover, now),
                     clamped,
                 ),

@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use pilotage_world::{MagneticEpoch, N51, UniformTerrain, World};
 
-use super::{Simulation, Start};
+use super::{Simulation, Start, Vehicle};
 use crate::aircraft::Aircraft;
 use crate::engine::ModelPaths;
 use crate::hil::{
@@ -28,6 +28,24 @@ fn world() -> World<UniformTerrain> {
     )
 }
 
+fn vehicle(
+    aircraft: Aircraft,
+    paths: ModelPaths,
+    start: Start,
+    gimbal: Option<crate::gimbal::GimbalLimits>,
+    step_ms: u32,
+) -> Vehicle {
+    Vehicle {
+        aircraft,
+        paths,
+        start,
+        seed: 3,
+        noise: DEFAULT_NOISE,
+        gimbal,
+        step_ms,
+    }
+}
+
 fn x500(world: &mut World<UniformTerrain>) -> Simulation {
     let paths = ModelPaths {
         root: PathBuf::from(env!("PILOTAGE_JSBSIM_ROOT")),
@@ -39,7 +57,7 @@ fn x500(world: &mut World<UniformTerrain>) -> Simulation {
         longitude_deg: N51.longitude_deg,
         heading_deg: N51.heading_deg,
     };
-    Simulation::new(Aircraft::X500, &paths, world, start, 3, DEFAULT_NOISE, None).unwrap()
+    Simulation::new(&vehicle(Aircraft::X500, paths, start, None, 4), world).unwrap()
 }
 
 fn controls(command: f32, armed: bool) -> ActuatorControls {
@@ -109,13 +127,29 @@ fn full_motor_commands_lift_the_x500_and_disarmed_ones_do_not() {
     );
 }
 
-#[test]
-fn px4_gets_the_imu_every_step_and_the_rest_at_their_rates() {
+/// Counts one simulated second of IMU, GNSS, and truth frames, and the
+/// simulated time it took.
+fn one_second(step_ms: u32) -> ([usize; 3], f64) {
     let mut world = world();
-    let mut simulation = x500(&mut world);
+    let paths = ModelPaths {
+        root: PathBuf::from(env!("PILOTAGE_JSBSIM_ROOT")),
+        aircraft_dir: Aircraft::X500.bundled_dir(),
+        model: "x500".to_owned(),
+    };
+    let start = Start {
+        latitude_deg: N51.latitude_deg,
+        longitude_deg: N51.longitude_deg,
+        heading_deg: N51.heading_deg,
+    };
+    let mut simulation = Simulation::new(
+        &vehicle(Aircraft::X500, paths, start, None, step_ms),
+        &mut world,
+    )
+    .unwrap();
     let mut encoder = Encoder::default();
+    let started = simulation.truth().time_s;
     let mut counts = [0usize; 3];
-    for _ in 0..250 {
+    for _ in 0..1_000 / step_ms {
         for frame in simulation.step(None, &mut world, &mut encoder).unwrap() {
             match message_id(&frame) {
                 id if id == HIL_SENSOR.0 => counts[0] += 1,
@@ -125,8 +159,20 @@ fn px4_gets_the_imu_every_step_and_the_rest_at_their_rates() {
             }
         }
     }
-    // One second: 250 IMU samples, 10 fixes, 50 truth messages.
-    assert_eq!(counts, [250, 10, 50]);
+    (counts, simulation.truth().time_s - started)
+}
+
+#[test]
+fn px4_gets_the_imu_and_truth_every_step_and_the_rest_at_their_rates() {
+    // PX4's 4 ms step: 250 IMU samples, 10 fixes, and truth every step.
+    let (counts, elapsed) = one_second(4);
+    assert_eq!(counts, [250, 10, 250]);
+    assert!((elapsed - 1.0).abs() < 1e-9, "{elapsed}");
+    // A 1 ms step (Aviate's JSBSim board): the same second in 1000 steps,
+    // with the GNSS still at 10 Hz.
+    let (counts, elapsed) = one_second(1);
+    assert_eq!(counts, [1_000, 10, 1_000]);
+    assert!((elapsed - 1.0).abs() < 1e-9, "{elapsed}");
 }
 
 #[test]
@@ -146,9 +192,17 @@ fn a_disarmed_x500_stays_put_on_the_ground() {
     }
     let after = simulation.truth();
     let yaw_drift = (after.attitude.yaw - before.attitude.yaw).to_degrees();
-    let (per_lat, per_lon) = pilotage_world::metres_per_degree(N51.latitude_deg);
-    let moved = ((after.latitude_deg - before.latitude_deg) * per_lat)
-        .hypot((after.longitude_deg - before.longitude_deg) * per_lon);
+    let plane =
+        pilotage_world::local_plane(before.latitude_deg, before.longitude_deg, before.altitude_m)
+            .unwrap();
+    let offset = plane
+        .to_ned(pilotage_world::world_position(
+            after.latitude_deg,
+            after.longitude_deg,
+            before.altitude_m,
+        ))
+        .unwrap();
+    let moved = offset.north_m.hypot(offset.east_m);
     assert!(yaw_drift.abs() < 0.1, "yawed {yaw_drift} deg at rest");
     assert!(moved < 0.01, "slid {moved} m at rest");
     // An inertial rate at rest is the Earth's rotation, 7.3e-5 rad/s.
@@ -173,16 +227,8 @@ fn a_powered_landing_comes_to_rest_without_ringing() {
             longitude_deg: N51.longitude_deg,
             heading_deg: heading,
         };
-        let mut simulation = Simulation::new(
-            Aircraft::X500,
-            &paths,
-            &mut world,
-            start,
-            3,
-            DEFAULT_NOISE,
-            None,
-        )
-        .unwrap();
+        let mut simulation =
+            Simulation::new(&vehicle(Aircraft::X500, paths, start, None, 4), &mut world).unwrap();
         let mut encoder = Encoder::default();
         let mut spin = controls(0.85, true);
         spin.controls[2] = 0.80;
@@ -237,16 +283,7 @@ fn rascal(world: &mut World<UniformTerrain>) -> Simulation {
         longitude_deg: N51.longitude_deg,
         heading_deg: N51.heading_deg,
     };
-    Simulation::new(
-        Aircraft::Rascal,
-        &paths,
-        world,
-        start,
-        3,
-        DEFAULT_NOISE,
-        None,
-    )
-    .unwrap()
+    Simulation::new(&vehicle(Aircraft::Rascal, paths, start, None, 4), world).unwrap()
 }
 
 /// PX4's airframe 1033 outputs: rudder on 3, throttle on 5 (0-based 2, 4).
@@ -319,13 +356,8 @@ fn px4s_gimbal_outputs_point_the_gimbal() {
     };
     let limits = crate::gimbal::GimbalLimits::from_px4(180.0, 45.0, -135.0, 720.0);
     let mut simulation = Simulation::new(
-        Aircraft::X500,
-        &paths,
+        &vehicle(Aircraft::X500, paths, start, Some(limits), 4),
         &mut world,
-        start,
-        3,
-        DEFAULT_NOISE,
-        Some(limits),
     )
     .unwrap();
     let mut encoder = Encoder::default();
@@ -347,4 +379,82 @@ fn px4s_gimbal_outputs_point_the_gimbal() {
             .unwrap();
     }
     assert!((simulation.gimbal_angles_deg().unwrap()[1] + 45.0).abs() < 0.1);
+}
+
+/// Ground rising 8 m per 100 m north in DEM-pixel steps, like the land
+/// around N51 in its archive.
+struct Hill;
+
+impl pilotage_world::TerrainSource for Hill {
+    fn id(&self) -> pilotage_geo::TerrainRefId {
+        pilotage_geo::TerrainRefId(9)
+    }
+
+    fn sample_blocking(
+        &mut self,
+        latitude_deg: f64,
+        longitude_deg: f64,
+    ) -> Result<Option<pilotage_world::TerrainSample>, pilotage_world::TerrainError> {
+        let plane = pilotage_world::local_plane(N51.latitude_deg, N51.longitude_deg, 0.0).unwrap();
+        let north_m = plane
+            .to_ned(pilotage_world::world_position(
+                latitude_deg,
+                longitude_deg,
+                0.0,
+            ))
+            .unwrap()
+            .north_m;
+        // In 3.6 m steps, as a z15 Terrarium pixel quantizes it. The
+        // start stands mid-step, so rounding in the frame conversion
+        // cannot move it onto the step below.
+        let mut flat = UniformTerrain {
+            elevation_m: 56.0 + 0.08 * ((north_m + 1.8) / 3.6).floor() * 3.6,
+        };
+        let mut sample =
+            pilotage_world::TerrainSource::sample_blocking(&mut flat, latitude_deg, longitude_deg)?;
+        if let Some(sample) = sample.as_mut() {
+            sample.resolution_m = 10.0;
+        }
+        Ok(sample)
+    }
+}
+
+#[test]
+fn the_x500_settles_on_sloped_terrain() {
+    let mut world = World::new(N51, Hill, MagneticEpoch::from_decimal_year(2026.8));
+    let paths = ModelPaths {
+        root: PathBuf::from(env!("PILOTAGE_JSBSIM_ROOT")),
+        aircraft_dir: Aircraft::X500.bundled_dir(),
+        model: "x500".to_owned(),
+    };
+    let start = Start {
+        latitude_deg: N51.latitude_deg,
+        longitude_deg: N51.longitude_deg,
+        heading_deg: N51.heading_deg,
+    };
+    let mut simulation =
+        Simulation::new(&vehicle(Aircraft::X500, paths, start, None, 4), &mut world).unwrap();
+    let mut encoder = Encoder::default();
+    for _ in 0..2_500 {
+        simulation.step(None, &mut world, &mut encoder).unwrap();
+    }
+    let truth = simulation.truth();
+    // On the slope the legs rest unevenly: the CG stands about 0.12 m
+    // above the ground under it, and the vehicle pitches with the hill.
+    assert!(
+        (truth.altitude_m - 56.0 - 0.12).abs() < 0.05,
+        "{}",
+        truth.altitude_m
+    );
+    assert!(
+        truth.velocity_ned.iter().all(|v| v.abs() < 0.01),
+        "{:?}",
+        truth.velocity_ned
+    );
+    // JSBSim's contact friction lets a vehicle on a slope creep, slowly.
+    assert!(
+        truth.rates_frd.iter().all(|r| r.abs() < 1e-2),
+        "{:?}",
+        truth.rates_frd
+    );
 }

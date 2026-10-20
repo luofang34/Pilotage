@@ -4,7 +4,8 @@
 //! `allow` cannot exempt one.
 //!
 //! A crate that binds a C or C++ library cannot call it without unsafe
-//! code. Such a crate is named in [`FFI_CRATES`] with the one module
+//! code. Such a crate is named in [`FFI_CRATES`] and is checked through
+//! its manifest. Its registration names the one module
 //! that may hold its unsafe code. Clippy denies `unsafe_code` in it
 //! instead of forbidding it, so that module's `allow` stands, and this
 //! guard keeps the exemption small: an `unsafe` anywhere else in the
@@ -23,8 +24,8 @@ mod tests;
 /// A crate that binds a foreign library.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct FfiCrate {
-    /// The cargo package name.
-    pub(crate) package: &'static str,
+    /// Workspace package to exclude from the ordinary lint group, if a member.
+    pub(crate) workspace_package: Option<&'static str>,
     /// Its directory, relative to the repository root.
     pub(crate) dir: &'static str,
     /// The one source file, relative to [`Self::dir`], that may hold
@@ -35,12 +36,12 @@ pub(crate) struct FfiCrate {
 /// Every crate that binds a foreign library.
 pub(crate) const FFI_CRATES: &[FfiCrate] = &[
     FfiCrate {
-        package: "pilotage-jsbsim-sidecar",
+        workspace_package: None,
         dir: "sim/jsbsim-sidecar",
         unsafe_module: "src/engine/ffi.rs",
     },
     FfiCrate {
-        package: "pilotage-dji-usb",
+        workspace_package: Some("pilotage-dji-usb"),
         dir: "adapters/dji-usb",
         unsafe_module: "src/ffi.rs",
     },
@@ -71,9 +72,9 @@ impl fmt::Display for Finding {
     }
 }
 
-/// The clippy argument lists the guard runs: the workspace without the
-/// FFI crates under a forbid of unsafe code, then each FFI crate under a
-/// deny of it. Both forbid the panic-capable operations.
+/// The clippy argument lists the guard runs: the workspace under a
+/// forbid of unsafe code, then each FFI crate, through its own manifest,
+/// under a deny of it. Both forbid the panic-capable operations.
 pub(crate) fn clippy_invocations(ffi: &[FfiCrate]) -> Vec<Vec<String>> {
     let lint_args = |unsafe_level: &str| {
         let mut args = vec![
@@ -94,15 +95,17 @@ pub(crate) fn clippy_invocations(ffi: &[FfiCrate]) -> Vec<Vec<String>> {
     let mut workspace = vec!["clippy".to_owned(), "--workspace".to_owned()];
     workspace.extend(targets.clone());
     for krate in ffi {
-        workspace.extend(["--exclude".to_owned(), krate.package.to_owned()]);
+        if let Some(package) = krate.workspace_package {
+            workspace.extend(["--exclude".to_owned(), package.to_owned()]);
+        }
     }
     workspace.extend(lint_args("-F"));
     let mut invocations = vec![workspace];
     for krate in ffi {
         let mut args = vec![
             "clippy".to_owned(),
-            "-p".to_owned(),
-            krate.package.to_owned(),
+            "--manifest-path".to_owned(),
+            format!("{}/Cargo.toml", krate.dir),
         ];
         args.extend(targets.clone());
         args.extend(lint_args("-D"));

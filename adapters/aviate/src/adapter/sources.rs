@@ -9,9 +9,9 @@ use pilotage_adapter_api::{
     SourceRole,
 };
 
-use super::AviateProfile;
 #[cfg(feature = "sim")]
 use super::shm_sampling::ShmSource;
+use super::{AviateProfile, AviateTruth};
 use crate::error::AviateAdapterError;
 use crate::incarnation::IncarnationProvider;
 use pilotage_mavlink::link::{LinkConfig, LinkState, MavlinkLink};
@@ -46,6 +46,8 @@ pub(super) struct ArmReport {
 /// independent sources, not one link.
 pub(super) async fn bind_sources<P: IncarnationProvider>(
     profile: AviateProfile,
+    // A flight build binds no truth at all.
+    #[cfg_attr(not(feature = "sim"), allow(unused_variables))] truth: AviateTruth,
     config: LinkConfig,
     provider: &mut P,
 ) -> Result<(Option<EstimateSource>, Option<Box<super::TruthOracle>>), AviateAdapterError> {
@@ -53,6 +55,16 @@ pub(super) async fn bind_sources<P: IncarnationProvider>(
         AviateProfile::Physical => {
             let incarnation = provider.next_incarnation_blocking()?;
             Ok((Some(estimate_source(config, incarnation).await?), None))
+        }
+        #[cfg(feature = "sim")]
+        AviateProfile::Simulation if truth == AviateTruth::HostLane => {
+            tracing::info!("Aviate simulation truth: the host's simulator lane; no shm oracle");
+            let incarnation = provider.next_incarnation_blocking()?;
+            Ok((Some(estimate_source(config, incarnation).await?), None))
+        }
+        #[cfg(feature = "sim")]
+        AviateProfile::OracleOnly if truth == AviateTruth::HostLane => {
+            Err(AviateAdapterError::OracleOnlyWithoutOracle)
         }
         #[cfg(feature = "sim")]
         AviateProfile::Simulation => {

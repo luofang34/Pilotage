@@ -2,6 +2,8 @@ use super::*;
 use pilotage_mavlink::{CommandTarget, LinkConfig, MavlinkLink, OutboundCommand};
 use tokio::net::UdpSocket;
 
+mod reset;
+
 async fn transport() -> (MavlinkLink, UdpSocket) {
     let receiver = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let config = LinkConfig {
@@ -26,6 +28,22 @@ async fn receive_command(receiver: &UdpSocket) -> (u16, Vec<u8>) {
         u16::from_le_bytes([bytes[38], bytes[39]]),
         bytes[..length].to_vec(),
     )
+}
+
+async fn sentinel(link: &MavlinkLink) {
+    link.command_sender()
+        .send(OutboundCommand {
+            command: 512,
+            params: [260.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            target_system: 1,
+            target_component: 100,
+            send_before: None,
+            fence: None,
+            payload_write: None,
+            receipt: None,
+        })
+        .await
+        .unwrap();
 }
 
 fn runtime() -> tokio::runtime::Runtime {
@@ -55,7 +73,7 @@ fn actual_camera_write_retains_sent_evidence_without_fabricating_ack_or_feedback
             .camera_control
             .as_ref()
             .unwrap()
-            .progress_cached((100, 0))
+            .progress_cached(requirement(&state))
             .unwrap();
         assert_eq!(progress.stage, wire::PayloadCommandStage::Sent as i32);
         assert!(progress.sent_at.is_some());
@@ -117,19 +135,7 @@ async fn assert_queued_command_fenced(change_capability: bool) {
         adapter.invalidate_pending_commands(VehicleId::new(1), &command.scope);
     }
     link.command_sender().send(stale).await.unwrap();
-    link.command_sender()
-        .send(OutboundCommand {
-            command: 512,
-            params: [260.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            target_system: 1,
-            target_component: 100,
-            send_before: None,
-            fence: None,
-            payload_write: None,
-            receipt: None,
-        })
-        .await
-        .unwrap();
+    sentinel(&link).await;
     assert_eq!(
         receive_command(&receiver).await.0,
         512,
@@ -140,7 +146,7 @@ async fn assert_queued_command_fenced(change_capability: bool) {
         .camera_control
         .as_ref()
         .unwrap()
-        .progress_cached((100, 0))
+        .progress_cached(requirement(&state))
         .unwrap();
     assert!(progress.sent_at.is_none());
     assert_eq!(progress.end_reason, wire::PayloadEndReason::Revoked as i32);

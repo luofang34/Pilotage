@@ -63,23 +63,7 @@ const FIELD_SPACING_M: f64 = 40.0;
 /// How far left of the centreline the grass row stands, m. The N51
 /// runway is 15 m wide; its taxiway and hangars are on its right side.
 const FIELD_OFFSET_M: f64 = 40.0;
-/// WGS84 semi-major axis, m, and first eccentricity squared.
-const WGS84_A_M: f64 = 6_378_137.0;
-const WGS84_E2: f64 = 6.694_379_990_14e-3;
-
-/// Metres per degree of latitude and of longitude at `latitude_deg`, from
-/// the WGS84 radii of curvature there: exact to centimetres over the few
-/// hundred metres of a layout.
-pub fn metres_per_degree(latitude_deg: f64) -> (f64, f64) {
-    let phi = latitude_deg.to_radians();
-    let w = libm::sqrt(1.0 - WGS84_E2 * libm::pow(libm::sin(phi), 2.0));
-    let meridian = WGS84_A_M * (1.0 - WGS84_E2) / libm::pow(w, 3.0);
-    let normal = WGS84_A_M / w;
-    (
-        meridian.to_radians(),
-        (normal * libm::cos(phi)).to_radians(),
-    )
-}
+use crate::position::{Ned, PositionError, local_plane};
 
 /// Where on a site a vehicle starts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,7 +98,12 @@ impl Site {
     /// Where the `index`-th vehicle (from 0) on `ground` starts. Every
     /// vehicle faces down the runway and stands at the site's declared
     /// elevation.
-    pub fn placement(&self, ground: Ground, index: usize) -> Placement {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PositionError`] for a site position that is not well
+    /// formed.
+    pub fn placement(&self, ground: Ground, index: usize) -> Result<Placement, PositionError> {
         let step = index as f64;
         let (along_m, left_m) = match ground {
             Ground::Runway => (RUNWAY_SPACING_M * step, 0.0),
@@ -122,15 +111,18 @@ impl Site {
         };
         let heading = self.heading_deg.to_radians();
         let (sin, cos) = (libm::sin(heading), libm::cos(heading));
-        let north_m = along_m * cos + left_m * sin;
-        let east_m = along_m * sin - left_m * cos;
-        let (per_lat_degree, per_lon_degree) = metres_per_degree(self.latitude_deg);
-        Placement {
-            latitude_deg: self.latitude_deg + north_m / per_lat_degree,
-            longitude_deg: self.longitude_deg + east_m / per_lon_degree,
+        let plane = local_plane(self.latitude_deg, self.longitude_deg, self.elevation_m)?;
+        let point = plane.to_geodetic(Ned {
+            north_m: along_m * cos + left_m * sin,
+            east_m: along_m * sin - left_m * cos,
+            down_m: 0.0,
+        });
+        Ok(Placement {
+            latitude_deg: point.latitude_deg,
+            longitude_deg: point.longitude_deg,
             elevation_m: self.elevation_m,
             heading_deg: self.heading_deg,
-        }
+        })
     }
 }
 

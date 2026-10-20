@@ -1,6 +1,7 @@
 use super::catalog::{camera_key, core_capabilities};
 use pilotage_mavlink::{
-    CameraReport, LinkState, OutboundCommand, PayloadChannel, PayloadTiming, SendFence,
+    CameraReport, CameraWriteRequirement, LinkState, OutboundCommand, PayloadChannel,
+    PayloadTiming, SendFence,
 };
 use pilotage_protocol::{ScopedControlFrame, ZoomCommand, ZoomUnit, wire};
 use std::collections::BTreeMap;
@@ -23,7 +24,7 @@ pub(super) enum CameraCommandError {
 
 #[derive(Debug)]
 struct Endpoint {
-    epoch: u64,
+    requirement: CameraWriteRequirement,
     capabilities: PayloadCapabilities,
     channel: PayloadChannel,
 }
@@ -70,18 +71,22 @@ impl CameraControl {
         }
     }
 
-    pub(super) fn synchronize(&mut self, reports: &[((u8, u8), CameraReport)], started: Instant) {
+    pub(super) fn synchronize(
+        &mut self,
+        reports: &[(CameraWriteRequirement, CameraReport)],
+        started: Instant,
+    ) {
         self.endpoints.retain(|key, endpoint| {
-            if reports
-                .iter()
-                .any(|(id, report)| id == key && report.epoch == endpoint.epoch)
-            {
+            if reports.iter().any(|(requirement, _)| {
+                requirement.key == *key && same_connection(*requirement, endpoint.requirement)
+            }) {
                 return true;
             }
             revoke(&endpoint.channel);
             false
         });
-        for (key, report) in reports {
+        for (requirement, report) in reports {
+            let key = requirement.key;
             let capabilities = match core_capabilities(report) {
                 Ok(value) => value,
                 Err(error) => {
@@ -89,8 +94,8 @@ impl CameraControl {
                     continue;
                 }
             };
-            let endpoint = self.endpoints.entry(*key).or_insert_with(|| Endpoint {
-                epoch: report.epoch,
+            let endpoint = self.endpoints.entry(key).or_insert_with(|| Endpoint {
+                requirement: *requirement,
                 capabilities,
                 channel: PayloadChannel::new(capabilities, report.epoch, started),
             });
@@ -101,6 +106,7 @@ impl CameraControl {
                 }
                 endpoint.capabilities = capabilities;
             }
+            endpoint.requirement = *requirement;
             match endpoint.channel.poll_effect() {
                 Ok(Effect::None) => {}
                 Ok(effect) => warn!(
@@ -137,12 +143,7 @@ impl CameraControl {
         permit.send(OutboundCommand {
             payload_write: Some(write),
             receipt: None,
-            fence: Some(SendFence::default().for_camera(
-                state,
-                key,
-                endpoint.epoch,
-                endpoint.capabilities.revision,
-            )),
+            fence: Some(SendFence::default().for_camera(state, endpoint.requirement)),
             command,
             params,
             target_system: self.system_id,
@@ -158,14 +159,29 @@ impl CameraControl {
         }
     }
 
-    pub(super) fn progress_cached(&self, key: (u8, u8)) -> Option<wire::PayloadCommandProgress> {
-        let snapshot = self.endpoints.get(&key)?.channel.snapshot_cached().ok()??;
+    pub(super) fn progress_cached(
+        &self,
+        requirement: CameraWriteRequirement,
+    ) -> Option<wire::PayloadCommandProgress> {
+        let endpoint = self.endpoints.get(&requirement.key)?;
+        if !same_connection(requirement, endpoint.requirement) {
+            return None;
+        }
+        let snapshot = endpoint.channel.snapshot_cached().ok()??;
         Some(pilotage_adapter_api::payload_progress_to_wire(
             &snapshot.progress,
             Some(&snapshot.command),
             snapshot.updated_at,
         ))
     }
+}
+
+fn same_connection(a: CameraWriteRequirement, b: CameraWriteRequirement) -> bool {
+    a.key == b.key
+        && a.epoch == b.epoch
+        && a.source_id == b.source_id
+        && a.source_incarnation == b.source_incarnation
+        && a.source_epoch == b.source_epoch
 }
 
 fn revoke(channel: &PayloadChannel) {

@@ -262,6 +262,7 @@ fn handle_event(
     match event {
         ReceiverEvent::Telemetry(observation) => {
             metrics.telemetry_received = metrics.telemetry_received.saturating_add(1);
+            video.note_truth(&observation);
             if let Some(writer) = capture {
                 writer.record(&observation);
             }
@@ -274,7 +275,13 @@ fn handle_event(
             let rtt = estimated_age(received_at, pong.echoed_sender_sent_at, ZERO_OFFSET);
             metrics.rtt.record(rtt);
         }
-        ReceiverEvent::VideoFrame { source_id, jpeg } => {
+        ReceiverEvent::VideoFrame {
+            source_id,
+            jpeg,
+            received_at,
+            capture,
+        } => {
+            video.note_capture(source_id, capture, received_at);
             let now = Instant::now();
             let gap = state
                 .last_video_at

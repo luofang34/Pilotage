@@ -5,7 +5,9 @@ use std::env::VarError;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use pilotage_adapter_aviate::{ALIA250_DEFAULT_CONTROL_FEEL_JSON, AviateProfile, LinkConfig};
+use pilotage_adapter_aviate::{
+    ALIA250_DEFAULT_CONTROL_FEEL_JSON, AviateProfile, AviateTruth, LinkConfig,
+};
 use pilotage_control_feel::ValidatedFlightFeelProfile;
 
 use crate::error::HostError;
@@ -77,6 +79,32 @@ pub(crate) fn link_config_from_env(
     Ok(config)
 }
 
+/// The variable naming where a simulation session's truth comes from.
+const TRUTH: &str = "PILOTAGE_AVIATE_TRUTH";
+
+/// Parses `PILOTAGE_AVIATE_TRUTH` fail-closed: absence keeps the shm
+/// oracle a Gazebo session attaches; `host-lane` says the host's
+/// simulator truth lane carries it (a JSBSim sidecar). Any other value
+/// stops the host rather than guessing which vehicle's truth to show.
+pub(crate) fn truth_from_env(value: Result<String, VarError>) -> Result<AviateTruth, HostError> {
+    match value {
+        Err(VarError::NotPresent) => Ok(AviateTruth::SharedMemory),
+        Ok(text) => match text.as_str() {
+            "shm" => Ok(AviateTruth::SharedMemory),
+            "host-lane" => Ok(AviateTruth::HostLane),
+            _ => Err(HostError::AviateSetting {
+                variable: TRUTH,
+                value: text,
+                expected: "shm or host-lane",
+            }),
+        },
+        Err(source @ VarError::NotUnicode(_)) => Err(HostError::AviateEndpointEncoding {
+            variable: TRUTH,
+            source,
+        }),
+    }
+}
+
 /// Loads the selected Aviate control-feel artifact.
 ///
 /// # Errors
@@ -123,6 +151,7 @@ mod tests {
 
     use super::{
         control_feel_from_env_blocking, link_config, link_config_from_env, profile_from_env,
+        truth_from_env,
     };
     use crate::error::HostError;
 
@@ -356,6 +385,32 @@ mod tests {
             let refusal = link_config_from_env(AviateProfile::Simulation, Ok(value.to_owned()));
             assert!(
                 matches!(refusal, Err(HostError::AviateEndpoint { value: ref rejected, .. }) if rejected == value),
+                "{value:?} must be refused, got {refusal:?}"
+            );
+        }
+    }
+
+    /// Truth stays the Gazebo shm oracle unless the launcher names the
+    /// host lane, and a value naming neither is refused.
+    #[test]
+    fn the_truth_source_moves_only_when_named_and_fails_closed() {
+        use pilotage_adapter_aviate::AviateTruth;
+        assert_eq!(
+            truth_from_env(Err(VarError::NotPresent)).expect("absent"),
+            AviateTruth::SharedMemory
+        );
+        assert_eq!(
+            truth_from_env(Ok("shm".to_owned())).expect("shm"),
+            AviateTruth::SharedMemory
+        );
+        assert_eq!(
+            truth_from_env(Ok("host-lane".to_owned())).expect("host lane"),
+            AviateTruth::HostLane
+        );
+        for value in ["", "lane", "Host-Lane"] {
+            let refusal = truth_from_env(Ok(value.to_owned()));
+            assert!(
+                matches!(refusal, Err(HostError::AviateSetting { value: ref rejected, .. }) if rejected == value),
                 "{value:?} must be refused, got {refusal:?}"
             );
         }

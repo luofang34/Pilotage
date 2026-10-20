@@ -3,8 +3,11 @@
 
 use pilotage_geo::TerrainRefId;
 
+use world_atmosphere::{Altitude, AtmosphereModel, AtmospherePoint, AtmosphereState, Isa};
+
 use crate::error::WorldError;
 use crate::geomag::{GeomagModel, MagneticEpoch, MagneticField, WMM2025};
+use crate::position::{LocalTangentPlane, local_plane, world_position};
 use crate::site::{Ground, Placement, Site};
 use crate::terrain::{TerrainSample, TerrainSource};
 
@@ -39,21 +42,37 @@ pub struct WorldSources {
     pub epoch: MagneticEpoch,
 }
 
-/// One simulated world.
+/// One simulated world. Its air is the standard atmosphere unless
+/// [`World::with_atmosphere`] gives it another model (weather).
 #[derive(Debug)]
-pub struct World<T> {
+pub struct World<T, A = Isa> {
     site: Site,
     terrain: T,
     epoch: MagneticEpoch,
+    air: A,
 }
 
 impl<T: TerrainSource> World<T> {
-    /// A world on `site`, over `terrain`, with its field at `epoch`.
+    /// A world on `site`, over `terrain`, with its field at `epoch` and
+    /// the International Standard Atmosphere.
     pub fn new(site: Site, terrain: T, epoch: MagneticEpoch) -> Self {
         Self {
             site,
             terrain,
             epoch,
+            air: Isa,
+        }
+    }
+}
+
+impl<T: TerrainSource, A: AtmosphereModel> World<T, A> {
+    /// The same world with `air` as its atmosphere.
+    pub fn with_atmosphere<B: AtmosphereModel>(self, air: B) -> World<T, B> {
+        World {
+            site: self.site,
+            terrain: self.terrain,
+            epoch: self.epoch,
+            air,
         }
     }
 
@@ -110,7 +129,7 @@ impl<T: TerrainSource> World<T> {
         ground: Ground,
         index: usize,
     ) -> Result<Placement, WorldError> {
-        let mut placement = self.site.placement(ground, index);
+        let mut placement = self.site.placement(ground, index)?;
         placement.elevation_m = self
             .ground_at_blocking(
                 placement.latitude_deg,
@@ -142,12 +161,8 @@ impl<T: TerrainSource> World<T> {
     }
 
     /// The main magnetic field at a point, at the world's epoch, in
-    /// north-east-down components.
-    ///
-    /// `height_m` is above the WGS84 ellipsoid. The world's MSL heights
-    /// are over a flat simulator geoid, so a caller passes them here
-    /// unchanged; the tens of metres a real geoid would add move the
-    /// field by far less than the model's own uncertainty.
+    /// north-east-down components. `height_m` is a world (MSL) height; see
+    /// [`crate::world_position`] for how it meets the ellipsoid.
     ///
     /// # Errors
     ///
@@ -161,7 +176,7 @@ impl<T: TerrainSource> World<T> {
     ) -> Result<MagneticField, WorldError> {
         let decimal_year = self.epoch.decimal_year();
         world_geomag::wmm2025(
-            world_core::GeodeticPosition::wgs84(latitude_deg, longitude_deg, height_m),
+            world_position(latitude_deg, longitude_deg, height_m),
             world_core::DecimalYear(decimal_year),
         )
         .map_err(|source| WorldError::MagneticField {
@@ -171,6 +186,42 @@ impl<T: TerrainSource> World<T> {
             decimal_year,
             source,
         })
+    }
+
+    /// The air at a point: the world's atmosphere model at its epoch.
+    /// `height_m` is a world (MSL) height, geometric.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorldError::Atmosphere`] outside the model's domain.
+    pub fn atmosphere(
+        &self,
+        latitude_deg: f64,
+        longitude_deg: f64,
+        height_m: f64,
+    ) -> Result<AtmosphereState, WorldError> {
+        self.air
+            .state(AtmospherePoint {
+                latitude_deg,
+                longitude_deg,
+                altitude: Altitude::GeometricMsl(height_m),
+                at: world_core::DecimalYear(self.epoch.decimal_year()),
+            })
+            .map_err(|source| WorldError::Atmosphere { height_m, source })
+    }
+
+    /// The local north-east-down frame tangent at a world (MSL) position.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorldError::Position`] for a position not well formed.
+    pub fn local_plane(
+        &self,
+        latitude_deg: f64,
+        longitude_deg: f64,
+        height_m: f64,
+    ) -> Result<LocalTangentPlane, WorldError> {
+        Ok(local_plane(latitude_deg, longitude_deg, height_m)?)
     }
 }
 

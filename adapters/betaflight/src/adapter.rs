@@ -83,6 +83,7 @@ impl BetaflightAdapter {
         let (report_tx, reports) = watch::channel(LinkReport::default());
         let task = tokio::spawn(link::run(
             config.msp_endpoint,
+            config.profile(),
             ENVELOPE,
             command_rx,
             report_tx,

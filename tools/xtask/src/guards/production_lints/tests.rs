@@ -1,12 +1,14 @@
 //! The production lint guard: the clippy plan, the unsafe-module scan,
 //! and a real clippy run that refuses a local exemption.
 
+#![allow(clippy::unwrap_used, clippy::panic)]
+
 use super::{FfiCrate, clippy_invocations, findings_in};
 
 mod ffi;
 
 const BINDING: FfiCrate = FfiCrate {
-    package: "binding",
+    workspace_package: None,
     dir: "sim/binding",
     unsafe_module: "src/ffi.rs",
 };
@@ -28,12 +30,12 @@ fn an_ffi_crate_is_linted_apart_with_unsafe_code_denied() {
     let invocations = clippy_invocations(&[BINDING]);
     assert_eq!(invocations.len(), 2);
     let workspace = invocations[0].join(" ");
-    assert!(
-        workspace.contains("--workspace --lib --bins --examples --no-deps --exclude binding --")
-    );
+    assert!(workspace.contains("--workspace --lib --bins --examples --no-deps --"));
     assert!(workspace.contains("-F unsafe_code"));
     let binding = invocations[1].join(" ");
-    assert!(binding.starts_with("clippy -p binding --lib --bins --examples --no-deps --"));
+    assert!(binding.starts_with(
+        "clippy --manifest-path sim/binding/Cargo.toml --lib --bins --examples --no-deps --"
+    ));
     assert!(binding.contains("-D unsafe_code"));
     for lint in [
         "clippy::unwrap_used",
@@ -42,6 +44,32 @@ fn an_ffi_crate_is_linted_apart_with_unsafe_code_denied() {
     ] {
         assert!(binding.contains(&format!("-F {lint}")), "{binding}");
         assert!(workspace.contains(&format!("-F {lint}")), "{workspace}");
+    }
+}
+
+#[test]
+fn mixed_ffi_plan_excludes_only_registered_workspace_members() {
+    let member = FfiCrate {
+        workspace_package: Some("binding-member"),
+        dir: "adapters/binding-member",
+        unsafe_module: "src/ffi.rs",
+    };
+    let invocations = clippy_invocations(&[BINDING, member]);
+    assert_eq!(invocations.len(), 3);
+    assert_eq!(
+        invocations[0].join(" "),
+        "clippy --workspace --lib --bins --examples --no-deps --exclude binding-member -- \
+         -D warnings -F unsafe_code -F clippy::unwrap_used -F clippy::expect_used \
+         -F clippy::panic"
+    );
+    for (args, manifest) in invocations[1..].iter().zip([
+        "sim/binding/Cargo.toml",
+        "adapters/binding-member/Cargo.toml",
+    ]) {
+        let args = args.join(" ");
+        assert!(args.starts_with(&format!("clippy --manifest-path {manifest} ")));
+        assert!(args.contains("-D unsafe_code"));
+        assert!(args.contains("-F clippy::panic"));
     }
 }
 
