@@ -12,13 +12,16 @@ use crate::backend::{SessionContext, SimBackend};
 use crate::cli::Profile;
 use crate::error::XtaskError;
 
+mod fixture_isolation;
+
 fn context(repo_root: PathBuf) -> SessionContext {
+    let log_dir = repo_root.join("logs");
     SessionContext {
         repo_root,
         host_port: 4433,
         viewer_port: 8080,
         profile: Profile::Simulation,
-        log_dir: std::env::temp_dir(),
+        log_dir,
         lan: false,
         join_token_file: None,
         web_root: std::env::temp_dir(),
