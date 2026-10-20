@@ -60,7 +60,7 @@ pub(super) struct Connection {
     pub(super) input: Input,
     pub(super) keyframes: keyframe::Keyframes,
     pending: Option<Pending>,
-    written_pitch: Option<GimbalPitchTarget>,
+    written_pitch: Option<(GimbalPitchTarget, CommandIdentity)>,
     drained: bool,
     pub(super) fault: Option<DjiFault>,
     pub(super) version_observed: bool,
@@ -153,6 +153,12 @@ impl Connection {
 
     pub(super) fn pending_pitch(&self) -> Option<GimbalPitchTarget> {
         self.pending.as_ref().and_then(|pending| pending.pitch)
+    }
+
+    pub(super) fn pending_pitch_identity(&self) -> Option<CommandIdentity> {
+        self.pending
+            .as_ref()
+            .and_then(|pending| pending.pitch.and(pending.identity))
     }
 
     pub(super) fn cancel_movement(&mut self) -> bool {
@@ -335,11 +341,11 @@ impl Connection {
         }
         if complete {
             self.pending = None;
-            self.written_pitch = pitch;
+            self.written_pitch = pitch.zip(identity);
         }
     }
 
-    pub(super) fn take_written_pitch(&mut self) -> Option<GimbalPitchTarget> {
+    pub(super) fn take_written_pitch(&mut self) -> Option<(GimbalPitchTarget, CommandIdentity)> {
         self.written_pitch.take()
     }
 

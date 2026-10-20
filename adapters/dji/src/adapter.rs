@@ -101,13 +101,8 @@ impl DjiAdapter {
         incarnation: SourceIncarnation,
         control_mode: DjiControlMode,
     ) -> Result<Self, DjiAdapterError> {
-        let minimum = if control_mode == DjiControlMode::Observed {
-            -50
-        } else {
-            -900
-        };
         let profile = Mini3ControlProfile::new(
-            minimum,
+            -900,
             turret_core::AngularRate::radians_per_second(HOST_PITCH_RATE_LIMIT_RPS)?,
         )?;
         let mut contract = profile.capabilities()?;
@@ -165,6 +160,9 @@ impl DjiAdapter {
         // Recording can take time. Recheck age at the command write boundary.
         let now = clock();
         let ready = self.movement_ready(now);
+        if !ready {
+            self.control.cancel_observed();
+        }
         let had_pending = self.connection.pending_pitch().is_some();
         self.connection
             .write_pending_blocking(now, ready, &mut clock);
@@ -174,7 +172,7 @@ impl DjiAdapter {
         let completed_at = clock();
         if let Some(bench) = &mut self.control.bench {
             bench.exclude_io(io_started, completed_at);
-            if let Some(pitch) = written {
+            if let Some((pitch, _identity)) = written {
                 match bench.written(pitch, completed_at) {
                     Ok(()) => tracing::debug!(
                         elapsed_ns = completed_at.as_nanos(),
@@ -191,7 +189,32 @@ impl DjiAdapter {
                 bench.stalled(completed_at, self.connection.pending_pitch().is_some());
             }
         }
+        self.record_observed_write(written, had_pending);
         self.refresh_contract(completed_at);
+    }
+
+    fn record_observed_write(
+        &mut self,
+        written: Option<(crate::GimbalPitchTarget, turret_core::CommandIdentity)>,
+        had_pending: bool,
+    ) {
+        if let Some((pitch, identity)) = written
+            && let Some((expected, plan)) = self.control.observed_write
+            && expected == identity
+        {
+            self.control.observed_write = None;
+            if plan.target() == pitch
+                && let Some(planner) = &mut self.control.observed
+                && !planner.written(plan)
+            {
+                tracing::debug!("DJI completed write belongs to a cancelled pitch plan");
+            }
+        }
+        if self.connection.fault.is_some()
+            || (had_pending && written.is_none() && self.connection.pending_pitch().is_none())
+        {
+            self.control.cancel_observed();
+        }
     }
 
     fn refresh_contract(&mut self, now: Duration) {
@@ -216,6 +239,7 @@ impl DjiAdapter {
         if contract == *self.connection.execution.capabilities() {
             return;
         }
+        self.control.cancel_observed();
         let reason = if self.connection.cancel_movement() {
             reason
         } else {

@@ -8,6 +8,7 @@ mod harness;
 mod keyframe;
 mod mapping;
 mod mobile;
+mod observed;
 mod profile;
 mod recovery;
 
@@ -102,7 +103,7 @@ fn recorded_poses_publish_payload_only_and_bound_pitch_commands() -> TestResult 
         (move_packet.command_set(), move_packet.command_id()),
         (4, 0x14)
     );
-    assert_eq!(move_packet.payload(), &[0, 0, 0, 0, 206, 255, 7, 10]);
+    assert_eq!(move_packet.payload(), &[0, 0, 0, 0, 157, 255, 7, 10]);
     assert_eq!(h.recorded("tx")?, written);
     Ok(())
 }
@@ -195,10 +196,10 @@ fn short_writes_keep_one_packet_and_record_only_actual_bytes() -> TestResult {
     );
     h.step(30);
     assert_eq!(h.adapter.status_cached().pending_bytes, 18);
-    assert!(matches!(
-        h.apply(frame(HOST_PITCH_RATE_LIMIT_RPS), 30).disposition,
-        Disposition::Rejected(_)
-    ));
+    assert_eq!(
+        h.apply(frame(-HOST_PITCH_RATE_LIMIT_RPS), 30).disposition,
+        Disposition::Transformed
+    );
     for ms in [40, 50, 60, 70, 80, 90] {
         h.step(ms);
     }
@@ -380,7 +381,7 @@ fn every_qualifying_arrival_must_be_inside_the_pitch_envelope() -> TestResult {
     let mut h = Harness::new();
     for (index, mut pose) in observed_poses().into_iter().enumerate() {
         if index == 1 {
-            pose[11..13].copy_from_slice(&(-51_i16).to_le_bytes());
+            pose[11..13].copy_from_slice(&(-901_i16).to_le_bytes());
             let length = pose.len();
             let crc = turret_dji::frame_checksum(&pose[..length - 2]).to_le_bytes();
             pose[length - 2..].copy_from_slice(&crc);

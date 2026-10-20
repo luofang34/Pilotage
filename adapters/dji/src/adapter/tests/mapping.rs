@@ -47,7 +47,7 @@ fn a_diagonal_shared_mapping_commands_bounded_pitch_without_yaw() -> TestResult 
     let written = harness.written()?;
     let packets = packets(&written);
     assert_eq!(packets.len(), 2);
-    assert_eq!(packets[1].payload(), &[0, 0, 0, 0, 206, 255, 7, 10]);
+    assert_eq!(packets[1].payload(), &[0, 0, 0, 0, 157, 255, 7, 10]);
     Ok(())
 }
 

@@ -12,7 +12,7 @@ use crate::adapter::{DjiFault, HOST_PITCH_RATE_LIMIT_RPS};
 
 #[test]
 fn both_modes_advertise_the_selected_host_policy_without_a_hardware_speed_claim() -> TestResult {
-    for (harness, minimum) in [(Harness::new(), -50), (Harness::bench(), -900)] {
+    for (harness, minimum) in [(Harness::new(), -900), (Harness::bench(), -900)] {
         let profile = harness.adapter.profile;
         assert_eq!(profile.minimum_tenths(), minimum);
         assert_eq!(
@@ -56,7 +56,7 @@ fn both_modes_advertise_the_selected_host_policy_without_a_hardware_speed_claim(
 
 #[test]
 fn observed_continuity_uses_the_selected_profile_range() -> TestResult {
-    for (mut harness, expected) in [(Harness::new(), 0), (Harness::bench(), 3)] {
+    for mut harness in [Harness::new(), Harness::bench()] {
         for (index, mut pose) in observed_poses().into_iter().enumerate() {
             pose[11..13].copy_from_slice(&(-51_i16).to_le_bytes());
             let end = pose.len() - 2;
@@ -65,7 +65,7 @@ fn observed_continuity_uses_the_selected_profile_range() -> TestResult {
             harness.feed(&pose)?;
             harness.step(index as u64 * 10);
         }
-        assert_eq!(harness.adapter.status_cached().consecutive_poses, expected);
+        assert_eq!(harness.adapter.status_cached().consecutive_poses, 3);
     }
     Ok(())
 }
@@ -73,6 +73,10 @@ fn observed_continuity_uses_the_selected_profile_range() -> TestResult {
 #[test]
 fn a_target_from_a_wider_profile_latches_an_encoding_fault_before_admission() -> TestResult {
     let mut harness = Harness::mobile();
+    harness.select_profile(Mini3ControlProfile::new(
+        -50,
+        AngularRate::radians_per_second(HOST_PITCH_RATE_LIMIT_RPS)?,
+    )?);
     let mut video = harness
         .adapter
         .subscribe_encoded_video()

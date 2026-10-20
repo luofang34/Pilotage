@@ -3613,7 +3613,7 @@ dependencies = [
 [[package]]
 name = "turret-core"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Turret?rev=45afda0a5412a98f7138e19fc0d0426bfce35b69#45afda0a5412a98f7138e19fc0d0426bfce35b69"
+source = "git+https://github.com/luofang34/Turret?rev=ec0005d42cb9633b837e8c7a5eb8aca8f71551d6#ec0005d42cb9633b837e8c7a5eb8aca8f71551d6"
 dependencies = [
  "thiserror",
 ]
@@ -3621,7 +3621,7 @@ dependencies = [
 [[package]]
 name = "turret-dji"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Turret?rev=45afda0a5412a98f7138e19fc0d0426bfce35b69#45afda0a5412a98f7138e19fc0d0426bfce35b69"
+source = "git+https://github.com/luofang34/Turret?rev=ec0005d42cb9633b837e8c7a5eb8aca8f71551d6#ec0005d42cb9633b837e8c7a5eb8aca8f71551d6"
 dependencies = [
  "thiserror",
  "turret-core",
@@ -3630,7 +3630,7 @@ dependencies = [
 [[package]]
 name = "turret-mavlink"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Turret?rev=45afda0a5412a98f7138e19fc0d0426bfce35b69#45afda0a5412a98f7138e19fc0d0426bfce35b69"
+source = "git+https://github.com/luofang34/Turret?rev=ec0005d42cb9633b837e8c7a5eb8aca8f71551d6#ec0005d42cb9633b837e8c7a5eb8aca8f71551d6"
 dependencies = [
  "turret-core",
 ]
