@@ -267,10 +267,8 @@ fn the_hover_throttle_is_learned_in_a_hover_not_in_a_climb() {
     let mut outer = OuterLoop::new(ENVELOPE);
     let mut plant = Plant::landed(0.55, 0.0);
     plant.vertical_drag = 0.6;
-    // Before any settled hover the integrator stands in.
     fly(&mut outer, &mut plant, climb(1.5), 2.0);
     assert_eq!(outer.settled_hover, None);
-    assert_eq!(outer.hover_throttle(), outer.hover);
     // A settled hover teaches the hover throttle.
     fly(&mut outer, &mut plant, Demand::default(), 15.0);
     let hover = outer.hover_throttle();
@@ -288,4 +286,47 @@ fn the_hover_throttle_is_learned_in_a_hover_not_in_a_climb() {
         "{} moved off the hover {hover}",
         outer.hover_throttle()
     );
+}
+
+#[test]
+fn before_a_settled_hover_the_integrator_stands_in() {
+    let mut outer = OuterLoop::new(ENVELOPE);
+    let mut plant = Plant::landed(0.55, 0.0);
+    // Still accelerating off the ground: nothing steady to learn from.
+    fly(&mut outer, &mut plant, climb(1.5), 0.2);
+    assert_eq!(outer.steady_hover.estimate(), None);
+    assert_eq!(outer.hover_throttle(), outer.hover);
+}
+
+/// Direct flight entered right after a climb holds the hover throttle
+/// open loop. The climb-rate integrator is braking the climb then and
+/// reads under hover; holding it would sink the quad.
+#[test]
+fn right_after_a_climb_the_hover_throttle_holds_altitude_open_loop() {
+    for vertical_drag in [0.0, 0.1] {
+        let mut outer = OuterLoop::new(ENVELOPE);
+        let mut plant = Plant::landed(0.5636, 0.0);
+        plant.vertical_drag = vertical_drag;
+        fly(&mut outer, &mut plant, climb(1.0), 6.0);
+        fly(&mut outer, &mut plant, Demand::default(), 1.0);
+        assert_eq!(outer.settled_hover, None, "no settled hover yet");
+        let hover = outer.hover_throttle();
+        let entered = plant.up;
+        for _ in 0..(3.0 / DT) as u32 {
+            plant.step(Sticks {
+                throttle: hover,
+                ..Sticks::IDLE
+            });
+        }
+        let change = plant.up - entered;
+        assert!(
+            change > -1.0 && change < 1.5,
+            "drag {vertical_drag}: holding {hover:.4} moved {change:.2} m in 3 s"
+        );
+        assert!(
+            outer.hover < hover,
+            "the braking integrator {} reads under the estimate {hover}",
+            outer.hover
+        );
+    }
 }

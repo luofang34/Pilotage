@@ -1,5 +1,5 @@
 //! Minimal argument parsing for the session-host binary: `--port <PORT>` and
-//! `--adapter reference|gazebo|aviate|px4|ardupilot|betaflight`, defaulting to
+//! `--adapter reference|gazebo|aviate|px4|ardupilot|betaflight|dji`, defaulting to
 //! port `0` (ephemeral, loopback-only bind) and the reference adapter.
 
 /// Which vehicle adapter the host embeds.
@@ -22,6 +22,8 @@ pub enum AdapterKind {
     /// The Betaflight adapter over MSP: telemetry plus a host-side velocity
     /// loop flying ANGLE mode.
     Betaflight,
+    /// The DJI USB CDC bench adapter. Flight and positioning are not implemented.
+    Dji,
 }
 
 /// Parsed command-line configuration.
@@ -53,7 +55,7 @@ pub enum CliError {
     MissingAdapterValue,
     /// `--adapter` was given a value outside the known adapter set.
     #[error(
-        "invalid --adapter value {0:?} (expected reference, gazebo, aviate, px4, ardupilot, or betaflight)"
+        "invalid --adapter value {0:?} (expected reference, gazebo, aviate, px4, ardupilot, betaflight, or dji)"
     )]
     InvalidAdapter(String),
     /// An argument was not recognized.
@@ -88,6 +90,7 @@ pub fn parse_args(args: &[String]) -> Result<CliArgs, CliError> {
                     "px4" => AdapterKind::Px4,
                     "ardupilot" => AdapterKind::ArduPilot,
                     "betaflight" => AdapterKind::Betaflight,
+                    "dji" => AdapterKind::Dji,
                     other => return Err(CliError::InvalidAdapter(other.to_owned())),
                 };
             }
@@ -98,102 +101,4 @@ pub fn parse_args(args: &[String]) -> Result<CliArgs, CliError> {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used, clippy::panic)]
-mod tests {
-    use super::{AdapterKind, CliError, parse_args};
-
-    #[test]
-    fn no_args_defaults_to_ephemeral_port() {
-        let parsed = parse_args(&[]).expect("empty args parse");
-        assert_eq!(parsed.port, 0);
-        assert_eq!(parsed.adapter, AdapterKind::Reference);
-    }
-
-    #[test]
-    fn explicit_port_parses() {
-        let args = vec!["--port".to_owned(), "4433".to_owned()];
-        let parsed = parse_args(&args).expect("valid port parses");
-        assert_eq!(parsed.port, 4433);
-    }
-
-    #[test]
-    fn gazebo_adapter_parses() {
-        let args = vec!["--adapter".to_owned(), "gazebo".to_owned()];
-        let parsed = parse_args(&args).expect("gazebo adapter parses");
-        assert_eq!(parsed.adapter, AdapterKind::Gazebo);
-    }
-
-    #[test]
-    fn reference_adapter_parses() {
-        let args = vec!["--adapter".to_owned(), "reference".to_owned()];
-        let parsed = parse_args(&args).expect("reference adapter parses");
-        assert_eq!(parsed.adapter, AdapterKind::Reference);
-    }
-
-    #[test]
-    fn aviate_adapter_parses() {
-        let args = vec!["--adapter".to_owned(), "aviate".to_owned()];
-        let parsed = parse_args(&args).expect("aviate adapter parses");
-        assert_eq!(parsed.adapter, AdapterKind::Aviate);
-    }
-
-    #[test]
-    fn px4_adapter_parses() {
-        let args = vec!["--adapter".to_owned(), "px4".to_owned()];
-        let parsed = parse_args(&args).expect("PX4 adapter parses");
-        assert_eq!(parsed.adapter, AdapterKind::Px4);
-    }
-
-    #[test]
-    fn ardupilot_adapter_parses() {
-        let args = vec!["--adapter".to_owned(), "ardupilot".to_owned()];
-        let parsed = parse_args(&args).expect("ArduPilot adapter parses");
-        assert_eq!(parsed.adapter, AdapterKind::ArduPilot);
-    }
-
-    #[test]
-    fn betaflight_adapter_parses() {
-        let args = vec!["--adapter".to_owned(), "betaflight".to_owned()];
-        let parsed = parse_args(&args).expect("Betaflight adapter parses");
-        assert_eq!(parsed.adapter, AdapterKind::Betaflight);
-    }
-
-    #[test]
-    fn unknown_adapter_is_an_error() {
-        let args = vec!["--adapter".to_owned(), "unreal".to_owned()];
-        assert_eq!(
-            parse_args(&args),
-            Err(CliError::InvalidAdapter("unreal".to_owned()))
-        );
-    }
-
-    #[test]
-    fn missing_adapter_value_is_an_error() {
-        let args = vec!["--adapter".to_owned()];
-        assert_eq!(parse_args(&args), Err(CliError::MissingAdapterValue));
-    }
-
-    #[test]
-    fn missing_port_value_is_an_error() {
-        let args = vec!["--port".to_owned()];
-        assert_eq!(parse_args(&args), Err(CliError::MissingPortValue));
-    }
-
-    #[test]
-    fn non_numeric_port_is_an_error() {
-        let args = vec!["--port".to_owned(), "not-a-port".to_owned()];
-        assert!(matches!(
-            parse_args(&args),
-            Err(CliError::InvalidPort { .. })
-        ));
-    }
-
-    #[test]
-    fn unrecognized_argument_is_an_error() {
-        let args = vec!["--bogus".to_owned()];
-        assert_eq!(
-            parse_args(&args),
-            Err(CliError::Unrecognized("--bogus".to_owned()))
-        );
-    }
-}
+mod tests;

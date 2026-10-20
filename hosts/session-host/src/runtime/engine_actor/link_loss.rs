@@ -65,7 +65,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
     /// Enacts one `ClearLinkLoss`: returns the SCOPE to normal control
     /// (ADR-0008's only path back — the latch drops only on `Ok`). On success
     /// it confirms to the engine and acks exactly when a still-pending clear at
-    /// this generation matched. A refused clear leaves the scope neutralized;
+    /// this generation matched. A refused clear leaves control fenced;
     /// the engine retries every tick.
     ///
     /// Logging is transition-only, never per-tick (the engine re-emits at the
@@ -105,7 +105,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
                     scope = scope.as_str(),
                     %error,
                     failures = self.link_loss_enact_failures,
-                    "link-loss clear refused; vehicle remains neutralized, retrying"
+                    "link-loss clear refused; control remains fenced, retrying"
                 );
             }
         }
