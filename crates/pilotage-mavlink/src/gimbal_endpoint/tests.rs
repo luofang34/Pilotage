@@ -163,9 +163,9 @@ fn discovery_projects_only_usable_axes_and_native_actions() {
     let position = pitch.position.unwrap();
     assert_eq!(
         position.support,
-        wire::PayloadSupportState::Unavailable as i32
+        wire::PayloadSupportState::Unimplemented as i32
     );
-    assert_eq!(position.unavailable_reason, "disabled by policy");
+    assert!(position.unavailable_reason.is_empty());
     assert_eq!(position.minimum_rad, Some(-1.5));
     assert_eq!(position.maximum_rad, Some(1.5));
     assert_eq!(
@@ -410,7 +410,7 @@ fn invalid_quaternion_without_rates_does_not_fabricate_a_level_attitude() {
 }
 
 #[test]
-fn an_axis_with_no_entrypoint_frame_keeps_its_device_contract_but_is_unavailable() {
+fn an_axis_with_no_entrypoint_frame_preserves_its_unimplemented_contract() {
     let mut rig = Rig::new();
     rig.discover(32 | 64);
     let descriptor = scope_descriptor(&rig.control, &stamp());
@@ -425,7 +425,10 @@ fn an_axis_with_no_entrypoint_frame_keeps_its_device_contract_but_is_unavailable
         .unwrap()
         .rate
         .unwrap();
-    assert_eq!(rate.support, wire::PayloadSupportState::Unavailable as i32);
-    assert_eq!(rate.unavailable_reason, "disabled by policy");
+    assert_eq!(
+        rate.support,
+        wire::PayloadSupportState::Unimplemented as i32
+    );
+    assert!(rate.unavailable_reason.is_empty());
     assert_eq!(rate.frames, [wire::PayloadReferenceFrame::BodyFrd as i32]);
 }

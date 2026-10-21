@@ -23,7 +23,8 @@ pub enum CameraPanRouting {
 /// Select camera pan from declared axis and flight capabilities.
 ///
 /// Only an explicit absence of both gimbal yaw position and rate control permits
-/// an airframe fallback. Temporary loss of gimbal control never changes its role.
+/// an airframe fallback. Missing backend implementations and temporary loss of
+/// gimbal control never change its role. Physical stabilization does not grant control.
 #[must_use]
 pub fn camera_pan_routing(vehicle: &VehicleCatalog, mode: Mode) -> CameraPanRouting {
     let Some(scope) = vehicle

@@ -36,6 +36,11 @@ fn declaration<T>(capability: &Capability<T>) -> (i32, Option<&T>, String) {
     match capability {
         Capability::Unknown => (Support::Unspecified as i32, None, String::new()),
         Capability::Unsupported => (Support::Unsupported as i32, None, String::new()),
+        Capability::Unimplemented { capability } => (
+            Support::Unimplemented as i32,
+            capability.as_ref(),
+            String::new(),
+        ),
         Capability::Available(value) => (Support::Available as i32, Some(value), String::new()),
         Capability::Unavailable { capability, reason } => (
             Support::Unavailable as i32,
@@ -79,6 +84,16 @@ fn frames(value: turret_core::Frames) -> Vec<i32> {
     .collect()
 }
 
+fn hardware_support(value: turret_core::HardwareSupport) -> i32 {
+    use turret_core::HardwareSupport as Source;
+    use wire::PayloadHardwareSupport as Target;
+    (match value {
+        Source::Unknown => Target::Unspecified,
+        Source::Unsupported => Target::Unsupported,
+        Source::Supported => Target::Supported,
+    }) as i32
+}
+
 fn axis(value: &turret_core::AxisCapabilities) -> wire::PayloadAxisCapabilities {
     let (support, position, reason) = declaration(&value.position);
     let mut position_wire = wire::PayloadPositionCapability {
@@ -107,6 +122,10 @@ fn axis(value: &turret_core::AxisCapabilities) -> wire::PayloadAxisCapabilities 
         rate_wire.frames = frames(rate.frames);
     }
     wire::PayloadAxisCapabilities {
+        mechanics: Some(wire::PayloadAxisMechanics {
+            movement: hardware_support(value.mechanics.movement),
+            stabilization: hardware_support(value.mechanics.stabilization),
+        }),
         position: Some(position_wire),
         rate: Some(rate_wire),
         angle_feedback: declaration(&value.feedback.angle).0,
@@ -221,6 +240,7 @@ fn aggregate_feedback(values: &[wire::ZoomAbsoluteCapability]) -> i32 {
     for state in [
         Support::Available,
         Support::Unavailable,
+        Support::Unimplemented,
         Support::Unspecified,
     ] {
         if values.iter().any(|value| value.support == state as i32) {

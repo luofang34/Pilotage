@@ -83,6 +83,7 @@ fn only_explicit_pitch_only_control_uses_the_airframe() {
     for support in [
         wire::PayloadSupportState::Unspecified,
         wire::PayloadSupportState::Unavailable,
+        wire::PayloadSupportState::Unimplemented,
     ] {
         gimbal(&mut vehicle).yaw.as_mut().unwrap().rate = Some(rate(support));
         assert_eq!(
@@ -113,6 +114,7 @@ fn position_pan_and_unknown_position_support_do_not_select_airframe_yaw() {
     for support in [
         wire::PayloadSupportState::Available,
         wire::PayloadSupportState::Unavailable,
+        wire::PayloadSupportState::Unimplemented,
         wire::PayloadSupportState::Unspecified,
     ] {
         let mut vehicle = vehicle();

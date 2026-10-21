@@ -72,9 +72,9 @@ exclude = ["sim/jsbsim-sidecar", "sim/maplibre-camera"]
 edition = "2024"
 
 [workspace.dependencies]
-turret-dji = { git = "https://github.com/luofang34/Turret", rev = "7215c8680fc9eed8f267609fc8a5fbab8af39dae" }
-turret-core = { git = "https://github.com/luofang34/Turret", rev = "7215c8680fc9eed8f267609fc8a5fbab8af39dae" }
-turret-mavlink = { git = "https://github.com/luofang34/Turret", rev = "7215c8680fc9eed8f267609fc8a5fbab8af39dae" }
+turret-dji = { git = "https://github.com/luofang34/Turret", rev = "49c0266de07646dc716ac17ff283761619e64fef" }
+turret-core = { git = "https://github.com/luofang34/Turret", rev = "49c0266de07646dc716ac17ff283761619e64fef" }
+turret-mavlink = { git = "https://github.com/luofang34/Turret", rev = "49c0266de07646dc716ac17ff283761619e64fef" }
 # The Aviate XIL contract crates are consumed only at one exact upstream
 # revision: both crates must always pin the identical rev so the layout
 # types, the transport, and the canonical object name cannot drift apart.
