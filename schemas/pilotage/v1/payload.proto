@@ -8,6 +8,8 @@ enum PayloadSupportState {
   PAYLOAD_SUPPORT_STATE_UNSUPPORTED = 1;
   PAYLOAD_SUPPORT_STATE_AVAILABLE = 2;
   PAYLOAD_SUPPORT_STATE_UNAVAILABLE = 3;
+  // The endpoint supports the operation, but the backend does not implement it.
+  PAYLOAD_SUPPORT_STATE_UNIMPLEMENTED = 4;
 }
 enum PayloadImplementation {
   PAYLOAD_IMPLEMENTATION_UNSPECIFIED = 0;
@@ -43,7 +45,18 @@ message PayloadRateCapability {
   optional float max_rate_rad_s = 4;
   repeated PayloadReferenceFrame frames = 5;
 }
+// Physical properties do not grant command authority or establish feedback.
+enum PayloadHardwareSupport {
+  PAYLOAD_HARDWARE_SUPPORT_UNSPECIFIED = 0;
+  PAYLOAD_HARDWARE_SUPPORT_UNSUPPORTED = 1;
+  PAYLOAD_HARDWARE_SUPPORT_SUPPORTED = 2;
+}
+message PayloadAxisMechanics {
+  PayloadHardwareSupport movement = 1;
+  PayloadHardwareSupport stabilization = 2;
+}
 message PayloadAxisCapabilities {
+  PayloadAxisMechanics mechanics = 7;
   PayloadPositionCapability position = 1;
   PayloadRateCapability rate = 2;
   PayloadSupportState angle_feedback = 3;

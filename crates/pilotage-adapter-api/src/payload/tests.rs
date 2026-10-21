@@ -3,6 +3,7 @@ use turret_core::{
     Angle, CommandIdentity, CommandProgress, EndReason, Observation, ObservationSource, Tick,
 };
 
+mod capabilities;
 mod rejection;
 
 #[test]

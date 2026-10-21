@@ -2,7 +2,7 @@ use pilotage_adapter_api::{
     ActionCapability, IntentCapability, LegacyAxisRoute, LegacyCommandMap, ScopeDescriptor,
 };
 use pilotage_protocol::{ActionKind, IntentFamily, LogicalAxisId, ScopeId, wire};
-use turret_core::{AxisCapabilities, Capability, Frames, ReferenceFrame, UnavailableReason};
+use turret_core::{AxisCapabilities, Capability, Frames, ReferenceFrame};
 
 use super::{ENDPOINT, GimbalStamp, NEUTRAL_BUTTON, PITCH_AXIS, SCOPE, YAW_AXIS};
 use crate::ManagerControl;
@@ -75,9 +75,8 @@ fn apply_entrypoint_limits(axis: &mut AxisCapabilities) {
     // The adapter's typed frame carries rates and recenter only. A native
     // position command in the transport does not create a client command route.
     if let Capability::Available(capability) = axis.position {
-        axis.position = Capability::Unavailable {
-            capability,
-            reason: UnavailableReason::Policy,
+        axis.position = Capability::Unimplemented {
+            capability: Some(capability),
         };
     }
     if let Capability::Available(mut capability) = axis.rate {
@@ -88,9 +87,8 @@ fn apply_entrypoint_limits(axis: &mut AxisCapabilities) {
             };
             Capability::Available(capability)
         } else {
-            Capability::Unavailable {
-                capability,
-                reason: UnavailableReason::Policy,
+            Capability::Unimplemented {
+                capability: Some(capability),
             }
         };
     }

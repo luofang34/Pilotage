@@ -233,3 +233,40 @@ fn a_written_target_rejected_by_the_planner_preserves_send_evidence_and_locks_co
     assert!(progress.observed_complete_at.is_none());
     Ok(())
 }
+
+#[test]
+fn the_camera_profile_keeps_stabilization_separate_from_executable_axes() {
+    use pilotage_protocol::wire;
+
+    for harness in [Harness::new(), Harness::bench()] {
+        let caps = harness.adapter.capabilities();
+        let payload = caps.vehicles[0].scopes[0].payload.as_ref().unwrap();
+        let gimbal = payload.gimbal.as_ref().unwrap();
+        for axis in [&gimbal.pitch, &gimbal.roll, &gimbal.yaw] {
+            let mechanics = axis.as_ref().unwrap().mechanics.as_ref().unwrap();
+            assert_eq!(
+                mechanics.movement,
+                wire::PayloadHardwareSupport::Supported as i32
+            );
+            assert_eq!(
+                mechanics.stabilization,
+                wire::PayloadHardwareSupport::Supported as i32
+            );
+        }
+        let roll = gimbal.roll.as_ref().unwrap();
+        assert_eq!(
+            roll.position.as_ref().unwrap().support,
+            wire::PayloadSupportState::Unimplemented as i32
+        );
+        assert_eq!(
+            payload.zoom.as_ref().unwrap().support,
+            wire::PayloadSupportState::Unimplemented as i32
+        );
+        let yaw = gimbal.yaw.as_ref().unwrap();
+        assert_eq!(
+            yaw.position.as_ref().unwrap().support,
+            wire::PayloadSupportState::Unsupported as i32
+        );
+        assert!(pilotage_protocol::payload_rate_limit(Some(yaw)).is_none());
+    }
+}
