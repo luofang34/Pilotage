@@ -157,6 +157,10 @@ impl Observations {
         self.airframe.binding_revision()
     }
 
+    pub(super) fn flight_cached(&self, now: Duration) -> Option<crate::flight::Mini3FlightReport> {
+        self.airframe.flight_cached(now)
+    }
+
     pub(super) fn flight_deadline(
         &self,
         command: crate::flight::BasicFlightCommand,

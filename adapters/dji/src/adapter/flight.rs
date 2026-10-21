@@ -1,6 +1,7 @@
 //! Discrete flight requests retain their identity through the only writer.
 
 mod admission;
+mod observation;
 mod progress;
 
 use std::time::Duration;
@@ -34,6 +35,9 @@ struct Procedure {
     completion_until: Duration,
     ack_until: Option<Duration>,
     written: bool,
+    flight_sequence: Option<u16>,
+    airborne_reports: u8,
+    airborne_received: Option<Duration>,
 }
 
 pub(super) struct FlightExecution {
@@ -139,6 +143,9 @@ impl FlightExecution {
             completion_until: now.saturating_add(completion),
             ack_until: None,
             written: false,
+            flight_sequence: None,
+            airborne_reports: 0,
+            airborne_received: None,
         });
         Ok(fence)
     }
