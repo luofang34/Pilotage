@@ -256,6 +256,7 @@ fn truth_and_fc_sample() -> TelemetrySample {
             stamp: truth_stamp,
         }),
         fc_state: Some(FcStateSample {
+            landing_approach: None,
             landed_state: None,
             motor_state: None,
             arm_state: 2,
@@ -319,6 +320,7 @@ fn the_fc_command_verdict_crosses_the_wire() {
     };
     // A refused arm: kind 1 with the typed outcome.
     let refused = super::fc_state_to_wire(FcStateSample {
+        landing_approach: None,
         landed_state: None,
         motor_state: None,
         arm_state: 1,
@@ -342,6 +344,7 @@ fn the_fc_command_verdict_crosses_the_wire() {
     assert_eq!(legacy, 0, "the FC-specific result code is not written");
     // No verdict observed: the lane stays at kind 0.
     let none = super::fc_state_to_wire(FcStateSample {
+        landing_approach: None,
         landed_state: None,
         motor_state: None,
         arm_state: 2,
@@ -444,4 +447,37 @@ fn the_gimbal_lane_carries_the_typed_reference_and_not_the_device_bits() {
     #[allow(deprecated)]
     let legacy = gimbal.flags;
     assert_eq!(legacy, 0, "the device's own mode bits are not written");
+}
+
+#[test]
+fn landing_approach_crosses_the_wire_without_an_arm_or_ground_inference() {
+    let stamp = MeasurementStamp {
+        role: SourceRole::FcState,
+        integrity: SourceIntegrity::ChecksummedOnly,
+        source_id: 1,
+        source_incarnation: SourceIncarnation::new([0x22; 16]),
+        source_epoch: 1,
+        sequence: 3,
+        acquired_at_ns: 77,
+        clock: MeasurementClock::HostMonotonic,
+    };
+    let fc = super::fc_state_to_wire(FcStateSample {
+        landing_approach: Some(pilotage_adapter_api::LandingApproachSample {
+            surface_distance_m: 0.5,
+            vertical_speed_down_mps: -0.1,
+            is_flying: true,
+            stamp,
+        }),
+        landed_state: None,
+        motor_state: None,
+        arm_state: 0,
+        last_command: None,
+        stamp: None,
+    });
+    let range = fc.landing_approach.unwrap();
+    assert_eq!(range.surface_distance_m, 0.5);
+    assert_eq!(range.vertical_speed_down_mps, -0.1);
+    assert!(range.is_flying);
+    assert_eq!(range.stamp.unwrap().acquired_at_ns, 77);
+    assert!(fc.stamp.is_none() && fc.landed_state.is_none());
 }

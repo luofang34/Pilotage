@@ -38,11 +38,13 @@ impl FlightExecution {
     pub(in crate::adapter) fn wait_for_mode_release(
         &mut self,
         frame: &ScopedControlFrame,
+        initial: Option<crate::flight::VirtualStickVelocity>,
         now: Duration,
     ) {
         let Some(procedure) = &mut self.procedure else {
             return;
         };
+        procedure.manual_descent = initial.is_some_and(|input| input.is_descent_only());
         let active_until = frame
             .admitted_timing
             .and_then(|timing| timing.active_remaining)

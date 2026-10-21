@@ -224,6 +224,19 @@ pub struct MotorStateSample {
     pub stamp: MeasurementStamp,
 }
 
+/// Coherent ranging and flight feedback for a landing approach.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LandingApproachSample {
+    /// Downward sensor distance to a surface, in metres. Not height above takeoff.
+    pub surface_distance_m: f32,
+    /// Observed vertical speed, positive down, in metres per second.
+    pub vertical_speed_down_mps: f32,
+    /// The FC reports flight. False does not prove ground contact.
+    pub is_flying: bool,
+    /// Identity and acquisition time shared by these observations.
+    pub stamp: MeasurementStamp,
+}
+
 /// FC-owned vehicle state with independently stamped reports.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FcStateSample {
@@ -237,6 +250,8 @@ pub struct FcStateSample {
     pub landed_state: Option<LandedStateSample>,
     /// Motor operation report, or `None` when unavailable.
     pub motor_state: Option<MotorStateSample>,
+    /// Downward ranging and descent feedback, or `None` when unavailable.
+    pub landing_approach: Option<LandingApproachSample>,
     /// Identity and acquisition time of the arm report, or `None` when absent.
     ///
     /// Independent motor or landed reports do not supply an arm stamp.

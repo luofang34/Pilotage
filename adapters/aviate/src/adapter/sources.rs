@@ -123,6 +123,7 @@ pub(super) fn fc_state_sample(
         .checked_duration_since(started_at)
         .unwrap_or_default();
     Some(FcStateSample {
+        landing_approach: None,
         landed_state: None,
         motor_state: None,
         arm_state: if report.armed { 2 } else { 1 },

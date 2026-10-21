@@ -44,7 +44,9 @@ impl FlightExecution {
             procedure.manual_ready = true;
             return Ok(None);
         }
-        if !procedure.manual_ready {
+        if !procedure.manual_ready
+            && !(procedure.manual_descent && input.value.interrupts_descent())
+        {
             return Ok(None);
         }
         let mut fence = procedure.fence.clone();

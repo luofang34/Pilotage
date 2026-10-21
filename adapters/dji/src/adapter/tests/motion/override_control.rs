@@ -2,7 +2,10 @@ use super::*;
 use pilotage_adapter_api::{FlightProcedurePhase, FlightProcedureReason};
 
 fn landing() -> Harness {
-    let mut h = enabled();
+    start_landing(enabled())
+}
+
+fn start_landing(mut h: Harness) -> Harness {
     assert_eq!(
         h.apply(landing::land(), 20).disposition,
         Disposition::Accepted
@@ -161,4 +164,32 @@ fn landing_without_an_existing_stick_session_accepts_only_a_fresh_neutral_takeov
     );
     h.step(19);
     assert_eq!(commands(&h).last().unwrap().payload(), [14]);
+}
+
+#[test]
+fn descent_landing_ignores_held_down_but_new_direction_requests_one_cancel() {
+    for changed in [
+        [0.3, 0.0, 0.5, 0.0],
+        [0.0, 0.0, -0.2, 0.0],
+        [0.0, 0.0, 0.5, 0.2],
+    ] {
+        let mut h = enabled();
+        input(&mut h, 2, 19, [0.0, 0.0, 0.5, 0.0]);
+        let mut h = start_landing(h);
+        input(&mut h, 3, 25, [0.0, 0.0, 0.5, 0.0]);
+        h.step(25);
+        assert_eq!(commands(&h).last().unwrap().payload(), [2]);
+        input(&mut h, 4, 26, changed);
+        h.step(26);
+        assert_eq!(commands(&h).last().unwrap().payload(), [14]);
+        input(&mut h, 5, 27, changed);
+        h.step(27);
+        assert_eq!(
+            commands(&h)
+                .iter()
+                .filter(|p| p.command_id() == 0x2a)
+                .count(),
+            2
+        );
+    }
 }

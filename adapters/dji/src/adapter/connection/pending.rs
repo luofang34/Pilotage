@@ -89,7 +89,12 @@ impl Connection {
             until,
         )?;
         if prepare_landing {
-            self.flight.wait_for_mode_release(frame, now);
+            let initial = self
+                .motion
+                .latest
+                .filter(|(_, until)| now < *until)
+                .map(|(value, _)| value);
+            self.flight.wait_for_mode_release(frame, initial, now);
             self.motion.stop(now);
             self.cancel_stick_pending(now);
             return Ok(());
