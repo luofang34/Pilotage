@@ -91,7 +91,7 @@ impl Connection {
             input: Input::new(framing),
             keyframes: keyframe::Keyframes::new(incarnation.into_bytes()),
             pending: Some(Pending {
-                bytes: framing.command(&turret_dji::rc_version_request()),
+                bytes: framing.command(&framing.rc_version_request()),
                 offset: 0,
                 purpose: Purpose::Probe,
                 expires_at: None,
@@ -262,7 +262,7 @@ impl Connection {
             self.execution.response(&frame, now);
             self.flight.response(&frame, now);
             if frame.sender() == RouteAddress(6)
-                && frame.receiver() == RouteAddress(10)
+                && frame.receiver() == RouteAddress(self.input.framing().probe_sender())
                 && frame.sequence() == 1
                 && frame.flags() == 0x80
                 && frame.command_set() == 0

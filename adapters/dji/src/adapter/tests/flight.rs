@@ -54,7 +54,7 @@ pub(super) fn feed_battery(h: &mut Harness, sequence: u16, percent: u8) {
 }
 
 fn probe() -> Vec<u8> {
-    let mut bytes = vec![0x55, 13, 4, 0, 6, 10, 1, 0, 0x80, 0, 1, 0, 0];
+    let mut bytes = vec![0x55, 13, 4, 0, 6, 2, 1, 0, 0x80, 0, 1, 0, 0];
     seal_duml(&mut bytes);
     bytes
 }
