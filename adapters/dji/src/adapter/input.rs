@@ -37,6 +37,22 @@ pub(super) enum Framing {
 }
 
 impl Framing {
+    pub(super) fn probe_sender(self) -> u8 {
+        match self {
+            Self::Duml => 10,
+            Self::LogicLink => 2,
+        }
+    }
+
+    pub(super) fn rc_version_request(self) -> [u8; 13] {
+        let mut request = turret_dji::rc_version_request();
+        // LogicLink replies return to the mobile-app address, while CDC uses the PC address.
+        request[4] = self.probe_sender();
+        let checksum = turret_dji::frame_checksum(&request[..11]).to_le_bytes();
+        request[11..].copy_from_slice(&checksum);
+        request
+    }
+
     pub(super) fn command(self, bytes: &[u8]) -> Vec<u8> {
         match self {
             Self::Duml => bytes.to_vec(),
