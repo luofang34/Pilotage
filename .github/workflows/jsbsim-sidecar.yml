@@ -48,7 +48,7 @@ jobs:
 
       # The cache key follows the release the build script pins.
       - name: Cache the JSBSim build
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/jsbsim
           key: jsbsim-${{ runner.os }}-${{ hashFiles('scripts/build-jsbsim.sh') }}
