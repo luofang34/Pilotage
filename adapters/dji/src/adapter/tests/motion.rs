@@ -10,6 +10,8 @@ use super::{
 use crate::{adapter::FLIGHT_SCOPE, flight::VirtualStickMode};
 
 mod diagonal;
+mod landing;
+mod override_control;
 
 fn input(h: &mut Harness, sequence: u32, time: u64, values: [f32; 4]) -> Disposition {
     let [vx, vy, vz, yaw_rate] = values;
@@ -29,12 +31,16 @@ fn input(h: &mut Harness, sequence: u32, time: u64, values: [f32; 4]) -> Disposi
 }
 
 fn flying(h: &mut Harness, sequence: u16) {
+    flying_mode(h, sequence, 6);
+}
+
+fn flying_mode(h: &mut Harness, sequence: u16, mode: u8) {
     let mut bytes = super::harness::captured_hex_frames(include_str!(
         "../airframe/fixtures/mini3-reported-attitude.hex"
     ))
     .remove(0);
     bytes[6..8].copy_from_slice(&sequence.to_le_bytes());
-    bytes[41] = 6;
+    bytes[41] = mode;
     bytes[43] = 0x0c;
     super::harness::seal_duml(&mut bytes);
     super::flight::feed(h, &bytes);

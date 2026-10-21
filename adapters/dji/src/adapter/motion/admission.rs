@@ -56,6 +56,26 @@ impl DjiAdapter {
         }
         let value = velocity_with_radial_limit(value)?;
         let until = write_deadline(frame, now)?;
+        let binding = VirtualStickBinding {
+            attachment: self.observations.incarnation().into_bytes(),
+            session: frame.session.as_u64(),
+            generation: frame.generation.as_u64(),
+            model_revision: self.observations.model_revision(),
+        };
+        let mut input = super::MotionInput {
+            binding,
+            sequence: frame.sequence.as_u32(),
+            value,
+            until,
+        };
+        if self.connection.flight.holds_landing_motion(binding) {
+            return self.connection.landing_motion(
+                input,
+                &self.observations,
+                now,
+                &mut self.control.sequence,
+            );
+        }
         if self.connection.motion.binding.is_none()
             && value == VirtualStickVelocity::ZERO
             && self.connection.input_clear()
@@ -66,23 +86,14 @@ impl DjiAdapter {
             // takeoff or while on the ground.
             return Ok(());
         }
-        let binding = VirtualStickBinding {
-            attachment: self.observations.incarnation().into_bytes(),
-            session: frame.session.as_u64(),
-            generation: frame.generation.as_u64(),
-            model_revision: self.observations.model_revision(),
-        };
-        self.connection.accept_motion(
-            super::MotionInput {
-                binding,
-                sequence: frame.sequence.as_u32(),
-                value,
-                until,
-            },
-            now,
-            &self.observations,
-            &mut self.control.sequence,
-        )
+        if self.connection.motion.stopped && self.connection.flight.take_landing_override(binding) {
+            // The takeover gesture was neutral then deflected. Mode acquisition still
+            // starts with zero; only subsequent fresh input can move the aircraft.
+            self.connection.motion = super::Motion::default();
+            input.value = VirtualStickVelocity::ZERO;
+        }
+        self.connection
+            .accept_motion(input, now, &self.observations, &mut self.control.sequence)
     }
 
     pub(in crate::adapter) fn motion_link_loss(
