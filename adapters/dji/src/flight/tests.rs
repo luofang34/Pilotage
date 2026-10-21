@@ -35,6 +35,7 @@ fn native_actions_use_the_basic_endpoint_and_keep_the_caller_sequence() {
             (BasicFlightCommand::Takeoff, 1),
             (BasicFlightCommand::Land, 2),
             (BasicFlightCommand::ReturnHome, 6),
+            (BasicFlightCommand::CancelLanding, 14),
         ] {
             let packet = command.packet(sequence);
             let frame = parse(packet.bytes());

@@ -59,7 +59,7 @@ fn probe() -> Vec<u8> {
     bytes
 }
 
-fn ack(sequence: u16, code: u8) -> Vec<u8> {
+pub(super) fn ack(sequence: u16, code: u8) -> Vec<u8> {
     let [lo, hi] = sequence.to_le_bytes();
     let mut bytes = vec![0x55, 14, 4, 0, 3, 2, lo, hi, 0x80, 3, 0x2a, code, 0, 0];
     seal_duml(&mut bytes);

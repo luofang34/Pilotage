@@ -140,31 +140,33 @@ fn explicit_land_replaces_takeoff_tracking_without_automatic_cancellation_comman
 }
 
 #[test]
-fn accepted_takeoff_completes_only_after_independent_forward_airborne_reports() {
-    let mut h = ready();
-    h.apply(request(ControlAction::Takeoff, 1), 20);
-    h.step(30);
-    let sequence = commands(&h)[0].sequence();
-    feed(&mut h, &ack(sequence, 0));
-    feed_fc(&mut h, 2, 12);
-    feed_fc(&mut h, 3, 12);
-    feed_fc(&mut h, 4, 12);
-    h.step(40);
-    assert_eq!(progress(&mut h).phase, Phase::InProgress);
-    h.step(50);
-    feed_fc(&mut h, 3, 12);
-    h.step(60);
-    assert_eq!(progress(&mut h).phase, Phase::InProgress);
-    feed_fc(&mut h, 5, 12);
-    h.step(70);
-    assert_eq!(progress(&mut h).phase, Phase::InProgress);
-    feed_fc(&mut h, 6, 12);
-    h.step(80);
-    let completed = progress(&mut h);
-    assert_eq!(completed.phase, Phase::Completed);
-    assert_eq!(completed.fc_outcome, Some(CommandOutcome::Accepted));
-    feed_fc(&mut h, 7, 0);
-    h.step(90);
-    assert_eq!(progress(&mut h), completed);
-    assert_eq!(commands(&h).len(), 1);
+fn flight_completion_requires_ack_and_independent_forward_reports() {
+    for (action, complete_flags) in [(ControlAction::Takeoff, 12), (ControlAction::Land, 0)] {
+        let mut h = ready();
+        h.apply(request(action, 1), 20);
+        h.step(30);
+        let sequence = commands(&h)[0].sequence();
+        feed(&mut h, &ack(sequence, 0));
+        feed_fc(&mut h, 2, complete_flags);
+        feed_fc(&mut h, 3, complete_flags);
+        feed_fc(&mut h, 4, complete_flags);
+        h.step(40);
+        assert_eq!(progress(&mut h).phase, Phase::InProgress);
+        h.step(50);
+        feed_fc(&mut h, 3, complete_flags);
+        h.step(60);
+        assert_eq!(progress(&mut h).phase, Phase::InProgress);
+        feed_fc(&mut h, 5, complete_flags);
+        h.step(70);
+        assert_eq!(progress(&mut h).phase, Phase::InProgress);
+        feed_fc(&mut h, 6, complete_flags);
+        h.step(80);
+        let completed = progress(&mut h);
+        assert_eq!(completed.phase, Phase::Completed);
+        assert_eq!(completed.fc_outcome, Some(CommandOutcome::Accepted));
+        feed_fc(&mut h, 7, 0);
+        h.step(90);
+        assert_eq!(progress(&mut h), completed);
+        assert_eq!(commands(&h).len(), 1);
+    }
 }

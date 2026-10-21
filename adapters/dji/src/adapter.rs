@@ -192,6 +192,7 @@ impl DjiAdapter {
         self.connection
             .drive_motion(&self.observations, now, &mut self.control.sequence);
         self.connection.drive_mode_session(&self.observations, now);
+        self.connection.drive_landing(&self.observations, now);
         let ready = self.pending_pitch_ready(now);
         if !ready {
             self.control.cancel_observed();

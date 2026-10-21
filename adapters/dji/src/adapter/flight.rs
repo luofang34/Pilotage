@@ -2,6 +2,8 @@
 
 mod admission;
 mod observation;
+mod override_control;
+mod preparation;
 mod progress;
 
 use std::time::Duration;
@@ -36,8 +38,14 @@ struct Procedure {
     ack_until: Option<Duration>,
     written: bool,
     flight_sequence: Option<u16>,
-    airborne_reports: u8,
-    airborne_received: Option<Duration>,
+    completion_reports: u8,
+    completion_received: Option<Duration>,
+    preparation: Option<preparation::LandingPreparation>,
+    manual_sequence: u32,
+    manual_ready: bool,
+    manual_released: bool,
+    manual_resumed: bool,
+    override_control: Option<override_control::LandingOverride>,
 }
 
 pub(super) struct FlightExecution {
@@ -144,8 +152,14 @@ impl FlightExecution {
             ack_until: None,
             written: false,
             flight_sequence: None,
-            airborne_reports: 0,
-            airborne_received: None,
+            completion_reports: 0,
+            completion_received: None,
+            preparation: None,
+            manual_sequence: frame.sequence.as_u32(),
+            manual_ready: false,
+            manual_released: false,
+            manual_resumed: false,
+            override_control: None,
         });
         Ok(fence)
     }
