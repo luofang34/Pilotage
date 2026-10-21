@@ -127,6 +127,9 @@ pub enum DjiHostError {
     /// The video supervisor cannot accept a new connection.
     #[error("DJI video lifecycle is unavailable")]
     VideoLifecycle,
+    /// The connection lifecycle task could not start.
+    #[error("cannot start DJI connection lifecycle task: {0}")]
+    LifecycleSpawn(#[source] std::io::Error),
 }
 
 pub(super) struct DjiRuntime {
