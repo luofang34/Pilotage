@@ -247,6 +247,13 @@ impl DjiAdapter {
                 now,
             );
         }
+        if self.connection.input_clear()
+            && let Some(report) = self.observations.flight_cached(now)
+        {
+            self.connection
+                .flight
+                .observe_flight(report, self.observations.model_revision(), now);
+        }
     }
 
     fn record_observed_write(

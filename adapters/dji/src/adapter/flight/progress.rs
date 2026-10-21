@@ -110,7 +110,7 @@ impl FlightExecution {
         }
     }
 
-    fn transition(
+    pub(super) fn transition(
         &mut self,
         phase: Phase,
         reason: Option<Reason>,
