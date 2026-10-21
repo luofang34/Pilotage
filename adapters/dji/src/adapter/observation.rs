@@ -174,6 +174,18 @@ impl Observations {
         }
     }
 
+    pub(super) fn motion_deadline(&self, now: Duration, enabled: bool) -> Option<Duration> {
+        let flight = self.airframe.flight_cached(now)?;
+        // The Mini 3 profile admits GPS attitude and the protocol's joystick
+        // mode. Native takeoff, landing, RTH, and unknown modes retain priority.
+        // https://github.com/o-gs/dji-firmware-tools/blob/195692263c2684cf1ddc4995f2736be6c0fb135e/comm_dissector/wireshark/dji-dumlv1-flyc.lua#L477-L515
+        (flight.is_flying
+            && flight.motors_running
+            && (flight.mode == 6 || (enabled && flight.mode == 17)))
+            .then(|| self.model_deadline(now))
+            .flatten()
+    }
+
     pub(super) fn expire_model(&mut self, now: Duration) {
         let revision = self.model_revision();
         self.airframe.expire_binding(now);

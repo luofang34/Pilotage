@@ -50,7 +50,11 @@ impl ControlState {
 impl DjiAdapter {
     pub(super) fn apply_at(&mut self, frame: &ScopedControlFrame, now: Duration) -> ApplyOutcome {
         if frame.scope.as_str() == super::FLIGHT_SCOPE {
-            return self.apply_flight(frame, now);
+            return if frame.intent.is_some() && frame.actions.is_empty() {
+                self.apply_motion(frame, now)
+            } else {
+                self.apply_flight(frame, now)
+            };
         }
         let result = self.validate_and_queue(frame, now);
         if result.is_err()
@@ -255,6 +259,9 @@ impl DjiAdapter {
         if vehicle != self.vehicle {
             return Err(LinkLossEnactError::UnknownVehicle { vehicle });
         }
+        if scope.as_str() == super::FLIGHT_SCOPE {
+            return self.motion_link_loss(policy, clock());
+        }
         if scope.as_str() != GIMBAL_SCOPE {
             return Err(rejected("unknown DJI control scope"));
         }
@@ -262,7 +269,9 @@ impl DjiAdapter {
             return self.bench_link_loss(policy);
         }
         if let Some(policy) = policy {
-            self.connection.mode_diagnostic.cancel();
+            if !self.connection.mode_session.retained() {
+                self.connection.mode_session.cancel();
+            }
             self.control.link_loss = true;
             self.control.cancel_observed();
             if !self.connection.cancel_movement() {
@@ -359,7 +368,10 @@ fn rejected(detail: &str) -> LinkLossEnactError {
     }
 }
 
-fn write_deadline(frame: &ScopedControlFrame, now: Duration) -> Result<Duration, RejectReason> {
+pub(super) fn write_deadline(
+    frame: &ScopedControlFrame,
+    now: Duration,
+) -> Result<Duration, RejectReason> {
     let timing = frame.admitted_timing.ok_or_else(|| {
         RejectReason::Other("DJI control requires an admitted, bounded input lifetime".to_owned())
     })?;

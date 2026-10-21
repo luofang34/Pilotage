@@ -1,7 +1,8 @@
-//! One explicit, bounded mode probe. It never sends velocity commands.
+//! One mode exchange shared by diagnostics and lease-bound motion.
 
 mod admission;
 mod progress;
+mod retention;
 mod status;
 
 pub use status::{
@@ -41,6 +42,7 @@ struct Diagnostic {
     enable_report_sequence: u16,
     disable_report_sequence: Option<u16>,
     disable_queued: bool,
+    retain_until: Option<Duration>,
 }
 
 impl Diagnostic {
@@ -72,6 +74,7 @@ impl Diagnostic {
             enable_report_sequence: report_sequence,
             disable_report_sequence: None,
             disable_queued: false,
+            retain_until: None,
         }
     }
 }
@@ -83,14 +86,14 @@ struct ModeReport {
     model_revision: u64,
 }
 
-pub(in crate::adapter) struct ModeDiagnostic {
+pub(in crate::adapter) struct ModeSession {
     incarnation: SourceIncarnation,
     latest: Option<ModeReport>,
     last_sequence: Option<u16>,
     diagnostic: Option<Diagnostic>,
 }
 
-impl ModeDiagnostic {
+impl ModeSession {
     pub(in crate::adapter) fn new(incarnation: SourceIncarnation) -> Self {
         Self {
             incarnation,

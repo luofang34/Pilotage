@@ -72,7 +72,7 @@ impl Connection {
     ) {
         if self.fault.is_some()
             || self.input.framing() != Framing::LogicLink
-            || self.mode_diagnostic.active()
+            || self.mode_session.active()
         {
             return;
         }

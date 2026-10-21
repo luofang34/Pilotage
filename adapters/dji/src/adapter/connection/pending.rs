@@ -18,6 +18,7 @@ pub(super) struct Pending {
 #[derive(Clone)]
 pub(super) enum Purpose {
     Probe,
+    Stick(crate::flight::VirtualStickWrite),
     Pitch {
         target: GimbalPitchTarget,
         identity: CommandIdentity,
@@ -44,8 +45,8 @@ impl Connection {
         observations: &Observations,
         now: Duration,
     ) -> Result<(), RejectReason> {
-        if self.mode_diagnostic.active()
-            || (command == BasicFlightCommand::Takeoff && self.mode_diagnostic.unresolved())
+        if self.mode_session.active()
+            || (command == BasicFlightCommand::Takeoff && self.mode_session.unresolved())
         {
             return Err(RejectReason::Other(
                 "virtual-stick diagnostic must finish with confirmed cleanup before Takeoff"

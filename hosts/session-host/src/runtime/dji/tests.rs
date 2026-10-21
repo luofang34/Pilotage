@@ -246,3 +246,15 @@ fn device_path() -> &'static str {
         "/dev/ttyACM0"
     }
 }
+
+#[test]
+fn virtual_stick_requires_its_own_exact_opt_in() {
+    assert!(!super::parse_virtual_stick(None).unwrap());
+    assert!(super::parse_virtual_stick(Some("1".into())).unwrap());
+    for value in ["", "0", "true", "1 "] {
+        assert!(matches!(
+            super::parse_virtual_stick(Some(value.into())),
+            Err(DjiHostError::VirtualStick { .. })
+        ));
+    }
+}

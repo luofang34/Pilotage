@@ -13,6 +13,7 @@ use turret_core::{CommandIdentity, PayloadCapabilities};
 use turret_dji::Mini3ControlProfile;
 
 mod keyframe;
+mod motion;
 mod pending;
 mod virtual_stick;
 mod writer;
@@ -52,7 +53,8 @@ pub(super) struct Connection {
     origin: Instant,
     pub(super) execution: Execution,
     pub(super) flight: FlightExecution,
-    pub(super) mode_diagnostic: super::virtual_stick::ModeDiagnostic,
+    pub(super) motion: super::motion::Motion,
+    pub(super) mode_session: super::virtual_stick::ModeSession,
     profile: Mini3ControlProfile,
     transport: Option<Box<dyn Transport>>,
     capture: Box<dyn Write + Send>,
@@ -83,7 +85,8 @@ impl Connection {
             origin,
             execution: Execution::new(capabilities, 0),
             flight: FlightExecution::new(incarnation),
-            mode_diagnostic: super::virtual_stick::ModeDiagnostic::new(incarnation),
+            motion: super::motion::Motion::default(),
+            mode_session: super::virtual_stick::ModeSession::new(incarnation),
             profile,
             transport: Some(transport),
             capture,
@@ -125,7 +128,7 @@ impl Connection {
         if self.pending.is_some()
             || self.keyframes.active.is_some()
             || self.fault.is_some()
-            || self.mode_diagnostic.active()
+            || (self.mode_session.active() && !self.mode_session.enabled())
         {
             return false;
         }
@@ -189,7 +192,8 @@ impl Connection {
     }
 
     pub(super) fn invalidate_model(&mut self) {
-        self.mode_diagnostic.source_changed();
+        self.motion.lost();
+        self.mode_session.source_changed();
         self.cancel_mode_pending();
         self.cancel_movement();
         self.keyframes.close();
@@ -274,8 +278,8 @@ impl Connection {
             let binding = observations
                 .model_deadline(now)
                 .map(|_| observations.model_revision());
-            self.mode_diagnostic.poll(now, binding);
-            self.mode_diagnostic.receive(&frame, now, binding);
+            self.mode_session.poll(now, binding);
+            self.mode_session.receive(&frame, now, binding);
         }
     }
 
@@ -309,8 +313,9 @@ impl Connection {
         } else {
             self.execution.cancel();
         }
+        self.motion.lost();
         self.flight.transport_failed();
-        self.mode_diagnostic.transport_failed();
+        self.mode_session.transport_failed();
         self.fault = Some(fault);
         self.pending = None;
         // Closing prevents a partial packet from being followed by a new command.

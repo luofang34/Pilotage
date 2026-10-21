@@ -1,9 +1,9 @@
 use std::time::Duration;
 
-use super::{DjiVirtualStickModeEvidence, ModeDiagnostic, ModeFence, ModeReport, Phase, Reason};
+use super::{DjiVirtualStickModeEvidence, ModeFence, ModeReport, ModeSession, Phase, Reason};
 use crate::{DumlFrame, flight::VirtualStickReport};
 
-impl ModeDiagnostic {
+impl ModeSession {
     pub(in crate::adapter) fn receive(
         &mut self,
         frame: &DumlFrame,
@@ -54,7 +54,7 @@ impl ModeDiagnostic {
                 false,
                 diagnostic.disable_report_sequence,
             ),
-            Phase::Finished => return,
+            Phase::Enabled | Phase::Finished => return,
         };
         if evidence.written_at.is_some_and(|written| now > written)
             && watermark.is_some_and(|last| forward(report.sequence, last))
@@ -73,7 +73,7 @@ impl ModeDiagnostic {
         let (fence, evidence) = match diagnostic.status.phase {
             Phase::Enable => (diagnostic.enable, &mut diagnostic.status.enable),
             Phase::Disable => (diagnostic.disable, &mut diagnostic.status.disable),
-            Phase::Finished => return,
+            Phase::Enabled | Phase::Finished => return,
         };
         if evidence.written_at.is_none() || evidence.acknowledgement.is_some() {
             return;
@@ -115,6 +115,12 @@ impl ModeDiagnostic {
             self.source_changed();
             return;
         }
+        if diagnostic.retain_until.is_some_and(|until| now >= until)
+            && matches!(diagnostic.status.phase, Phase::Enable | Phase::Enabled)
+        {
+            self.release_retained(now, Some(Reason::Cancelled));
+            return;
+        }
         match diagnostic.status.phase {
             Phase::Enable => {
                 let evidence = diagnostic.status.enable;
@@ -124,7 +130,11 @@ impl ModeDiagnostic {
                     diagnostic.enable.send_until
                 };
                 if confirmed(evidence) && current.is_some_and(|latest| latest.report.enabled) {
-                    self.cleanup(None);
+                    if diagnostic.retain_until.is_some() {
+                        diagnostic.status.phase = Phase::Enabled;
+                    } else {
+                        self.cleanup(None);
+                    }
                 } else if now >= until || evidence.acknowledgement.is_some_and(|code| code != 0) {
                     self.cleanup(Some(Reason::EnableUnconfirmed));
                 }
@@ -153,21 +163,28 @@ impl ModeDiagnostic {
                     diagnostic.status.phase = Phase::Finished;
                 }
             }
+            Phase::Enabled => {
+                if current.is_none_or(|latest| {
+                    !latest.report.enabled
+                        || !latest.report.multiple_flight_modes
+                        || latest.report.novice_mode
+                }) {
+                    self.release_retained(now, Some(Reason::SourceChanged));
+                }
+            }
             Phase::Finished => {}
         }
     }
 
     pub(in crate::adapter) fn cancel(&mut self) {
-        if self
-            .diagnostic
-            .as_ref()
-            .is_some_and(|diagnostic| diagnostic.status.phase == Phase::Enable)
-        {
+        if self.diagnostic.as_ref().is_some_and(|diagnostic| {
+            matches!(diagnostic.status.phase, Phase::Enable | Phase::Enabled)
+        }) {
             self.cleanup(Some(Reason::Cancelled));
         }
     }
 
-    fn cleanup(&mut self, reason: Option<Reason>) {
+    pub(super) fn cleanup(&mut self, reason: Option<Reason>) {
         let Some(diagnostic) = &mut self.diagnostic else {
             return;
         };

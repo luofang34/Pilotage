@@ -37,6 +37,7 @@ pub(super) fn capabilities(
     payload: &turret_core::PayloadCapabilities,
     incarnation: pilotage_adapter_api::SourceIncarnation,
     experimental_flight: bool,
+    experimental_virtual_stick: bool,
 ) -> AdapterCapabilities {
     let mut payload =
         pilotage_adapter_api::payload_capabilities_to_wire("dji-camera", payload, &[GIMBAL_SCOPE]);
@@ -44,8 +45,11 @@ pub(super) fn capabilities(
     payload.connection_epoch = 0;
     payload.connection_role = pilotage_protocol::wire::PayloadConnectionRole::DirectDevice as i32;
     let mut scopes = vec![gimbal_scope(payload, profile)];
-    if experimental_flight {
-        scopes.push(flight_scope());
+    if experimental_flight || experimental_virtual_stick {
+        scopes.push(flight_scope(
+            experimental_flight,
+            experimental_virtual_stick,
+        ));
     }
     AdapterCapabilities {
         execution: ExecutionMode {
@@ -100,15 +104,27 @@ fn gimbal_scope(
     }
 }
 
-fn flight_scope() -> ScopeDescriptor {
+fn flight_scope(actions: bool, continuous: bool) -> ScopeDescriptor {
     ScopeDescriptor {
         payload: None,
         authority_group: None,
         scope: ScopeId::new(super::FLIGHT_SCOPE),
         axes: Vec::new(),
-        intents: Vec::new(),
+        intents: if continuous {
+            vec![IntentCapability {
+                family: IntentFamily::Velocity,
+                frames: vec![pilotage_protocol::ReferenceFrame::BodyFrd],
+                max_linear: 1.0,
+                max_vertical: 0.5,
+                max_angular: core::f32::consts::FRAC_PI_6,
+                max_yaw_rate: 0.0,
+            }]
+        } else {
+            Vec::new()
+        },
         actions: [ActionKind::Takeoff, ActionKind::Land]
             .into_iter()
+            .filter(|_| actions)
             .map(|action| ActionCapability {
                 action,
                 mode_targets: Vec::new(),

@@ -17,6 +17,7 @@ const USB: &str = "PILOTAGE_DJI_USB";
 const CAPTURE: &str = "PILOTAGE_DJI_CAPTURE";
 const CONTROL_MODE: &str = "PILOTAGE_DJI_CONTROL_MODE";
 const FFMPEG: &str = "PILOTAGE_DJI_FFMPEG";
+const VIRTUAL_STICK: &str = "PILOTAGE_DJI_VIRTUAL_STICK";
 const EXPERIMENTAL_FLIGHT: &str = "PILOTAGE_DJI_EXPERIMENTAL_FLIGHT";
 
 mod attachment;
@@ -104,6 +105,12 @@ pub enum DjiHostError {
         /// The rejected configuration value.
         value: OsString,
     },
+    /// The virtual-stick opt-in is not the exact supported value.
+    #[error("{VIRTUAL_STICK} must be absent or 1, got {value:?}")]
+    VirtualStick {
+        /// The rejected configuration value.
+        value: OsString,
+    },
     /// The decoder command is empty or a relative path.
     #[error("{FFMPEG} must be a command name or an absolute file path, got {path:?}")]
     DecoderPath {
@@ -147,13 +154,15 @@ pub(super) fn start_blocking(vehicle: VehicleId) -> Result<DjiRuntime, DjiHostEr
         capture_path: config.capture_path,
         control_mode: config.control_mode,
         experimental_flight: config.experimental_flight,
+        experimental_virtual_stick: parse_virtual_stick(std::env::var_os(VIRTUAL_STICK))?,
         experimental_virtual_stick_diagnostic: false,
     };
     tracing::info!(attachment = ?adapter_config.attachment,
         capture = %adapter_config.capture_path.display(),
         control_mode = ?adapter_config.control_mode,
         experimental_flight = adapter_config.experimental_flight,
-        "DJI experimental adapter configured; continuous flight control is unavailable");
+        experimental_virtual_stick = adapter_config.experimental_virtual_stick,
+        "DJI experimental adapter configured");
     if adapter_config.control_mode == DjiControlMode::BenchInitialHorizontal {
         tracing::warn!(
             "DJI one-way bench control starts from an operator-confirmed horizontal target; physical pose and stop are not confirmed"
@@ -211,6 +220,14 @@ fn config_from_values(
         ffmpeg: parse_decoder(ffmpeg)?,
         experimental_flight: parse_experimental_flight(experimental_flight)?,
     })
+}
+
+fn parse_virtual_stick(value: Option<OsString>) -> Result<bool, DjiHostError> {
+    match value {
+        None => Ok(false),
+        Some(value) if value == "1" => Ok(true),
+        Some(value) => Err(DjiHostError::VirtualStick { value }),
+    }
 }
 
 fn parse_experimental_flight(value: Option<OsString>) -> Result<bool, DjiHostError> {
