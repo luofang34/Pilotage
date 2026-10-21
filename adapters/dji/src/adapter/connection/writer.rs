@@ -47,7 +47,7 @@ impl Connection {
                 if let Some(Purpose::Mode(fence)) =
                     self.pending.as_ref().map(|pending| pending.purpose.clone())
                 {
-                    self.mode_diagnostic.wrote(&fence, completed_at(), false);
+                    self.mode_session.wrote(&fence, completed_at(), false);
                 }
                 if let Some((_, identity)) = self
                     .pending
@@ -76,6 +76,10 @@ impl Connection {
         };
         match &pending.purpose {
             Purpose::Probe => true,
+            Purpose::Stick(write) => {
+                let write = *write;
+                self.prepare_stick(write, observations, now)
+            }
             Purpose::Pitch { .. } => {
                 if !movement_ready {
                     self.cancel_movement();
@@ -138,7 +142,7 @@ impl Connection {
         if let Purpose::Flight(fence) = &purpose {
             self.flight.wrote(fence, now, complete);
         } else if let Purpose::Mode(fence) = &purpose {
-            self.mode_diagnostic.wrote(fence, now, false);
+            self.mode_session.wrote(fence, now, false);
         }
         let expired = pending.expires_at.is_some_and(|until| now >= until);
         if complete {
@@ -154,12 +158,17 @@ impl Connection {
             return;
         }
         if complete {
+            if let Purpose::Stick(write) = &purpose
+                && let Some(stream) = &mut self.motion.stream
+            {
+                stream.written(*write, now);
+            }
             self.written_pitch = purpose.pitch();
             if let Purpose::Mode(fence) = &purpose {
-                self.mode_diagnostic.wrote(fence, now, true);
+                self.mode_session.wrote(fence, now, true);
             }
         }
-        if expired && matches!(purpose, Purpose::Mode(_)) {
+        if expired && matches!(purpose, Purpose::Mode(_) | Purpose::Stick(_)) {
             self.fail(DjiFault::Transport {
                 operation: "mode diagnostic write exceeded its deadline",
                 source: io::ErrorKind::TimedOut.into(),

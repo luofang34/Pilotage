@@ -31,7 +31,9 @@ impl DjiAdapter {
     /// This does not start I/O. Keep stepping to attempt the disable request.
     /// It does not stop motors or prove that control returned to the RC.
     pub fn cancel_virtual_stick_diagnostic(&mut self) {
-        self.connection.mode_diagnostic.cancel();
+        if !self.connection.mode_session.retained() {
+            self.connection.mode_session.cancel();
+        }
     }
 
     /// Read retained diagnostic evidence without renewing any source age.
@@ -39,7 +41,9 @@ impl DjiAdapter {
     pub fn virtual_stick_diagnostic_status_cached(
         &self,
     ) -> Option<DjiVirtualStickDiagnosticStatus> {
-        self.connection.mode_diagnostic.status_cached()
+        (!self.connection.mode_session.retained())
+            .then(|| self.connection.mode_session.status_cached())
+            .flatten()
     }
 
     pub(in crate::adapter) fn request_virtual_stick_at(
@@ -54,7 +58,7 @@ impl DjiAdapter {
         {
             return Err(Error::Disabled);
         }
-        self.connection.queue_mode_diagnostic(
+        self.connection.queue_mode_session(
             request_id,
             self.control.sequence,
             now,

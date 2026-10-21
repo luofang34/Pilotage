@@ -158,8 +158,8 @@ The host limits target planning to 30 degrees per second. This is not a
 measured device speed limit. Recenter continues while control input and
 feedback remain valid. The host does not repeat an unchanged target after
 a full write.
-The adapter ignores horizontal gimbal input because yaw control is not
-implemented.
+The gimbal scope supports pitch only. A client can route camera pan to
+vehicle yaw when the separate flight velocity capability is enabled.
 An RC version response alone does not establish the aircraft route.
 
 Set `PILOTAGE_DJI_EXPERIMENTAL_FLIGHT=1` to enable Takeoff and Land on the
@@ -174,6 +174,18 @@ not cause an automatic retry. Use the original remote controller for flight
 control. Verify remote takeover and disconnect behavior before a flight test.
 After a Takeoff write, another Takeoff requires an explicit adapter restart.
 A restart does not stop an aircraft procedure.
+
+Set `PILOTAGE_DJI_VIRTUAL_STICK=1` to expose experimental BODY-FRD velocity
+control on the upper USB interface. This setting is separate from Takeoff
+and Land. A new control lease must supply neutral input. Mode entry requires
+fresh airborne GPS-attitude reports and independent mode confirmation.
+Fresh input retains the stream at up to 20 writes per second. The limits are
+1 m/s horizontal speed, 0.5 m/s vertical speed, and 30 degrees/s yaw rate.
+Input loss requests one zero-velocity write and mode release. Native flight
+modes and remote mode exit stop the stream without automatic reacquisition.
+A new lease requires confirmed release. Release virtual-stick control before
+requesting native Takeoff or Land. These checks do not verify aircraft motion
+or remote takeover behavior. Keep the original controller available.
 
 The bottom RC-N1 CDC interface can forward pitch commands without aircraft
 pose feedback. For this bench connection, set

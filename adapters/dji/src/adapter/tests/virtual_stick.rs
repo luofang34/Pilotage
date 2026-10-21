@@ -11,7 +11,7 @@ use crate::{DumlFrame, flight::VirtualStickMode, logiclink::LogicLinkParser};
 use pilotage_adapter_api::VehicleAdapter;
 use std::time::Duration;
 
-fn ready() -> Harness {
+pub(super) fn ready() -> Harness {
     let mut h = super::flight::ready();
     h.adapter.experimental_virtual_stick_diagnostic = true;
     report(&mut h, 10, false, true, false);
@@ -19,7 +19,7 @@ fn ready() -> Harness {
     h
 }
 
-fn report(h: &mut Harness, sequence: u16, enabled: bool, multiple: bool, novice: bool) {
+pub(super) fn report(h: &mut Harness, sequence: u16, enabled: bool, multiple: bool, novice: bool) {
     let [lo, hi] = sequence.to_le_bytes();
     let mut bytes = vec![0x55, 91, 4, 0, 14, 2, lo, hi, 0, 3, 0x44];
     let mut payload = [0; 78];
@@ -32,7 +32,7 @@ fn report(h: &mut Harness, sequence: u16, enabled: bool, multiple: bool, novice:
     feed(h, &bytes);
 }
 
-fn ack(h: &mut Harness, mode: VirtualStickMode, sequence: u16, code: u8) {
+pub(super) fn ack(h: &mut Harness, mode: VirtualStickMode, sequence: u16, code: u8) {
     let mut bytes = *mode.packet(sequence).bytes();
     bytes[4] = 3;
     bytes[5] = 2;
@@ -51,7 +51,7 @@ fn status(h: &Harness) -> DjiVirtualStickDiagnosticStatus {
     h.adapter.virtual_stick_diagnostic_status_cached().unwrap()
 }
 
-fn commands(h: &Harness) -> Vec<DumlFrame> {
+pub(super) fn commands(h: &Harness) -> Vec<DumlFrame> {
     let mut parser = LogicLinkParser::new();
     let mut result = Vec::new();
     parser

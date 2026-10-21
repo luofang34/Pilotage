@@ -29,6 +29,11 @@ pub struct DjiConfig {
     /// Permit experimental discrete Takeoff and Land on the upper USB interface.
     /// This does not enable continuous flight control.
     pub experimental_flight: bool,
+    /// Permit lease-bound BODY-FRD velocity through confirmed virtual-stick mode.
+    /// Entry requires neutral input and fresh airborne GPS-attitude feedback.
+    /// A stopped lease cannot restart; release must be confirmed before a new lease.
+    /// Native flight actions require the virtual-stick exchange to finish first.
+    pub experimental_virtual_stick: bool,
     /// Allow one explicit, bounded virtual-stick enable-and-disable diagnostic.
     /// This permits no velocity writes and starts no diagnostic automatically.
     pub experimental_virtual_stick_diagnostic: bool,

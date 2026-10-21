@@ -11,6 +11,7 @@ mod control;
 mod execution;
 mod flight;
 mod input;
+mod motion;
 mod observation;
 mod recording;
 #[cfg(test)]
@@ -55,7 +56,7 @@ pub use config::{DjiAdapterError, DjiConfig, DjiControlMode, DjiFault, DjiStatus
 ///
 /// The caller drives I/O with `step` at 10 ms intervals. Discrete Takeoff and
 /// Land require explicit configuration on the upper USB interface. Continuous
-/// flight control is not implemented.
+/// flight control requires a separate experimental opt-in.
 /// The default mode requires valid reports. The explicit bench mode tracks
 /// command targets only. Neither mode infers physical completion.
 pub struct DjiAdapter {
@@ -67,6 +68,7 @@ pub struct DjiAdapter {
     control: ControlState,
     video_subscribed: bool,
     experimental_flight: bool,
+    experimental_virtual_stick: bool,
     experimental_virtual_stick_diagnostic: bool,
 }
 
@@ -102,6 +104,7 @@ impl DjiAdapter {
             config.control_mode,
             config.experimental_flight,
         )?;
+        adapter.experimental_virtual_stick = config.experimental_virtual_stick;
         adapter.experimental_virtual_stick_diagnostic =
             config.experimental_virtual_stick_diagnostic;
         Ok(adapter)
@@ -144,6 +147,7 @@ impl DjiAdapter {
             control: ControlState::new(control_mode, profile),
             video_subscribed: false,
             experimental_flight: experimental_flight && control_mode == DjiControlMode::Observed,
+            experimental_virtual_stick: false,
             experimental_virtual_stick_diagnostic: false,
         })
     }
@@ -178,7 +182,8 @@ impl DjiAdapter {
         // Recording can take time. Recheck age at the command write boundary.
         let now = clock();
         self.connection
-            .drive_mode_diagnostic(&self.observations, now);
+            .drive_motion(&self.observations, now, &mut self.control.sequence);
+        self.connection.drive_mode_session(&self.observations, now);
         let ready = self.pending_pitch_ready(now);
         if !ready {
             self.control.cancel_observed();
@@ -315,6 +320,7 @@ impl VehicleAdapter for DjiAdapter {
             self.connection.execution.capabilities(),
             self.observations.incarnation(),
             self.flight_enabled(),
+            self.motion_enabled(),
         );
         capabilities.execution.render_capable = self.video_subscribed;
         capabilities

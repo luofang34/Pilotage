@@ -59,6 +59,9 @@ impl DjiAdapter {
         if !self.flight_enabled() || frame.scope.as_str() != FLIGHT_SCOPE {
             return Err(RejectReason::UnknownScope);
         }
+        if self.connection.motion.link_loss {
+            return Err(RejectReason::LinkLossEngaged);
+        }
         let command = flight_demand(frame)?;
         if !self.connection.input_clear() || !self.connection.version_observed {
             return Err(super::reject(
@@ -100,12 +103,16 @@ impl DjiAdapter {
         if vehicle != self.vehicle {
             return;
         }
+        if (scope.as_str() == FLIGHT_SCOPE || scope.as_str() == GIMBAL_SCOPE)
+            && !self.connection.mode_session.retained()
+        {
+            self.connection.mode_session.cancel();
+        }
         if scope.as_str() == FLIGHT_SCOPE {
-            self.connection.mode_diagnostic.cancel();
+            self.connection.motion.stop(now);
             self.connection
                 .invalidate_flight(FlightProcedureReason::AuthorityLost, now);
         } else if scope.as_str() == GIMBAL_SCOPE {
-            self.connection.mode_diagnostic.cancel();
             self.control.cancel_observed();
             self.connection.cancel_movement();
         }

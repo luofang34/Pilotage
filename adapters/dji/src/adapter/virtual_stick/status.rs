@@ -2,13 +2,15 @@ use std::time::Duration;
 
 use pilotage_adapter_api::SourceIncarnation;
 
-/// The current step of a single enable-and-disable diagnostic.
+/// The current step of a mode exchange. Diagnostics do not retain `Enabled`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DjiVirtualStickDiagnosticPhase {
     /// Send one enable request and await independent feedback.
     Enable,
     /// Send one disable request and await independent feedback.
     Disable,
+    /// Mode is confirmed and retained by a bounded control input lifetime.
+    Enabled,
     /// The bounded diagnostic has ended. Inspect both evidence records.
     Finished,
 }

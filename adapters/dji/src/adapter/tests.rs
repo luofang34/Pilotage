@@ -488,3 +488,5 @@ fn an_injected_missing_mode_cannot_reuse_the_last_valid_attitude() -> TestResult
     ));
     Ok(())
 }
+
+mod motion;

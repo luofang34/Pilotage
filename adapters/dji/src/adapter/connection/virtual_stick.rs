@@ -3,12 +3,12 @@ use std::time::Duration;
 use super::{Connection, DjiFault, Pending, Purpose};
 use crate::adapter::{
     observation::Observations,
-    virtual_stick::{DjiVirtualStickDiagnosticError as Error, ModeDiagnostic, ModeFence},
+    virtual_stick::{DjiVirtualStickDiagnosticError as Error, ModeFence, ModeSession},
 };
 use crate::flight::{BasicFlightCommand, VirtualStickMode};
 
 impl Connection {
-    pub(in crate::adapter) fn queue_mode_diagnostic(
+    pub(in crate::adapter) fn queue_mode_session(
         &mut self,
         request_id: u64,
         sequence: u16,
@@ -27,7 +27,7 @@ impl Connection {
         observations
             .flight_deadline(BasicFlightCommand::Takeoff, now)
             .ok_or(Error::MissingFeedback)?;
-        let fence = self.mode_diagnostic.begin(
+        let fence = self.mode_session.begin(
             request_id,
             observations.model_revision(),
             sequence,
@@ -38,7 +38,7 @@ impl Connection {
         Ok(())
     }
 
-    fn mode_pending(
+    pub(super) fn mode_pending(
         &self,
         fence: ModeFence,
         observations: &Observations,
@@ -47,7 +47,7 @@ impl Connection {
         let until = observations
             .model_deadline(now)
             .ok_or(Error::MissingFeedback)?;
-        let packet = ModeDiagnostic::packet(&fence);
+        let packet = ModeSession::packet(&fence);
         Ok(Pending {
             bytes: self.input.framing().command(packet.bytes()),
             offset: 0,
@@ -56,7 +56,7 @@ impl Connection {
         })
     }
 
-    pub(in crate::adapter) fn drive_mode_diagnostic(
+    pub(in crate::adapter) fn drive_mode_session(
         &mut self,
         observations: &Observations,
         now: Duration,
@@ -64,12 +64,12 @@ impl Connection {
         let binding = observations
             .model_deadline(now)
             .map(|_| observations.model_revision());
-        self.mode_diagnostic.poll(now, binding);
+        self.mode_session.poll(now, binding);
         let valid = self
             .pending
             .as_ref()
             .is_none_or(|pending| match &pending.purpose {
-                Purpose::Mode(fence) => self.mode_diagnostic.permits(fence, now),
+                Purpose::Mode(fence) => self.mode_session.permits(fence, now),
                 _ => true,
             });
         if !valid && !self.cancel_mode_pending() {
@@ -78,16 +78,19 @@ impl Connection {
         if self.fault.is_some() || !self.input_clear() {
             return;
         }
-        let Some(fence) = self.mode_diagnostic.cleanup_fence() else {
+        if self.pending.is_some() {
+            return;
+        }
+        let Some(fence) = self.mode_session.cleanup_fence() else {
             return;
         };
         if self.pending.is_some() {
-            self.mode_diagnostic.transport_failed();
+            self.mode_session.transport_failed();
             return;
         }
         match self.mode_pending(fence, observations, now) {
             Ok(pending) => self.pending = Some(pending),
-            Err(_) => self.mode_diagnostic.source_changed(),
+            Err(_) => self.mode_session.source_changed(),
         }
     }
 
@@ -100,15 +103,17 @@ impl Connection {
         let fresh = observations.model_revision() == fence.model_revision
             && observations.model_deadline(now).is_some()
             && (fence.mode == VirtualStickMode::Disable
+                || (self.mode_session.retained()
+                    && observations.motion_deadline(now, false).is_some())
                 || observations
                     .flight_deadline(BasicFlightCommand::Takeoff, now)
                     .is_some());
         if self.input_clear()
             && self.version_observed
             && fresh
-            && self.mode_diagnostic.permits(fence, now)
+            && self.mode_session.permits(fence, now)
         {
-            let until = if fence.mode == VirtualStickMode::Enable {
+            let until = if fence.mode == VirtualStickMode::Enable && !self.mode_session.retained() {
                 observations.flight_deadline(BasicFlightCommand::Takeoff, now)
             } else {
                 observations.model_deadline(now)
@@ -118,7 +123,7 @@ impl Connection {
             }
             return true;
         }
-        self.mode_diagnostic.cancel();
+        self.mode_session.cancel();
         self.cancel_mode_pending();
         false
     }
