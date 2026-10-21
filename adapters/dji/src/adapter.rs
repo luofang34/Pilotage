@@ -73,6 +73,23 @@ pub struct DjiAdapter {
 }
 
 impl DjiAdapter {
+    /// Whether a failed attachment has confirmed release of its transport owner.
+    #[must_use]
+    pub fn transport_released(&self) -> bool {
+        self.connection.cleanup_confirmed
+    }
+
+    /// Close a removed attachment and fence all pending commands.
+    /// Already submitted flight actions retain an unknown result.
+    pub fn disconnect_blocking(&mut self) {
+        if self.connection.fault.is_none() {
+            self.connection.fail(DjiFault::Transport {
+                operation: "attachment removed",
+                source: std::io::ErrorKind::NotConnected.into(),
+            });
+        }
+    }
+
     /// Open one explicit attachment and a new raw capture file.
     ///
     /// No background task or reconnect loop is started. The first `step`

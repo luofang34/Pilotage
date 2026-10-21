@@ -107,7 +107,7 @@ fn lost_write_receipt_or_capture_failure_never_reports_accepted_or_retries() {
         }
         h.step(30);
         let status = progress(&mut h);
-        assert_eq!(status.phase, Phase::Failed);
+        assert_eq!(status.phase, Phase::OutcomeUnknown);
         assert_eq!(status.fc_outcome, None);
         assert_eq!(status.reason, Some(Reason::WriteFailed));
         let before = h.written().unwrap();

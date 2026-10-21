@@ -9,6 +9,33 @@ use pilotage_protocol::ControlAction;
 use super::*;
 
 #[test]
+fn disconnect_retains_accepted_unknown_result_and_cannot_replay_commands() {
+    let mut h = ready();
+    let frame = request(ControlAction::Takeoff, 77);
+    h.apply(frame.clone(), 20);
+    h.step(30);
+    let sequence = commands(&h)[0].sequence();
+    feed(&mut h, &ack(sequence, 0));
+    h.step(40);
+    assert_eq!(progress(&mut h).phase, Phase::InProgress);
+    let written = h.written().unwrap();
+    h.adapter.disconnect_blocking();
+    assert!(h.adapter.transport_released());
+    let unknown = progress(&mut h);
+    assert_eq!(unknown.phase, Phase::OutcomeUnknown);
+    assert_eq!(unknown.fc_outcome, Some(CommandOutcome::Accepted));
+    assert_eq!(unknown.request.action_id, 77);
+    assert!(matches!(
+        h.apply(frame, 50).disposition,
+        Disposition::Rejected(_)
+    ));
+    h.step(60);
+    h.adapter.disconnect_blocking();
+    assert_eq!(progress(&mut h), unknown);
+    assert_eq!(h.written().unwrap(), written);
+}
+
+#[test]
 fn exact_request_written_ack_and_motor_reports_never_claim_completed() {
     let mut h = ready();
     let frame = request(ControlAction::Takeoff, 77);

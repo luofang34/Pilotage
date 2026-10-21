@@ -233,11 +233,5 @@ fn timestamp(now: Duration) -> MonoTimestamp {
 }
 
 fn terminal(phase: FlightProcedurePhase) -> bool {
-    matches!(
-        phase,
-        FlightProcedurePhase::Completed
-            | FlightProcedurePhase::Failed
-            | FlightProcedurePhase::TimedOut
-            | FlightProcedurePhase::Cancelled
-    )
+    phase.is_terminal()
 }

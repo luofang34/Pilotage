@@ -16,6 +16,7 @@ fn every_procedure_value_roundtrips_without_losing_its_meaning() {
         FlightProcedurePhase::Failed,
         FlightProcedurePhase::TimedOut,
         FlightProcedurePhase::Cancelled,
+        FlightProcedurePhase::OutcomeUnknown,
     ] {
         assert_eq!(
             FlightProcedurePhase::from_wire(phase.to_wire() as i32),
@@ -59,6 +60,7 @@ fn absent_or_unknown_progress_never_implies_completion() {
         FlightProcedurePhase::Failed,
         FlightProcedurePhase::TimedOut,
         FlightProcedurePhase::Cancelled,
+        FlightProcedurePhase::OutcomeUnknown,
     ] {
         assert!(phase.is_terminal());
     }

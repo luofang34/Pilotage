@@ -28,6 +28,9 @@ struct NativeCandidate {
 
 // SAFETY: These declarations match native/logiclink.h and the linked native test entry points.
 unsafe extern "C" {
+    fn dji_watch_open(output: *mut *mut c_void, error: *mut NativeError) -> i32;
+    fn dji_watch_poll(handle: *mut c_void) -> i32;
+    fn dji_watch_close(handle: *mut c_void);
     fn dji_usb_discover(
         output: *mut NativeCandidate,
         capacity: u32,
@@ -59,6 +62,33 @@ unsafe extern "C" {
     fn dji_usb_deadline_test() -> i32;
     #[cfg(test)]
     fn dji_usb_discovery_test() -> i32;
+}
+
+pub(crate) struct RegistryWatch(NonNull<c_void>);
+
+impl RegistryWatch {
+    pub(crate) fn open() -> Result<Self, UsbError> {
+        let mut handle = std::ptr::null_mut();
+        let mut error = NativeError::default();
+        // SAFETY: The native observer is created and used on this thread only.
+        let status = unsafe { dji_watch_open(&mut handle, &mut error) };
+        match (status, NonNull::new(handle)) {
+            (0, Some(handle)) => Ok(Self(handle)),
+            _ => Err(error.into()),
+        }
+    }
+
+    pub(crate) fn changed(&mut self) -> bool {
+        // SAFETY: The observer and its run-loop callbacks remain owned by this thread.
+        unsafe { dji_watch_poll(self.0.as_ptr()) != 0 }
+    }
+}
+
+impl Drop for RegistryWatch {
+    fn drop(&mut self) {
+        // SAFETY: Drop removes callbacks before releasing the sole native observer.
+        unsafe { dji_watch_close(self.0.as_ptr()) };
+    }
 }
 
 pub(crate) fn discover() -> Result<Vec<UpperUsbCandidate>, UsbError> {
