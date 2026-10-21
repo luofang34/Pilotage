@@ -126,7 +126,7 @@ int dji_usb_open(uint64_t identity, DjiUsb **output, DjiError *error) {
         if (valid) valid = openInterface(usb, profile, error);
         if (!valid) {
             DjiError cleanup = {0};
-            if (dji_usb_close(usb, &cleanup) != 0) *error = cleanup;
+            if (dji_usb_close(usb, &cleanup) < 0) *error = cleanup;
             return -1;
         }
         *output = usb;
@@ -201,22 +201,26 @@ int dji_usb_close(DjiUsb *usb, DjiError *error) {
             if (usb->pending) return dji_fail(error, 15,
                 status == kIOReturnSuccess ? kIOReturnTimeout : status);
         }
-        BOOL ok = YES;
+        BOOL restored = YES, released = YES;
         if (usb->opened && usb->changed) {
             IOReturn status = (*usb->interface)->SetAlternateInterface(usb->interface, usb->original);
-            if (status != kIOReturnSuccess) { dji_fail(error, 16, status); ok = NO; }
+            if (status != kIOReturnSuccess) { dji_fail(error, 16, status); restored = NO; }
         }
         if (usb->opened && usb->originalKnown) {
             UInt8 actual = 255;
             IOReturn status = (*usb->interface)->GetAlternateSetting(usb->interface, &actual);
             if (status != kIOReturnSuccess || actual != usb->original) {
                 dji_fail(error, 16, status == kIOReturnSuccess ? kIOReturnBadArgument : status);
-                ok = NO;
+                restored = NO;
             }
         }
         if (usb->opened) {
             IOReturn status = (*usb->interface)->USBInterfaceClose(usb->interface);
-            if (status != kIOReturnSuccess) { dji_fail(error, 17, status); ok = NO; }
+            // NoDevice means the interface owner has been torn down by removal.
+            // Callback completion above is still required before freeing its context.
+            if (status != kIOReturnSuccess && status != kIOReturnNoDevice) {
+                dji_fail(error, 17, status); released = NO;
+            }
         }
         if (usb->source != NULL) {
             CFRunLoopRemoveSource(CFRunLoopGetCurrent(), usb->source, kCFRunLoopDefaultMode);
@@ -225,6 +229,6 @@ int dji_usb_close(DjiUsb *usb, DjiError *error) {
         if (usb->interface != NULL) (*usb->interface)->Release(usb->interface);
         if (usb->service != IO_OBJECT_NULL) IOObjectRelease(usb->service);
         free(usb);
-        return ok ? 0 : -1;
+        return released ? (restored ? 0 : 1) : -1;
     }
 }

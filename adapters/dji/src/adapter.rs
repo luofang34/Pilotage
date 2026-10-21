@@ -82,6 +82,13 @@ impl DjiAdapter {
     /// Close a removed attachment and fence all pending commands.
     /// Already submitted flight actions retain an unknown result.
     pub fn disconnect_blocking(&mut self) {
+        self.fence_transport();
+        self.connection.close_transport_blocking();
+    }
+
+    /// Stop protocol input and command submission without waiting for USB cleanup.
+    /// The owner must subsequently call [`Self::disconnect_blocking`] off the control loop.
+    pub fn fence_transport(&mut self) {
         if self.connection.fault.is_none() {
             self.connection.fail(DjiFault::Transport {
                 operation: "attachment removed",
