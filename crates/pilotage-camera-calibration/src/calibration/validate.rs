@@ -9,7 +9,7 @@
 //! reason, never clamping or repairing. It runs from [`super::verify`] and is
 //! mirrored by the browser admission path in `clients/web/calibration.js`.
 
-use indicate_frames::FrameId;
+use indicate_frames::FrameKind;
 
 use super::CameraCalibration;
 use super::budget::AlignmentAllowances;
@@ -110,10 +110,10 @@ fn validate_extrinsics_boresight(geometry: &CameraGeometry) -> Result<(), Calibr
         ("boresight_y", geometry.boresight.direction_camera[1]),
         ("boresight_z", geometry.boresight.direction_camera[2]),
     ])?;
-    if e.from_frame != FrameId::Body || e.to_frame != FrameId::Installation {
+    if e.from_kind != FrameKind::Body || e.to_kind != FrameKind::Installation {
         return Err(CalibrationError::FrameMismatch {
-            from_code: e.from_frame.to_u8(),
-            to_code: e.to_frame.to_u8(),
+            from_code: e.from_kind.to_u8(),
+            to_code: e.to_kind.to_u8(),
         });
     }
     let quat_norm = norm(&e.rotation_quat_wxyz);

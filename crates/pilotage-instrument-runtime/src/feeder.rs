@@ -13,7 +13,7 @@ use indicate_instrument_feeder::nav_guidance::{
     Guidance, NavCounters, NavGuidanceTracker, NavReject, NavSnapshot,
 };
 use indicate_instrument_feeder::turn::{TurnDeclaration, TurnDerivation};
-use indicate_instrument_feeder::{RawStamp, StampFault};
+use indicate_instrument_feeder::{ROLE_OPERATIONAL_ESTIMATE, RawStamp, StampFault};
 use indicate_instrument_state::{NavData, Stamped};
 
 /// Construction parameters for [`Ingress`], in plain Rust.
@@ -45,6 +45,7 @@ impl Ingress {
         Self {
             inner: AvionicsIngress::new(IngressConfig {
                 vehicle_id: params.vehicle_id,
+                role: ROLE_OPERATIONAL_ESTIMATE,
                 source_id: params.source_id,
                 incarnation: params.incarnation,
                 incarnation_policy: if params.sim_accept_unseen {

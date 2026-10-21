@@ -9,8 +9,6 @@
 
 use super::*;
 
-use indicate_frames::FrameId;
-
 use crate::availability::AvailabilityReason;
 use crate::identity::IntegrityLevel;
 use crate::{ConformalReason, ConformalState};
@@ -65,7 +63,7 @@ fn velocity_in_the_wrong_frame_is_non_conformal() {
     // The velocity must be NED; a body-frame velocity is refused rather than
     // projected as if it were NED.
     let mut older = sample(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3], 1_000, 1);
-    older.velocity.frame = FrameId::Body;
+    older.velocity.frame = crate::fixtures::frame(indicate_frames::FrameKind::Body);
     let b = Bracket {
         older,
         newer: sample(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3], 2_000, 2),
@@ -82,7 +80,7 @@ fn velocity_in_the_wrong_frame_is_non_conformal() {
 fn body_rate_in_the_wrong_frame_is_non_conformal() {
     // The body rate must be body-frame; an NED-tagged rate is refused.
     let mut older = sample(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3], 1_000, 1);
-    older.body_rate.frame = FrameId::Ned;
+    older.body_rate.frame = crate::fixtures::frame(indicate_frames::FrameKind::Ned);
     let b = Bracket {
         older,
         newer: sample(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3], 2_000, 2),
@@ -170,8 +168,8 @@ fn a_velocity_timed_seconds_from_the_pose_is_non_conformal() {
     // at the pose's instant, however coherent its snapshot identity is — the
     // spread is charged as co-timing skew and exceeds the policy limit.
     let mut newer = sample(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3], 2_000, 2);
-    newer.velocity.epoch = epoch(9_000_002_000);
-    newer.velocity.meta.acquired_at = epoch(9_000_002_000);
+    newer.velocity.at = timestamp(9_000_002_000);
+    newer.velocity.meta.acquired_at = timestamp(9_000_002_000);
     let b = Bracket {
         older: sample(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3], 1_000, 1),
         newer,
@@ -189,7 +187,7 @@ fn a_velocity_value_epoch_alone_timed_from_the_pose_is_non_conformal() {
     // The value epoch (the instant the velocity is valid at) participates in the
     // skew on its own, even when the acquisition stamp stays co-timed.
     let mut older = sample(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3], 1_000, 1);
-    older.velocity.epoch = epoch(9_000_001_000);
+    older.velocity.at = timestamp(9_000_001_000);
     let b = Bracket {
         older,
         newer: sample(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3], 2_000, 2),
@@ -207,7 +205,7 @@ fn a_body_rate_acquired_seconds_from_the_pose_is_non_conformal() {
     // The body rate's acquisition epoch participates in the skew exactly like
     // the velocity's.
     let mut newer = sample(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3], 2_000, 2);
-    newer.body_rate.meta.acquired_at = epoch(9_000_002_000);
+    newer.body_rate.meta.acquired_at = timestamp(9_000_002_000);
     let b = Bracket {
         older: sample(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3], 1_000, 1),
         newer,
@@ -226,7 +224,7 @@ fn a_kinematic_value_epoch_on_a_different_clock_is_non_conformal() {
     // epoch at all, so it is refused as clock-incoherent rather than having its
     // nanoseconds read as if they were on the pose clock.
     let mut older = sample(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3], 1_000, 1);
-    older.velocity.epoch.clock = ClockDomain::Gnss;
+    older.velocity.at.clock = crate::fixtures::clock(ClockDomain::Gnss);
     let b = Bracket {
         older,
         newer: sample(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3], 2_000, 2),
@@ -250,8 +248,8 @@ fn a_small_kinematic_skew_is_charged_to_the_budget_not_refused() {
         &generous(),
     );
     let mut skewed = steady(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3]);
-    skewed.newer.velocity.epoch = epoch(5_002_000);
-    skewed.newer.velocity.meta.acquired_at = epoch(5_002_000);
+    skewed.newer.velocity.at = timestamp(5_002_000);
+    skewed.newer.velocity.meta.acquired_at = timestamp(5_002_000);
     let fix = run(&skewed, capture(1_500), &generous());
     assert!(fix.state.draws_cues(), "a within-limit skew stays drawable");
     let (e0, e1) = (
@@ -320,5 +318,31 @@ fn a_wildly_inaccurate_velocity_alone_removes_the_cues() {
     assert!(
         fix.error.expect("ran").velocity_rad > sim().valid_error_rad(),
         "the velocity term dominates the budget"
+    );
+}
+
+#[test]
+fn matching_axis_conventions_do_not_join_different_physical_frames() {
+    let mut bracket = steady(Quat::IDENTITY, [100.0, 0.0, 0.0], [0.0; 3]);
+    bracket.older.velocity.frame =
+        indicate_frames::FrameId::new(indicate_frames::FrameKind::Ned, 55).expect("other origin");
+    let fix = run(&bracket, capture(1_500), &generous());
+    assert_eq!(
+        fix.state.reason(),
+        super::super::ConformalReason::KinematicFrame
+    );
+}
+
+#[test]
+fn a_navigation_origin_reset_cannot_be_interpolated_as_one_view() {
+    let mut bracket = steady(Quat::IDENTITY, [100.0, 0.0, 0.0], [0.0; 3]);
+    let origin =
+        indicate_frames::FrameId::new(indicate_frames::FrameKind::Ned, 55).expect("new origin");
+    bracket.newer.attitude.navigation_frame = origin;
+    bracket.newer.velocity.frame = origin;
+    let fix = run(&bracket, capture(1_500), &generous());
+    assert_eq!(
+        fix.state.reason(),
+        super::super::ConformalReason::StreamDiscontinuity
     );
 }

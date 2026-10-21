@@ -432,6 +432,7 @@ export class NavGuidanceTracker {
         wrongSource: 0,
         duplicates: 0,
         malformedGuidance: 0,
+        invalidClock: 0,
         lastRejectReason: null,
       });
     }

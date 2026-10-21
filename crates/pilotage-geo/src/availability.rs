@@ -11,7 +11,7 @@
 //! coverage, renderer) are producer-stated ([`ExternalHealth`]). An untrusted
 //! reading can never produce an [`SvsAvailability::Available`] scene.
 
-use indicate_frames::Epoch;
+use indicate_frames::Timestamp;
 
 use crate::identity::{IntegrityLevel, PositionQuality, StatedAttitude, StatedPosition};
 
@@ -245,7 +245,7 @@ const fn health_from_position_quality(
 fn derive_time_coherence(
     position: &StatedPosition,
     attitude: &StatedAttitude,
-    reference_time: Epoch,
+    reference_time: Timestamp,
     profile: &AvailabilityProfile,
 ) -> InputHealth {
     // A coherent scene requires the position and attitude to be one declared
@@ -273,7 +273,7 @@ pub fn derive_inputs(
     position: &StatedPosition,
     attitude: &StatedAttitude,
     external: &ExternalHealth,
-    reference_time: Epoch,
+    reference_time: Timestamp,
     profile: &AvailabilityProfile,
 ) -> SvsInputs {
     SvsInputs {
@@ -281,10 +281,20 @@ pub fn derive_inputs(
             health_from_integrity(position.stamp.integrity),
             health_from_position_quality(position.quality, profile),
         ),
-        attitude: worse(
-            health_from_integrity(attitude.stamp.integrity),
-            profile.attitude_mrad_health(attitude.quality.angular_mrad),
-        ),
+        attitude: if indicate_frames::ned_attitude(
+            &attitude.as_attitude(),
+            attitude.body_frame,
+            attitude.navigation_frame,
+        )
+        .is_ok()
+        {
+            worse(
+                health_from_integrity(attitude.stamp.integrity),
+                profile.attitude_mrad_health(attitude.quality.angular_mrad),
+            )
+        } else {
+            InputHealth::Failed
+        },
         integrity: external.integrity,
         time_coherence: derive_time_coherence(position, attitude, reference_time, profile),
         calibration: external.calibration,

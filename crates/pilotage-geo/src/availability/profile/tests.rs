@@ -1,5 +1,4 @@
 //! Tests for the explicit, checked availability profile.
-#![allow(clippy::expect_used, clippy::panic)]
 
 use super::{AvailabilityProfile, AvailabilityProfileId, SIMULATOR_PROFILE_ID};
 use crate::availability::InputHealth;

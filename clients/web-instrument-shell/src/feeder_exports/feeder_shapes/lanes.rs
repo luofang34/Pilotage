@@ -242,6 +242,7 @@ pub(in super::super) struct JsNavDiagnostics {
     wrong_source: u32,
     duplicates: u32,
     malformed_guidance: u32,
+    invalid_clock: u32,
     last_reject_reason: Option<&'static str>,
 }
 
@@ -253,8 +254,10 @@ impl JsNavDiagnostics {
             wrong_source: counters.wrong_source,
             duplicates: counters.duplicates,
             malformed_guidance: counters.malformed_guidance,
+            invalid_clock: counters.invalid_clock,
             last_reject_reason: last.map(|reason| match reason {
                 NavReject::InvalidStamp => "invalidStamps",
+                NavReject::InvalidClock => "invalidClock",
                 NavReject::WrongSource => "wrongSource",
                 NavReject::Duplicate => "duplicates",
                 NavReject::MalformedGuidance => "malformedGuidance",

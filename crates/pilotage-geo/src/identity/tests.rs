@@ -1,14 +1,13 @@
 //! Tests for source identity, typed age, and coherent-snapshot binding.
-#![allow(clippy::expect_used, clippy::panic)]
 
-use indicate_frames::{ClockDomain, Epoch, TimeScale};
+use indicate_frames::{ClockDomain, TimeScale, Timestamp};
 
 use super::{CoherentSnapshot, IntegrityLevel, SourceIncarnation, SourceStamp};
 use crate::error::AgeError;
 
-fn epoch(clock: ClockDomain, scale: TimeScale, nanos: u64) -> Epoch {
-    Epoch {
-        clock,
+fn timestamp(clock: ClockDomain, scale: TimeScale, nanos: u64) -> Timestamp {
+    Timestamp {
+        clock: crate::fixtures::clock(clock),
         scale,
         nanos,
     }
@@ -22,7 +21,7 @@ fn snap(producer: u8, generation: u32, id: u64) -> CoherentSnapshot {
     }
 }
 
-fn stamp(acquired_at: Epoch, snapshot: CoherentSnapshot) -> SourceStamp {
+fn stamp(acquired_at: Timestamp, snapshot: CoherentSnapshot) -> SourceStamp {
     SourceStamp {
         source_id: 1,
         incarnation: SourceIncarnation([7; 16]),
@@ -36,19 +35,19 @@ fn stamp(acquired_at: Epoch, snapshot: CoherentSnapshot) -> SourceStamp {
 
 #[test]
 fn age_is_computed_only_within_one_clock_and_scale() {
-    let acq = epoch(ClockDomain::Gnss, TimeScale::Gps, 1_000);
+    let acq = timestamp(ClockDomain::Gnss, TimeScale::Gps, 1_000);
     let s = stamp(acq, CoherentSnapshot::NONE);
-    let same = epoch(ClockDomain::Gnss, TimeScale::Gps, 3_000);
+    let same = timestamp(ClockDomain::Gnss, TimeScale::Gps, 3_000);
     assert_eq!(s.age_ns(same), Ok(2_000));
 }
 
 #[test]
 fn a_future_sample_is_a_typed_error_never_a_saturated_zero() {
     let s = stamp(
-        epoch(ClockDomain::Gnss, TimeScale::Gps, 1_000),
+        timestamp(ClockDomain::Gnss, TimeScale::Gps, 1_000),
         CoherentSnapshot::NONE,
     );
-    let earlier = epoch(ClockDomain::Gnss, TimeScale::Gps, 500);
+    let earlier = timestamp(ClockDomain::Gnss, TimeScale::Gps, 500);
     assert_eq!(
         s.age_ns(earlier),
         Err(AgeError::FutureSample {
@@ -62,16 +61,16 @@ fn a_future_sample_is_a_typed_error_never_a_saturated_zero() {
 #[test]
 fn age_across_clock_domains_is_never_inferred() {
     let s = stamp(
-        epoch(ClockDomain::Gnss, TimeScale::Gps, 1_000),
+        timestamp(ClockDomain::Gnss, TimeScale::Gps, 1_000),
         CoherentSnapshot::NONE,
     );
     assert_eq!(
-        s.age_ns(epoch(ClockDomain::VehicleBoot, TimeScale::Gps, 3_000)),
+        s.age_ns(timestamp(ClockDomain::VehicleBoot, TimeScale::Gps, 3_000)),
         Err(AgeError::ClockMismatch),
         "different clock domain: no age"
     );
     assert_eq!(
-        s.age_ns(epoch(ClockDomain::Gnss, TimeScale::Utc, 3_000)),
+        s.age_ns(timestamp(ClockDomain::Gnss, TimeScale::Utc, 3_000)),
         Err(AgeError::ScaleMismatch),
         "different time scale: no age"
     );
@@ -79,7 +78,7 @@ fn age_across_clock_domains_is_never_inferred() {
 
 #[test]
 fn coherence_binds_the_full_snapshot_identity_and_time_base() {
-    let acq = epoch(ClockDomain::Gnss, TimeScale::Gps, 1_000);
+    let acq = timestamp(ClockDomain::Gnss, TimeScale::Gps, 1_000);
     let a = stamp(acq, snap(1, 5, 42));
     let b = stamp(acq, snap(1, 5, 42));
     assert!(
@@ -98,7 +97,7 @@ fn coherence_binds_the_full_snapshot_identity_and_time_base() {
         "equal id from a different generation is not coherent"
     );
     // Same snapshot identity but a different time base is not coherent.
-    let other_clock = epoch(ClockDomain::Simulation, TimeScale::Monotonic, 1_000);
+    let other_clock = timestamp(ClockDomain::Simulation, TimeScale::Monotonic, 1_000);
     assert!(
         !a.coherent_with(&stamp(other_clock, snap(1, 5, 42))),
         "a different clock/scale is not one coherent sampling"
@@ -107,7 +106,7 @@ fn coherence_binds_the_full_snapshot_identity_and_time_base() {
 
 #[test]
 fn an_undeclared_snapshot_is_never_coherent() {
-    let acq = epoch(ClockDomain::Gnss, TimeScale::Gps, 1_000);
+    let acq = timestamp(ClockDomain::Gnss, TimeScale::Gps, 1_000);
     let undeclared = stamp(acq, CoherentSnapshot::NONE);
     assert!(
         !undeclared.coherent_with(&undeclared),

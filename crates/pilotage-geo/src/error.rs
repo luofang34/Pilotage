@@ -7,6 +7,14 @@
 /// Why constructing or validating a geospatial value failed.
 #[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
 pub enum GeoError {
+    /// Aircraft attitude requires body and local navigation conventions.
+    #[error("aircraft attitude needs Body and Ned, found {body:?} and {navigation:?}")]
+    AttitudeFrames {
+        /// Convention of the observed object.
+        body: indicate_frames::FrameKind,
+        /// Convention of the reference frame.
+        navigation: indicate_frames::FrameKind,
+    },
     /// A field that must be finite is NaN or infinite.
     #[error("geospatial field {field} is not finite")]
     NonFinite {
@@ -144,6 +152,15 @@ pub enum AgeError {
 /// build cannot interpret, never masquerading as a benign default.
 #[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
 pub enum AbiError {
+    /// A decoded frame or clock identity is invalid.
+    #[error("invalid ABI identity in {field}: {source}")]
+    Identity {
+        /// Field containing the invalid identity.
+        field: &'static str,
+        /// The identity validation failure.
+        #[source]
+        source: indicate_frames::FrameError,
+    },
     /// The buffer length does not equal the fixed block length. A fixed-size
     /// block must match exactly: trailing bytes are as suspect as truncation.
     #[error("ABI block length wrong: need exactly {needed} bytes, got {got}")]

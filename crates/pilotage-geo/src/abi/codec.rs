@@ -2,7 +2,7 @@
 //! panic-free. This is the byte layer only; the frame types and the public
 //! [`encode`]/[`decode`] entry points live in the parent module.
 
-use indicate_frames::{ClockDomain, Epoch, Quat, TimeScale};
+use indicate_frames::{ClockDomain, ClockId, FrameId, FrameKind, Quat, TimeScale, Timestamp};
 
 use crate::availability::{AvailabilityProfile, ExternalHealth, InputHealth};
 use crate::datum::{
@@ -32,7 +32,7 @@ impl Writer<'_> {
         if let Some(slot) = self.buf.get_mut(self.off..self.off + b.len()) {
             slot.copy_from_slice(b);
         }
-        self.off += b.len();
+        self.off = self.off.wrapping_add(b.len());
     }
     fn u8(&mut self, v: u8) {
         self.bytes(&[v]);
@@ -52,8 +52,13 @@ impl Writer<'_> {
     fn f64(&mut self, v: f64) {
         self.bytes(&v.to_le_bytes());
     }
-    fn epoch(&mut self, e: Epoch) {
-        self.u8(e.clock as u8);
+    fn frame(&mut self, frame: FrameId) {
+        self.u8(frame.kind().to_u8());
+        self.bytes(&frame.instance().to_le_bytes());
+    }
+    fn timestamp(&mut self, e: Timestamp) {
+        self.u8(e.clock.domain() as u8);
+        self.bytes(&e.clock.instance().to_le_bytes());
         self.u8(e.scale as u8);
         self.u64(e.nanos);
     }
@@ -116,11 +121,26 @@ impl Reader<'_> {
     fn health(&mut self, field: &'static str) -> Result<InputHealth, AbiError> {
         self.enum_u8(field, InputHealth::from_u8)
     }
-    fn epoch(&mut self) -> Result<Epoch, AbiError> {
-        let clock = self.enum_u8("clock", clock_from_u8)?;
+    fn identity(&mut self) -> Result<u128, AbiError> {
+        let mut bytes = [0; 16];
+        bytes.copy_from_slice(self.take(16)?);
+        Ok(u128::from_le_bytes(bytes))
+    }
+    fn frame(&mut self, field: &'static str) -> Result<FrameId, AbiError> {
+        let kind = FrameKind::from_u8(self.u8()?)
+            .map_err(|source| AbiError::Identity { field, source })?;
+        FrameId::new(kind, self.identity()?).map_err(|source| AbiError::Identity { field, source })
+    }
+    fn timestamp(&mut self) -> Result<Timestamp, AbiError> {
+        let domain = self.enum_u8("clock", clock_from_u8)?;
+        let clock =
+            ClockId::new(domain, self.identity()?).map_err(|source| AbiError::Identity {
+                field: "clock",
+                source,
+            })?;
         let scale = self.enum_u8("time_scale", scale_from_u8)?;
         let nanos = self.u64()?;
-        Ok(Epoch {
+        Ok(Timestamp {
             clock,
             scale,
             nanos,
@@ -155,7 +175,7 @@ fn put_stamp(w: &mut Writer, s: &SourceStamp) {
     w.bytes(&s.incarnation.0);
     w.u32(s.generation);
     w.u32(s.sequence);
-    w.epoch(s.acquired_at);
+    w.timestamp(s.acquired_at);
     w.u8(s.integrity.to_u8());
     w.bytes(&s.snapshot.producer.0);
     w.u32(s.snapshot.generation);
@@ -225,11 +245,13 @@ pub(super) fn encode(frame: &ValidatedSvsFrame) -> [u8; SVS_FRAME_LEN] {
     w.u32(ABI_VERSION);
     put_position(&mut w, frame.position());
     put_quat(&mut w, &frame.attitude().attitude);
+    w.frame(frame.attitude().body_frame);
+    w.frame(frame.attitude().navigation_frame);
     put_stamp(&mut w, &frame.attitude().stamp);
     w.u32(frame.attitude().quality.angular_mrad);
     put_view(&mut w, frame.view());
     put_external(&mut w, &frame.external_health());
-    w.epoch(frame.reference_time());
+    w.timestamp(frame.reference_time());
     buf
 }
 
@@ -241,7 +263,7 @@ fn get_stamp(r: &mut Reader) -> Result<SourceStamp, AbiError> {
     incarnation.copy_from_slice(r.take(16)?);
     let generation = r.u32()?;
     let sequence = r.u32()?;
-    let acquired_at = r.epoch()?;
+    let acquired_at = r.timestamp()?;
     let integrity = r.enum_u8("integrity", IntegrityLevel::from_u8)?;
     let mut producer = [0u8; 16];
     producer.copy_from_slice(r.take(16)?);
@@ -313,6 +335,8 @@ fn get_position(r: &mut Reader) -> Result<StatedPosition, AbiError> {
 
 fn get_attitude(r: &mut Reader) -> Result<StatedAttitude, AbiError> {
     let attitude = get_quat(r)?;
+    let body_frame = r.frame("body_frame")?;
+    let navigation_frame = r.frame("navigation_frame")?;
     if attitude.renormalized(ATTITUDE_NORM_TOLERANCE).is_err() {
         return Err(AbiError::Malformed {
             field: "attitude",
@@ -323,11 +347,20 @@ fn get_attitude(r: &mut Reader) -> Result<StatedAttitude, AbiError> {
     let quality = AttitudeQuality {
         angular_mrad: r.u32()?,
     };
-    Ok(StatedAttitude {
+    let value = StatedAttitude {
         attitude,
+        body_frame,
+        navigation_frame,
         stamp,
         quality,
-    })
+    };
+    indicate_frames::ned_attitude(&value.as_attitude(), body_frame, navigation_frame).map_err(
+        |source| AbiError::Identity {
+            field: "attitude_frame",
+            source,
+        },
+    )?;
+    Ok(value)
 }
 
 fn get_view(r: &mut Reader) -> Result<ProjectionView, AbiError> {
@@ -401,7 +434,7 @@ pub(super) fn decode(
     let attitude = get_attitude(&mut r)?;
     let view = get_view(&mut r)?;
     let external = get_external(&mut r)?;
-    let reference_time = r.epoch()?;
+    let reference_time = r.timestamp()?;
     Ok(ValidatedSvsFrame::assemble(
         position,
         attitude,

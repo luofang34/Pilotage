@@ -17,7 +17,7 @@ use super::identity::{
     Residuals, ToolVersion, ValidityStatus,
 };
 use super::recovery::recovery_report;
-use indicate_frames::FrameId;
+use indicate_frames::FrameKind;
 
 /// The FPV camera's physical id, matching the Gazebo bridge `camera_id` for the
 /// onboard camera and the calibration id the artifact publishes.
@@ -70,8 +70,8 @@ fn fpv_geometry() -> CameraGeometry {
             // Body FRD (x forward, y right, z down) -> camera optical OpenCV
             // (x right, y down, z forward): forward->+Z, right->+X, down->+Y.
             rotation_quat_wxyz: [0.5, -0.5, -0.5, -0.5],
-            from_frame: FrameId::Body,
-            to_frame: FrameId::Installation,
+            from_kind: FrameKind::Body,
+            to_kind: FrameKind::Installation,
         },
         // Simulated design eye coincident with the camera optical center; this
         // is a SIM reference, not a real HUD eyebox.

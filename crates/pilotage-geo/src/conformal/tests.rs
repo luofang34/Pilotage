@@ -9,13 +9,12 @@
 //!   provenance, and velocity-accuracy regressions).
 //!
 //! Every test is deterministic and synchronizes on values, never on time.
-#![allow(clippy::expect_used, clippy::panic)]
 
 mod kinematics;
 mod projection;
 mod verdict;
 
-use indicate_frames::{ClockDomain, Epoch, FrameId, Quat, Tagged, TimeScale};
+use indicate_frames::{ClockDomain, Quat, Tagged, TimeScale, Timestamp};
 
 use pilotage_camera_calibration::{
     SIM_FPV_CALIBRATION_HASH, SIM_FPV_CALIBRATION_ID, VerifiedCameraModel, sim_fpv_calibration,
@@ -42,9 +41,9 @@ const DEG: f64 = core::f64::consts::PI / 180.0;
 
 // --- fixtures (shared with the `verdict` submodule via `use super::*`) ------
 
-fn epoch(nanos: u64) -> Epoch {
-    Epoch {
-        clock: ClockDomain::Simulation,
+fn timestamp(nanos: u64) -> Timestamp {
+    Timestamp {
+        clock: crate::fixtures::clock(ClockDomain::Simulation),
         scale: TimeScale::Monotonic,
         nanos,
     }
@@ -56,7 +55,7 @@ fn stamp(nanos: u64, snap_id: u64) -> SourceStamp {
         incarnation: SourceIncarnation([9; 16]),
         generation: 1,
         sequence: (nanos & 0xffff_ffff) as u32,
-        acquired_at: epoch(nanos),
+        acquired_at: timestamp(nanos),
         integrity: IntegrityLevel::Trusted,
         snapshot: CoherentSnapshot {
             producer: SourceIncarnation([5; 16]),
@@ -95,6 +94,8 @@ fn sample(att: Quat, vel: [f64; 3], rate: [f32; 3], nanos: u64, snap_id: u64) ->
     KinematicSample {
         attitude: StatedAttitude {
             attitude: att,
+            body_frame: crate::fixtures::frame(indicate_frames::FrameKind::Body),
+            navigation_frame: crate::fixtures::frame(indicate_frames::FrameKind::Ned),
             stamp: s,
             quality: AttitudeQuality { angular_mrad: 2 },
         },
@@ -107,14 +108,14 @@ fn sample(att: Quat, vel: [f64; 3], rate: [f32; 3], nanos: u64, snap_id: u64) ->
             },
         },
         velocity: Tagged {
-            frame: FrameId::Ned,
-            epoch: epoch(nanos),
+            frame: crate::fixtures::frame(indicate_frames::FrameKind::Ned),
+            at: timestamp(nanos),
             meta: s,
             value: vel,
         },
         body_rate: Tagged {
-            frame: FrameId::Body,
-            epoch: epoch(nanos),
+            frame: crate::fixtures::frame(indicate_frames::FrameKind::Body),
+            at: timestamp(nanos),
             meta: s,
             value: rate,
         },
@@ -182,7 +183,7 @@ fn view() -> ProjectionView {
 
 fn capture(nanos: u64) -> CaptureContext {
     CaptureContext {
-        capture_epoch: epoch(nanos),
+        captured_at: timestamp(nanos),
         clock_error_ns: 100_000,
         pipeline_latency_ns: 2_000_000,
     }

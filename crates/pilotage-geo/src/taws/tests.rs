@@ -1,5 +1,4 @@
 //! Tests pinning TAWS independence in the type surface.
-#![allow(clippy::expect_used, clippy::panic)]
 
 use super::TawsHazard;
 use crate::availability::{AvailabilityReason, InputHealth, SvsAvailability, SvsInputs};

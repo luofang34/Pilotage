@@ -151,9 +151,9 @@ public final class VerifiedInstrumentRuntime {
 public enum AppleInstrumentCompatibilityGate {
     public static let stateABI: UInt32 = 8
     public static let registrySceneDigest =
-        "f6fb603bf2e1f7889ddc9b5d534f329a0379d34a8f00d954f366e9b270ddc273"
+        "edf5815cc83179cfa7f5b8871bbe6e945dbf04d0339e9f5e55cb3a2922deff51"
     public static let screenCompositionDigest =
-        "2912562c50aa7f6dd4bfd3b3be2c83fe69ab0ef225b6081496b5a0a5dd8f18f4"
+        "87acb725dedfe7455383f157f583dab1d13af914639d5f69736ed3b0866633a7"
     public static let glyphRecordedHash =
         "281eef6229feee417c7090d8c8ea79489c017cd1c02fc7234876b2a64a532158"
 

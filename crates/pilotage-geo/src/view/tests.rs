@@ -1,6 +1,5 @@
 //! Tests for the projection view: the calibration reference, projection
 //! payloads, projection boundary, and fail-closed validation.
-#![allow(clippy::expect_used, clippy::panic)]
 
 use super::{
     CalibrationId, CalibrationRef, MinificationPolicy, NearFarPolicy, Projection, ProjectionView,

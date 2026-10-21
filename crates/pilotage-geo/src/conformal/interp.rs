@@ -111,9 +111,9 @@ fn skew_of(sample: &KinematicSample) -> u64 {
     let epochs = [
         sample.attitude.stamp.acquired_at.nanos,
         sample.position.stamp.acquired_at.nanos,
-        sample.velocity.epoch.nanos,
+        sample.velocity.at.nanos,
         sample.velocity.meta.acquired_at.nanos,
-        sample.body_rate.epoch.nanos,
+        sample.body_rate.at.nanos,
         sample.body_rate.meta.acquired_at.nanos,
     ];
     let hi = epochs.into_iter().max().unwrap_or(0);

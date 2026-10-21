@@ -33,7 +33,9 @@
 //!
 //! SIM / NOT FOR FLIGHT.
 
-use indicate_frames::{AngularVelocity, Epoch, FrameId, ROTATION_NORM_TOLERANCE, Velocity};
+use indicate_frames::{
+    AngularVelocity, FrameId, FrameKind, ROTATION_NORM_TOLERANCE, Timestamp, Velocity,
+};
 
 use crate::availability::{
     AvailabilityProfile, ExternalHealth, SvsAvailability, derive_inputs, health_from_integrity,
@@ -89,10 +91,10 @@ pub struct KinematicSample {
     pub attitude: StatedAttitude,
     /// Geodetic position, with its identity stamp and position accuracy.
     pub position: StatedPosition,
-    /// NED velocity, meters/second — frame must be [`FrameId::Ned`]; carries its
+    /// NED velocity, meters/second — frame must be [`FrameKind::Ned`]; carries its
     /// own frame, epoch, and [`SourceStamp`] provenance.
     pub velocity: Velocity<SourceStamp>,
-    /// Body-frame angular rate, radians/second — frame must be [`FrameId::Body`];
+    /// Body-frame angular rate, radians/second — frame must be [`FrameKind::Body`];
     /// carries its own frame, epoch, and [`SourceStamp`] provenance.
     pub body_rate: AngularVelocity<SourceStamp>,
     /// The velocity's 1-sigma speed accuracy (the velocity-error budget input).
@@ -121,7 +123,7 @@ pub struct Bracket {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CaptureContext {
     /// Capture time, mapped into the aircraft state's clock domain and scale.
-    pub capture_epoch: Epoch,
+    pub captured_at: Timestamp,
     /// Symmetric bound on the capture-clock mapping error, nanoseconds.
     pub clock_error_ns: u64,
     /// Measured glass-to-glass pipeline latency, nanoseconds.
@@ -156,17 +158,23 @@ pub struct FixIdentity {
     pub newer_snapshot: CoherentSnapshot,
     /// The source incarnation both endpoints belong to (one continuous stream).
     pub source_incarnation: SourceIncarnation,
+    /// Vehicle frame shared by the bracket endpoints.
+    pub body_frame: FrameId,
+    /// Navigation origin shared by the bracket endpoints.
+    pub navigation_frame: FrameId,
     /// The capture time the interpolated state was aligned to.
-    pub capture_epoch: Epoch,
+    pub captured_at: Timestamp,
 }
 
 impl FixIdentity {
-    fn at_capture(bracket: &Bracket, capture_epoch: Epoch) -> Self {
+    fn at_capture(bracket: &Bracket, captured_at: Timestamp) -> Self {
         Self {
             older_snapshot: bracket.older.attitude.stamp.snapshot,
             newer_snapshot: bracket.newer.attitude.stamp.snapshot,
             source_incarnation: bracket.newer.attitude.stamp.incarnation,
-            capture_epoch,
+            body_frame: bracket.newer.attitude.body_frame,
+            navigation_frame: bracket.newer.attitude.navigation_frame,
+            captured_at,
         }
     }
 }
@@ -240,7 +248,7 @@ pub fn assess_conformal(
     policy: &ConformalPolicy,
     path_ned_m: &[[f64; 3]],
 ) -> ConformalFix {
-    let identity = FixIdentity::at_capture(bracket, capture.capture_epoch);
+    let identity = FixIdentity::at_capture(bracket, capture.captured_at);
 
     if view.validate().is_err()
         || !matches!(view.projection, Projection::Perspective)
@@ -260,7 +268,7 @@ pub fn assess_conformal(
             identity,
         );
     }
-    if let Some(reason) = identity_fault(bracket, capture.capture_epoch) {
+    if let Some(reason) = identity_fault(bracket, capture.captured_at) {
         return ConformalFix::refused(ConformalState::NonConformal(reason), identity);
     }
     // Both endpoint attitudes must be unit rotations, and the velocity/rate must be
@@ -273,7 +281,7 @@ pub fn assess_conformal(
     // Availability is DERIVED from the actual samples (integrity + accuracy)
     // against the profile — never taken as a caller-asserted verdict — so a low
     // integrity or accuracy in the samples cannot be masked by an optimistic claim.
-    let scene = derive_availability(bracket, availability, capture.capture_epoch);
+    let scene = derive_availability(bracket, availability, capture.captured_at);
     if let SvsAvailability::Unavailable(reason) = scene {
         return ConformalFix::refused(
             ConformalState::Unavailable(ConformalReason::Availability(reason)),
@@ -281,7 +289,7 @@ pub fn assess_conformal(
         );
     }
 
-    let interp = interp::interpolate(&bracket.older, &bracket.newer, capture.capture_epoch.nanos);
+    let interp = interp::interpolate(&bracket.older, &bracket.newer, capture.captured_at.nanos);
     let error = budget::compute(
         geom.alignment_bound_rad,
         capture.clock_error_ns,
@@ -326,7 +334,7 @@ pub fn assess_conformal(
 fn derive_availability(
     bracket: &Bracket,
     availability: AvailabilityInputs,
-    capture: Epoch,
+    capture: Timestamp,
 ) -> SvsAvailability {
     let newer_at = bracket.newer.attitude.stamp.acquired_at;
     let reference = if capture.nanos >= newer_at.nanos {
@@ -382,7 +390,11 @@ fn kinematic_fault(bracket: &Bracket) -> Option<ConformalReason> {
         {
             return Some(ConformalReason::AttitudeNotARotation);
         }
-        if s.velocity.frame != FrameId::Ned || s.body_rate.frame != FrameId::Body {
+        if s.attitude.body_frame.kind() != FrameKind::Body
+            || s.attitude.navigation_frame.kind() != FrameKind::Ned
+            || s.velocity.frame != s.attitude.navigation_frame
+            || s.body_rate.frame != s.attitude.body_frame
+        {
             return Some(ConformalReason::KinematicFrame);
         }
         if !s.attitude.stamp.coherent_with(&s.velocity.meta)
@@ -395,7 +407,7 @@ fn kinematic_fault(bracket: &Bracket) -> Option<ConformalReason> {
         // too, or the co-timing skew charged by the interpolation would compare
         // nanoseconds from incomparable clocks.
         let pose = s.attitude.stamp.acquired_at;
-        for value_epoch in [s.velocity.epoch, s.body_rate.epoch] {
+        for value_epoch in [s.velocity.at, s.body_rate.at] {
             if value_epoch.clock != pose.clock || value_epoch.scale != pose.scale {
                 return Some(ConformalReason::ClockIncoherent);
             }
@@ -432,7 +444,12 @@ fn build_cues(
 /// The structural fault that makes the capture/state relationship untrustworthy,
 /// or `None` when the bracket is a single coherent, in-order stream the capture
 /// time is expressed against.
-fn identity_fault(bracket: &Bracket, capture: Epoch) -> Option<ConformalReason> {
+fn identity_fault(bracket: &Bracket, capture: Timestamp) -> Option<ConformalReason> {
+    if bracket.older.attitude.body_frame != bracket.newer.attitude.body_frame
+        || bracket.older.attitude.navigation_frame != bracket.newer.attitude.navigation_frame
+    {
+        return Some(ConformalReason::StreamDiscontinuity);
+    }
     let older = bracket.older.attitude.stamp;
     let newer = bracket.newer.attitude.stamp;
     if !bracket
