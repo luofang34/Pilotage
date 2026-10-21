@@ -229,6 +229,22 @@ impl DjiAdapter {
         }
     }
 
+    pub(super) fn pending_pitch_ready(&self, now: Duration) -> bool {
+        if !self.movement_ready(now) {
+            return false;
+        }
+        if self.control.bench.is_some() {
+            return true;
+        }
+        self.connection.pending_pitch().is_none_or(|target| {
+            self.observations.latest.is_some_and(|pose| {
+                self.profile
+                    .validate_observed_target(pose.angles.pitch_tenths, target)
+                    .is_ok()
+            })
+        })
+    }
+
     pub(super) fn link_loss_with_time_blocking(
         &mut self,
         vehicle: VehicleId,
@@ -273,7 +289,7 @@ impl DjiAdapter {
         };
         let pitch = self
             .profile
-            .pitch_target(pose.angles.pitch_tenths)
+            .observed_hold_target(pose.angles.pitch_tenths)
             .map_err(|error| rejected(&error.to_string()))?;
         if !self.connection.queue_pitch_until(
             pitch,

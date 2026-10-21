@@ -167,7 +167,7 @@ impl DjiAdapter {
         self.read_available_blocking(io_started);
         // Recording can take time. Recheck age at the command write boundary.
         let now = clock();
-        let ready = self.movement_ready(now);
+        let ready = self.pending_pitch_ready(now);
         if !ready {
             self.control.cancel_observed();
         }

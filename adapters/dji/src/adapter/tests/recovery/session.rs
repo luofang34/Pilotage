@@ -181,10 +181,22 @@ impl RecoverySession {
     }
 
     pub(super) fn pose(&mut self, offset: u16, at: u64) -> Result<()> {
+        self.pose_with_pitch(offset, None, at)
+    }
+
+    pub(super) fn pose_with_pitch(
+        &mut self,
+        offset: u16,
+        pitch_tenths: Option<i16>,
+        at: u64,
+    ) -> Result<()> {
         self.io.feed_model(87, offset)?;
         let mut pose = observed_poses().remove(2);
         let sequence = u16::from_le_bytes([pose[6], pose[7]]).wrapping_add(offset);
         pose[6..8].copy_from_slice(&sequence.to_le_bytes());
+        if let Some(pitch) = pitch_tenths {
+            pose[11..13].copy_from_slice(&pitch.to_le_bytes());
+        }
         let length = pose.len();
         let crc = turret_dji::frame_checksum(&pose[..length - 2]).to_le_bytes();
         pose[length - 2..].copy_from_slice(&crc);

@@ -125,7 +125,7 @@ fn observed_manual_and_recenter_steps_keep_the_one_second_encoding() -> TestResu
 }
 
 #[test]
-fn observed_continuity_uses_the_selected_profile_range() -> TestResult {
+fn valid_feedback_builds_continuity_in_both_control_modes() -> TestResult {
     for mut harness in [Harness::new(), Harness::bench()] {
         for (index, mut pose) in observed_poses().into_iter().enumerate() {
             pose[11..13].copy_from_slice(&(-51_i16).to_le_bytes());
