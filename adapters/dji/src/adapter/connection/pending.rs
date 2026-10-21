@@ -23,6 +23,7 @@ pub(super) enum Purpose {
         identity: CommandIdentity,
     },
     Flight(FlightFence),
+    Mode(super::super::virtual_stick::ModeFence),
 }
 
 impl Purpose {
@@ -43,6 +44,14 @@ impl Connection {
         observations: &Observations,
         now: Duration,
     ) -> Result<(), RejectReason> {
+        if self.mode_diagnostic.active()
+            || (command == BasicFlightCommand::Takeoff && self.mode_diagnostic.unresolved())
+        {
+            return Err(RejectReason::Other(
+                "virtual-stick diagnostic must finish with confirmed cleanup before Takeoff"
+                    .to_owned(),
+            ));
+        }
         self.flight.validate(frame, command)?;
         let until = observations
             .flight_deadline(command, now)

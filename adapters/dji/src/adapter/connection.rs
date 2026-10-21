@@ -14,6 +14,7 @@ use turret_dji::Mini3ControlProfile;
 
 mod keyframe;
 mod pending;
+mod virtual_stick;
 mod writer;
 
 use super::flight::FlightExecution;
@@ -51,6 +52,7 @@ pub(super) struct Connection {
     origin: Instant,
     pub(super) execution: Execution,
     pub(super) flight: FlightExecution,
+    pub(super) mode_diagnostic: super::virtual_stick::ModeDiagnostic,
     profile: Mini3ControlProfile,
     transport: Option<Box<dyn Transport>>,
     capture: Box<dyn Write + Send>,
@@ -81,6 +83,7 @@ impl Connection {
             origin,
             execution: Execution::new(capabilities, 0),
             flight: FlightExecution::new(incarnation),
+            mode_diagnostic: super::virtual_stick::ModeDiagnostic::new(incarnation),
             profile,
             transport: Some(transport),
             capture,
@@ -119,7 +122,11 @@ impl Connection {
         now: Duration,
         expires_at: Duration,
     ) -> bool {
-        if self.pending.is_some() || self.keyframes.active.is_some() || self.fault.is_some() {
+        if self.pending.is_some()
+            || self.keyframes.active.is_some()
+            || self.fault.is_some()
+            || self.mode_diagnostic.active()
+        {
             return false;
         }
         let command = match self.profile.encode_pitch(pitch, sequence) {
@@ -182,6 +189,8 @@ impl Connection {
     }
 
     pub(super) fn invalidate_model(&mut self) {
+        self.mode_diagnostic.source_changed();
+        self.cancel_mode_pending();
         self.cancel_movement();
         self.keyframes.close();
     }
@@ -262,6 +271,11 @@ impl Connection {
                 self.version_observed = true;
             }
             observations.receive(&frame, now);
+            let binding = observations
+                .model_deadline(now)
+                .map(|_| observations.model_revision());
+            self.mode_diagnostic.poll(now, binding);
+            self.mode_diagnostic.receive(&frame, now, binding);
         }
     }
 
@@ -296,6 +310,7 @@ impl Connection {
             self.execution.cancel();
         }
         self.flight.transport_failed();
+        self.mode_diagnostic.transport_failed();
         self.fault = Some(fault);
         self.pending = None;
         // Closing prevents a partial packet from being followed by a new command.

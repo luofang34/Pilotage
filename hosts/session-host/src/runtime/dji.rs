@@ -147,6 +147,7 @@ pub(super) fn start_blocking(vehicle: VehicleId) -> Result<DjiRuntime, DjiHostEr
         capture_path: config.capture_path,
         control_mode: config.control_mode,
         experimental_flight: config.experimental_flight,
+        experimental_virtual_stick_diagnostic: false,
     };
     tracing::info!(attachment = ?adapter_config.attachment,
         capture = %adapter_config.capture_path.display(),

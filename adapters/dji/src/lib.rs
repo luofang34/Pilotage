@@ -17,6 +17,8 @@ mod serial;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 pub use adapter::{
     DjiAdapter, DjiAdapterError, DjiAttachment, DjiConfig, DjiControlMode, DjiFault, DjiStatus,
+    DjiVirtualStickDiagnosticError, DjiVirtualStickDiagnosticPhase,
+    DjiVirtualStickDiagnosticReason, DjiVirtualStickDiagnosticStatus, DjiVirtualStickModeEvidence,
     EncodedVideoChunk, EncodedVideoStream,
 };
 #[cfg(any(target_os = "macos", target_os = "linux"))]

@@ -262,6 +262,7 @@ impl DjiAdapter {
             return self.bench_link_loss(policy);
         }
         if let Some(policy) = policy {
+            self.connection.mode_diagnostic.cancel();
             self.control.link_loss = true;
             self.control.cancel_observed();
             if !self.connection.cancel_movement() {

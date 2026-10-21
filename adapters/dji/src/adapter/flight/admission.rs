@@ -101,9 +101,11 @@ impl DjiAdapter {
             return;
         }
         if scope.as_str() == FLIGHT_SCOPE {
+            self.connection.mode_diagnostic.cancel();
             self.connection
                 .invalidate_flight(FlightProcedureReason::AuthorityLost, now);
         } else if scope.as_str() == GIMBAL_SCOPE {
+            self.connection.mode_diagnostic.cancel();
             self.control.cancel_observed();
             self.connection.cancel_movement();
         }

@@ -16,6 +16,7 @@ mod recording;
 #[cfg(test)]
 mod tests;
 mod video;
+mod virtual_stick;
 
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
@@ -37,6 +38,10 @@ use control::ControlState;
 pub use input::EncodedVideoChunk;
 use observation::Observations;
 pub use video::EncodedVideoStream;
+pub use virtual_stick::{
+    DjiVirtualStickDiagnosticError, DjiVirtualStickDiagnosticPhase,
+    DjiVirtualStickDiagnosticReason, DjiVirtualStickDiagnosticStatus, DjiVirtualStickModeEvidence,
+};
 
 const GIMBAL_SCOPE: &str = "vehicle.gimbal";
 const FLIGHT_SCOPE: &str = "vehicle.motion";
@@ -62,6 +67,7 @@ pub struct DjiAdapter {
     control: ControlState,
     video_subscribed: bool,
     experimental_flight: bool,
+    experimental_virtual_stick_diagnostic: bool,
 }
 
 impl DjiAdapter {
@@ -87,7 +93,7 @@ impl DjiAdapter {
                 source,
             })?;
         let transport = attachment::open_blocking(&config.attachment)?;
-        Self::from_connection(
+        let mut adapter = Self::from_connection(
             vehicle,
             transport,
             Box::new(capture),
@@ -95,7 +101,10 @@ impl DjiAdapter {
             SourceIncarnation::new(identity),
             config.control_mode,
             config.experimental_flight,
-        )
+        )?;
+        adapter.experimental_virtual_stick_diagnostic =
+            config.experimental_virtual_stick_diagnostic;
+        Ok(adapter)
     }
 
     fn from_connection(
@@ -135,6 +144,7 @@ impl DjiAdapter {
             control: ControlState::new(control_mode, profile),
             video_subscribed: false,
             experimental_flight: experimental_flight && control_mode == DjiControlMode::Observed,
+            experimental_virtual_stick_diagnostic: false,
         })
     }
 
@@ -167,6 +177,8 @@ impl DjiAdapter {
         self.read_available_blocking(io_started);
         // Recording can take time. Recheck age at the command write boundary.
         let now = clock();
+        self.connection
+            .drive_mode_diagnostic(&self.observations, now);
         let ready = self.pending_pitch_ready(now);
         if !ready {
             self.control.cancel_observed();

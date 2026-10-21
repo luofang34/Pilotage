@@ -44,6 +44,11 @@ impl Connection {
                     io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
                 ) => {}
             Err(source) => {
+                if let Some(Purpose::Mode(fence)) =
+                    self.pending.as_ref().map(|pending| pending.purpose.clone())
+                {
+                    self.mode_diagnostic.wrote(&fence, completed_at(), false);
+                }
                 if let Some((_, identity)) = self
                     .pending
                     .as_ref()
@@ -103,6 +108,10 @@ impl Connection {
                 }
                 permitted
             }
+            Purpose::Mode(fence) => {
+                let fence = *fence;
+                self.prepare_mode(&fence, observations, now)
+            }
         }
     }
 
@@ -128,7 +137,10 @@ impl Connection {
         self.written_bytes = self.written_bytes.wrapping_add(count as u64);
         if let Purpose::Flight(fence) = &purpose {
             self.flight.wrote(fence, now, complete);
+        } else if let Purpose::Mode(fence) = &purpose {
+            self.mode_diagnostic.wrote(fence, now, false);
         }
+        let expired = pending.expires_at.is_some_and(|until| now >= until);
         if complete {
             self.pending = None;
             if let Some((_, identity)) = purpose.pitch()
@@ -143,6 +155,15 @@ impl Connection {
         }
         if complete {
             self.written_pitch = purpose.pitch();
+            if let Purpose::Mode(fence) = &purpose {
+                self.mode_diagnostic.wrote(fence, now, true);
+            }
+        }
+        if expired && matches!(purpose, Purpose::Mode(_)) {
+            self.fail(DjiFault::Transport {
+                operation: "mode diagnostic write exceeded its deadline",
+                source: io::ErrorKind::TimedOut.into(),
+            });
         }
     }
 }
