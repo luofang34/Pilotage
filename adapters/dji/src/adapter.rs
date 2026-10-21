@@ -123,8 +123,16 @@ impl DjiAdapter {
             DjiControlMode::Observed => HOST_PITCH_RATE_LIMIT_RPS,
             DjiControlMode::BenchInitialHorizontal => BENCH_PITCH_RATE_LIMIT_RPS,
         };
-        let profile =
-            Mini3ControlProfile::new(-900, turret_core::AngularRate::radians_per_second(rate)?)?;
+        let maximum = if control_mode == DjiControlMode::Observed {
+            600
+        } else {
+            0
+        };
+        let profile = Mini3ControlProfile::new(
+            -900,
+            maximum,
+            turret_core::AngularRate::radians_per_second(rate)?,
+        )?;
         let mut contract = profile.capabilities()?;
         let unavailable = (control_mode == DjiControlMode::Observed)
             .then_some(turret_core::UnavailableReason::MissingFeedback);

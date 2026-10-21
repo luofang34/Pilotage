@@ -16,6 +16,10 @@ fn both_modes_advertise_the_selected_host_policy_without_a_hardware_speed_claim(
     for (harness, degrees_per_second) in [(Harness::new(), 30.0), (Harness::bench(), 5.0)] {
         let profile = harness.adapter.profile;
         assert_eq!(profile.minimum_tenths(), -900);
+        let maximum = if degrees_per_second == 30.0 { 600 } else { 0 };
+        assert_eq!(profile.maximum_tenths(), maximum);
+        assert!(profile.pitch_target(maximum).is_ok());
+        assert!(profile.pitch_target(maximum + 1).is_err());
         assert!(
             (profile.rate_limit().as_radians_per_second().to_degrees() - degrees_per_second).abs()
                 < 0.00001
@@ -145,6 +149,7 @@ fn a_target_from_a_wider_profile_latches_an_encoding_fault_before_admission() ->
     let mut harness = Harness::mobile();
     harness.select_profile(Mini3ControlProfile::new(
         -50,
+        0,
         AngularRate::radians_per_second(HOST_PITCH_RATE_LIMIT_RPS)?,
     )?);
     let mut video = harness
@@ -158,6 +163,7 @@ fn a_target_from_a_wider_profile_latches_an_encoding_fault_before_admission() ->
     let before = harness.written()?;
     let wider = Mini3ControlProfile::new(
         -900,
+        0,
         AngularRate::radians_per_second(HOST_PITCH_RATE_LIMIT_RPS)?,
     )?;
     assert!(!harness.adapter.connection.queue_pitch_until(
@@ -205,6 +211,7 @@ fn a_written_target_rejected_by_the_planner_preserves_send_evidence_and_locks_co
     ));
     let narrower = Mini3ControlProfile::new(
         -50,
+        0,
         AngularRate::radians_per_second(BENCH_PITCH_RATE_LIMIT_RPS)?,
     )?;
     harness.adapter.control.bench = Some(PitchPlanner::from_confirmed_horizontal(narrower));
