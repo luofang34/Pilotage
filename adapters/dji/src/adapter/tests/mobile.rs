@@ -1,7 +1,54 @@
-use super::harness::{Harness, frame, observed_poses, packets};
+use super::harness::{Harness, frame, observed_poses, packets, seal_duml};
+use crate::adapter::input::Framing;
 use crate::logiclink::{CONTROL_CHANNEL, LogicLinkParser};
 use pilotage_adapter_api::{AvionicsAttitudeSample, Disposition, VehicleAdapter};
 use std::time::Duration;
+
+#[test]
+fn startup_probe_requires_the_transport_return_address_and_exact_request() {
+    for (framing, mut harness) in [
+        (Framing::Duml, Harness::new()),
+        (Framing::LogicLink, Harness::mobile()),
+    ] {
+        harness.step(0);
+        let written = harness.written().unwrap();
+        let requests = if framing == Framing::Duml {
+            packets(&written)
+        } else {
+            let mut parser = LogicLinkParser::new();
+            let mut requests = Vec::new();
+            parser
+                .push(&written, |envelope| {
+                    requests.extend(packets(envelope.payload))
+                })
+                .unwrap();
+            parser.finish().unwrap();
+            requests
+        };
+        let sender = if framing == Framing::Duml { 10 } else { 2 };
+        assert_eq!(requests.len(), 1);
+        let request = &requests[0];
+        assert_eq!((request.sender().0, request.receiver().0), (sender, 6));
+        assert_eq!((request.command_set(), request.command_id()), (0, 1));
+        assert_eq!((request.sequence(), request.flags()), (1, 0x40));
+        assert!(request.payload().is_empty());
+        for (receiver, sequence, flags, accepted) in [
+            (if sender == 2 { 10 } else { 2 }, 1, 0x80, false),
+            (sender, 2, 0x80, false),
+            (sender, 1, 0, false),
+            (sender, 1, 0x80, true),
+        ] {
+            let mut response = vec![0x55, 13, 4, 0, 6, receiver, sequence, 0, flags, 0, 1, 0, 0];
+            seal_duml(&mut response);
+            harness.feed(&framing.command(&response)).unwrap();
+            harness.step(10);
+            assert_eq!(
+                harness.adapter.status_cached().rc_version_observed,
+                accepted
+            );
+        }
+    }
+}
 
 #[test]
 fn upper_capture_reaches_real_payload_state_without_faking_vehicle_pose() {
