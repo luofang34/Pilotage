@@ -11,6 +11,8 @@ use super::{
 };
 use crate::adapter::{DjiFault, HOST_PITCH_RATE_LIMIT_RPS};
 
+mod feedback;
+
 fn pose(harness: &mut Harness, pitch: i16, sequence: u16, millis: u64) -> TestResult {
     harness.feed_model(87, sequence)?;
     let mut bytes = observed_poses().remove(0);
@@ -246,7 +248,7 @@ fn an_out_of_range_observation_cancels_recenter_before_valid_feedback_returns() 
     let mut harness = ready_at(-600)?;
     harness.apply(recenter(), 20);
     harness.step(21);
-    pose(&mut harness, 1, 3, 40)?;
+    pose(&mut harness, i16::MAX, 3, 40)?;
     for sequence in 4..7 {
         pose(&mut harness, -595, sequence, 10 + u64::from(sequence) * 10)?;
     }

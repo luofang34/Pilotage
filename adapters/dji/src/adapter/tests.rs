@@ -383,11 +383,11 @@ fn coalesced_recorded_poses_need_new_arrivals_before_control() -> TestResult {
 }
 
 #[test]
-fn every_qualifying_arrival_must_be_inside_the_pitch_envelope() -> TestResult {
+fn every_qualifying_arrival_must_be_inside_the_feedback_envelope() -> TestResult {
     let mut h = Harness::new();
     for (index, mut pose) in observed_poses().into_iter().enumerate() {
         if index == 1 {
-            pose[11..13].copy_from_slice(&(-901_i16).to_le_bytes());
+            pose[11..13].copy_from_slice(&(-1351_i16).to_le_bytes());
             let length = pose.len();
             let crc = turret_dji::frame_checksum(&pose[..length - 2]).to_le_bytes();
             pose[length - 2..].copy_from_slice(&crc);

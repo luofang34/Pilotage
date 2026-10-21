@@ -40,7 +40,7 @@ impl Observations {
         connection_valid: bool,
     ) -> turret_core::Capability<()> {
         use turret_core::{Capability, UnavailableReason};
-        let Some(pose) = self.latest.filter(|pose| pose.yaw_follow) else {
+        let Some(pose) = self.latest.filter(|pose| pose.qualifies(self.profile)) else {
             return Capability::Unknown;
         };
         if !connection_valid {
@@ -111,7 +111,11 @@ impl Observations {
         let yaw_follow = frame.payload().get(6).is_some_and(|mode| mode >> 6 == 2);
         let continuous = self.age(now).is_some_and(|age| age <= MAX_AGE)
             && self.latest.is_some_and(|pose| pose.qualifies(self.profile));
-        self.consecutive = if !yaw_follow || self.profile.pitch_target(angles.pitch_tenths).is_err()
+        self.consecutive = if !yaw_follow
+            || self
+                .profile
+                .validate_observed_pitch(angles.pitch_tenths)
+                .is_err()
         {
             0
         } else if !continuous {
@@ -218,7 +222,7 @@ impl Observations {
         {
             return None;
         }
-        let pose = self.latest.filter(|pose| pose.yaw_follow)?;
+        let pose = self.latest.filter(|pose| pose.qualifies(self.profile))?;
         self.published_sequence = self.sequence;
         match self.payload_observation(pose) {
             Ok(payload) => Some(payload),
@@ -278,7 +282,10 @@ impl Observations {
 
 impl Pose {
     fn qualifies(self, profile: Mini3ControlProfile) -> bool {
-        self.yaw_follow && profile.pitch_target(self.angles.pitch_tenths).is_ok()
+        self.yaw_follow
+            && profile
+                .validate_observed_pitch(self.angles.pitch_tenths)
+                .is_ok()
     }
 }
 
