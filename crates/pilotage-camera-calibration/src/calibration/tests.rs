@@ -1,7 +1,7 @@
 //! Verification tests for the calibration contract.
 #![allow(clippy::expect_used, clippy::panic)]
 
-use indicate_frames::FrameId;
+use indicate_frames::FrameKind;
 
 use super::CameraCalibration;
 use super::error::CalibrationError;
@@ -133,7 +133,7 @@ fn principal_point_outside_viewport_is_rejected() {
 #[test]
 fn wrong_extrinsic_frames_are_rejected() {
     let mut cal = sim_fpv_calibration();
-    cal.geometry.extrinsics.from_frame = FrameId::Ned;
+    cal.geometry.extrinsics.from_kind = FrameKind::Ned;
     assert!(matches!(
         verify_hash_consistent(&cal),
         CalibrationError::FrameMismatch { .. }

@@ -8,9 +8,9 @@ export const EXPECTED_CORPUS_VERSION = 8;
 export const EXPECTED_CORPUS_DIGEST =
   "0b0c7ccb135bfc4107bc110e4b24dceffd84adf1b767fcd14d2c5ace7391f962";
 export const EXPECTED_SCENE_DIGEST =
-  "f6fb603bf2e1f7889ddc9b5d534f329a0379d34a8f00d954f366e9b270ddc273";
+  "edf5815cc83179cfa7f5b8871bbe6e945dbf04d0339e9f5e55cb3a2922deff51";
 export const EXPECTED_COMPOSITION_DIGEST =
-  "2912562c50aa7f6dd4bfd3b3be2c83fe69ab0ef225b6081496b5a0a5dd8f18f4";
+  "87acb725dedfe7455383f157f583dab1d13af914639d5f69736ed3b0866633a7";
 
 export const COMPATIBILITY_BINDING_FNS = [
   "scene_format_version",

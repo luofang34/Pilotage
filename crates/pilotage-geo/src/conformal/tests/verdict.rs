@@ -62,8 +62,8 @@ fn nominal_low_dynamics_is_valid_with_a_bounded_budget() {
 #[test]
 fn clock_domain_mismatch_is_non_conformal_and_removes_cues() {
     let mut cap = capture(1_500);
-    cap.capture_epoch = Epoch {
-        clock: ClockDomain::VehicleBoot,
+    cap.captured_at = Timestamp {
+        clock: crate::fixtures::clock(ClockDomain::VehicleBoot),
         scale: TimeScale::Monotonic,
         nanos: 1_500,
     };
@@ -199,8 +199,8 @@ fn excessive_skew_between_attitude_and_position_is_refused() {
     let mut s = sample(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3], 1_000_000, 1);
     // Same snapshot (still coherent) but sampled 20 ms apart — over the 10 ms
     // policy skew limit.
-    s.attitude.stamp.acquired_at = epoch(1_000_000);
-    s.position.stamp.acquired_at = epoch(21_000_000);
+    s.attitude.stamp.acquired_at = timestamp(1_000_000);
+    s.position.stamp.acquired_at = timestamp(21_000_000);
     let newer = sample(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3], 30_000_000, 2);
     let fix = run(&Bracket { older: s, newer }, capture(20_000_000), &sim());
     assert_eq!(
@@ -308,7 +308,7 @@ fn fix_identity_retains_both_bracket_endpoints_and_the_capture_time() {
         fix.identity.source_incarnation,
         newer.attitude.stamp.incarnation
     );
-    assert_eq!(fix.identity.capture_epoch, cap.capture_epoch);
+    assert_eq!(fix.identity.captured_at, cap.captured_at);
 }
 
 #[test]

@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use base64::Engine;
 use cgmath::{Matrix3, Quaternion};
-use indicate_frames::FrameId;
+use indicate_frames::FrameKind;
 use pilotage_calibration_id::CalibrationId;
 use pilotage_camera_calibration::{
     AlignmentAllowances, BodyToCameraExtrinsics, Boresight, BrownConradyDistortion,
@@ -84,8 +84,8 @@ pub fn calibration(camera: &CameraSpec, detent: usize) -> Result<CameraCalibrati
             extrinsics: BodyToCameraExtrinsics {
                 translation_body_m: camera.mount_body_m,
                 rotation_quat_wxyz: body_to_optical(camera),
-                from_frame: FrameId::Body,
-                to_frame: FrameId::Installation,
+                from_kind: FrameKind::Body,
+                to_kind: FrameKind::Installation,
             },
             design_eye: DesignEye {
                 position_installation_m: [0.0, 0.0, 0.0],

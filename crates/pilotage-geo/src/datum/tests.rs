@@ -1,6 +1,5 @@
 //! Edge-case tests for datum discipline (anti-meridian, polar, tile-seam,
 //! vertical datum, and the datum-identity completeness the contract requires).
-#![allow(clippy::expect_used, clippy::panic)]
 
 use super::{
     BaroSettingId, DatumRealizationId, GeodeticPosition, GeoidModelId, HorizontalDatum,

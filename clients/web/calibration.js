@@ -22,7 +22,7 @@
 export const CALIBRATION_SCHEMA_VERSION = 2;
 // ValidityStatus::Valid.
 const STATUS_VALID = 1;
-// FrameId::Body / FrameId::Installation.
+// FrameKind::Body / FrameKind::Installation coordinate conventions.
 const FRAME_BODY = 0;
 const FRAME_INSTALLATION = 1;
 // Unit-norm tolerance mirroring the Rust validator.

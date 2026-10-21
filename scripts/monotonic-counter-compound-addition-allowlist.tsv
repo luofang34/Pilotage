@@ -16,7 +16,6 @@ crates/pilotage-flight-quality/src/series.rs	cumulative += weight;
 crates/pilotage-flight-quality/src/signal.rs	integrated_abs_jerk += jerk.abs() * dt;
 crates/pilotage-flight-quality/src/signal.rs	jerk_square_integral += jerk * jerk * dt;
 crates/pilotage-flight-quality/src/signal.rs	square_integral += integral_square_linear(pair[0].value, pair[1].value, dt);
-crates/pilotage-geo/src/abi/codec.rs	self.off += b.len();
 crates/pilotage-input/src/button_tracker.rs	ButtonEdge::Pressed => presses += 1,
 crates/pilotage-input/src/button_tracker.rs	ButtonEdge::Released => releases += 1,
 crates/pilotage-navdata-tiles/src/mvt.rs	area += i64::from(points[index].0) * i64::from(points[next].1)

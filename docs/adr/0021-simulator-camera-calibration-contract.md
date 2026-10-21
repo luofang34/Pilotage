@@ -33,12 +33,12 @@ would be a safety-relevant category error.
   version, tool version, effective window, provenance, residual RMS/max,
   validity status). It lives in `pilotage-adapter-api::calibration`.
 
-- **Every unit and frame is explicit.** Field names carry units (`_px`, `_m`,
-  `_rad`); the extrinsics name both frames using the `indicate-frames`
-  vocabulary (`FrameId::Body` → `FrameId::Installation`, the sensor mount) and
-  never invent a frame; the optical convention (OpenCV: `+Z` forward, `+X`
-  right, `+Y` down) is a stored enum, not an assumption; a units marker is
-  serialized so a future unit change is a visible schema event.
+- **Every unit and frame is explicit.** Field names state the units (`_px`,
+  `_m`, `_rad`). Static extrinsics declare `FrameKind::Body` and
+  `FrameKind::Installation` coordinate conventions. Runtime samples identify
+  the physical frames. The optical convention is stored explicitly: OpenCV
+  uses `+Z` forward, `+X` right, and `+Y` down. The encoded units marker permits
+  a receiver to detect a change of units.
 
 - **Content hash, verifier recomputes** (the REN-02 glyph-pack pattern). A fixed
   little-endian canonical byte form is hashed with SHA-256; the recorded hash is

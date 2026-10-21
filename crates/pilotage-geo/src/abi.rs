@@ -17,7 +17,7 @@
 //! read. [`encode_frame`] serializes only a [`ValidatedSvsFrame`], so an invalid
 //! frame cannot be encoded, and it is allocation-free.
 
-use indicate_frames::Epoch;
+use indicate_frames::{FrameKind, Timestamp};
 
 use crate::availability::{
     AvailabilityProfile, ExternalHealth, SvsAvailability, SvsInputs, derive_inputs,
@@ -29,24 +29,25 @@ use crate::view::ProjectionView;
 mod codec;
 
 /// The ABI version. Bumped when the layout changes; decode refuses any other.
-pub const ABI_VERSION: u32 = 2;
+pub const ABI_VERSION: u32 = 3;
 
 /// Largest quaternion norm error tolerated before an attitude is refused as not
 /// a rotation.
 pub(crate) const ATTITUDE_NORM_TOLERANCE: f32 = 1e-4;
 
-const STAMP_LEN: usize = 8 + 16 + 4 + 4 + (1 + 1 + 8) + 1 + (16 + 4 + 8);
+const STAMP_LEN: usize = 8 + 16 + 4 + 4 + TIMESTAMP_LEN + 1 + (16 + 4 + 8);
 const GEODETIC_LEN: usize = 8 + 8 + 1 + 2 + 8 + 1 + 2 + 4 + 4 + 8;
 const POSITION_LEN: usize = GEODETIC_LEN + STAMP_LEN + (4 + 4);
 const QUAT_LEN: usize = 4 * 4;
-const ATTITUDE_LEN: usize = QUAT_LEN + STAMP_LEN + 4;
+const FRAME_ID_LEN: usize = 1 + 16;
+const ATTITUDE_LEN: usize = QUAT_LEN + 2 * FRAME_ID_LEN + STAMP_LEN + 4;
 const VIEW_LEN: usize = 4 + 32 + 1 + 8 + 8 + 8 + 8 + 1;
 const EXTERNAL_LEN: usize = 5;
-const EPOCH_LEN: usize = 1 + 1 + 8;
+const TIMESTAMP_LEN: usize = 1 + 16 + 1 + 8;
 
 /// The fixed byte length of one encoded frame.
 pub const SVS_FRAME_LEN: usize =
-    4 + POSITION_LEN + ATTITUDE_LEN + VIEW_LEN + EXTERNAL_LEN + EPOCH_LEN;
+    4 + POSITION_LEN + ATTITUDE_LEN + VIEW_LEN + EXTERNAL_LEN + TIMESTAMP_LEN;
 
 /// A raw, unvalidated synthetic-vision frame: the inputs a producer states,
 /// before the contract derives availability. Build one and call
@@ -64,7 +65,7 @@ pub struct RawSvsFrame {
     pub external: ExternalHealth,
     /// The producer's reference ("as of") time; position/attitude ages and the
     /// future-sample check are computed against it.
-    pub reference_time: Epoch,
+    pub reference_time: Timestamp,
 }
 
 impl RawSvsFrame {
@@ -91,6 +92,11 @@ impl RawSvsFrame {
         {
             return Err(GeoError::AttitudeNotARotation);
         }
+        let body = self.attitude.body_frame.kind();
+        let navigation = self.attitude.navigation_frame.kind();
+        if body != FrameKind::Body || navigation != FrameKind::Ned {
+            return Err(GeoError::AttitudeFrames { body, navigation });
+        }
         self.view.validate()?;
         Ok(ValidatedSvsFrame::assemble(
             self.position,
@@ -116,7 +122,7 @@ pub struct ValidatedSvsFrame {
     attitude: StatedAttitude,
     view: ProjectionView,
     external: ExternalHealth,
-    reference_time: Epoch,
+    reference_time: Timestamp,
     profile: AvailabilityProfile,
     inputs: SvsInputs,
     availability: SvsAvailability,
@@ -131,7 +137,7 @@ impl ValidatedSvsFrame {
         attitude: StatedAttitude,
         view: ProjectionView,
         external: ExternalHealth,
-        reference_time: Epoch,
+        reference_time: Timestamp,
         profile: &AvailabilityProfile,
     ) -> Self {
         let inputs = derive_inputs(&position, &attitude, &external, reference_time, profile);
@@ -170,7 +176,7 @@ impl ValidatedSvsFrame {
     }
     /// The producer's reference time.
     #[must_use]
-    pub fn reference_time(&self) -> Epoch {
+    pub fn reference_time(&self) -> Timestamp {
         self.reference_time
     }
     /// The full derived input health.

@@ -1,9 +1,8 @@
 //! Round-trip, fail-closed, and hostile cross-field tests for the SVS frame
 //! ABI. Availability is derived, never decoded: the central hostile case is
 //! that an untrusted or incoherent input can never yield an available scene.
-#![allow(clippy::expect_used, clippy::panic)]
 
-use indicate_frames::{ClockDomain, Epoch, Quat, TimeScale};
+use indicate_frames::{ClockDomain, Quat, TimeScale, Timestamp};
 
 use super::{
     ABI_VERSION, RawSvsFrame, SVS_FRAME_LEN, ValidatedSvsFrame, decode_frame, encode_frame,
@@ -32,9 +31,9 @@ const REF_NS: u64 = ACQ_NS + 10_000_000; // 10 ms after acquisition: fresh.
 /// receiver-derived under this profile; the wire carries none.
 const SIM: AvailabilityProfile = AvailabilityProfile::simulator();
 
-fn epoch(nanos: u64) -> Epoch {
-    Epoch {
-        clock: ClockDomain::Gnss,
+fn timestamp(nanos: u64) -> Timestamp {
+    Timestamp {
+        clock: crate::fixtures::clock(ClockDomain::Gnss),
         scale: TimeScale::Gps,
         nanos,
     }
@@ -54,7 +53,7 @@ fn stamp(integrity: IntegrityLevel) -> SourceStamp {
         incarnation: SourceIncarnation([3; 16]),
         generation: 1,
         sequence: 7,
-        acquired_at: epoch(ACQ_NS),
+        acquired_at: timestamp(ACQ_NS),
         integrity,
         snapshot: snapshot(),
     }
@@ -90,6 +89,8 @@ fn position(integrity: IntegrityLevel) -> StatedPosition {
 fn attitude(integrity: IntegrityLevel) -> StatedAttitude {
     StatedAttitude {
         attitude: Quat::IDENTITY,
+        body_frame: crate::fixtures::frame(indicate_frames::FrameKind::Body),
+        navigation_frame: crate::fixtures::frame(indicate_frames::FrameKind::Ned),
         stamp: stamp(integrity),
         quality: AttitudeQuality { angular_mrad: 5 },
     }
@@ -129,7 +130,7 @@ fn raw() -> RawSvsFrame {
         attitude: attitude(IntegrityLevel::Trusted),
         view: view(),
         external: external_ok(),
-        reference_time: epoch(REF_NS),
+        reference_time: timestamp(REF_NS),
     }
 }
 
@@ -201,9 +202,8 @@ fn a_non_unit_aircraft_attitude_is_refused() {
     ));
     // And decode refuses a wire frame whose attitude quaternion is not unit.
     let mut bytes = encode_frame(&validated());
-    // Aircraft quaternion w is the first f32 of the attitude block at offset
-    // version(4) + position(125) = 129.
-    bytes[129..133].copy_from_slice(&2.0f32.to_le_bytes());
+    let attitude_offset = 4 + super::POSITION_LEN;
+    bytes[attitude_offset..attitude_offset + 4].copy_from_slice(&2.0f32.to_le_bytes());
     assert!(matches!(
         decode_frame(&bytes, &SIM),
         Err(AbiError::Malformed {
@@ -216,7 +216,7 @@ fn a_non_unit_aircraft_attitude_is_refused() {
 #[test]
 fn a_future_acquisition_fails_time_coherence() {
     let mut r = raw();
-    r.reference_time = epoch(ACQ_NS - 1); // before acquisition: a future sample.
+    r.reference_time = timestamp(ACQ_NS - 1); // before acquisition: a future sample.
     let f = r.validate(&SIM).expect("structurally valid");
     assert_eq!(
         f.availability(),
@@ -240,8 +240,8 @@ fn a_snapshot_id_collision_across_streams_is_not_coherent() {
 #[test]
 fn a_clock_or_scale_mismatch_fails_time_coherence() {
     let mut r = raw();
-    r.attitude.stamp.acquired_at = Epoch {
-        clock: ClockDomain::Simulation,
+    r.attitude.stamp.acquired_at = Timestamp {
+        clock: crate::fixtures::clock(ClockDomain::Simulation),
         scale: TimeScale::Monotonic,
         nanos: ACQ_NS,
     };
@@ -283,7 +283,7 @@ fn wrong_version_fails_closed() {
         decode_frame(&bytes, &SIM),
         Err(AbiError::BadVersion { .. })
     ));
-    assert_eq!(u32::from_le_bytes([2, 0, 0, 0]), ABI_VERSION);
+    assert_eq!(u32::from_le_bytes([3, 0, 0, 0]), ABI_VERSION);
 }
 
 #[test]
@@ -337,10 +337,9 @@ fn an_incomplete_calibration_reference_fails_closed() {
         r.validate(&SIM),
         Err(crate::error::GeoError::IncompleteCalibrationReference)
     ));
-    // Decode refuses a zero calibration id on the wire (u32 id at view offset:
-    // version(4)+position(125)+attitude(91) = 220).
     let mut bytes = encode_frame(&validated());
-    bytes[220..224].copy_from_slice(&0u32.to_le_bytes());
+    let view_offset = 4 + super::POSITION_LEN + super::ATTITUDE_LEN;
+    bytes[view_offset..view_offset + 4].copy_from_slice(&0u32.to_le_bytes());
     assert!(matches!(
         decode_frame(&bytes, &SIM),
         Err(AbiError::Malformed { field: "view", .. })
@@ -381,12 +380,12 @@ fn an_orthographic_frame_is_not_read_as_perspective() {
 
 #[test]
 fn an_unknown_external_health_byte_is_refused_not_coerced() {
-    // External health sits just before the 10-byte reference time; the first of
+    // External health sits just before the reference timestamp; the first of
     // its five bytes is the navigation-integrity monitor. An unknown value must
     // be refused with UnknownEnum, not silently coerced to Failed — otherwise
     // decode-then-encode would change the bytes.
     let mut bytes = encode_frame(&validated());
-    let external_off = SVS_FRAME_LEN - 5 - 10;
+    let external_off = SVS_FRAME_LEN - super::EXTERNAL_LEN - super::TIMESTAMP_LEN;
     bytes[external_off] = 200;
     match decode_frame(&bytes, &SIM) {
         Err(AbiError::UnknownEnum { field, value }) => {
@@ -456,7 +455,9 @@ fn the_same_wire_bytes_are_judged_by_the_receivers_profile() {
 
     // The wire bytes are profile-independent: re-encoding either verdict yields
     // exactly the original block, so no profile or availability ever reaches the
-    // wire and ABI v2 bytes are untouched by the profile.
+    // wire. The profile cannot change the encoded input data.
     assert_eq!(encode_frame(&under_sim), bytes);
     assert_eq!(encode_frame(&under_strict), bytes);
 }
+
+mod identified;

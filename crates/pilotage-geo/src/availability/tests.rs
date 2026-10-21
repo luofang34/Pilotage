@@ -1,5 +1,4 @@
 //! Tests for the deterministic, traceable availability verdict.
-#![allow(clippy::expect_used, clippy::panic)]
 
 use super::{AvailabilityReason, InputHealth, SvsAvailability, SvsInputs};
 
@@ -121,7 +120,7 @@ fn availability_reason_wire_codes_round_trip_and_reject_unknown() {
 
 // ---- derivation from validated inputs --------------------------------------
 
-use indicate_frames::{ClockDomain, Epoch, Quat, TimeScale};
+use indicate_frames::{ClockDomain, Quat, TimeScale, Timestamp};
 
 use super::{
     AvailabilityProfile, AvailabilityProfileId, ExternalHealth, derive_inputs,
@@ -150,7 +149,7 @@ fn derive_sim(
     position: &StatedPosition,
     attitude: &StatedAttitude,
     external: &ExternalHealth,
-    reference_time: Epoch,
+    reference_time: Timestamp,
 ) -> SvsInputs {
     derive_inputs(
         position,
@@ -161,9 +160,9 @@ fn derive_sim(
     )
 }
 
-fn epoch(nanos: u64) -> Epoch {
-    Epoch {
-        clock: ClockDomain::Simulation,
+fn timestamp(nanos: u64) -> Timestamp {
+    Timestamp {
+        clock: crate::fixtures::clock(ClockDomain::Simulation),
         scale: TimeScale::Monotonic,
         nanos,
     }
@@ -175,7 +174,7 @@ fn stamp(integrity: IntegrityLevel, nanos: u64) -> SourceStamp {
         incarnation: SourceIncarnation([1; 16]),
         generation: 0,
         sequence: 0,
-        acquired_at: epoch(nanos),
+        acquired_at: timestamp(nanos),
         integrity,
         snapshot: CoherentSnapshot {
             producer: SourceIncarnation([9; 16]),
@@ -215,6 +214,8 @@ fn position(integrity: IntegrityLevel, nanos: u64) -> StatedPosition {
 fn attitude(integrity: IntegrityLevel, nanos: u64) -> StatedAttitude {
     StatedAttitude {
         attitude: Quat::IDENTITY,
+        body_frame: crate::fixtures::frame(indicate_frames::FrameKind::Body),
+        navigation_frame: crate::fixtures::frame(indicate_frames::FrameKind::Ned),
         stamp: stamp(integrity, nanos),
         quality: AttitudeQuality { angular_mrad: 5 },
     }
@@ -254,7 +255,7 @@ fn health_from_integrity_only_trusts_the_top_level() {
 
 #[test]
 fn fresh_trusted_coherent_inputs_are_available() {
-    let now = epoch(SIM_FRESH_AGE_NS / 2);
+    let now = timestamp(SIM_FRESH_AGE_NS / 2);
     let inputs = derive_sim(
         &position(IntegrityLevel::Trusted, 0),
         &attitude(IntegrityLevel::Trusted, 0),
@@ -266,7 +267,7 @@ fn fresh_trusted_coherent_inputs_are_available() {
 
 #[test]
 fn untrusted_position_can_never_be_available() {
-    let now = epoch(SIM_FRESH_AGE_NS / 2);
+    let now = timestamp(SIM_FRESH_AGE_NS / 2);
     let inputs = derive_sim(
         &position(IntegrityLevel::Untrusted, 0),
         &attitude(IntegrityLevel::Trusted, 0),
@@ -281,7 +282,7 @@ fn untrusted_position_can_never_be_available() {
 
 #[test]
 fn monitored_attitude_degrades_the_scene() {
-    let now = epoch(SIM_FRESH_AGE_NS / 2);
+    let now = timestamp(SIM_FRESH_AGE_NS / 2);
     let inputs = derive_sim(
         &position(IntegrityLevel::Trusted, 0),
         &attitude(IntegrityLevel::Monitored, 0),
@@ -301,7 +302,7 @@ fn a_future_sample_fails_time_coherence() {
         &position(IntegrityLevel::Trusted, 1_000_000),
         &attitude(IntegrityLevel::Trusted, 1_000_000),
         &external_ok(),
-        epoch(0),
+        timestamp(0),
     );
     assert_eq!(
         SvsAvailability::assess(&inputs),
@@ -315,7 +316,7 @@ fn a_stale_pair_degrades_and_an_unusable_pair_fails() {
         &position(IntegrityLevel::Trusted, 0),
         &attitude(IntegrityLevel::Trusted, 0),
         &external_ok(),
-        epoch(SIM_FRESH_AGE_NS + 1),
+        timestamp(SIM_FRESH_AGE_NS + 1),
     );
     assert_eq!(
         SvsAvailability::assess(&stale),
@@ -325,7 +326,7 @@ fn a_stale_pair_degrades_and_an_unusable_pair_fails() {
         &position(IntegrityLevel::Trusted, 0),
         &attitude(IntegrityLevel::Trusted, 0),
         &external_ok(),
-        epoch(SIM_USABLE_AGE_NS + 1),
+        timestamp(SIM_USABLE_AGE_NS + 1),
     );
     assert_eq!(
         SvsAvailability::assess(&unusable),
@@ -341,7 +342,7 @@ fn incoherent_position_and_attitude_fail_time_coherence() {
         &position(IntegrityLevel::Trusted, 0),
         &att,
         &external_ok(),
-        epoch(SIM_FRESH_AGE_NS / 2),
+        timestamp(SIM_FRESH_AGE_NS / 2),
     );
     assert_eq!(
         SvsAvailability::assess(&inputs),
@@ -353,7 +354,7 @@ fn incoherent_position_and_attitude_fail_time_coherence() {
 fn a_trusted_but_grossly_inaccurate_position_is_never_available() {
     // Trusted integrity, fresh, coherent — but the position 1-sigma is
     // u32::MAX mm. Accuracy participates: the scene is unavailable.
-    let now = epoch(SIM_FRESH_AGE_NS / 2);
+    let now = timestamp(SIM_FRESH_AGE_NS / 2);
     let mut pos = position(IntegrityLevel::Trusted, 0);
     pos.quality = PositionQuality {
         horizontal_mm: u32::MAX,
@@ -373,7 +374,7 @@ fn a_trusted_but_grossly_inaccurate_position_is_never_available() {
 
 #[test]
 fn a_trusted_but_imprecise_attitude_degrades_or_fails() {
-    let now = epoch(SIM_FRESH_AGE_NS / 2);
+    let now = timestamp(SIM_FRESH_AGE_NS / 2);
     let mut att = attitude(IntegrityLevel::Trusted, 0);
     att.quality = AttitudeQuality {
         angular_mrad: SIM_FRESH_ATT_MRAD + 1,
@@ -406,7 +407,7 @@ fn a_trusted_but_imprecise_attitude_degrades_or_fails() {
 
 #[test]
 fn position_quality_at_the_fresh_bound_is_still_available() {
-    let now = epoch(SIM_FRESH_AGE_NS / 2);
+    let now = timestamp(SIM_FRESH_AGE_NS / 2);
     let mut pos = position(IntegrityLevel::Trusted, 0);
     pos.quality = PositionQuality {
         horizontal_mm: SIM_FRESH_POS_MM,
@@ -421,78 +422,4 @@ fn position_quality_at_the_fresh_bound_is_still_available() {
     assert_eq!(SvsAvailability::assess(&inputs), SvsAvailability::Available);
 }
 
-// ---- derivation under an explicit, traceable profile -----------------------
-
-#[test]
-fn the_same_reading_is_judged_by_the_selected_profile() {
-    // A position 1-sigma that is fully fresh under the simulator profile but only
-    // degraded under a stricter one: the verdict tracks the profile, not the
-    // wire, so the same input yields different, deterministic results.
-    let now = epoch(SIM_FRESH_AGE_NS / 2);
-    let mut pos = position(IntegrityLevel::Trusted, 0);
-    pos.quality = PositionQuality {
-        horizontal_mm: 1_000,
-        vertical_mm: 1_000,
-    };
-
-    let stricter = AvailabilityProfile::new(
-        AvailabilityProfileId(2),
-        1,
-        SIM_FRESH_AGE_NS,
-        SIM_USABLE_AGE_NS,
-        500,
-        2_000,
-        SIM_FRESH_ATT_MRAD,
-        SIM_USABLE_ATT_MRAD,
-    )
-    .expect("a monotonic profile");
-
-    let under_sim = derive_sim(
-        &pos,
-        &attitude(IntegrityLevel::Trusted, 0),
-        &external_ok(),
-        now,
-    );
-    let under_strict = derive_inputs(
-        &pos,
-        &attitude(IntegrityLevel::Trusted, 0),
-        &external_ok(),
-        now,
-        &stricter,
-    );
-
-    assert_eq!(
-        SvsAvailability::assess(&under_sim),
-        SvsAvailability::Available,
-    );
-    assert_eq!(
-        SvsAvailability::assess(&under_strict),
-        SvsAvailability::Degraded(AvailabilityReason::Position),
-    );
-}
-
-#[test]
-fn the_age_boundary_is_pinned_under_the_simulator_profile() {
-    let att = attitude(IntegrityLevel::Trusted, 0);
-    let pos = position(IntegrityLevel::Trusted, 0);
-    let assess = |reference: Epoch| {
-        SvsAvailability::assess(&derive_sim(&pos, &att, &external_ok(), reference))
-    };
-    // Exactly at the fresh age: still available.
-    assert_eq!(assess(epoch(SIM_FRESH_AGE_NS)), SvsAvailability::Available);
-    // One nanosecond older: degraded on time/coherence.
-    assert_eq!(
-        assess(epoch(SIM_FRESH_AGE_NS + 1)),
-        SvsAvailability::Degraded(AvailabilityReason::TimeCoherence),
-    );
-    // Exactly at the usable age: still only degraded.
-    assert_eq!(
-        assess(epoch(SIM_USABLE_AGE_NS)),
-        SvsAvailability::Degraded(AvailabilityReason::TimeCoherence),
-    );
-    // One nanosecond beyond usable: unavailable.
-    assert_eq!(
-        assess(epoch(SIM_USABLE_AGE_NS + 1)),
-        SvsAvailability::Unavailable(AvailabilityReason::TimeCoherence),
-    );
-}
+mod profile;

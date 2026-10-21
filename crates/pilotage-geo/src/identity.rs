@@ -19,15 +19,15 @@
 //! | `incarnation` | `source_incarnation` |
 //! | `generation` | `source_epoch` (boot/attachment generation) |
 //! | `sequence` | `sequence` |
-//! | `acquired_at` ([`Epoch`]) | `acquired_at_ns` + `clock`, enriched with a time scale |
+//! | `acquired_at` ([`Timestamp`]) | `acquired_at_ns` + `clock`, with a clock instance and time scale |
 //!
-//! The acquisition time is an [`Epoch`] (clock **and** scale **and** nanos), so
+//! The acquisition time is a [`Timestamp`] (clock identity, scale, and nanoseconds), so
 //! an age is only a physical duration between two readings on the same clock and
 //! scale; across clock domains or scales the age is a typed refusal, never a
 //! silently-inferred difference, and a future sample is a typed refusal, never a
 //! saturated zero.
 
-use indicate_frames::{Epoch, Quat};
+use indicate_frames::{Attitude, FrameId, Quat, Timestamp};
 
 use crate::datum::GeodeticPosition;
 use crate::error::AgeError;
@@ -176,8 +176,8 @@ pub struct SourceStamp {
     pub generation: u32,
     /// Wrapping group sequence.
     pub sequence: u32,
-    /// Acquisition epoch: clock domain, time scale, and nanoseconds.
-    pub acquired_at: Epoch,
+    /// Acquisition time: clock identity, time scale, and nanoseconds.
+    pub acquired_at: Timestamp,
     /// Integrity trust level.
     pub integrity: IntegrityLevel,
     /// Coherent-snapshot identity.
@@ -186,7 +186,7 @@ pub struct SourceStamp {
 
 impl SourceStamp {
     /// Age in nanoseconds relative to `now`, failing closed rather than
-    /// inferring: a `now` on a different clock domain or time scale, or a
+    /// inferring: a `now` on a different clock instance or time scale, or a
     /// sample acquired after `now`, is a typed [`AgeError`], never a saturated
     /// zero.
     ///
@@ -194,7 +194,7 @@ impl SourceStamp {
     ///
     /// [`AgeError::ClockMismatch`], [`AgeError::ScaleMismatch`], or
     /// [`AgeError::FutureSample`].
-    pub fn age_ns(&self, now: Epoch) -> Result<u64, AgeError> {
+    pub fn age_ns(&self, now: Timestamp) -> Result<u64, AgeError> {
         if now.clock != self.acquired_at.clock {
             return Err(AgeError::ClockMismatch);
         }
@@ -235,17 +235,34 @@ pub struct StatedPosition {
     pub quality: PositionQuality,
 }
 
-/// A vehicle attitude with its identity stamp and angular accuracy. The attitude
-/// rotates body directions to the local navigation frame; the frame pairing is
-/// a `indicate-frames` concern the consumer applies, never implied here.
+/// A vehicle attitude with identified body and navigation frames, provenance, and angular accuracy.
+/// The shared spatial contract checks the frame pairing when the observation is consumed.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StatedAttitude {
     /// Body → local-navigation rotation.
     pub attitude: Quat,
+    /// Identified vehicle body axes.
+    pub body_frame: FrameId,
+    /// Identified local navigation axes and origin.
+    pub navigation_frame: FrameId,
     /// Identity, epoch, integrity, and snapshot of the reading.
     pub stamp: SourceStamp,
     /// Attitude accuracy (an angle).
     pub quality: AttitudeQuality,
+}
+
+impl StatedAttitude {
+    /// Expresses this observation through the shared spatial contract without discarding provenance.
+    #[must_use]
+    pub const fn as_attitude(&self) -> Attitude<SourceStamp> {
+        Attitude {
+            subject: self.body_frame,
+            frame: self.navigation_frame,
+            at: self.stamp.acquired_at,
+            meta: self.stamp,
+            value: self.attitude,
+        }
+    }
 }
 
 #[cfg(test)]

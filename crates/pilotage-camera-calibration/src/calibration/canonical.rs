@@ -53,8 +53,8 @@ fn write_header(out: &mut Vec<u8>, cal: &CameraCalibration) {
     out.push(id.status as u8);
     out.push(UNITS_METERS_RADIANS_PIXELS);
     out.push(cal.geometry.intrinsics.convention as u8);
-    out.push(cal.geometry.extrinsics.from_frame.to_u8());
-    out.push(cal.geometry.extrinsics.to_frame.to_u8());
+    out.push(cal.geometry.extrinsics.from_kind.to_u8());
+    out.push(cal.geometry.extrinsics.to_kind.to_u8());
 }
 
 fn write_geometry(out: &mut Vec<u8>, cal: &CameraCalibration) {

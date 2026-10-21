@@ -8,7 +8,7 @@
 //! distinction; the types here keep every unit and coordinate frame explicit
 //! (`_px` pixels, `_m` meters, `_rad` radians) so nothing is implied.
 
-use indicate_frames::FrameId;
+use indicate_frames::FrameKind;
 
 /// The optical coordinate convention a camera's projection is expressed in.
 ///
@@ -90,10 +90,8 @@ pub struct FieldOfView {
     pub vertical_rad: f64,
 }
 
-/// Rigid body-to-camera extrinsics: where the camera sits relative to the
-/// vehicle body, with both frames named ([`FrameId::Body`] →
-/// [`FrameId::Installation`], the sensor mount) so composition can never
-/// silently relabel geometry.
+/// Static body-to-camera extrinsics with declared coordinate conventions.
+/// Runtime observations bind this model to identified vehicle and camera frames.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BodyToCameraExtrinsics {
     /// Camera optical-frame origin expressed in the body frame, in meters.
@@ -101,10 +99,10 @@ pub struct BodyToCameraExtrinsics {
     /// Rotation quaternion `(w, x, y, z)` taking body-frame directions to the
     /// camera optical frame.
     pub rotation_quat_wxyz: [f64; 4],
-    /// The frame the translation is expressed in and the rotation maps from.
-    pub from_frame: FrameId,
-    /// The frame the rotation maps into (the sensor/installation mount).
-    pub to_frame: FrameId,
+    /// Coordinate convention of the translation and rotation input.
+    pub from_kind: FrameKind,
+    /// Coordinate convention of the rotation output (the sensor installation).
+    pub to_kind: FrameKind,
 }
 
 /// The SIMULATED design-eye reference point, expressed in the installation
