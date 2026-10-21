@@ -9,6 +9,10 @@ mod connection;
 mod discovery;
 mod error;
 #[cfg(target_os = "macos")]
+mod watch;
+#[cfg(target_os = "macos")]
+pub use watch::UsbEvents;
+#[cfg(target_os = "macos")]
 mod ffi;
 #[cfg(all(not(target_os = "macos"), not(test)))]
 mod unsupported;

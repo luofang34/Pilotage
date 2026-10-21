@@ -11,6 +11,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         "native/discovery.h",
         "native/discovery.m",
         "native/discovery_tests.m",
+        "native/watch.h",
+        "native/watch.m",
         "native/profile.m",
         "native/interface.m",
         "native/tests.m",
@@ -35,6 +37,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         "tests",
         "discovery",
         "discovery_tests",
+        "watch",
     ] {
         let object = out.join(format!("{name}.o"));
         let status = Command::new("xcrun")

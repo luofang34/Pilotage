@@ -110,11 +110,18 @@ Select one RC-N1 attachment and a new capture file. The capture directory
 must exist. The host refuses to overwrite a capture.
 The host uses the session access settings above.
 
-For the upper USB port, set `PILOTAGE_DJI_USB=auto` to select the only matching
-DJI C5 device in the macOS I/O Registry. The device must already expose the
-iAP and `com.dji.logiclink` interfaces. Discovery only reads registry properties.
-The host stops if no device or more than one device matches. It checks the
-full USB descriptors when it opens the selected device.
+On macOS, the upper USB port uses automatic selection by default.
+The host subscribes to device events before it reads the I/O Registry.
+It waits for one DJI C5 device with iAP and `com.dji.logiclink` interfaces.
+It does not select a device when more than one candidate is present.
+It checks the full USB descriptors when it opens the selected device.
+After device removal, the host waits for a new attachment identity.
+Each attachment gets a separate capture file with a `.usb-<identity>.jsonl`
+suffix. Failed opens do not repeat for the same attachment.
+Keep the host running when you close or reopen a client. Client disconnects
+release control authority; they do not close USB. A new USB connection
+starts fresh protocol and video state. It does not replay commands.
+An interrupted flight action retains its unknown result.
 The host does not run the upper-port bootstrap procedure or change the USB
 role or device configuration. Connecting the cable alone does not ensure
 that the required profile is present.
@@ -133,7 +140,7 @@ a `0x` prefix. The registry ID can change when the cable is disconnected.
 The upper interface supplies telemetry and H.264 video from one connection.
 Video decoding requires `ffmpeg` on `PATH`. Set `PILOTAGE_DJI_FFMPEG` to an
 absolute executable path to select another installation. A decoder that
-cannot start prevents host startup. Camera capture time and calibration
+cannot start leaves video unavailable. Camera capture time and calibration
 remain unknown.
 
 For the lower USB CDC port, select its callout path instead:

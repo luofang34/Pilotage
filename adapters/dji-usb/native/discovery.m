@@ -97,6 +97,8 @@ int dji_usb_discover(DjiCandidate *output, uint32_t capacity,
         IOReturn status = IOServiceGetMatchingServices(kIOMainPortDefault,
             (__bridge_retained CFDictionaryRef)match, &iterator);
         if (status != KERN_SUCCESS) return dji_fail(error, 20, status);
+        // IOKit returns success with no iterator when the matching set is empty.
+        if (iterator == IO_OBJECT_NULL) return 0;
         int result = 0;
         io_service_t service;
         while ((service = IOIteratorNext(iterator)) != IO_OBJECT_NULL) {

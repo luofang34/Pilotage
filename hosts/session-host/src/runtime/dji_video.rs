@@ -2,6 +2,8 @@
 
 mod ppm;
 mod process;
+mod supervisor;
+pub(super) use supervisor::supervise;
 #[cfg(test)]
 mod tests;
 

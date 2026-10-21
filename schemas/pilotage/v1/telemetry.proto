@@ -584,6 +584,8 @@ enum FlightProcedurePhase {
   // The adapter stopped tracking or issuing the procedure. This does not
   // confirm that the vehicle stopped its autonomous motion.
   FLIGHT_PROCEDURE_PHASE_CANCELLED = 7;
+  // Transport loss prevents a conclusive result. Never replay this request.
+  FLIGHT_PROCEDURE_PHASE_OUTCOME_UNKNOWN = 8;
 }
 
 enum FlightProcedureReason {

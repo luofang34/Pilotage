@@ -58,6 +58,7 @@ pub(super) struct Connection {
     pub(super) mode_session: super::virtual_stick::ModeSession,
     profile: Mini3ControlProfile,
     transport: Option<Box<dyn Transport>>,
+    pub(super) cleanup_confirmed: bool,
     capture: Box<dyn Write + Send>,
     capture_path: PathBuf,
     pub(super) input: Input,
@@ -90,6 +91,7 @@ impl Connection {
             mode_session: super::virtual_stick::ModeSession::new(incarnation),
             profile,
             transport: Some(transport),
+            cleanup_confirmed: false,
             capture,
             capture_path,
             input: Input::new(framing),
@@ -302,7 +304,7 @@ impl Connection {
     }
 
     pub(super) fn fail(&mut self, fault: DjiFault) {
-        error!(%fault, "DJI connection closed; explicit restart required");
+        error!(%fault, "DJI connection closed; control is fenced");
         if let Some(pending) = &self.pending {
             if pending.offset > 0 {
                 if let Some((_, identity)) = pending.purpose.pitch() {
@@ -328,10 +330,13 @@ impl Connection {
 
 impl Connection {
     fn close_transport_blocking(&mut self) {
-        if let Some(transport) = self.transport.take()
-            && let Err(error) = transport.close_blocking()
-        {
-            tracing::error!(%error, "DJI attachment cleanup unconfirmed; do not reopen automatically");
+        if let Some(transport) = self.transport.take() {
+            match transport.close_blocking() {
+                Ok(()) => self.cleanup_confirmed = true,
+                Err(error) => {
+                    tracing::error!(%error, "DJI attachment cleanup unconfirmed; do not reopen automatically")
+                }
+            }
         }
     }
 }
