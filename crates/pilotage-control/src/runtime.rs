@@ -19,12 +19,14 @@ use crate::sample::{DirectDemand, Mode, RawSample, SessionState};
 
 mod activation;
 mod authority;
+mod camera_pan;
 use authority::{MotionOutput, MotionPhase};
 
 /// The stateful web-control runtime. Construct it, then activate a compiled
 /// profile before evaluating ticks.
 #[derive(Debug, Default)]
 pub struct ControlRuntime {
+    camera_pan: crate::CameraPanRouting,
     active: Option<CompiledProfile>,
     pending: Option<CompiledProfile>,
     activation_revision: u32,
@@ -67,6 +69,7 @@ impl ControlRuntime {
     /// re-seeding discrete controls on the next tick.
     pub fn begin_session(&mut self) {
         self.authority.begin_session();
+        self.camera_pan = crate::CameraPanRouting::default();
         self.motion_phase = MotionPhase::Held;
         self.reseed_edges = true;
         self.streaming = false;
@@ -95,7 +98,16 @@ impl ControlRuntime {
         scope: AuthorityScope,
         event: AuthorityEvent,
     ) -> AuthorityDisposition {
-        self.authority.apply(scope, event)
+        let was_granted = self.authority.state(scope).granted();
+        let disposition = self.authority.apply(scope, event);
+        if scope == AuthorityScope::Gimbal
+            && self.camera_pan == crate::CameraPanRouting::AirframeYaw
+            && self.authority.state(scope).granted() != was_granted
+        {
+            // A held camera stick must not change between yaw and translation.
+            self.camera_pan_handover();
+        }
+        disposition
     }
 
     /// Returns the authoritative state of one scope.
@@ -250,7 +262,10 @@ impl ControlRuntime {
             active_gimbal,
         );
         self.reset_baseline = reset.baseline;
-        let demand = gimbal_demand(sample, gimbal);
+        let mut demand = gimbal_demand(sample, gimbal);
+        if self.camera_pan != crate::CameraPanRouting::GimbalYaw {
+            demand.yaw = 0.0;
+        }
         let plan = frame_plan(captured, reset.edge, self.streaming, demand);
         self.streaming = plan.is_some_and(|p| p.streaming);
 
@@ -347,10 +362,17 @@ impl ControlRuntime {
             yaw_axis: active.gimbal.yaw.source_index,
             modifier_button: usize::from(active.gimbal.modifier_button),
         };
-        let axes = match sample.direct {
+        let mut axes = match sample.direct {
             Some(demand) => direct_axes(demand, session.mode),
             None => flight_axes(sample, flight, &active.flight_stick, session.mode, capture),
         };
+        if held
+            && sample.direct.is_none()
+            && self.camera_pan == crate::CameraPanRouting::AirframeYaw
+        {
+            // One yaw source avoids adding two independent stick demands.
+            axes.yaw = gimbal_demand(sample, &active.gimbal).yaw;
+        }
         MotionOutcome {
             frame: Frame::motion(axes.roll, axes.pitch, axes.throttle, axes.yaw),
             label: axes.label,

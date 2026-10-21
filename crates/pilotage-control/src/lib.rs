@@ -18,6 +18,7 @@
 //! privileged default path.
 
 mod authority;
+mod camera_pan;
 mod coordinator;
 mod device;
 mod flight;
@@ -36,6 +37,7 @@ mod golden;
 pub use authority::{
     AuthorityDisposition, AuthorityEvent, AuthorityScope, AuthorityState, is_fresh_generation,
 };
+pub use camera_pan::{CameraPanRouting, camera_pan_routing};
 pub use coordinator::{AgentInput, AgentTick, ControlCoordinator, InputSource};
 pub use device::{DeviceStage, MAX_AXES, MAX_BUTTONS, SelectOutcome, parse_gamepad_identity};
 pub use plan::{

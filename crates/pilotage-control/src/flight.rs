@@ -1,8 +1,6 @@
-//! Flight-scheme mapping for Standard Gamepad pads, ported from the JS
-//! schemes. Each mode commands the identical velocity control law; only the
-//! stick assignment differs. While the gimbal quasimode is engaged the
-//! captured inputs (the right stick and the modifier trigger) read neutral to
-//! flight here, so a captured input can never be double-consumed.
+//! Flight-scheme mapping for Standard Gamepad pads.
+//! Captured camera inputs read neutral here. The runtime routes camera pan
+//! to airframe yaw separately when the declared capabilities permit it.
 
 use pilotage_input::{AxisConfig, normalize_axis};
 
