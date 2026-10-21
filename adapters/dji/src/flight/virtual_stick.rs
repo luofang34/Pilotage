@@ -81,6 +81,9 @@ pub enum VirtualStickVelocityError {
 }
 
 impl VirtualStickVelocity {
+    /// Zero velocity on all four axes.
+    pub const ZERO: Self = Self { values: [0.0; 4] };
+
     /// Validate forward/right/down speed in m/s and clockwise yaw rate in rad/s.
     ///
     /// Horizontal speed is limited to 1 m/s in total, vertical speed to

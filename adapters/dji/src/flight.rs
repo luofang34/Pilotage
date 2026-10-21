@@ -6,11 +6,16 @@
 
 mod command;
 mod report;
+mod stream;
 mod virtual_stick;
 
 pub use command::{BasicFlightCommand, BasicFlightPacket};
 pub(crate) use report::osd_payload;
 pub use report::{Mini3FlightReport, VirtualStickReport};
+pub use stream::{
+    VirtualStickBinding, VirtualStickStream, VirtualStickStreamError, VirtualStickStreamPhase,
+    VirtualStickWrite,
+};
 pub use virtual_stick::{
     VirtualStickMode, VirtualStickModePacket, VirtualStickVelocity, VirtualStickVelocityError,
 };
