@@ -302,3 +302,43 @@ fn an_airframe_only_sample_preserves_command_progress_without_payload_angles() -
     assert!(progress.acknowledged_at.is_none() && progress.observed_complete_at.is_none());
     Ok(())
 }
+
+#[test]
+fn landing_range_uses_downward_sensor_flags_not_relative_height() -> TestResult {
+    for case in 0..8 {
+        let mut bytes = captured_reports().remove(0);
+        bytes[27..29].copy_from_slice(&500_i16.to_le_bytes());
+        bytes[33..35].copy_from_slice(&(-1_i16).to_le_bytes());
+        bytes[43..47].copy_from_slice(&0x1c_u32.to_le_bytes());
+        bytes[52] = 5;
+        match case {
+            1 => bytes[43] &= !0x10,
+            2 => bytes[45] |= 2,
+            3 => bytes[52] = 0,
+            4 => bytes[52] = 255,
+            5 => bytes[35..37].copy_from_slice(&151_i16.to_le_bytes()),
+            6 => bytes[33..35].copy_from_slice(&i16::MIN.to_le_bytes()),
+            7 => bytes[59] = 88,
+            _ => {}
+        }
+        seal_duml(&mut bytes);
+        let mut h = Harness::mobile();
+        h.feed(&crate::logiclink::encode_control(&packets(&bytes)[0]))?;
+        h.step(100);
+        let approach = h
+            .telemetry(100)
+            .samples
+            .into_iter()
+            .find_map(|sample| sample.fc_state.and_then(|fc| fc.landing_approach));
+        if case == 0 {
+            let approach = approach.unwrap();
+            assert_eq!(approach.surface_distance_m, 0.5);
+            assert_eq!(approach.vertical_speed_down_mps, -0.1);
+            assert!(approach.is_flying);
+            assert_eq!(approach.stamp.acquired_at_ns, 100_000_000);
+        } else {
+            assert!(approach.is_none(), "case {case}");
+        }
+    }
+    Ok(())
+}

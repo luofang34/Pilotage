@@ -108,6 +108,16 @@ impl VirtualStickVelocity {
         Ok(Self { values })
     }
 
+    pub(crate) fn is_descent_only(self) -> bool {
+        let [forward, right, down, yaw] = self.values;
+        down >= 0.4 && forward.abs() <= 0.05 && right.abs() <= 0.05 && yaw.abs() <= 0.05
+    }
+
+    pub(crate) fn interrupts_descent(self) -> bool {
+        let [forward, right, down, yaw] = self.values;
+        down < -0.05 || forward.abs() > 0.1 || right.abs() > 0.1 || yaw.abs() > 0.1
+    }
+
     /// Encode BODY velocity with upward vertical speed and yaw rate in degrees/s.
     ///
     /// The FC sub-endpoint does not acknowledge each value. No I/O is performed.
