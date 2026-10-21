@@ -4,9 +4,9 @@ use super::{HOST_PITCH_RATE_LIMIT_RPS, TestResult, frame, pose, ready_at, recent
 
 #[test]
 fn positive_feedback_stays_measured_while_manual_targets_stay_within_policy() -> TestResult {
-    let mut harness = ready_at(1)?;
+    let mut harness = ready_at(403)?;
     let measured = harness.telemetry(20).samples.remove(0).payload.unwrap();
-    assert!((measured.pitch.unwrap().angle_rad.unwrap().to_degrees() - 0.1).abs() < 0.00001);
+    assert!((measured.pitch.unwrap().angle_rad.unwrap().to_degrees() - 40.3).abs() < 0.00001);
     assert_eq!(
         harness.apply(frame(0.0), 20).disposition,
         Disposition::Accepted
@@ -20,7 +20,7 @@ fn positive_feedback_stays_measured_while_manual_targets_stay_within_policy() ->
         Disposition::Transformed
     );
     harness.step(31);
-    assert_eq!(targets(&harness)?, [-299]);
+    assert_eq!(targets(&harness)?, [103]);
     assert_eq!(
         harness
             .adapter
@@ -28,21 +28,21 @@ fn positive_feedback_stays_measured_while_manual_targets_stay_within_policy() ->
             .latest_angles
             .unwrap()
             .pitch_tenths,
-        1
+        403
     );
-    assert!(harness.adapter.profile.pitch_target(1).is_err());
+    assert!(harness.adapter.profile.pitch_target(601).is_err());
     assert!(harness.adapter.profile.pitch_target(-901).is_err());
     Ok(())
 }
 
 #[test]
 fn neutralize_from_positive_feedback_sends_a_bounded_target_without_faking_arrival() -> TestResult {
-    let mut harness = ready_at(1)?;
+    let mut harness = ready_at(403)?;
     harness.link_loss(Some(LinkLossPolicy::Neutralize), 20)?;
-    assert_eq!(targets(&harness)?, [0]);
+    assert_eq!(targets(&harness)?, [403]);
     let state = harness.adapter.status_cached();
     assert!(state.control_locked);
-    assert_eq!(state.latest_angles.unwrap().pitch_tenths, 1);
+    assert_eq!(state.latest_angles.unwrap().pitch_tenths, 403);
     let progress = harness
         .adapter
         .connection
@@ -57,8 +57,7 @@ fn neutralize_from_positive_feedback_sends_a_bounded_target_without_faking_arriv
 }
 
 #[test]
-fn recenter_above_the_command_ceiling_uses_raw_feedback_without_extending_the_ceiling() -> TestResult
-{
+fn recenter_from_positive_feedback_targets_zero_without_faking_arrival() -> TestResult {
     let mut harness = ready_at(1)?;
     assert_eq!(
         harness.apply(recenter(), 20).disposition,
@@ -93,6 +92,7 @@ fn the_configured_lower_target_bound_does_not_discard_valid_feedback() -> TestRe
     let mut harness = super::Harness::new();
     harness.select_profile(turret_dji::Mini3ControlProfile::new(
         -50,
+        0,
         turret_core::AngularRate::radians_per_second(HOST_PITCH_RATE_LIMIT_RPS)?,
     )?);
     for sequence in 0..3 {
