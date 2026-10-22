@@ -112,7 +112,9 @@ lease while the vehicle is on the ground, where the vehicle refuses velocity
 control: after its welcome it holds, with the phase clocks stopped, until the
 vehicle's estimate reports at least 1 m above the launch point. Then it
 requests the lease and, once granted, resumes with one neutral frame and
-climbs to the survey height. A human may hold the scope at that moment, for
+climbs to the survey height. A survey plan ends over the launch point at the
+survey height: the mission completes there and commands nothing more, and
+the pilot takes the vehicle and lands it. A human may hold the scope at that moment, for
 example after a software takeoff from the App: the mission stays held and
 asks again every five seconds, and at once when that lease is released, so
 releasing control hands the aircraft to the mission. The pilot keeps the

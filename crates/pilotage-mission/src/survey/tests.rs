@@ -40,11 +40,25 @@ fn planar_waypoints(plan: &super::SurveyPlan) -> Vec<[f64; 2]> {
     plan.plan
         .waypoints
         .iter()
+        .filter(|waypoint| waypoint.ident != "HOME")
         .map(|waypoint| {
             let offset = plane.to_ned(&waypoint.position);
             [offset.north_m, offset.east_m]
         })
         .collect()
+}
+
+/// The home waypoint, north then east metres from the anchor.
+fn planar_home(plan: &super::SurveyPlan) -> Option<[f64; 2]> {
+    let plane = LocalTangentPlane::new(anchor()).expect("anchor is plausible");
+    plan.plan
+        .waypoints
+        .iter()
+        .find(|waypoint| waypoint.ident == "HOME")
+        .map(|waypoint| {
+            let offset = plane.to_ned(&waypoint.position);
+            [offset.north_m, offset.east_m]
+        })
 }
 
 fn footprint(fov_rad: f64) -> f64 {
@@ -137,7 +151,7 @@ fn rectangle_lines_follow_the_long_edge_and_cover_the_width() {
     assert!((survey.footprint_width_m - footprint).abs() < 1e-9);
     assert!((survey.line_spacing_m - footprint * 0.4).abs() < 1e-9);
     assert_eq!(survey.line_count, 4);
-    assert_eq!(survey.plan.waypoints.len(), 8);
+    assert_eq!(survey.plan.waypoints.len(), 9, "eight line ends and home");
     let idents: Vec<&str> = survey
         .plan
         .waypoints
@@ -147,7 +161,7 @@ fn rectangle_lines_follow_the_long_edge_and_cover_the_width() {
     assert_eq!(
         idents,
         [
-            "L01A", "L01B", "L02A", "L02B", "L03A", "L03B", "L04A", "L04B"
+            "L01A", "L01B", "L02A", "L02B", "L03A", "L03B", "L04A", "L04B", "HOME"
         ]
     );
     for waypoint in &survey.plan.waypoints {
@@ -155,6 +169,11 @@ fn rectangle_lines_follow_the_long_edge_and_cover_the_width() {
         assert_eq!(waypoint.altitude, Some(AltitudeConstraint::At(610.0)));
         assert!((waypoint.position.altitude_m - 610.0).abs() < 1e-6);
     }
+    let home = planar_home(&survey).expect("home is planned");
+    assert!(
+        home[0].abs() < 1e-3 && home[1].abs() < 1e-3,
+        "home is the anchor"
+    );
     let points = planar_waypoints(&survey);
     // Lines run north along the 400 m edge, 10 m past both ends.
     for pair in points.chunks(2) {
@@ -181,7 +200,8 @@ fn rectangle_lines_follow_the_long_edge_and_cover_the_width() {
 
 #[test]
 fn a_polygon_narrower_than_the_footprint_gets_one_centred_line() {
-    let request = SurveyRequest::new(rectangle(400.0, 100.0));
+    let mut request = SurveyRequest::new(rectangle(400.0, 100.0));
+    request.return_to_launch = false;
     let survey = plan_survey(&request, &anchor(), HEIGHT_M).expect("plans");
     assert_eq!(survey.line_count, 1);
     let points = planar_waypoints(&survey);
@@ -233,7 +253,8 @@ fn an_l_shaped_polygon_is_covered_by_spanning_lines() {
 
 #[test]
 fn the_path_length_counts_lines_and_the_gaps_between_them() {
-    let request = SurveyRequest::new(rectangle(400.0, 300.0));
+    let mut request = SurveyRequest::new(rectangle(400.0, 300.0));
+    request.return_to_launch = false;
     let survey = plan_survey(&request, &anchor(), HEIGHT_M).expect("plans");
     let points = planar_waypoints(&survey);
     let expected: f64 = points
@@ -371,4 +392,31 @@ fn the_digest_binds_every_parameter() {
     let survey = plan_survey(&request, &anchor(), HEIGHT_M).expect("plans");
     assert_eq!(survey.digest, request.digest());
     assert_eq!(survey.plan.id, format!("survey:{}", request.digest()));
+}
+
+#[test]
+fn the_plan_comes_home_unless_asked_not_to() {
+    let mut request = SurveyRequest::new(rectangle(400.0, 300.0));
+    let with_home = plan_survey(&request, &anchor(), HEIGHT_M).expect("plans");
+    request.return_to_launch = false;
+    let without = plan_survey(&request, &anchor(), HEIGHT_M).expect("plans");
+    assert_eq!(
+        with_home.plan.waypoints.len(),
+        without.plan.waypoints.len() + 1
+    );
+    assert_ne!(
+        with_home.digest, without.digest,
+        "the choice is in the digest"
+    );
+    assert!(
+        with_home.path_length_m > without.path_length_m,
+        "the way home counts in the path"
+    );
+    assert!(
+        without
+            .plan
+            .waypoints
+            .iter()
+            .all(|waypoint| waypoint.ident != "HOME")
+    );
 }

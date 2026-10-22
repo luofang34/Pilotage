@@ -102,7 +102,7 @@ impl Truth {
 
 fn assert_record(record: &SurveyPlanRecord) {
     assert_eq!(record.line_count, 4);
-    assert_eq!(record.waypoint_count, 8);
+    assert_eq!(record.waypoint_count, 9, "eight line ends and home");
     assert_eq!(record.idents[0], "L01A");
     assert_eq!(record.idents[7], "L04B");
     // The last line is pulled back onto the far side, so the shortest
@@ -202,8 +202,8 @@ fn fly(source: OwnshipSource, role: TruthRole) {
         .collect();
     assert_eq!(
         advances,
-        (1..8).collect::<Vec<_>>(),
-        "every line end is flown in order"
+        (1..9).collect::<Vec<_>>(),
+        "every line end is flown in order, then home"
     );
     for (index, distance) in nearest.iter().enumerate() {
         assert!(
@@ -217,6 +217,11 @@ fn fly(source: OwnshipSource, role: TruthRole) {
     assert!(
         (height - HEIGHT_M).abs() < 2.0,
         "flown at the survey height, got {height}"
+    );
+    let from_home = truth.ned[0].hypot(truth.ned[1]);
+    assert!(
+        from_home <= record.capture_radius_m + 0.5,
+        "the mission completes over the launch point, {from_home} m away"
     );
 }
 

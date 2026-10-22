@@ -13,7 +13,9 @@
 //!   survey instead of a route. The value is the polygon as
 //!   `lat_deg,lon_deg;lat_deg,lon_deg;...` with at least three vertices.
 //!   The survey height is `PILOTAGE_MISSION_CRUISE_HEIGHT`, 110 m when
-//!   unset. Set one of the route and the area, not both.
+//!   unset. The plan ends over the anchor at that height, where the
+//!   mission completes and the pilot lands the vehicle. Set one of the
+//!   route and the area, not both.
 //! - `PILOTAGE_MISSION_SURVEY_FOV_DEG`: the camera's across-track field
 //!   of view in degrees for a nadir camera; unset keeps the
 //!   [`pilotage_mission::SurveyRequest`] default.
