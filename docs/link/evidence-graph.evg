@@ -195,12 +195,12 @@ attr outcome pass
 node RESULT-LINK-WIRE verification-result
 title host wire-mapping suite — recorded pass
 attr command cargo test -p pilotage-session-host --lib engine_actor::telemetry
-attr config-digest 4e5eabe3c1a1195cb38edebb4f905b74128a1f4a
+attr config-digest f180a0ad75c925bf8817e5b7927508de9e2af6c5
 attr tool-version rustc 1.99.0 (b940084d7 2026-09-28)
-attr source-digest git-blob:35274f4b4234619bacc4619185f5e915aca313df
+attr source-digest git-blob:bb2c8007b213ed84f0549c508c52e4be47289e07
 attr artifact docs/link/evidence-artifacts/link04/host-wire.run.txt
-attr output-digest sha256:ee3edcf87d4e5a8ab8e71a191820ad3199bed7e987bf780f327b650aaea5fa08
-attr run-id local:4e5eabe3c1a1195cb38edebb4f905b74128a1f4a
+attr output-digest sha256:787b90cb003db2b80f21bc513140e58a5a44011fdd277adfd497d3ab5ebf803d
+attr run-id local:f180a0ad75c925bf8817e5b7927508de9e2af6c5
 attr outcome pass
 
 node RESULT-LINK-CAPTURE verification-result
@@ -248,6 +248,12 @@ attr artifact docs/link/evidence-artifacts/link05/authz-regime.run.txt
 attr output-digest sha256:ec85ba6fcf019599b4ece6546859e854ec254478c5457fb29a8316b4fa8bf9ee
 attr run-id local:27bc04929ec212d25e45a1cb9ca6ec7f5fc34e7f
 attr outcome pass
+
+node CFG-LINK-WIRE configuration-item
+title committed baseline for host telemetry wire mapping
+attr scm git
+attr commit f180a0ad75c925bf8817e5b7927508de9e2af6c5
+attr tree e2a492674cc8e235b578183cd181b24bb58033ac
 
 node CFG-LINK-START-CONDITIONS configuration-item
 title committed baseline for independent takeoff start-condition verification
@@ -391,7 +397,7 @@ edge RESULT-LINK-ADAPTER justified-by TOOL-LINK-CARGO
 
 edge RESULT-LINK-WIRE result-of CASE-LINK-WIRE
 edge RESULT-LINK-WIRE covers LINK-PROV-003
-edge RESULT-LINK-WIRE justified-by CFG-LINK-START-CONDITIONS
+edge RESULT-LINK-WIRE justified-by CFG-LINK-WIRE
 edge RESULT-LINK-WIRE justified-by TOOL-LINK-CARGO
 
 edge RESULT-LINK-CAPTURE result-of CASE-LINK-CAPTURE
