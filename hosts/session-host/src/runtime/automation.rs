@@ -89,29 +89,30 @@ pub(crate) struct MissionPlan {
 }
 
 impl MissionPlan {
-    /// The anchor in radians/meters, converted exactly once (ADR-0030).
-    fn anchor(&self) -> GeodeticPosition {
-        GeodeticPosition::new(
-            self.options.anchor.lat_deg.to_radians(),
-            self.options.anchor.lon_deg.to_radians(),
-            self.options.anchor.alt_m,
-        )
+    /// The mission config over this plan's route and anchor; limits are
+    /// tightened by the caller from the advertised capabilities.
+    fn config(&self) -> MissionConfig {
+        Self::config_for(&self.options)
     }
 
-    /// The mission config over this plan's route and anchor; limits are
-    /// tightened by the caller from the advertised capabilities. A survey
-    /// carries no route.
-    fn config(&self) -> MissionConfig {
-        let route = match &self.options.plan {
+    /// The mission config the options describe. A survey carries no route.
+    fn config_for(options: &MissionOptions) -> MissionConfig {
+        let route = match &options.plan {
             MissionPlanRequest::Route(route) => route.clone(),
             MissionPlanRequest::Survey(_) => String::new(),
         };
-        let mut config = MissionConfig::new(route, self.anchor(), MISSION_CLOCK);
-        if let Some(cruise_height_m) = self.options.cruise_height_m {
+        // The anchor in radians/meters, converted exactly once (ADR-0030).
+        let anchor = GeodeticPosition::new(
+            options.anchor.lat_deg.to_radians(),
+            options.anchor.lon_deg.to_radians(),
+            options.anchor.alt_m,
+        );
+        let mut config = MissionConfig::new(route, anchor, MISSION_CLOCK);
+        if let Some(cruise_height_m) = options.cruise_height_m {
             config.cruise_height_m = cruise_height_m;
         }
-        config.ownship_source = self.options.ownship_source;
-        config.execution_target = self.options.execution_target;
+        config.ownship_source = options.ownship_source;
+        config.execution_target = options.execution_target;
         config
     }
 }
@@ -159,16 +160,16 @@ fn prepare_survey(
 
 fn prepare_route(options: &MissionOptions) -> Result<MissionPlan, HostError> {
     let navdata = mission_navdata::load(options).map_err(HostError::MissionNavdata)?;
+    let (_, record) = MissionEngine::new(
+        &navdata.snapshot,
+        navdata.provenance.clone(),
+        MissionPlan::config_for(options),
+    )
+    .map_err(|source| HostError::MissionBuild(Box::new(source)))?;
     let plan = MissionPlan {
         source: PlanSource::Navdata(navdata),
         options: options.clone(),
     };
-    let PlanSource::Navdata(navdata) = &plan.source else {
-        return Err(HostError::MissionPlanConflict);
-    };
-    let (_, record) =
-        MissionEngine::new(&navdata.snapshot, navdata.provenance.clone(), plan.config())
-            .map_err(|source| HostError::MissionBuild(Box::new(source)))?;
     info!(
         route = %record.route_input,
         waypoints = record.waypoint_count,
