@@ -3,7 +3,7 @@
 //! datagrams (telemetry, rejection notices), decoded with the same wire
 //! vocabulary remote clients read.
 
-use pilotage_mission::{MissionEngine, MissionLimits};
+use pilotage_mission::{MissionEngine, MissionLimits, OwnshipSource};
 use pilotage_protocol::{
     ControlAction, ControlActionResult, FrameRejected, FrameRejectionReason, LeaseRequest,
     LeaseResponse, ProfileActivation, ScopeId, ServerWelcome, wire,
@@ -223,7 +223,17 @@ impl MissionTask {
         if !ours {
             return;
         }
-        if let Some(ownship) = ownship::ownship_from_wire(sample, now, self.planar_pose_is_truth) {
+        let ownship = match self.ownship_source {
+            OwnshipSource::SimulationTruth => {
+                ownship::ownship_from_wire(sample, now, self.planar_pose_is_truth)
+            }
+            OwnshipSource::VehicleEstimate { .. } => {
+                ownship::estimate_from_wire(sample, now, |latitude_rad, longitude_rad, altitude| {
+                    mission.ned_of(latitude_rad, longitude_rad, altitude)
+                })
+            }
+        };
+        if let Some(ownship) = ownship {
             mission.on_ownship(&ownship, now);
         }
     }

@@ -97,6 +97,8 @@ impl MissionPlan {
         if let Some(cruise_height_m) = self.options.cruise_height_m {
             config.cruise_height_m = cruise_height_m;
         }
+        config.ownship_source = self.options.ownship_source;
+        config.execution_target = self.options.execution_target;
         config
     }
 }
@@ -244,6 +246,8 @@ pub fn spawn_reference_mission_rig() -> Result<MissionRig, HostError> {
         anchor: crate::runtime::DEFAULT_MISSION_ANCHOR,
         date: None,
         cruise_height_m: Some(0.0),
+        ownship_source: pilotage_mission::OwnshipSource::SimulationTruth,
+        execution_target: pilotage_mission::ExecutionTarget::Simulator,
     };
     let plan = prepare(&options)?;
     let start = Instant::now();

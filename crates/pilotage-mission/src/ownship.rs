@@ -17,15 +17,16 @@ pub enum TruthRole {
 /// One ownship kinematic sample, converted by the host task from
 /// vehicle telemetry.
 ///
-/// **Only [`TruthRole::SimulationTruth`] samples become observations.**
-/// The engine synthesizes a GNSS-class position fix from truth — a
-/// simulation-only stand-in for a real receiver. FC-state and
-/// operational-estimate samples are estimator-derived: feeding them back
-/// as aids would double-count information the estimator already holds
-/// (the ADR-0024 correlation rule), so the engine refuses them with a
-/// counted rejection and never launders them into a fix. A physical
-/// vehicle needs a genuine independent position source before this
-/// engine can guide it.
+/// **The engine admits one role, the one its configured source names.**
+/// Under [`crate::OwnshipSource::SimulationTruth`] only
+/// [`TruthRole::SimulationTruth`] samples become observations: the engine
+/// synthesizes a GNSS-class position fix from truth, a simulation-only
+/// stand-in for a real receiver. Under
+/// [`crate::OwnshipSource::VehicleEstimate`] only
+/// [`TruthRole::OperationalEstimate`] samples are admitted, and the engine
+/// flies them as a declared estimator-derived solution without fusion
+/// (ADR-0024 correlation rule). Every other role is a counted refusal,
+/// never an aid.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct OwnshipSample {
     /// Position as NED meters from the mission anchor.
@@ -45,4 +46,15 @@ pub struct OwnshipSample {
     pub acquired_at: MonotonicNanos,
     /// Per-source sample sequence, wrap-aware.
     pub sequence: u32,
+}
+
+/// The vertical reading a host converts for the vehicle-estimate source.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum OwnshipAltitude {
+    /// Height above the WGS-84 ellipsoid, meters.
+    Ellipsoid(f64),
+    /// Height above the mission anchor, meters. A vehicle that measures
+    /// height from its launch point reports this reading when the anchor
+    /// is that point.
+    AboveAnchor(f64),
 }

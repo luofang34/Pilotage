@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use navigate_contract::MonotonicNanos;
-use pilotage_mission::{MissionAction, MissionEngine, MissionEvent, NavGuidance};
+use pilotage_mission::{MissionAction, MissionEngine, MissionEvent, NavGuidance, OwnshipSource};
 use pilotage_protocol::{
     ClientHello, ControlActionCommand, ControlIntent, ControlPayload, Generation, PrincipalId,
     SESSION_PROTOCOL_VERSION, ScopeId, ScopedControlFrame, SequenceNum, SessionId,
@@ -76,6 +76,8 @@ pub(super) struct MissionTask {
     /// own state (true only for the deterministic reference adapter).
     /// Anything else must arrive under a stamped role or be refused.
     planar_pose_is_truth: bool,
+    /// Which telemetry lane becomes the mission's ownship.
+    ownship_source: OwnshipSource,
 }
 
 impl MissionTask {
@@ -86,6 +88,7 @@ impl MissionTask {
         status: watch::Sender<AutomationStatus>,
         planar_pose_is_truth: bool,
     ) -> Self {
+        let ownship_source = plan.config().ownship_source;
         Self {
             engine,
             start,
@@ -101,6 +104,7 @@ impl MissionTask {
             pending_actions: HashMap::new(),
             nav_guidance: None,
             planar_pose_is_truth,
+            ownship_source,
         }
     }
 
@@ -127,6 +131,7 @@ impl MissionTask {
             pending_actions: HashMap::new(),
             nav_guidance: None,
             planar_pose_is_truth: true,
+            ownship_source: OwnshipSource::SimulationTruth,
         }
     }
 
