@@ -14,7 +14,7 @@ mod ownship;
 mod task;
 
 use navigate_contract::{ClockDomainId, GeodeticPosition};
-use pilotage_mission::{MissionConfig, MissionEngine, MissionState};
+use pilotage_mission::{MissionConfig, MissionEngine, MissionState, SurveyRequest};
 use pilotage_session::ClientKey;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
@@ -23,7 +23,6 @@ use tracing::info;
 
 use crate::error::HostError;
 use crate::mission_navdata::{self, LoadedNavdata};
-use crate::runtime::MissionOptions;
 #[cfg(feature = "sim")]
 use crate::runtime::RuntimeOptions;
 use crate::runtime::connection::ToConnection;
@@ -31,6 +30,7 @@ use crate::runtime::engine_actor::ToEngine;
 #[cfg(feature = "sim")]
 use crate::runtime::engine_actor::{ENGINE_QUEUE_CAPACITY, EngineActor};
 use crate::runtime::registry::OUTBOUND_QUEUE_CAPACITY;
+use crate::runtime::{MissionOptions, MissionPlanRequest};
 
 /// The mission principal's driver-assigned client key. The accept loop
 /// allocates keys from zero with a `fetch_add`, so `u64::MAX` can only
@@ -72,10 +72,19 @@ pub struct AutomationStatus {
     pub closed: bool,
 }
 
-/// A validated mission: the decoded snapshot, its provenance, and the
-/// options the flight engine is built from once capabilities are known.
+/// Where the plan comes from: a navdata snapshot the route expands
+/// against, or an area survey request.
+pub(crate) enum PlanSource {
+    /// The decoded snapshot and its provenance.
+    Navdata(LoadedNavdata),
+    /// The survey request the plan is derived from.
+    Survey(SurveyRequest),
+}
+
+/// A validated mission: the plan source and the options the flight engine
+/// is built from once capabilities are known.
 pub(crate) struct MissionPlan {
-    navdata: LoadedNavdata,
+    source: PlanSource,
     options: MissionOptions,
 }
 
@@ -90,10 +99,14 @@ impl MissionPlan {
     }
 
     /// The mission config over this plan's route and anchor; limits are
-    /// tightened by the caller from the advertised capabilities.
+    /// tightened by the caller from the advertised capabilities. A survey
+    /// carries no route.
     fn config(&self) -> MissionConfig {
-        let mut config =
-            MissionConfig::new(self.options.route.clone(), self.anchor(), MISSION_CLOCK);
+        let route = match &self.options.plan {
+            MissionPlanRequest::Route(route) => route.clone(),
+            MissionPlanRequest::Survey(_) => String::new(),
+        };
+        let mut config = MissionConfig::new(route, self.anchor(), MISSION_CLOCK);
         if let Some(cruise_height_m) = self.options.cruise_height_m {
             config.cruise_height_m = cruise_height_m;
         }
@@ -103,26 +116,59 @@ impl MissionPlan {
     }
 }
 
-/// Loads the navdata, proves the route builds against it, and logs the
-/// ADR-0030 pack-for-flight record — all at startup, so a bad route or
-/// store fails the host before it listens.
+/// Proves the plan builds and logs its record — all at startup, so a bad
+/// route, store, or area fails the host before it listens. A route loads
+/// the navdata and logs the ADR-0030 pack-for-flight record; a survey
+/// logs the lines it plans.
 ///
 /// # Errors
 ///
 /// [`HostError::MissionNavdata`] when the snapshot cannot be loaded;
-/// [`HostError::MissionBuild`] when the route does not build against it.
+/// [`HostError::MissionBuild`] when the plan does not build.
 pub(crate) fn prepare(options: &MissionOptions) -> Result<MissionPlan, HostError> {
-    let navdata = mission_navdata::load(options).map_err(HostError::MissionNavdata)?;
+    match &options.plan {
+        MissionPlanRequest::Route(_) => prepare_route(options),
+        MissionPlanRequest::Survey(request) => prepare_survey(options, request),
+    }
+}
+
+fn prepare_survey(
+    options: &MissionOptions,
+    request: &SurveyRequest,
+) -> Result<MissionPlan, HostError> {
     let plan = MissionPlan {
-        navdata,
+        source: PlanSource::Survey(request.clone()),
         options: options.clone(),
     };
-    let (_, record) = MissionEngine::new(
-        &plan.navdata.snapshot,
-        plan.navdata.provenance.clone(),
-        plan.config(),
-    )
-    .map_err(|source| HostError::MissionBuild(Box::new(source)))?;
+    let (_, record) = MissionEngine::from_survey(request, plan.config())
+        .map_err(|source| HostError::MissionBuild(Box::new(source)))?;
+    info!(
+        vertices = request.polygon_deg.len(),
+        lines = record.line_count,
+        waypoints = record.waypoint_count,
+        line_spacing_m = record.line_spacing_m,
+        footprint_width_m = record.footprint_width_m,
+        path_length_m = record.path_length_m,
+        survey_digest = %record.digest,
+        mission_revision = %record.mission_identity.revision_id,
+        mission_digest = %record.mission_identity.content_digest,
+        "survey planned for flight"
+    );
+    Ok(plan)
+}
+
+fn prepare_route(options: &MissionOptions) -> Result<MissionPlan, HostError> {
+    let navdata = mission_navdata::load(options).map_err(HostError::MissionNavdata)?;
+    let plan = MissionPlan {
+        source: PlanSource::Navdata(navdata),
+        options: options.clone(),
+    };
+    let PlanSource::Navdata(navdata) = &plan.source else {
+        return Err(HostError::MissionPlanConflict);
+    };
+    let (_, record) =
+        MissionEngine::new(&navdata.snapshot, navdata.provenance.clone(), plan.config())
+            .map_err(|source| HostError::MissionBuild(Box::new(source)))?;
     info!(
         route = %record.route_input,
         waypoints = record.waypoint_count,
@@ -241,7 +287,7 @@ impl MissionRig {
 #[cfg(feature = "sim")]
 pub fn spawn_reference_mission_rig() -> Result<MissionRig, HostError> {
     let options = MissionOptions {
-        route: pilotage_mission::fixture::DEMO_ROUTE.to_owned(),
+        plan: MissionPlanRequest::Route(pilotage_mission::fixture::DEMO_ROUTE.to_owned()),
         navdata: crate::runtime::MissionNavdataSource::Fixture,
         anchor: crate::runtime::DEFAULT_MISSION_ANCHOR,
         date: None,
@@ -249,6 +295,49 @@ pub fn spawn_reference_mission_rig() -> Result<MissionRig, HostError> {
         ownship_source: pilotage_mission::OwnshipSource::SimulationTruth,
         execution_target: pilotage_mission::ExecutionTarget::Simulator,
     };
+    spawn_reference_rig(options)
+}
+
+/// Spawns [`MissionRig`] over a small area survey at a zero height with
+/// a measured footprint (the planar reference vehicle has no climb axis):
+/// a 50 m by 60 m rectangle north-east of the default anchor, two lines
+/// 20 m apart, which the car-like reference vehicle can turn between.
+///
+/// # Errors
+///
+/// [`HostError`] when the survey does not plan.
+#[cfg(feature = "sim")]
+pub fn spawn_reference_survey_rig() -> Result<MissionRig, HostError> {
+    let anchor = crate::runtime::DEFAULT_MISSION_ANCHOR;
+    // About 50 m north and 60 m east at the anchor's latitude.
+    let north = 50.0 / 111_320.0;
+    let east = 60.0 / (111_320.0 * anchor.lat_deg.to_radians().cos());
+    let mut request = SurveyRequest::new(vec![
+        [anchor.lat_deg, anchor.lon_deg],
+        [anchor.lat_deg + north, anchor.lon_deg],
+        [anchor.lat_deg + north, anchor.lon_deg + east],
+        [anchor.lat_deg, anchor.lon_deg + east],
+    ]);
+    request.footprint_width_m = Some(40.0);
+    // A 24 m step covers the 20 m beyond the first swath in one more
+    // line: exactly two lines across the 60 m width.
+    request.sidelap = 0.4;
+    request.overshoot_m = 5.0;
+    request.line_bearing_rad = Some(0.0);
+    let options = MissionOptions {
+        plan: MissionPlanRequest::Survey(request),
+        navdata: crate::runtime::MissionNavdataSource::Fixture,
+        anchor,
+        date: None,
+        cruise_height_m: Some(0.0),
+        ownship_source: pilotage_mission::OwnshipSource::SimulationTruth,
+        execution_target: pilotage_mission::ExecutionTarget::Simulator,
+    };
+    spawn_reference_rig(options)
+}
+
+#[cfg(feature = "sim")]
+fn spawn_reference_rig(options: MissionOptions) -> Result<MissionRig, HostError> {
     let plan = prepare(&options)?;
     let start = Instant::now();
     let (engine, adapter) = super::build_reference(RuntimeOptions::default());

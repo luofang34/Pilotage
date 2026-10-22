@@ -76,7 +76,8 @@ impl Default for MissionLimits {
 /// engine itself never reads a clock.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MissionConfig {
-    /// Route string expanded against the navdata snapshot at build.
+    /// Route string expanded against the navdata snapshot at build. A
+    /// survey mission carries no route and leaves it empty.
     pub route: String,
     /// Mission anchor in radians/meters ([`GeodeticPosition`]). The host
     /// converts from the snapshot's degrees exactly once, at plan build

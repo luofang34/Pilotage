@@ -23,7 +23,7 @@ use navigate_guidance::{GuidanceRefusal, VelocityGuidanceConfig};
 use pilotage_mission_core::{
     ActionId, DirectiveReceipt, EngineState as CoreEngineState, FlightAction as CoreFlightAction,
     FlightPlanReference, MissionDocument, MissionEngine as CoreMissionEngine,
-    MissionTerminal as CoreMissionTerminal, PhaseStage, ReceiptResult,
+    MissionTerminal as CoreMissionTerminal, NavigationDataIdentity, PhaseStage, ReceiptResult,
 };
 
 pub use nav_guidance::{NavGuidance, NavQuality};
@@ -36,6 +36,7 @@ use crate::ownship::{OwnshipAltitude, OwnshipSample, TruthRole};
 mod estimate;
 
 use crate::provenance::{MissionPlanRecord, SnapshotProvenance};
+use crate::survey::{SurveyPlanRecord, SurveyRequest, plan_survey};
 use estimate::{EstimateBudget, VehicleEstimate};
 
 /// The single synthesized-GNSS source identity the engine stamps its
@@ -127,22 +128,87 @@ impl MissionEngine {
             waypoints,
         );
         let execution = PlanExecution::new(plan, ExecutionConfig::default())?;
-        let (document, plan_reference) = document::build_document(
-            execution.plan(),
-            &config,
+        let route_input = config.route.clone();
+        let engine = Self::from_execution(
+            execution,
+            config,
             provenance.navigation_data_identity.clone(),
+            document::ROUTE_REVISION_PREFIX,
         )?;
         let record = MissionPlanRecord {
             provenance,
-            route_input: config.route.clone(),
+            route_input,
             waypoint_count: expanded_idents.len(),
             expanded_idents,
-            mission_identity: document.identity.clone(),
+            mission_identity: engine.document.identity.clone(),
         };
+        Ok((engine, record))
+    }
+
+    /// Builds an engine over an area survey of `request` at the configured
+    /// cruise height above the anchor. The plan's identity is the survey
+    /// request itself: no navigation data takes part.
+    ///
+    /// # Errors
+    ///
+    /// [`MissionBuildError::Survey`] when the request does not become a
+    /// plan, and the activation, geodesy, and document errors of
+    /// [`Self::new`].
+    pub fn from_survey(
+        request: &SurveyRequest,
+        config: MissionConfig,
+    ) -> Result<(Self, SurveyPlanRecord), MissionBuildError> {
+        let survey = plan_survey(request, &config.anchor, config.cruise_height_m)?;
+        let identity = NavigationDataIdentity {
+            cycle: "survey".to_owned(),
+            snapshot_id: format!("survey:{}", survey.digest),
+            snapshot_digest: survey.digest,
+        };
+        let idents: Vec<String> = survey
+            .plan
+            .waypoints
+            .iter()
+            .map(|waypoint| waypoint.ident.clone())
+            .collect();
+        let execution =
+            PlanExecution::new(survey.plan, ExecutionConfig::new(survey.capture_radius_m))?;
+        let mut engine = Self::from_execution(
+            execution,
+            config,
+            identity,
+            document::SURVEY_REVISION_PREFIX,
+        )?;
+        // A survey line is flown at cruise speed to its end; the arrival
+        // slowdown of a route would crawl the last 30 m of every line.
+        engine.guidance.arrival_slowdown_radius_m = 2.0 * survey.capture_radius_m;
+        let record = SurveyPlanRecord {
+            digest: survey.digest,
+            line_count: survey.line_count,
+            line_spacing_m: survey.line_spacing_m,
+            footprint_width_m: survey.footprint_width_m,
+            path_length_m: survey.path_length_m,
+            capture_radius_m: survey.capture_radius_m,
+            waypoint_count: idents.len(),
+            idents,
+            mission_identity: engine.document.identity.clone(),
+        };
+        Ok((engine, record))
+    }
+
+    /// The engine over an activated plan: the document, the anchor plane,
+    /// the fusion filter, and the guidance shaped by the config.
+    fn from_execution(
+        execution: PlanExecution,
+        config: MissionConfig,
+        identity: NavigationDataIdentity,
+        revision_prefix: &str,
+    ) -> Result<Self, MissionBuildError> {
+        let (document, plan_reference) =
+            document::build_document(execution.plan(), &config, identity, revision_prefix)?;
         let plane = LocalTangentPlane::new(config.anchor)?;
         let filter = NavigationFilter::new(FusionConfig::default(), config.clock);
         let guidance = guidance_config(&config);
-        let engine = Self {
+        Ok(Self {
             config,
             plane,
             filter,
@@ -161,8 +227,7 @@ impl MissionEngine {
             last_yaw_rad: None,
             last_refusal: None,
             estimate: VehicleEstimate::default(),
-        };
-        Ok((engine, record))
+        })
     }
 
     /// Offers one ownship sample. The configured [`OwnshipSource`] names

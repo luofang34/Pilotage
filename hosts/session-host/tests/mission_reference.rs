@@ -38,7 +38,18 @@ async fn await_status(
     what: &str,
     predicate: impl Fn(&AutomationStatus) -> bool,
 ) -> AutomationStatus {
-    timeout(TEST_TIMEOUT, async {
+    await_status_within(status, TEST_TIMEOUT, what, predicate).await
+}
+
+/// [`await_status`] with its own virtual-time bound, for a flight that is
+/// longer than the arming handshake.
+async fn await_status_within(
+    status: &mut tokio::sync::watch::Receiver<AutomationStatus>,
+    bound: Duration,
+    what: &str,
+    predicate: impl Fn(&AutomationStatus) -> bool,
+) -> AutomationStatus {
+    timeout(bound, async {
         loop {
             {
                 let current = status.borrow_and_update();
@@ -141,6 +152,42 @@ fn assert_guidance_broadcast(guidance: &[wire::NavGuidanceState]) {
         );
         assert_eq!(state.waypoint_count, 3, "the demo route has three fixes");
     }
+}
+
+/// The survey principal arms, flies every line end of the two-line
+/// rectangle in order, and completes; the guidance it broadcasts names
+/// the survey's own waypoints.
+#[tokio::test(start_paused = true)]
+async fn survey_principal_flies_every_line_and_completes() {
+    let rig = runtime::spawn_reference_survey_rig().expect("survey rig spawns");
+    let mut status = rig.status();
+    await_status(&mut status, "arm acceptance", |status| status.arm_accepted).await;
+    let mut observer = rig.observe().await;
+    let guidance = collect_guidance(&mut observer, 2).await;
+    drop(observer);
+    for state in &guidance {
+        assert_eq!(state.waypoint_count, 4, "two lines, two ends each");
+        assert!(
+            state.to_ident.starts_with('L'),
+            "the active waypoint is a survey line end, got {}",
+            state.to_ident
+        );
+    }
+    // Two 60 m lines, a 20 m turn, and the arrivals: a few minutes of
+    // virtual time under the paused clock.
+    let complete = await_status_within(
+        &mut status,
+        Duration::from_secs(600),
+        "survey completion",
+        |status| status.mission_state == Some(MissionState::Complete),
+    )
+    .await;
+    assert_eq!(
+        complete.frames_rejected, 0,
+        "every streamed frame was accepted"
+    );
+    assert!(!complete.fenced && !complete.closed);
+    rig.shutdown().await;
 }
 
 #[tokio::test(start_paused = true)]

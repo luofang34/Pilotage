@@ -18,6 +18,7 @@ pub mod fixture;
 pub mod ownship;
 pub mod policy;
 pub mod provenance;
+pub mod survey;
 
 mod body_frame;
 
@@ -30,3 +31,4 @@ pub use error::MissionBuildError;
 pub use ownship::{OwnshipAltitude, OwnshipSample, TruthRole};
 pub use pilotage_mission_core::ExecutionTarget;
 pub use provenance::{MissionPlanRecord, SnapshotProvenance, decode_snapshot};
+pub use survey::{SurveyError, SurveyPlan, SurveyPlanRecord, SurveyRequest, plan_survey};
