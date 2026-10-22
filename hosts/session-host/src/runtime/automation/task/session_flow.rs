@@ -3,7 +3,7 @@
 //! datagrams (telemetry, rejection notices), decoded with the same wire
 //! vocabulary remote clients read.
 
-use pilotage_mission::{MissionEngine, MissionLimits};
+use pilotage_mission::{MissionEngine, MissionLimits, OwnshipSource};
 use pilotage_protocol::{
     ControlAction, ControlActionResult, FrameRejected, FrameRejectionReason, LeaseRequest,
     LeaseResponse, ProfileActivation, ScopeId, ServerWelcome, wire,
@@ -14,11 +14,17 @@ use tracing::{debug, error, info, warn};
 
 use crate::runtime::HOST_VEHICLE;
 
+use super::super::PlanSource;
 use super::nav_guidance::NavGuidancePublisher;
 use super::{
     ACTIVATION_REVISION, MISSION_SCOPE, MissionTask, NO_DEVICE_DIGEST, PROFILE_DIGEST, PROFILE_ID,
     PROFILE_REVISION, ownship,
 };
+
+/// Height above the launch point, metres, from which a real vehicle counts
+/// as launched. Below it the vehicle is on the ground or in ground effect
+/// and refuses velocity control.
+pub(super) const AIRBORNE_HEIGHT_M: f64 = 2.0;
 
 impl MissionTask {
     /// One reliable bootstrap-stream reply, decoded with the same
@@ -95,14 +101,29 @@ impl MissionTask {
             return false;
         }
         let limits = config.limits;
-        match MissionEngine::new(
-            &plan.navdata.snapshot,
-            plan.navdata.provenance.clone(),
-            config,
-        ) {
-            Ok((engine, record)) => {
+        let built = match &plan.source {
+            PlanSource::Navdata(navdata) => {
+                MissionEngine::new(&navdata.snapshot, navdata.provenance.clone(), config).map(
+                    |(engine, record)| {
+                        info!(route = %record.route_input, "mission plan is a route");
+                        engine
+                    },
+                )
+            }
+            PlanSource::Survey(request) => {
+                MissionEngine::from_survey(request, config).map(|(engine, record)| {
+                    info!(
+                        lines = record.line_count,
+                        waypoints = record.waypoint_count,
+                        "mission plan is an area survey"
+                    );
+                    engine
+                })
+            }
+        };
+        match built {
+            Ok(engine) => {
                 info!(
-                    route = %record.route_input,
                     max_horizontal_mps = limits.max_horizontal_mps,
                     max_vertical_mps = limits.max_vertical_mps,
                     max_yaw_rate_rps = limits.max_yaw_rate_rps,
@@ -129,11 +150,41 @@ impl MissionTask {
             return false;
         }
         self.update(|status| status.activation_sent = true);
+        if self.real_vehicle {
+            self.wait_for_launch();
+            return true;
+        }
+        self.request_lease().await
+    }
+
+    /// Asks for the motion lease.
+    pub(super) async fn request_lease(&mut self) -> bool {
         let lease = DomainEnvelope::Lease(LeaseRequest {
             vehicle: HOST_VEHICLE,
             scope: ScopeId::new(MISSION_SCOPE),
         });
         self.send_message(lease).await
+    }
+
+    /// Holds a real vehicle's mission until its pilot has launched it: the
+    /// mission does not ask for the motion lease on the ground, where the
+    /// vehicle would refuse velocity control, and its phase clocks do not
+    /// run (ADR-0051).
+    pub(super) fn wait_for_launch(&mut self) {
+        self.awaiting_launch = true;
+        self.hold("waiting for the pilot to launch the aircraft");
+        self.update(|status| status.awaiting_launch = true);
+    }
+
+    /// Notes the vehicle airborne: the next tick asks for the lease.
+    fn on_airborne(&mut self, height_m: f64) {
+        self.awaiting_launch = false;
+        self.lease_due = true;
+        info!(
+            height_m,
+            "the aircraft is airborne; the mission asks for the motion lease"
+        );
+        self.update(|status| status.awaiting_launch = false);
     }
 
     fn on_lease_response(&mut self, response: &LeaseResponse) {
@@ -145,11 +196,12 @@ impl MissionTask {
                 generation = response.generation.as_u64(),
                 "mission motion lease granted"
             );
-            self.generation = Some(response.generation);
-            self.update(|status| status.lease_generation = Some(response.generation.as_u64()));
+            self.take_generation(response.generation);
         } else {
+            // A human already holds the scope: the mission waits for a
+            // handover instead of ending (ADR-0051).
             error!(reason = ?response.reason, "mission motion lease denied");
-            self.fence("the motion lease was denied");
+            self.hold("the motion lease was denied; waiting for a handover");
         }
     }
 
@@ -223,8 +275,23 @@ impl MissionTask {
         if !ours {
             return;
         }
-        if let Some(ownship) = ownship::ownship_from_wire(sample, now, self.planar_pose_is_truth) {
-            mission.on_ownship(&ownship, now);
+        let ownship = match self.ownship_source {
+            OwnshipSource::SimulationTruth => {
+                ownship::ownship_from_wire(sample, now, self.planar_pose_is_truth)
+            }
+            OwnshipSource::VehicleEstimate { .. } => {
+                ownship::estimate_from_wire(sample, now, |latitude_rad, longitude_rad, altitude| {
+                    mission.ned_of(latitude_rad, longitude_rad, altitude)
+                })
+            }
+        };
+        let Some(ownship) = ownship else {
+            return;
+        };
+        mission.on_ownship(&ownship, now);
+        let height_m = -ownship.ned[2];
+        if self.awaiting_launch && height_m >= AIRBORNE_HEIGHT_M {
+            self.on_airborne(height_m);
         }
     }
 }
@@ -284,53 +351,4 @@ fn velocity_capability(capabilities: &wire::HostCapabilities) -> Option<&wire::I
 }
 
 #[cfg(test)]
-mod tests {
-    #![allow(clippy::expect_used, clippy::panic)]
-
-    use super::*;
-
-    fn advertised(max_linear: f32) -> wire::HostCapabilities {
-        wire::HostCapabilities {
-            vehicles: vec![wire::VehicleDescriptor {
-                vehicle: Some(wire::VehicleId {
-                    value: HOST_VEHICLE.as_u64(),
-                }),
-                scopes: vec![wire::ScopeDescriptor {
-                    payload: None,
-                    scope: Some(wire::ScopeId {
-                        value: MISSION_SCOPE.to_owned(),
-                    }),
-                    intents: vec![wire::IntentCapability {
-                        family: wire::IntentFamily::Velocity as i32,
-                        max_linear,
-                        ..Default::default()
-                    }],
-                    ..Default::default()
-                }],
-                ..Default::default()
-            }],
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn a_missing_velocity_capability_is_mission_fatal_not_fail_open() {
-        let mut limits = MissionLimits::default();
-        let configured = limits;
-        assert!(!tighten_limits(
-            &mut limits,
-            &wire::HostCapabilities::default()
-        ));
-        assert_eq!(
-            limits, configured,
-            "refusal, not silent flight on unadvertised ceilings"
-        );
-    }
-
-    #[test]
-    fn an_advertised_envelope_tightens_the_configured_ceilings() {
-        let mut limits = MissionLimits::default();
-        assert!(tighten_limits(&mut limits, &advertised(1.0)));
-        assert_eq!(limits.max_horizontal_mps, 1.0);
-    }
-}
+mod tests;

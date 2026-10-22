@@ -1,6 +1,43 @@
 //! Mission configuration with documented defaults.
 
 use navigate_contract::{ClockDomainId, DurationNanos, GeodeticPosition};
+use pilotage_mission_core::ExecutionTarget;
+
+/// Where the engine's ownship position comes from.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum OwnshipSource {
+    /// A simulator's truth oracle. The engine synthesizes a GNSS-class fix
+    /// from each sample and fuses it. This is the default.
+    SimulationTruth,
+    /// The vehicle's own estimate lane, as its flight controller exports
+    /// it under the operational-estimate role. The engine flies the latest
+    /// fresh sample as a pass-through solution, declares it
+    /// estimator-derived, and runs no fusion. The solution never grades
+    /// better than degraded.
+    VehicleEstimate {
+        /// 1-sigma position uncertainty the solution declares per NED
+        /// axis, meters.
+        sigma_m: f64,
+        /// 1-sigma velocity uncertainty the solution declares per NED
+        /// axis, meters per second.
+        velocity_sigma_mps: f64,
+        /// Age past which the latest sample yields no solution.
+        max_age: DurationNanos,
+    },
+}
+
+impl OwnshipSource {
+    /// The vehicle-estimate source with its documented defaults: 3 m
+    /// position, 0.5 m/s velocity, one second of age.
+    #[must_use]
+    pub const fn vehicle_estimate() -> Self {
+        Self::VehicleEstimate {
+            sigma_m: 3.0,
+            velocity_sigma_mps: 0.5,
+            max_age: DurationNanos::from_millis(1_000),
+        }
+    }
+}
 
 /// Ceilings every emitted intent is clamped within.
 ///
@@ -39,7 +76,8 @@ impl Default for MissionLimits {
 /// engine itself never reads a clock.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MissionConfig {
-    /// Route string expanded against the navdata snapshot at build.
+    /// Route string expanded against the navdata snapshot at build. A
+    /// survey mission carries no route and leaves it empty.
     pub route: String,
     /// Mission anchor in radians/meters ([`GeodeticPosition`]). The host
     /// converts from the snapshot's degrees exactly once, at plan build
@@ -67,6 +105,13 @@ pub struct MissionConfig {
     pub frame_interval: DurationNanos,
     /// The clock domain all mission time lives on.
     pub clock: ClockDomainId,
+    /// Where ownship position comes from. Default
+    /// [`OwnshipSource::SimulationTruth`].
+    pub ownship_source: OwnshipSource,
+    /// The execution target the mission document is admitted for.
+    /// Default [`ExecutionTarget::Simulator`]; a physical vehicle needs
+    /// [`ExecutionTarget::RealVehicle`].
+    pub execution_target: ExecutionTarget,
 }
 
 impl MissionConfig {
@@ -86,6 +131,8 @@ impl MissionConfig {
             gnss_sigma_m: 1.5,
             frame_interval: DurationNanos::from_millis(50),
             clock,
+            ownship_source: OwnshipSource::SimulationTruth,
+            execution_target: ExecutionTarget::Simulator,
         }
     }
 }

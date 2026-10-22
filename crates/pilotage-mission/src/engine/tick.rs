@@ -8,10 +8,10 @@ use navigate_contract::{
 use navigate_fpl::SequenceEvent;
 use navigate_guidance::guide_velocity;
 use pilotage_mission_core::{
-    DirectiveReceipt, EngineEvent as CoreEvent, EngineStart, ExecutionTarget,
-    FlightAction as CoreFlightAction, MissionDirective, MissionEngine as CoreMissionEngine,
-    MissionObservation as CoreObservation, MissionTerminal as CoreTerminal, NavigationObservation,
-    ReceiptResult, TickInput, TickOutput as CoreTickOutput, VehicleObservation, WallDeadline,
+    DirectiveReceipt, EngineEvent as CoreEvent, EngineStart, FlightAction as CoreFlightAction,
+    MissionDirective, MissionEngine as CoreMissionEngine, MissionObservation as CoreObservation,
+    MissionTerminal as CoreTerminal, NavigationObservation, ReceiptResult, TickInput,
+    TickOutput as CoreTickOutput, VehicleObservation, WallDeadline,
 };
 use pilotage_protocol::{ControlAction, ControlIntent, ReferenceFrame, VelocityIntent};
 
@@ -24,6 +24,10 @@ use super::{MissionAction, MissionEngine, MissionEvent, MissionOutput, MissionSt
 /// Commanded horizontal speed below which course has no useful direction.
 const YAW_COURSE_FLOOR_MPS: f64 = 0.05;
 
+mod outputs;
+
+use outputs::{failed_output, terminal_output, zero_velocity_intent};
+
 impl MissionEngine {
     /// Advances the operational mission with one caller clock value.
     ///
@@ -33,12 +37,13 @@ impl MissionEngine {
         match self.state() {
             MissionState::Complete => return terminal_output(MissionState::Complete),
             MissionState::Failed => return terminal_output(MissionState::Failed),
+            MissionState::Held => return self.held_output(now),
             MissionState::AwaitSolution
             | MissionState::Arming
             | MissionState::Climb
             | MissionState::Enroute => {}
         }
-        let mut events = Vec::new();
+        let mut events = core::mem::take(&mut self.hold_events);
         let solution = self.publish_solution(now);
         let mut plan_advanced = false;
         if self.state() == MissionState::Enroute {
@@ -101,7 +106,7 @@ impl MissionEngine {
             return None;
         }
         let input = TickInput {
-            simulator_time_ns: now.as_nanos(),
+            simulator_time_ns: self.sequencing_time(now).as_nanos(),
             wall_time_ns: now.as_nanos(),
             observation,
             receipts: self.pending_receipt.take().into_iter().collect(),
@@ -120,8 +125,8 @@ impl MissionEngine {
         let now_ns = now.as_nanos();
         let expires_at_ns = now_ns.saturating_add(OPERATIONAL_WALL_DEADLINE_NS);
         let start = EngineStart {
-            host_target: ExecutionTarget::Simulator,
-            simulator_time_ns: now_ns,
+            host_target: self.config.execution_target,
+            simulator_time_ns: self.sequencing_time(now).as_nanos(),
             wall_time_ns: now_ns,
             wall_deadline: WallDeadline {
                 mission_content_digest: self.document.identity.content_digest,
@@ -276,7 +281,22 @@ impl MissionEngine {
             MissionState::Climb => self.climb_intent(solution),
             MissionState::Enroute => self.follow_plan_intent(solution, now, events),
             MissionState::Complete => Some(zero_velocity_intent()),
-            MissionState::AwaitSolution | MissionState::Arming | MissionState::Failed => None,
+            MissionState::AwaitSolution
+            | MissionState::Arming
+            | MissionState::Held
+            | MissionState::Failed => None,
+        }
+    }
+
+    /// A held tick: the ownship stays fresh for the first resumed tick,
+    /// nothing is commanded, and the hold is announced once.
+    fn held_output(&mut self, now: MonotonicNanos) -> MissionOutput {
+        self.publish_solution(now);
+        MissionOutput {
+            intent: None,
+            action: None,
+            state: MissionState::Held,
+            events: core::mem::take(&mut self.hold_events),
         }
     }
 
@@ -366,9 +386,22 @@ impl MissionEngine {
         }
     }
 
-    /// Publishes the filter solution for `now` and clears stale display data.
+    /// Publishes the solution for `now` and clears stale display data: the
+    /// filter's solution under simulation truth, the latest fresh vehicle
+    /// estimate otherwise.
     fn publish_solution(&mut self, now: MonotonicNanos) -> Option<NavigationSolution> {
-        self.last_solution = self.filter.tick(now);
+        self.last_solution = match self.estimate_budget() {
+            None => self.filter.tick(now),
+            Some(budget) => {
+                let solution = self
+                    .estimate
+                    .solution(now, &self.plane, self.config.clock, budget);
+                if solution.is_none() && self.estimate.has_sample() {
+                    self.counters.estimate_stale = self.counters.estimate_stale.wrapping_add(1);
+                }
+                solution
+            }
+        };
         self.last_solution
     }
 
@@ -450,32 +483,4 @@ impl MissionEngine {
             yaw_rate: yaw_rate as f32,
         })
     }
-}
-
-fn terminal_output(state: MissionState) -> MissionOutput {
-    MissionOutput {
-        intent: (state == MissionState::Complete).then(zero_velocity_intent),
-        action: None,
-        state,
-        events: Vec::new(),
-    }
-}
-
-fn failed_output(events: Vec<MissionEvent>) -> MissionOutput {
-    MissionOutput {
-        intent: None,
-        action: None,
-        state: MissionState::Failed,
-        events,
-    }
-}
-
-fn zero_velocity_intent() -> ControlIntent {
-    ControlIntent::Velocity(VelocityIntent {
-        frame: ReferenceFrame::BodyFrd,
-        vx: 0.0,
-        vy: 0.0,
-        vz: 0.0,
-        yaw_rate: 0.0,
-    })
 }

@@ -23,12 +23,16 @@ pub(super) const FOLLOW_PLAN_PHASE_ID: &str = "follow-plan";
 pub(super) const CLIMB_CAPTURE_MARGIN_M: f64 = 1.0;
 
 const PLAN_DIGEST_DOMAIN: &[u8] = b"pilotage.flight-plan.v1\0";
-const MISSION_REVISION_PREFIX: &str = "operational-route-v1";
+/// Revision prefix of a mission built from a navdata route.
+pub(super) const ROUTE_REVISION_PREFIX: &str = "operational-route-v1";
+/// Revision prefix of a mission built from an area survey request.
+pub(super) const SURVEY_REVISION_PREFIX: &str = "operational-survey-v1";
 
 pub(super) fn build_document(
     plan: &FlightPlan,
     config: &MissionConfig,
     navigation_data_identity: NavigationDataIdentity,
+    revision_prefix: &str,
 ) -> Result<(MissionDocument, FlightPlanReference), MissionBuildError> {
     let plan_content_digest = plan_digest(plan)?;
     let plan_reference = FlightPlanReference {
@@ -36,22 +40,33 @@ pub(super) fn build_document(
         plan_content_digest,
         navigation_data_identity: navigation_data_identity.clone(),
     };
-    let revision_id = format!("{MISSION_REVISION_PREFIX}:{plan_content_digest}");
+    let revision_id = format!("{revision_prefix}:{plan_content_digest}");
     let document = MissionDocument::new(
         revision_id,
         navigation_data_identity,
         ExecutionPolicy {
-            target: ExecutionTarget::Simulator,
+            target: config.execution_target,
             retry_limit: OPERATIONAL_RETRY_LIMIT,
             receipt_timeout_ns: OPERATIONAL_RECEIPT_TIMEOUT_NS,
         },
-        vec![
-            arm_phase(),
-            climb_phase(config),
-            follow_plan_phase(plan_reference.clone()),
-        ],
+        phases(config, plan_reference.clone()),
     )?;
     Ok((document, plan_reference))
+}
+
+/// The phases the mission flies. A simulator's vehicle is armed by the
+/// mission; a real vehicle is armed and launched by its pilot, so its
+/// mission starts from the hover with the climb (ADR-0051).
+fn phases(config: &MissionConfig, plan: FlightPlanReference) -> Vec<MissionPhase> {
+    let mut phases = Vec::with_capacity(3);
+    if config.execution_target == ExecutionTarget::Simulator {
+        phases.push(arm_phase());
+    }
+    // The first phase waits for a valid solution; later phases follow on.
+    let first = phases.is_empty();
+    phases.push(climb_phase(config, first));
+    phases.push(follow_plan_phase(plan));
+    phases
 }
 
 fn arm_phase() -> MissionPhase {
@@ -73,8 +88,13 @@ fn arm_phase() -> MissionPhase {
     }
 }
 
-fn climb_phase(config: &MissionConfig) -> MissionPhase {
+fn climb_phase(config: &MissionConfig, first: bool) -> MissionPhase {
     let target_altitude_m = config.anchor.altitude_m + config.cruise_height_m;
+    let entry = if first {
+        MissionCondition::Navigation(NavigationCondition::GuidanceValid { expected: true })
+    } else {
+        MissionCondition::Always {}
+    };
     MissionPhase {
         id: CLIMB_PHASE_ID.to_owned(),
         required_capabilities: vec![
@@ -82,7 +102,7 @@ fn climb_phase(config: &MissionConfig) -> MissionPhase {
             MissionCapability::FlightControl,
             MissionCapability::NavigationState,
         ],
-        entry_conditions: vec![MissionCondition::Always {}],
+        entry_conditions: vec![entry],
         action: MissionAction::Flight(FlightAction::Climb { target_altitude_m }),
         cleanup_actions: Vec::new(),
         completion_conditions: vec![MissionCondition::Navigation(

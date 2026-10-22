@@ -9,8 +9,14 @@
 //! each role may become.
 
 use navigate_contract::MonotonicNanos;
-use pilotage_mission::{OwnshipSample, TruthRole};
+use pilotage_geo::{HorizontalDatum, VerticalDatum};
+use pilotage_mission::{OwnshipAltitude, OwnshipSample, TruthRole};
 use pilotage_protocol::wire;
+
+/// Estimator authorization bit for position.
+const VALID_POSITION: u32 = 0b0100;
+/// Estimate quality the vehicle grades unusable.
+const QUALITY_UNUSABLE: u32 = 2;
 
 /// Converts one wire telemetry sample into an ownship sample, preferring
 /// the simulation-truth group, then stamped avionics kinematics, then —
@@ -133,6 +139,94 @@ fn from_pose(sample: &wire::TelemetrySample, acquired_at: MonotonicNanos) -> Opt
     })
 }
 
+/// Converts one wire telemetry sample into an ownship sample under the
+/// vehicle-estimate source: the vehicle's own fix becomes NED from the
+/// mission anchor through `ned_of`, and the stamped kinematics group
+/// supplies the velocity. The sample is admitted only when the vehicle's
+/// estimator status authorizes its position and grades it usable, and
+/// when both the fix and the kinematics ride the estimate role. Yaw comes
+/// from a canonical attitude when one is stamped, else from the reported
+/// Euler heading the vehicle states; absent is absent.
+pub(super) fn estimate_from_wire(
+    sample: &wire::TelemetrySample,
+    received_at: MonotonicNanos,
+    ned_of: impl Fn(f64, f64, OwnshipAltitude) -> [f64; 3],
+) -> Option<OwnshipSample> {
+    let acquired_at = sample
+        .observed_at
+        .as_ref()
+        .map_or(received_at, |stamp| MonotonicNanos::from_nanos(stamp.nanos));
+    let avionics = sample.avionics.as_ref()?;
+    avionics.estimator_status_stamp.as_ref()?;
+    if avionics.valid_flags & VALID_POSITION == 0 || avionics.quality >= QUALITY_UNUSABLE {
+        return None;
+    }
+    let kinematics = avionics.kinematics_stamp.as_ref()?;
+    let fix_stamp = avionics.geodetic_stamp.as_ref()?;
+    if role_from_wire(kinematics.role)? != TruthRole::OperationalEstimate
+        || role_from_wire(fix_stamp.role)? != TruthRole::OperationalEstimate
+    {
+        return None;
+    }
+    let fix = avionics.geodetic.as_ref()?;
+    let datum = HorizontalDatum::from_u8(u8::try_from(fix.horizontal_datum).ok()?)?;
+    if datum != HorizontalDatum::Wgs84 {
+        return None;
+    }
+    let altitude = estimate_altitude(fix)?;
+    let yaw_rad = avionics
+        .attitude_stamp
+        .as_ref()
+        .map(|_| {
+            quat_yaw(
+                avionics.quat_w,
+                avionics.quat_x,
+                avionics.quat_y,
+                avionics.quat_z,
+            )
+        })
+        .or_else(|| reported_yaw(avionics.reported_euler.as_ref()?));
+    Some(OwnshipSample {
+        ned: ned_of(
+            fix.latitude_deg.to_radians(),
+            fix.longitude_deg.to_radians(),
+            altitude,
+        ),
+        ned_velocity: [
+            f64::from(avionics.vel_n_mps),
+            f64::from(avionics.vel_e_mps),
+            f64::from(avionics.vel_d_mps),
+        ],
+        yaw_rad,
+        role: TruthRole::OperationalEstimate,
+        acquired_at,
+        sequence: fix_stamp.sequence,
+    })
+}
+
+/// The vertical reading of a wire fix the mission can place: an
+/// ellipsoidal height directly, a declared local-relative height as height
+/// above the anchor. Every other datum has no declared conversion here.
+fn estimate_altitude(fix: &wire::GeodeticFix) -> Option<OwnshipAltitude> {
+    match VerticalDatum::from_u8(u8::try_from(fix.vertical_datum).ok()?)? {
+        VerticalDatum::Ellipsoid => Some(OwnshipAltitude::Ellipsoid(fix.height_m)),
+        VerticalDatum::LocalRelative if fix.local_origin != 0 => {
+            Some(OwnshipAltitude::AboveAnchor(fix.height_m))
+        }
+        _ => None,
+    }
+}
+
+/// The heading a reported Euler attitude states, when it is stamped and
+/// finite.
+fn reported_yaw(attitude: &wire::ReportedEulerAttitude) -> Option<f64> {
+    attitude.stamp.as_ref()?;
+    attitude
+        .yaw_rad
+        .is_finite()
+        .then(|| f64::from(attitude.yaw_rad))
+}
+
 /// Maps a wire source role onto the mission vocabulary; roles the mission
 /// has no reading for (video, payload device) yield nothing.
 fn role_from_wire(role: i32) -> Option<TruthRole> {
@@ -157,91 +251,4 @@ fn quat_yaw(w: f32, x: f32, y: f32, z: f32) -> f64 {
 }
 
 #[cfg(test)]
-mod tests {
-    #![allow(clippy::expect_used, clippy::panic)]
-
-    use super::*;
-
-    fn now() -> MonotonicNanos {
-        MonotonicNanos::from_nanos(1_000_000)
-    }
-
-    fn stamped_kinematics(role: wire::SourceRole) -> wire::TelemetrySample {
-        wire::TelemetrySample {
-            flight_procedure: None,
-            payload: None,
-            avionics: Some(wire::AvionicsState {
-                baro_alt_m: 0.0,
-                baro_stamp: None,
-                pos_n_m: 1.0,
-                pos_e_m: 2.0,
-                pos_d_m: -3.0,
-                kinematics_stamp: Some(wire::MeasurementStamp {
-                    role: role as i32,
-                    sequence: 7,
-                    ..Default::default()
-                }),
-                ..Default::default()
-            }),
-            // A pose rides along so a fall-through would have something
-            // to upgrade — the tests below prove it never does.
-            pose: Some(wire::Pose2d {
-                x_m: 9.0,
-                y_m: 9.0,
-                heading_rad: 1.0,
-            }),
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn an_unreadable_stamped_role_is_refused_not_upgraded_to_pose_truth() {
-        let sample = stamped_kinematics(wire::SourceRole::NavigationSolution);
-        assert_eq!(ownship_from_wire(&sample, now(), true), None);
-        assert_eq!(ownship_from_wire(&sample, now(), false), None);
-    }
-
-    #[test]
-    fn a_planar_pose_is_truth_only_by_declaration() {
-        let sample = wire::TelemetrySample {
-            flight_procedure: None,
-            payload: None,
-            pose: Some(wire::Pose2d {
-                x_m: 4.0,
-                y_m: 5.0,
-                heading_rad: 0.5,
-            }),
-            ..Default::default()
-        };
-        let declared =
-            ownship_from_wire(&sample, now(), true).expect("declared planar truth converts");
-        assert_eq!(declared.role, TruthRole::SimulationTruth);
-        assert_eq!(declared.yaw_rad, Some(0.5));
-        assert_eq!(ownship_from_wire(&sample, now(), false), None);
-    }
-
-    #[test]
-    fn kinematics_without_an_attitude_group_carries_no_yaw() {
-        let sample = stamped_kinematics(wire::SourceRole::SimulationTruth);
-        let ownship = ownship_from_wire(&sample, now(), false).expect("truth role converts");
-        assert_eq!(
-            ownship.yaw_rad, None,
-            "a substituted zero would read as due north"
-        );
-        assert_eq!(ownship.ned, [1.0, 2.0, -3.0]);
-    }
-
-    #[test]
-    fn an_attitude_group_supplies_the_yaw() {
-        let mut sample = stamped_kinematics(wire::SourceRole::SimulationTruth);
-        let avionics = sample.avionics.as_mut().expect("fixture carries avionics");
-        avionics.quat_w = 1.0;
-        avionics.attitude_stamp = Some(wire::MeasurementStamp::default());
-        let ownship = ownship_from_wire(&sample, now(), false).expect("truth role converts");
-        assert_eq!(
-            ownship.yaw_rad,
-            Some(0.0),
-            "identity quaternion is a zero yaw"
-        );
-    }
-}
+mod tests;
