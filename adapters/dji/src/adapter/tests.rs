@@ -10,6 +10,7 @@ mod keyframe;
 mod mapping;
 mod mobile;
 mod model;
+mod observation_source;
 mod observed;
 mod profile;
 mod recovery;

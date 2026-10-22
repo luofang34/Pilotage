@@ -13,6 +13,7 @@ mod flight;
 mod input;
 mod motion;
 mod observation;
+mod observation_source;
 mod recording;
 #[cfg(test)]
 mod tests;
@@ -38,6 +39,7 @@ use connection::{Connection, Transport};
 use control::ControlState;
 pub use input::EncodedVideoChunk;
 use observation::Observations;
+pub use observation_source::DjiTelemetrySource;
 pub use video::EncodedVideoStream;
 pub use virtual_stick::{
     DjiVirtualStickDiagnosticError, DjiVirtualStickDiagnosticPhase,
@@ -136,8 +138,9 @@ impl DjiAdapter {
 
     /// Open an attachment on the session host's monotonic time origin.
     ///
-    /// Reconnected attachments need a new identity, but their host-clock
-    /// measurements must remain comparable with the session's timestamps.
+    /// Reconnected attachments need new command and payload identities. Pass
+    /// the last telemetry source to advance the aircraft report epoch within
+    /// the same host session. Keep the host clock origin unchanged.
     ///
     /// # Errors
     /// Returns the attachment, capture, or identity error from opening the device.
@@ -145,15 +148,26 @@ impl DjiAdapter {
         vehicle: VehicleId,
         config: DjiConfig,
         origin: Instant,
+        previous: Option<DjiTelemetrySource>,
     ) -> Result<Self, DjiAdapterError> {
-        Self::start_blocking(vehicle, config).map(|adapter| adapter.with_host_clock(origin))
+        Self::start_blocking(vehicle, config)
+            .map(|adapter| adapter.with_host_clock(origin, previous))
     }
 
-    fn with_host_clock(mut self, origin: Instant) -> Self {
+    /// The host retains this source across attachments within one vehicle session.
+    #[must_use]
+    pub fn telemetry_source(&self) -> DjiTelemetrySource {
+        self.observations.telemetry_source
+    }
+
+    fn with_host_clock(mut self, origin: Instant, previous: Option<DjiTelemetrySource>) -> Self {
         // Opening has not read or written application data, so no evidence uses
         // the constructor's local clock yet. Both writes and reports use this origin.
         self.origin = origin;
         self.connection.origin = origin;
+        if let Some(previous) = previous {
+            self.observations.telemetry_source = previous.next_attachment();
+        }
         self
     }
 

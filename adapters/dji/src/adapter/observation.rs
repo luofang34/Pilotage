@@ -7,7 +7,7 @@ use turret_dji::Mini3ControlProfile;
 
 use crate::{DumlFrame, GimbalAngles, RouteAddress};
 
-use super::{airframe::AirframeObservations, battery::BatteryObservations};
+use super::{DjiTelemetrySource, airframe::AirframeObservations, battery::BatteryObservations};
 
 const MAX_AGE: Duration = Duration::from_millis(300);
 
@@ -23,6 +23,7 @@ pub(super) struct Observations {
     pub(super) consecutive: u8,
     profile: Mini3ControlProfile,
     incarnation: SourceIncarnation,
+    pub(super) telemetry_source: DjiTelemetrySource,
     sequence: u32,
     published_sequence: u32,
     battery: BatteryObservations,
@@ -67,6 +68,7 @@ impl Observations {
             consecutive: 0,
             profile,
             incarnation,
+            telemetry_source: DjiTelemetrySource::new(incarnation),
             sequence: 0,
             published_sequence: 0,
             battery: BatteryObservations::default(),
@@ -207,10 +209,12 @@ impl Observations {
         connection_valid: bool,
     ) -> TelemetryBatch {
         let payload = self.sample_payload(now, connection_valid);
-        let battery = self.battery.sample(now, connection_valid, self.incarnation);
+        let battery = self
+            .battery
+            .sample(now, connection_valid, self.telemetry_source);
         let airframe = self
             .airframe
-            .sample(now, connection_valid, self.incarnation);
+            .sample(now, connection_valid, self.telemetry_source);
         if payload.is_none() && battery.is_none() && airframe.is_none() {
             return TelemetryBatch::default();
         }

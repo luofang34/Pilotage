@@ -4,7 +4,9 @@ use std::time::Instant;
 use pilotage_adapter_api::{
     AdapterCapabilities, ExecutionMode, FlightProcedureSample, VehicleAdapter, VehicleDescriptor,
 };
-use pilotage_adapter_dji::{DjiAdapter, DjiAttachment, DjiConfig, EncodedVideoStream};
+use pilotage_adapter_dji::{
+    DjiAdapter, DjiAttachment, DjiConfig, DjiTelemetrySource, EncodedVideoStream,
+};
 use pilotage_protocol::{VehicleClass, VehicleId};
 use tokio::sync::mpsc;
 
@@ -25,6 +27,7 @@ pub(in crate::runtime) struct ManagedDji {
     config: DjiHostConfig,
     virtual_stick: bool,
     adapter: Option<DjiAdapter>,
+    telemetry_source: Option<DjiTelemetrySource>,
     identity: Option<u64>,
     #[cfg(target_os = "macos")]
     selection: Selection,
@@ -61,6 +64,7 @@ impl ManagedDji {
             streams,
             origin,
             adapter: None,
+            telemetry_source: None,
             identity: None,
             #[cfg(target_os = "macos")]
             selection: Selection::default(),
@@ -88,6 +92,7 @@ impl ManagedDji {
     ) -> Result<(), DjiHostError> {
         let vehicle = self.vehicle;
         let origin = self.origin;
+        let previous = self.telemetry_source;
         let config = DjiConfig {
             attachment,
             capture_path,
@@ -98,7 +103,7 @@ impl ManagedDji {
         };
         self.pending = Some(Operation::start(move || {
             Completion::Opened(
-                DjiAdapter::start_with_host_clock_blocking(vehicle, config, origin)
+                DjiAdapter::start_with_host_clock_blocking(vehicle, config, origin, previous)
                     .map(Box::new)
                     .map_err(DjiHostError::Adapter),
             )
@@ -117,6 +122,7 @@ impl ManagedDji {
             );
             return;
         }
+        self.telemetry_source = Some(adapter.telemetry_source());
         self.adapter = Some(adapter);
         tracing::info!(identity = ?self.identity, "DJI transport open; fresh aircraft evidence and control authority required");
     }
