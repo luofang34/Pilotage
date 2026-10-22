@@ -1,12 +1,11 @@
-// Reorder-safe avionics ingestion — thin wrappers over the shared
-// feeder core (#252). Publication/receipt time is transport metadata:
-// freshness advances only when a source group presents a new
-// epoch/sequence. Every semantic judgement (identity pinning,
-// incarnation policy, wrap-safe ordering, coherence, the fail-closed
-// authorization regimes) runs in indicate-instrument-feeder via the
-// instrument wasm build; this module keeps decode-shape validation of
-// the script's own object dialect, marshalling, and the constructor
-// contracts its consumers rely on.
+// Reorder-safe avionics ingestion: thin wrappers over the shared feeder
+// core. Publication/receipt time is transport metadata: freshness advances
+// only when a source group presents a new epoch/sequence. Every semantic
+// judgement (identity pinning, incarnation policy, wrap-safe ordering,
+// coherence, the fail-closed authorization regimes) runs in
+// indicate-instrument-feeder via the instrument wasm build; this module
+// keeps decode-shape validation of the script's own object dialect,
+// marshalling, and the constructor contracts its consumers rely on.
 
 import { firstFault } from "./wire-bounds.js";
 import { bindings, deepFreeze } from "./feeder-wasm.js";
