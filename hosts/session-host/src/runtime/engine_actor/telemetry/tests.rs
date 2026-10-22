@@ -10,6 +10,8 @@ use pilotage_timing::{MonoTimestamp, SimTick};
 
 use super::{avionics_to_wire, sample_to_wire};
 
+mod mission_estimate;
+
 /// One telemetry sample carrying only the estimate under test.
 fn one_vehicle_sample(avionics: AvionicsSample) -> TelemetrySample {
     TelemetrySample {

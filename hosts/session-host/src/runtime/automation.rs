@@ -10,7 +10,7 @@
 //! so host shutdown proceeds exactly as without a mission and the task
 //! drains out behind the actor.
 
-mod ownship;
+pub(crate) mod ownship;
 mod task;
 
 use navigate_contract::{ClockDomainId, GeodeticPosition};
@@ -64,6 +64,9 @@ pub struct AutomationStatus {
     pub held: bool,
     /// A real vehicle's mission is waiting for its pilot to launch it.
     pub awaiting_launch: bool,
+    /// A real vehicle's mission is waiting for the vehicle to advertise
+    /// velocity control.
+    pub awaiting_capabilities: bool,
     /// Lease requests scheduled while another principal held the scope.
     pub lease_retries: u32,
     /// Transfers back that resumed the mission.

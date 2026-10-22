@@ -2,7 +2,7 @@
 
 use super::*;
 
-fn advertised(max_linear: f32) -> wire::HostCapabilities {
+pub(super) fn advertised(max_linear: f32) -> wire::HostCapabilities {
     wire::HostCapabilities {
         vehicles: vec![wire::VehicleDescriptor {
             vehicle: Some(wire::VehicleId {
@@ -198,6 +198,65 @@ mod launch {
         // The human who holds the scope releases it: the mission asks at once.
         task.on_revoked_event(&released_by(21));
         assert!(task.lease_due, "a foreign release re-requests the lease");
+    }
+
+    /// A real-vehicle survey plan as the host prepares it from options.
+    fn survey_plan() -> crate::runtime::automation::MissionPlan {
+        use crate::runtime::{MissionNavdataSource, MissionOptions, MissionPlanRequest};
+        let request = SurveyRequest::new(vec![
+            [LAT_DEG, LON_DEG],
+            [LAT_DEG + 0.002, LON_DEG],
+            [LAT_DEG + 0.002, LON_DEG + 0.002],
+            [LAT_DEG, LON_DEG + 0.002],
+        ]);
+        let options = MissionOptions {
+            plan: MissionPlanRequest::Survey(request),
+            navdata: MissionNavdataSource::Fixture,
+            anchor: pilotage_mission::fixture::GeoPointDegrees {
+                lat_deg: LAT_DEG,
+                lon_deg: LON_DEG,
+                alt_m: 20.0,
+            },
+            date: None,
+            cruise_height_m: Some(110.0),
+            ownship_source: OwnshipSource::vehicle_estimate(),
+            execution_target: ExecutionTarget::RealVehicle,
+            cruise_mps: None,
+        };
+        crate::runtime::automation::prepare(&options).expect("the survey plans")
+    }
+
+    #[tokio::test]
+    async fn a_late_velocity_capability_starts_the_waiting_mission() {
+        use pilotage_protocol::{ServerWelcome, SessionId};
+        let (engine_tx, _engine_rx) = mpsc::channel(8);
+        let (status_tx, status) = watch::channel(AutomationStatus::default());
+        let mut task = MissionTask::new(
+            engine_tx.downgrade(),
+            tokio::time::Instant::now(),
+            survey_plan(),
+            status_tx,
+            false,
+        );
+        let welcome = ServerWelcome {
+            session: SessionId::new(5),
+            principal: PrincipalId::new(9),
+            host_capabilities: wire::HostCapabilities::default(),
+            scope_holders: Vec::new(),
+        };
+        assert!(
+            task.on_welcome(welcome).await,
+            "a bare welcome keeps the task alive"
+        );
+        assert!(!task.fenced && task.plan.is_some() && task.mission.is_none());
+        assert!(status.borrow().awaiting_capabilities);
+        assert!(task.on_capabilities(&super::advertised(5.0)).await);
+        assert!(task.plan.is_none() && task.mission.is_some());
+        assert!(
+            task.held && task.awaiting_launch,
+            "started, waiting for the launch"
+        );
+        assert!(!status.borrow().awaiting_capabilities && status.borrow().activation_sent);
     }
 
     #[tokio::test]
