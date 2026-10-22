@@ -51,7 +51,7 @@ impl ManagedDji {
         #[cfg(target_os = "macos")]
         let events = if matches!(config.attachment, AttachmentSelection::AutoUsb) {
             Some(
-                pilotage_dji_usb::UsbEvents::subscribe_blocking()
+                pilotage_dji_usb::UsbEvents::subscribe_access_blocking(config.usb_ground_recovery)
                     .map_err(DjiHostError::UsbDiscovery)?,
             )
         } else {
@@ -148,6 +148,23 @@ impl ManagedDji {
         }
     }
 
+    fn connection_label(&self) -> &'static str {
+        #[cfg(target_os = "macos")]
+        if let Some(events) = &self.events {
+            use pilotage_dji_usb::UsbAccessStatus as State;
+            return match events.access_status_cached() {
+                State::Waiting => "DJI · waiting for connection",
+                State::AuthorizationRequired => "DJI · unlock or authorize this Mac",
+                State::Ambiguous => "DJI · select one connection",
+                State::Handshake => "DJI · connecting",
+                State::DataInterfacePresent => "DJI · opening data interface",
+                State::ReconnectRequired => "DJI · handshake timed out; reconnect required",
+                State::Blocked => "DJI · USB access unavailable",
+            };
+        }
+        "DJI · waiting for USB"
+    }
+
     fn offline_capabilities(&self) -> AdapterCapabilities {
         AdapterCapabilities {
             execution: ExecutionMode {
@@ -159,7 +176,7 @@ impl ManagedDji {
                 id: self.vehicle,
                 class: VehicleClass::Multicopter,
                 heading_reference: None,
-                display_name: "DJI · waiting for USB".into(),
+                display_name: self.connection_label().into(),
                 scopes: Vec::new(),
                 link_loss_actions: Vec::new(),
             }],
@@ -200,6 +217,12 @@ impl ManagedDji {
         let Some(registry_id) = selected else {
             return;
         };
+        if self.events.as_ref().is_some_and(|events| {
+            events.access_status_cached() != pilotage_dji_usb::UsbAccessStatus::DataInterfacePresent
+        }) {
+            self.selection.defer(Some(registry_id));
+            return;
+        }
         let mut path = self.config.capture_path.as_os_str().to_os_string();
         path.push(format!(".usb-{registry_id:016x}.jsonl"));
         self.identity = Some(registry_id);
@@ -276,6 +299,12 @@ impl ManagedDji {
 
     fn update_blocking(&mut self) {
         self.poll_operation();
+        #[cfg(target_os = "macos")]
+        if let Some(events) = &self.events {
+            events.permit_handshake(
+                self.adapter.is_none() && self.pending.is_none() && !self.blocked,
+            );
+        }
         if self
             .adapter
             .as_ref()

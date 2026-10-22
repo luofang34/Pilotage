@@ -122,9 +122,20 @@ Keep the host running when you close or reopen a client. Client disconnects
 release control authority; they do not close USB. A new USB connection
 starts fresh protocol and video state. It does not replay commands.
 An interrupted flight action retains its unknown result.
-The host does not run the upper-port bootstrap procedure or change the USB
-role or device configuration. Connecting the cable alone does not ensure
-that the required profile is present.
+The host prepares the upper-port handshake on a separate connection task.
+It discovers the port and controller from the current system topology.
+An enumerated data interface opens directly. A client restart does not close
+that interface while the host remains active. An ambiguous connection is not
+selected automatically. macOS must authorize the connection.
+The handshake requires the AppleT8122USBXDCI controller and the
+`ncmAuxBringup` configuration. Other controller profiles are not enabled.
+
+For a missed initial handshake, set `PILOTAGE_DJI_USB_GROUND_RECOVERY=1`
+only when the aircraft is on the ground with stopped motors. This permits
+one software role cycle on the startup connection. The permission expires
+after five seconds and does not carry to a new connection. The receiver is
+ready before the cycle starts. A failed attempt does not repeat; the host
+reports that a reconnect is required. Do not enable this option in flight.
 
 ```sh
 PILOTAGE_DJI_USB=auto \
@@ -157,10 +168,11 @@ An invalid attachment or an unsupported platform fails startup. The host
 does not select another device or transport.
 
 This adapter exposes a DJI Mini 3 experimental object with gimbal control.
-Continuous flight and positioning control are not implemented.
+Flight velocity control requires the separate experimental opt-in below.
 Keep the propellers removed for bench tests.
 The default `observed` control mode requires fresh gimbal observations before
-it sends a pitch command. Pitch targets are limited to -90 through 0 degrees.
+it sends a pitch command. Observed pitch targets use the Mini 3 range of
+-90 through +60 degrees.
 The host limits target planning to 30 degrees per second. This is not a
 measured device speed limit. Recenter continues while control input and
 feedback remain valid. The host does not repeat an unchanged target after
