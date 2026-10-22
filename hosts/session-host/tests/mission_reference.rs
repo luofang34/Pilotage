@@ -18,8 +18,12 @@
 use std::time::Duration;
 
 use pilotage_mission::MissionState;
-use pilotage_protocol::wire;
-use pilotage_session_host::runtime::{self, AutomationStatus, TelemetryObserver};
+use pilotage_protocol::{
+    ClientHello, SESSION_PROTOCOL_VERSION, ScopeId, ScopeTransferAccept, ScopeTransferOffer,
+    ScopeTransferRequest, VehicleId, wire,
+};
+use pilotage_session::DomainEnvelope;
+use pilotage_session_host::runtime::{self, AutomationStatus, Participant, TelemetryObserver};
 use prost::Message;
 use tokio::time::timeout;
 
@@ -152,6 +156,141 @@ fn assert_guidance_broadcast(guidance: &[wire::NavGuidanceState]) {
         );
         assert_eq!(state.waypoint_count, 3, "the demo route has three fixes");
     }
+}
+
+/// Decodes one reliable or authority envelope the way the principal does.
+fn envelope_of(bytes: &[u8]) -> Option<wire::Envelope> {
+    pilotage_protocol::decode_envelope_length_delimited(bytes)
+        .ok()
+        .map(|(envelope, _rest)| envelope)
+}
+
+/// Opens the operator's session and returns its principal id.
+async fn admit(operator: &mut Participant) -> u64 {
+    assert!(
+        operator
+            .send(DomainEnvelope::Hello(ClientHello {
+                protocol_version: SESSION_PROTOCOL_VERSION,
+                client_name: "operator".to_owned(),
+                join_token: Vec::new(),
+            }))
+            .await
+    );
+    timeout(TEST_TIMEOUT, async {
+        loop {
+            let bytes = operator
+                .next_bootstrap()
+                .await
+                .expect("the actor answers the hello");
+            if let Some(wire::envelope::Payload::ServerWelcome(welcome)) =
+                envelope_of(&bytes).and_then(|envelope| envelope.payload)
+            {
+                return welcome
+                    .principal
+                    .expect("the welcome names the principal")
+                    .value;
+            }
+        }
+    })
+    .await
+    .expect("the welcome arrives")
+}
+
+/// Awaits the offer of the motion scope to `to`, returning the offering
+/// principal.
+async fn await_offer(operator: &mut Participant, to: u64) -> u64 {
+    timeout(TEST_TIMEOUT, async {
+        loop {
+            let bytes = operator
+                .next_authority()
+                .await
+                .expect("the actor keeps broadcasting authority events");
+            let Some(wire::envelope::Payload::AuthorityEvent(event)) =
+                envelope_of(&bytes).and_then(|envelope| envelope.payload)
+            else {
+                continue;
+            };
+            if let Some(wire::authority_event::Event::ScopeTransferOffered(offered)) = event.event
+                && offered.to_principal.as_ref().is_some_and(|p| p.value == to)
+            {
+                return offered
+                    .from_principal
+                    .expect("the offer names the holder")
+                    .value;
+            }
+        }
+    })
+    .await
+    .expect("the holder offers the scope")
+}
+
+/// An operator asks for the motion scope while the survey is enroute; the
+/// principal offers it and holds. The operator hands it back; the
+/// principal accepts, resumes, and completes the survey.
+#[tokio::test(start_paused = true)]
+async fn an_operator_takes_the_survey_over_and_hands_it_back() {
+    let rig = runtime::spawn_reference_survey_rig().expect("survey rig spawns");
+    let mut status = rig.status();
+    await_status(&mut status, "enroute guidance", |status| {
+        status.mission_state == Some(MissionState::Enroute)
+    })
+    .await;
+    let mut operator = rig.participant(77).await;
+    let me = admit(&mut operator).await;
+    let (vehicle, scope) = (VehicleId::new(1), ScopeId::new("vehicle.motion"));
+    assert!(
+        operator
+            .send(DomainEnvelope::TransferRequest(ScopeTransferRequest {
+                vehicle,
+                scope: scope.clone(),
+            }))
+            .await
+    );
+    let mission_principal = await_offer(&mut operator, me).await;
+    assert_ne!(mission_principal, me);
+    assert!(
+        operator
+            .send(DomainEnvelope::TransferAccept(ScopeTransferAccept {
+                vehicle,
+                scope: scope.clone(),
+            }))
+            .await
+    );
+    let held = await_status(&mut status, "the mission to hold", |status| status.held).await;
+    assert!(!held.fenced, "a takeover holds, it does not fence");
+    assert_eq!(held.lease_generation, None);
+    assert_eq!(held.offers, 1);
+
+    assert!(
+        operator
+            .send(DomainEnvelope::TransferOffer(ScopeTransferOffer {
+                vehicle,
+                scope,
+                to: pilotage_protocol::PrincipalId::new(mission_principal),
+            }))
+            .await
+    );
+    // The operator's queue is drained no further: a client the actor
+    // cannot reach is evicted on its next send, as a remote connection
+    // would be. The offer is queued ahead of that eviction.
+    drop(operator);
+    let resumed = await_status(&mut status, "the mission to resume", |status| {
+        !status.held && status.resumes == 1
+    })
+    .await;
+    assert!(resumed.lease_generation.is_some());
+    let complete = await_status_within(
+        &mut status,
+        Duration::from_secs(600),
+        "survey completion after the resume",
+        |status| status.mission_state == Some(MissionState::Complete),
+    )
+    .await;
+    assert_eq!(
+        complete.frames_rejected, 0,
+        "the neutral first frame and every later frame were accepted"
+    );
+    rig.shutdown().await;
 }
 
 /// The survey principal arms, flies every line end of the two-line

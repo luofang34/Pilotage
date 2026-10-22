@@ -16,6 +16,10 @@ pub enum MissionState {
     Climb,
     /// Flying the plan under velocity guidance.
     Enroute,
+    /// A human holds the motion scope. The mission commands nothing, keeps
+    /// its ownship fresh, and pauses its sequencing clock until the host
+    /// resumes it.
+    Held,
     /// The plan is complete; every tick commands zero velocity so the
     /// adapter's brake-then-hold takes over.
     Complete,
@@ -70,6 +74,13 @@ pub enum MissionEvent {
     },
     /// The final waypoint captured; emitted exactly once.
     MissionComplete,
+    /// The host held the mission: a human took the motion scope.
+    MissionHeld,
+    /// The host resumed the mission after a hold of this length.
+    MissionResumed {
+        /// How long the mission was held, nanoseconds on the engine clock.
+        held_ns: u64,
+    },
     /// The sequencing core stopped the mission with a typed result.
     MissionFailed {
         /// The typed core terminal result.

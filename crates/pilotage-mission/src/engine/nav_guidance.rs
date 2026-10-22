@@ -90,6 +90,7 @@ impl MissionEngine {
         match self.state() {
             MissionState::AwaitSolution
             | MissionState::Arming
+            | MissionState::Held
             | MissionState::Complete
             | MissionState::Failed => None,
             MissionState::Climb | MissionState::Enroute => {

@@ -72,6 +72,32 @@ The host tightens the mission ceilings to the velocity envelope the vehicle
 advertises before it builds the engine. The engine never commands beyond
 the advertised envelope.
 
+### Held and resume
+
+A human interrupts a mission through the handover vocabulary of
+[ADR-0010](0010-authority-state-machines.md); no new message exists for
+it. A client whose lease request finds the mission as holder asks for a
+transfer. The mission principal offers the scope to the requester at once:
+human takeover wins ([ADR-0025](0025-client-optional-operation-automation-principals.md)).
+When the transfer commits, when the lease is revoked, or when an emergency
+override displaces the principal, the mission is **held**: the principal
+stops framing, the engine commands nothing, keeps its ownship fresh, and
+pauses its sequencing clock so phase deadlines do not count the time a
+human flew. The mission wall deadline keeps counting.
+
+The human hands the scope back by offering it to the mission principal.
+The principal accepts the offer. On the committed transfer the mission
+resumes from its active leg under the new generation. The first frames
+under the new generation are neutral, which a vehicle that requires neutral
+input on a new lease admits. Accepting an offer executes a human decision;
+the mission never requests the scope on its own after a hold.
+
+A human who releases the scope instead of offering it leaves the mission
+held: the scope is unassigned and nothing resumes it. To resume, the human
+requests the lease and offers the scope to the mission. The same recovery
+applies after an operator link loss. Only a closed connection ends the
+principal.
+
 ## Consequences
 
 - A physical vehicle can fly a planned mission without an independent
@@ -81,5 +107,7 @@ the advertised envelope.
   velocity sign of a consumer multicopter, need a flight capture before the
   first automatic flight. The adapter refuses a fix outside the Earth, so
   a unit error produces no fix and no flight.
-- The executor's pause and resume behavior after a human takeover is a
-  separate decision.
+- A takeover and a hand-back use the existing handover protocol, so every
+  client that can request a transfer and offer a scope can interrupt and
+  resume a mission. A client that only requests and releases leases can
+  interrupt but not resume.
