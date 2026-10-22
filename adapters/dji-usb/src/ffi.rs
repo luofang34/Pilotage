@@ -29,6 +29,10 @@ struct NativeCandidate {
 // SAFETY: These declarations match native/logiclink.h and the linked native test entry points.
 unsafe extern "C" {
     fn dji_watch_open(output: *mut *mut c_void, error: *mut NativeError) -> i32;
+    fn dji_watch_access_open(ground: i32, output: *mut *mut c_void, error: *mut NativeError)
+    -> i32;
+    fn dji_watch_access_status(handle: *mut c_void) -> u32;
+    fn dji_watch_access_permit(handle: *mut c_void, permitted: i32);
     fn dji_watch_poll(handle: *mut c_void) -> i32;
     fn dji_watch_close(handle: *mut c_void);
     fn dji_usb_discover(
@@ -57,6 +61,8 @@ unsafe extern "C" {
     #[cfg(test)]
     fn dji_usb_profile_test() -> i32;
     #[cfg(test)]
+    fn dji_access_test() -> i32;
+    #[cfg(test)]
     fn dji_usb_lifecycle_test() -> i32;
     #[cfg(test)]
     fn dji_usb_deadline_test() -> i32;
@@ -67,15 +73,30 @@ unsafe extern "C" {
 pub(crate) struct RegistryWatch(NonNull<c_void>);
 
 impl RegistryWatch {
-    pub(crate) fn open() -> Result<Self, UsbError> {
+    pub(crate) fn open(access: Option<bool>) -> Result<Self, UsbError> {
         let mut handle = std::ptr::null_mut();
         let mut error = NativeError::default();
         // SAFETY: The native observer is created and used on this thread only.
-        let status = unsafe { dji_watch_open(&mut handle, &mut error) };
+        let status = unsafe {
+            match access {
+                Some(ground) => dji_watch_access_open(i32::from(ground), &mut handle, &mut error),
+                None => dji_watch_open(&mut handle, &mut error),
+            }
+        };
         match (status, NonNull::new(handle)) {
             (0, Some(handle)) => Ok(Self(handle)),
             _ => Err(error.into()),
         }
+    }
+
+    pub(crate) fn permit(&mut self, permitted: bool) {
+        // SAFETY: Only the owner thread changes admission for its native observer.
+        unsafe { dji_watch_access_permit(self.0.as_ptr(), i32::from(permitted)) };
+    }
+
+    pub(crate) fn status(&self) -> u8 {
+        // SAFETY: The native observer is live and read on its owner thread.
+        unsafe { dji_watch_access_status(self.0.as_ptr()) as u8 }
     }
 
     pub(crate) fn changed(&mut self) -> bool {
@@ -255,3 +276,9 @@ fn discovery_test() -> i32 {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+pub(crate) fn access_test() -> i32 {
+    // SAFETY: The native test only classifies bounded in-process setup arrays.
+    unsafe { dji_access_test() }
+}

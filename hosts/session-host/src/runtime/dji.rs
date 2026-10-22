@@ -14,6 +14,7 @@ use super::dji_video::{self, DjiVideoError};
 const SERIAL: &str = "PILOTAGE_DJI_SERIAL";
 const USB_REGISTRY_ID: &str = "PILOTAGE_DJI_USB_REGISTRY_ID";
 const USB: &str = "PILOTAGE_DJI_USB";
+const GROUND_RECOVERY: &str = "PILOTAGE_DJI_USB_GROUND_RECOVERY";
 const CAPTURE: &str = "PILOTAGE_DJI_CAPTURE";
 const CONTROL_MODE: &str = "PILOTAGE_DJI_CONTROL_MODE";
 const FFMPEG: &str = "PILOTAGE_DJI_FFMPEG";
@@ -32,6 +33,12 @@ pub enum DjiHostError {
     Missing {
         /// The required environment variable.
         variable: &'static str,
+    },
+    /// A ground-only USB recovery opt-in was not recognized.
+    #[error("{GROUND_RECOVERY} must be absent or 1, got {value:?}")]
+    GroundRecovery {
+        /// The rejected setting.
+        value: OsString,
     },
     /// No attachment was selected.
     #[error("set exactly one of {SERIAL}, {USB_REGISTRY_ID}, or {USB}=auto")]
@@ -144,13 +151,14 @@ struct DjiHostConfig {
     control_mode: DjiControlMode,
     ffmpeg: PathBuf,
     experimental_flight: bool,
+    usb_ground_recovery: bool,
 }
 
 pub(super) fn start_blocking(
     vehicle: VehicleId,
     origin: std::time::Instant,
 ) -> Result<DjiRuntime, DjiHostError> {
-    let config = config_from_values(
+    let mut config = config_from_values(
         std::env::var_os(SERIAL),
         std::env::var_os(USB_REGISTRY_ID),
         std::env::var_os(USB),
@@ -159,6 +167,11 @@ pub(super) fn start_blocking(
         std::env::var_os(FFMPEG),
         std::env::var_os(EXPERIMENTAL_FLIGHT),
     )?;
+    config.usb_ground_recovery = match std::env::var_os(GROUND_RECOVERY) {
+        None => false,
+        Some(value) if value == "1" => true,
+        Some(value) => return Err(DjiHostError::GroundRecovery { value }),
+    };
     let virtual_stick = parse_virtual_stick(std::env::var_os(VIRTUAL_STICK))?;
     let (streams, updates) = mpsc::channel(2);
     let (frames, producer) = dji_video::supervise(config.ffmpeg.clone(), updates);
@@ -198,6 +211,7 @@ fn config_from_values(
         control_mode: parse_control_mode(control_mode)?,
         ffmpeg: parse_decoder(ffmpeg)?,
         experimental_flight: parse_experimental_flight(experimental_flight)?,
+        usb_ground_recovery: false,
     })
 }
 
