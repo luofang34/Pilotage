@@ -75,13 +75,15 @@ impl MissionTask {
                 debug!(?released, "lease release acknowledged");
                 true
             }
+            Some(wire::envelope::Payload::HostCapabilities(capabilities)) => {
+                self.on_capabilities(&capabilities).await
+            }
             _ => true,
         }
     }
 
-    /// The welcome closes the handshake: capture identities, tighten the
-    /// mission ceilings to the advertised envelope, build the flight
-    /// engine, then announce the profile and request the motion lease.
+    /// The welcome closes the handshake: capture identities, then start
+    /// the mission against the advertised capabilities.
     async fn on_welcome(&mut self, welcome: ServerWelcome) -> bool {
         // Fencing is permanent for this task: even a fresh welcome must
         // not restart activation or re-lease the motion scope.
@@ -92,17 +94,45 @@ impl MissionTask {
         self.principal = Some(welcome.principal);
         self.nav_guidance = Some(NavGuidancePublisher::for_session(welcome.session));
         self.update(|status| status.session = Some(welcome.session.as_u64()));
+        self.try_start(&welcome.host_capabilities).await
+    }
+
+    /// Capabilities the host announces after the welcome: a real vehicle
+    /// whose transport opened late advertises its velocity control only
+    /// now, and the mission that waited for it starts.
+    pub(super) async fn on_capabilities(&mut self, capabilities: &wire::HostCapabilities) -> bool {
+        if self.fenced || self.plan.is_none() || self.session.is_none() {
+            return true;
+        }
+        self.try_start(capabilities).await
+    }
+
+    /// Tightens the mission ceilings to the advertised envelope, builds the
+    /// flight engine, announces the profile, and asks for the motion lease
+    /// or waits for the launch. A real vehicle that advertises no velocity
+    /// control yet keeps its plan for a later capability announcement.
+    async fn try_start(&mut self, capabilities: &wire::HostCapabilities) -> bool {
+        let Some(session) = self.session else {
+            return true;
+        };
         let Some(plan) = self.plan.take() else {
             return true;
         };
         let mut config = plan.config();
-        if !tighten_limits(&mut config.limits, &welcome.host_capabilities) {
+        if !tighten_limits(&mut config.limits, capabilities) {
+            if self.real_vehicle {
+                info!("the vehicle advertises no velocity control yet; the mission waits for it");
+                self.plan = Some(plan);
+                self.update(|status| status.awaiting_capabilities = true);
+                return true;
+            }
             // Streaming velocity intents the host never advertised would
             // fail open against the command gate; a mission with no
             // authorized envelope does not fly.
             self.fence("no vehicle.motion velocity capability advertised");
             return false;
         }
+        self.update(|status| status.awaiting_capabilities = false);
         let limits = config.limits;
         let built = match &plan.source {
             PlanSource::Navdata(navdata) => {
@@ -140,7 +170,7 @@ impl MissionTask {
             }
         }
         let activation = DomainEnvelope::ProfileActivation(ProfileActivation {
-            session: welcome.session,
+            session,
             profile_id: PROFILE_ID.to_owned(),
             profile_revision: PROFILE_REVISION,
             activation_revision: ACTIVATION_REVISION,
