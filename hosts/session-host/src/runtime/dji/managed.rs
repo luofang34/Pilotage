@@ -206,6 +206,7 @@ impl ManagedDji {
             .is_some_and(|a| a.status_cached().fault.is_some())
         {
             self.detach_blocking();
+            #[cfg(target_os = "macos")]
             return;
         }
         #[cfg(target_os = "macos")]
