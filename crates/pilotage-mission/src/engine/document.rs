@@ -2,9 +2,9 @@
 
 use navigate_contract::{AltitudeConstraint, FlightPlan, PlanRole, TurnType, Waypoint};
 use pilotage_mission_core::{
-    Comparison, Digest, ExecutionPolicy, ExecutionTarget, FlightAction, FlightPlanReference,
-    MissionAction, MissionCapability, MissionCondition, MissionDocument, MissionPhase,
-    NavigationCondition, NavigationDataIdentity,
+    Comparison, Digest, ExecutionPolicy, FlightAction, FlightPlanReference, MissionAction,
+    MissionCapability, MissionCondition, MissionDocument, MissionPhase, NavigationCondition,
+    NavigationDataIdentity,
 };
 use sha2::{Digest as _, Sha256};
 
@@ -41,7 +41,7 @@ pub(super) fn build_document(
         revision_id,
         navigation_data_identity,
         ExecutionPolicy {
-            target: ExecutionTarget::Simulator,
+            target: config.execution_target,
             retry_limit: OPERATIONAL_RETRY_LIMIT,
             receipt_timeout_ns: OPERATIONAL_RECEIPT_TIMEOUT_NS,
         },

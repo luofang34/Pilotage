@@ -8,10 +8,10 @@ use navigate_contract::{
 use navigate_fpl::SequenceEvent;
 use navigate_guidance::guide_velocity;
 use pilotage_mission_core::{
-    DirectiveReceipt, EngineEvent as CoreEvent, EngineStart, ExecutionTarget,
-    FlightAction as CoreFlightAction, MissionDirective, MissionEngine as CoreMissionEngine,
-    MissionObservation as CoreObservation, MissionTerminal as CoreTerminal, NavigationObservation,
-    ReceiptResult, TickInput, TickOutput as CoreTickOutput, VehicleObservation, WallDeadline,
+    DirectiveReceipt, EngineEvent as CoreEvent, EngineStart, FlightAction as CoreFlightAction,
+    MissionDirective, MissionEngine as CoreMissionEngine, MissionObservation as CoreObservation,
+    MissionTerminal as CoreTerminal, NavigationObservation, ReceiptResult, TickInput,
+    TickOutput as CoreTickOutput, VehicleObservation, WallDeadline,
 };
 use pilotage_protocol::{ControlAction, ControlIntent, ReferenceFrame, VelocityIntent};
 
@@ -120,7 +120,7 @@ impl MissionEngine {
         let now_ns = now.as_nanos();
         let expires_at_ns = now_ns.saturating_add(OPERATIONAL_WALL_DEADLINE_NS);
         let start = EngineStart {
-            host_target: ExecutionTarget::Simulator,
+            host_target: self.config.execution_target,
             simulator_time_ns: now_ns,
             wall_time_ns: now_ns,
             wall_deadline: WallDeadline {
@@ -366,9 +366,22 @@ impl MissionEngine {
         }
     }
 
-    /// Publishes the filter solution for `now` and clears stale display data.
+    /// Publishes the solution for `now` and clears stale display data: the
+    /// filter's solution under simulation truth, the latest fresh vehicle
+    /// estimate otherwise.
     fn publish_solution(&mut self, now: MonotonicNanos) -> Option<NavigationSolution> {
-        self.last_solution = self.filter.tick(now);
+        self.last_solution = match self.estimate_budget() {
+            None => self.filter.tick(now),
+            Some(budget) => {
+                let solution = self
+                    .estimate
+                    .solution(now, &self.plane, self.config.clock, budget);
+                if solution.is_none() && self.estimate.has_sample() {
+                    self.counters.estimate_stale = self.counters.estimate_stale.wrapping_add(1);
+                }
+                solution
+            }
+        };
         self.last_solution
     }
 

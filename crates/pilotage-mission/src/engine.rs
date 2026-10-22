@@ -29,10 +29,14 @@ use pilotage_mission_core::{
 pub use nav_guidance::{NavGuidance, NavQuality};
 pub use output::{MissionAction, MissionCounters, MissionEvent, MissionOutput, MissionState};
 
-use crate::config::MissionConfig;
+use crate::config::{MissionConfig, OwnshipSource};
 use crate::error::MissionBuildError;
-use crate::ownship::{OwnshipSample, TruthRole};
+use crate::ownship::{OwnshipAltitude, OwnshipSample, TruthRole};
+
+mod estimate;
+
 use crate::provenance::{MissionPlanRecord, SnapshotProvenance};
+use estimate::{EstimateBudget, VehicleEstimate};
 
 /// The single synthesized-GNSS source identity the engine stamps its
 /// observations with.
@@ -70,6 +74,8 @@ pub struct MissionEngine {
     /// zero would silently rotate every command to due north.
     last_yaw_rad: Option<f64>,
     last_refusal: Option<Discriminant<GuidanceRefusal>>,
+    /// The latest admitted sample under the vehicle-estimate source.
+    estimate: VehicleEstimate,
 }
 
 impl MissionEngine {
@@ -154,22 +160,76 @@ impl MissionEngine {
             last_solution: None,
             last_yaw_rad: None,
             last_refusal: None,
+            estimate: VehicleEstimate::default(),
         };
         Ok((engine, record))
     }
 
-    /// Offers one ownship sample. Only [`TruthRole::SimulationTruth`]
-    /// samples become observations — see [`OwnshipSample`] for why any
+    /// Offers one ownship sample. The configured [`OwnshipSource`] names
+    /// the one role the engine admits — see [`OwnshipSample`] for why any
     /// other role is a counted refusal, never an aid. `now` is the
     /// admission reference on the engine's clock domain.
     pub fn on_ownship(&mut self, sample: &OwnshipSample, now: MonotonicNanos) {
-        if sample.role != TruthRole::SimulationTruth {
+        let admitted = match self.config.ownship_source {
+            OwnshipSource::SimulationTruth => TruthRole::SimulationTruth,
+            OwnshipSource::VehicleEstimate { .. } => TruthRole::OperationalEstimate,
+        };
+        if sample.role != admitted {
             self.counters.rejected_role = self.counters.rejected_role.wrapping_add(1);
             return;
         }
         if let Some(yaw) = sample.yaw_rad {
             self.last_yaw_rad = Some(yaw);
         }
+        if admitted == TruthRole::OperationalEstimate {
+            self.estimate.accept(sample);
+            return;
+        }
+        self.fuse_truth(sample, now);
+    }
+
+    /// NED meters from the mission anchor of a geodetic reading, for a
+    /// host that converts the vehicle's own fix into an ownship sample.
+    /// An above-anchor height is measured from the anchor altitude.
+    #[must_use]
+    pub fn ned_of(
+        &self,
+        latitude_rad: f64,
+        longitude_rad: f64,
+        altitude: OwnshipAltitude,
+    ) -> [f64; 3] {
+        let altitude_m = match altitude {
+            OwnshipAltitude::Ellipsoid(altitude_m) => altitude_m,
+            OwnshipAltitude::AboveAnchor(height_m) => self.config.anchor.altitude_m + height_m,
+        };
+        let offset = self.plane.to_ned(&GeodeticPosition::new(
+            latitude_rad,
+            longitude_rad,
+            altitude_m,
+        ));
+        [offset.north_m, offset.east_m, offset.down_m]
+    }
+
+    /// The pass-through solution budget, when the source is the vehicle's
+    /// own estimate.
+    fn estimate_budget(&self) -> Option<EstimateBudget> {
+        match self.config.ownship_source {
+            OwnshipSource::SimulationTruth => None,
+            OwnshipSource::VehicleEstimate {
+                sigma_m,
+                velocity_sigma_mps,
+                max_age,
+            } => Some(EstimateBudget {
+                sigma_m,
+                velocity_sigma_mps,
+                max_age,
+            }),
+        }
+    }
+
+    /// Synthesizes a GNSS-class fix from a simulation-truth sample and
+    /// offers it to the fusion filter.
+    fn fuse_truth(&mut self, sample: &OwnshipSample, now: MonotonicNanos) {
         let position =
             self.plane
                 .from_ned(&NedOffset::new(sample.ned[0], sample.ned[1], sample.ned[2]));

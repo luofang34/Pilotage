@@ -270,6 +270,28 @@ pub enum HostError {
         /// The rejected height in meters.
         height: f64,
     },
+    /// `PILOTAGE_MISSION_OWNSHIP` named no known ownship source.
+    #[error(
+        "invalid PILOTAGE_MISSION_OWNSHIP value {value:?} (expected \"simulation-truth\" or \"vehicle-estimate\")"
+    )]
+    MissionOwnshipSource {
+        /// The rejected value.
+        value: String,
+    },
+    /// `PILOTAGE_MISSION_TARGET` named no known execution target.
+    #[error(
+        "invalid PILOTAGE_MISSION_TARGET value {value:?} (expected \"simulator\" or \"real-vehicle\")"
+    )]
+    MissionTarget {
+        /// The rejected value.
+        value: String,
+    },
+    /// A real vehicle exports no simulation truth, so that pairing would
+    /// wait for a first solution for the whole mission.
+    #[error(
+        "PILOTAGE_MISSION_TARGET=real-vehicle requires PILOTAGE_MISSION_OWNSHIP=vehicle-estimate"
+    )]
+    MissionTruthOnRealVehicle,
     /// Loading or selecting the mission navdata snapshot failed.
     #[error("failed to load mission navdata: {0}")]
     MissionNavdata(#[source] crate::mission_navdata::NavdataError),

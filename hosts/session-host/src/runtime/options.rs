@@ -21,6 +21,14 @@
 //! - `PILOTAGE_MISSION_CRUISE_HEIGHT`: cruise height above the anchor in
 //!   meters. `0` skips the climb phase (planar vehicles); unset keeps the
 //!   [`pilotage_mission::MissionConfig`] default.
+//! - `PILOTAGE_MISSION_OWNSHIP`: `simulation-truth` (the default) fuses a
+//!   simulator's truth oracle; `vehicle-estimate` flies the vehicle's own
+//!   exported estimate as a declared pass-through solution (ADR-0051).
+//!   Under `vehicle-estimate` the anchor is the launch point: a height the
+//!   vehicle measures from its launch point is read as height above the
+//!   anchor.
+//! - `PILOTAGE_MISSION_TARGET`: `simulator` (the default) or
+//!   `real-vehicle`. A real vehicle requires `vehicle-estimate`.
 //! - `PILOTAGE_SIM_CAMERA_PORT`: presence enables the simulator camera
 //!   attachment on that loopback port. A world-model camera producer
 //!   dials it, renders from the vehicle's simulator truth, and returns
@@ -30,6 +38,7 @@ use std::path::PathBuf;
 
 use chrono::NaiveDate;
 use pilotage_mission::fixture::GeoPointDegrees;
+use pilotage_mission::{ExecutionTarget, OwnshipSource};
 
 use crate::error::HostError;
 
@@ -92,6 +101,10 @@ pub struct MissionOptions {
     /// Cruise height override in meters (`0.0` skips the climb phase);
     /// `None` keeps the [`pilotage_mission::MissionConfig`] default.
     pub cruise_height_m: Option<f64>,
+    /// Where ownship position comes from.
+    pub ownship_source: OwnshipSource,
+    /// The execution target the mission document is admitted for.
+    pub execution_target: ExecutionTarget,
 }
 
 impl RuntimeOptions {
@@ -159,13 +172,57 @@ fn mission_from_env() -> Result<Option<MissionOptions>, HostError> {
         None => None,
         Some(value) => Some(parse_cruise_height(&value)?),
     };
+    let ownship_source = match env_var("PILOTAGE_MISSION_OWNSHIP")? {
+        None => OwnshipSource::SimulationTruth,
+        Some(value) => parse_ownship_source(&value)?,
+    };
+    let execution_target = match env_var("PILOTAGE_MISSION_TARGET")? {
+        None => ExecutionTarget::Simulator,
+        Some(value) => parse_execution_target(&value)?,
+    };
+    check_vehicle_pairing(ownship_source, execution_target)?;
     Ok(Some(MissionOptions {
         route,
         navdata,
         anchor,
         date,
         cruise_height_m,
+        ownship_source,
+        execution_target,
     }))
+}
+
+/// Parses `PILOTAGE_MISSION_OWNSHIP`; an unknown word fails startup.
+fn parse_ownship_source(value: &str) -> Result<OwnshipSource, HostError> {
+    match value {
+        "simulation-truth" => Ok(OwnshipSource::SimulationTruth),
+        "vehicle-estimate" => Ok(OwnshipSource::vehicle_estimate()),
+        _ => Err(HostError::MissionOwnshipSource {
+            value: value.to_owned(),
+        }),
+    }
+}
+
+/// Parses `PILOTAGE_MISSION_TARGET`; an unknown word fails startup.
+fn parse_execution_target(value: &str) -> Result<ExecutionTarget, HostError> {
+    match value {
+        "simulator" => Ok(ExecutionTarget::Simulator),
+        "real-vehicle" => Ok(ExecutionTarget::RealVehicle),
+        _ => Err(HostError::MissionTarget {
+            value: value.to_owned(),
+        }),
+    }
+}
+
+/// A real vehicle exports no simulation truth: that pairing never gets a
+/// solution, so it is refused at startup instead of waiting in flight.
+fn check_vehicle_pairing(source: OwnshipSource, target: ExecutionTarget) -> Result<(), HostError> {
+    match (source, target) {
+        (OwnshipSource::SimulationTruth, ExecutionTarget::RealVehicle) => {
+            Err(HostError::MissionTruthOnRealVehicle)
+        }
+        _ => Ok(()),
+    }
 }
 
 /// Parses and range-screens `PILOTAGE_MISSION_CRUISE_HEIGHT`. A negative
@@ -218,8 +275,61 @@ fn parse_anchor(value: &str) -> Result<GeoPointDegrees, HostError> {
 mod tests {
     #![allow(clippy::expect_used, clippy::panic)]
 
-    use super::{parse_cruise_height, parse_sim_camera_port};
+    use super::{
+        check_vehicle_pairing, parse_cruise_height, parse_execution_target, parse_ownship_source,
+        parse_sim_camera_port,
+    };
     use crate::error::HostError;
+    use pilotage_mission::{ExecutionTarget, OwnshipSource};
+
+    #[test]
+    fn ownship_source_and_target_words_parse_and_unknown_words_fail() {
+        assert_eq!(
+            parse_ownship_source("simulation-truth").expect("known"),
+            OwnshipSource::SimulationTruth
+        );
+        assert_eq!(
+            parse_ownship_source("vehicle-estimate").expect("known"),
+            OwnshipSource::vehicle_estimate()
+        );
+        assert!(matches!(
+            parse_ownship_source("truth").expect_err("unknown"),
+            HostError::MissionOwnshipSource { value } if value == "truth"
+        ));
+        assert_eq!(
+            parse_execution_target("simulator").expect("known"),
+            ExecutionTarget::Simulator
+        );
+        assert_eq!(
+            parse_execution_target("real-vehicle").expect("known"),
+            ExecutionTarget::RealVehicle
+        );
+        assert!(matches!(
+            parse_execution_target("drone").expect_err("unknown"),
+            HostError::MissionTarget { value } if value == "drone"
+        ));
+    }
+
+    #[test]
+    fn simulation_truth_on_a_real_vehicle_is_refused_at_startup() {
+        assert!(matches!(
+            check_vehicle_pairing(OwnshipSource::SimulationTruth, ExecutionTarget::RealVehicle),
+            Err(HostError::MissionTruthOnRealVehicle)
+        ));
+        for (source, target) in [
+            (OwnshipSource::SimulationTruth, ExecutionTarget::Simulator),
+            (
+                OwnshipSource::vehicle_estimate(),
+                ExecutionTarget::Simulator,
+            ),
+            (
+                OwnshipSource::vehicle_estimate(),
+                ExecutionTarget::RealVehicle,
+            ),
+        ] {
+            assert!(check_vehicle_pairing(source, target).is_ok());
+        }
+    }
 
     #[test]
     fn a_negative_cruise_height_is_refused_with_the_value() {

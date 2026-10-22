@@ -121,4 +121,7 @@ pub struct MissionCounters {
     /// sample has carried a heading yet (the NED→body rotation needs
     /// one; zero would steer toward due north).
     pub missing_yaw: u64,
+    /// Ticks under the vehicle-estimate source on which the latest
+    /// sample was too old to fly, so no solution was published.
+    pub estimate_stale: u64,
 }
