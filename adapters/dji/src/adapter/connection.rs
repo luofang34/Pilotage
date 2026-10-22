@@ -13,6 +13,7 @@ use turret_core::{CommandIdentity, PayloadCapabilities};
 use turret_dji::Mini3ControlProfile;
 
 mod keyframe;
+mod landing;
 mod motion;
 mod pending;
 mod virtual_stick;

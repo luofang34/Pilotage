@@ -24,6 +24,7 @@ pub(super) enum Purpose {
         identity: CommandIdentity,
     },
     Flight(FlightFence),
+    LandingOverride(FlightFence),
     Mode(super::super::virtual_stick::ModeFence),
 }
 
@@ -45,12 +46,14 @@ impl Connection {
         observations: &Observations,
         now: Duration,
     ) -> Result<(), RejectReason> {
-        if self.mode_session.active()
+        let prepare_landing = command == BasicFlightCommand::Land
+            && self.mode_session.active()
+            && self.mode_session.retained();
+        if (self.mode_session.active() && !prepare_landing)
             || (command == BasicFlightCommand::Takeoff && self.mode_session.unresolved())
         {
             return Err(RejectReason::Other(
-                "virtual-stick diagnostic must finish with confirmed cleanup before Takeoff"
-                    .to_owned(),
+                "virtual-stick mode exchange must finish before this flight action".to_owned(),
             ));
         }
         self.flight.validate(frame, command)?;
@@ -85,6 +88,12 @@ impl Connection {
             now,
             until,
         )?;
+        if prepare_landing {
+            self.flight.wait_for_mode_release(frame, now);
+            self.motion.stop(now);
+            self.cancel_stick_pending(now);
+            return Ok(());
+        }
         self.pending = Some(Pending {
             bytes: self.input.framing().command(packet.bytes()),
             offset: 0,
@@ -100,11 +109,12 @@ impl Connection {
         now: Duration,
     ) -> bool {
         self.flight.invalidate(reason, now);
-        if self
-            .pending
-            .as_ref()
-            .is_some_and(|pending| matches!(pending.purpose, Purpose::Flight(_)))
-        {
+        if self.pending.as_ref().is_some_and(|pending| {
+            matches!(
+                pending.purpose,
+                Purpose::Flight(_) | Purpose::LandingOverride(_)
+            )
+        }) {
             if self
                 .pending
                 .as_ref()

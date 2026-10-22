@@ -140,7 +140,11 @@ fn coalesced_replies_preserve_the_original_windows_without_extending_them() {
     let Some(wire::envelope::Payload::ControlActionCommand(command)) = envelope.payload else {
         panic!("reliable action")
     };
-    assert_eq!(command.timing.unwrap().control_window_id, 1);
+    let timing = command.timing.unwrap();
+    assert_eq!(timing.control_window_id, 1);
+    assert_eq!(timing.max_delay_ms, 250);
+    assert_eq!(timing.active_for_ms, 0);
+    assert_eq!(timing.completion_timeout_ms, 30_000);
     assert!(!client.control_action_ready(1, MOTION, 20 * MS));
     assert!(client.control_action_ready(1, MOTION, 221 * MS));
     assert!(!client.control_action_ready(1, MOTION, 460 * MS));

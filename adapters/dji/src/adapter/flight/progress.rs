@@ -10,6 +10,7 @@ use crate::{DumlFrame, flight::BasicFlightCommand};
 impl FlightExecution {
     pub(in crate::adapter) fn poll(&mut self, now: Duration) {
         self.now = now;
+        self.poll_landing_override(now);
         let Some(procedure) = &self.procedure else {
             return;
         };
@@ -53,6 +54,9 @@ impl FlightExecution {
 
     pub(in crate::adapter) fn response(&mut self, frame: &DumlFrame, now: Duration) {
         self.poll(now);
+        if self.landing_override_response(frame, now) {
+            return;
+        }
         let Some(procedure) = &mut self.procedure else {
             return;
         };

@@ -100,6 +100,19 @@ impl ControlLane {
         timing.into()
     }
 
+    fn action_timing(&self, action: i32) -> wire::CommandTiming {
+        let mut timing = self.command_timing();
+        if matches!(
+            wire::ControlAction::try_from(action),
+            Ok(wire::ControlAction::Takeoff | wire::ControlAction::Land)
+        ) {
+            // Admission stays short; a finite procedure has its own completion budget.
+            timing.active_for_ms = 0;
+            timing.completion_timeout_ms = 30_000;
+        }
+        timing
+    }
+
     /// Builds the next control-frame datagram. The sequence advances by
     /// one per frame and wraps; the host's staleness window, not the
     /// counter range, is the real bound.
@@ -185,7 +198,7 @@ impl ControlLane {
                     sampled_at: Some(wire::MonoTimestamp {
                         nanos: sampled_at_nanos,
                     }),
-                    timing: Some(self.command_timing()),
+                    timing: Some(self.action_timing(request.action)),
                     session: Some(wire::SessionId {
                         value: identity.session_id,
                     }),

@@ -112,6 +112,10 @@ impl Connection {
                 }
                 permitted
             }
+            Purpose::LandingOverride(fence) => {
+                let fence = fence.clone();
+                self.prepare_landing_override(&fence, observations, now)
+            }
             Purpose::Mode(fence) => {
                 let fence = *fence;
                 self.prepare_mode(&fence, observations, now)
@@ -145,7 +149,16 @@ impl Connection {
             self.mode_session.wrote(fence, now, false);
         }
         let expired = pending.expires_at.is_some_and(|until| now >= until);
+        if complete
+            && (matches!(purpose, Purpose::Stick(_))
+                || matches!(purpose, Purpose::Mode(fence) if fence.mode == crate::flight::VirtualStickMode::Disable))
+        {
+            self.flight.preparation_written(now);
+        }
         if complete {
+            if matches!(purpose, Purpose::LandingOverride(_)) {
+                self.flight.landing_override_written(now);
+            }
             self.pending = None;
             if let Some((_, identity)) = purpose.pitch()
                 && let Err(source) = self.execution.sent(identity, now)
@@ -168,7 +181,12 @@ impl Connection {
                 self.mode_session.wrote(fence, now, true);
             }
         }
-        if expired && matches!(purpose, Purpose::Mode(_) | Purpose::Stick(_)) {
+        if expired
+            && matches!(
+                purpose,
+                Purpose::Mode(_) | Purpose::Stick(_) | Purpose::LandingOverride(_)
+            )
+        {
             self.fail(DjiFault::Transport {
                 operation: "mode diagnostic write exceeded its deadline",
                 source: io::ErrorKind::TimedOut.into(),
