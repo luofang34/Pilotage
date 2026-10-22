@@ -1,6 +1,5 @@
-// Reorder-safe avionics ingestion — thin wrappers over the shared
-// feeder core (#252). Publication/receipt time is transport metadata:
-// freshness advances only when a source group presents a new
+// Reorder-safe ingestion uses the shared feeder core. Receipt time is
+// transport metadata. Freshness advances only on a new source
 // epoch/sequence. Every semantic judgement (identity pinning,
 // incarnation policy, wrap-safe ordering, coherence, the fail-closed
 // authorization regimes) runs in indicate-instrument-feeder via the
