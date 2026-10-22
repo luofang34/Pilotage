@@ -14,6 +14,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::runtime::HOST_VEHICLE;
 
+use super::super::PlanSource;
 use super::nav_guidance::NavGuidancePublisher;
 use super::{
     ACTIVATION_REVISION, MISSION_SCOPE, MissionTask, NO_DEVICE_DIGEST, PROFILE_DIGEST, PROFILE_ID,
@@ -95,14 +96,29 @@ impl MissionTask {
             return false;
         }
         let limits = config.limits;
-        match MissionEngine::new(
-            &plan.navdata.snapshot,
-            plan.navdata.provenance.clone(),
-            config,
-        ) {
-            Ok((engine, record)) => {
+        let built = match &plan.source {
+            PlanSource::Navdata(navdata) => {
+                MissionEngine::new(&navdata.snapshot, navdata.provenance.clone(), config).map(
+                    |(engine, record)| {
+                        info!(route = %record.route_input, "mission plan is a route");
+                        engine
+                    },
+                )
+            }
+            PlanSource::Survey(request) => {
+                MissionEngine::from_survey(request, config).map(|(engine, record)| {
+                    info!(
+                        lines = record.line_count,
+                        waypoints = record.waypoint_count,
+                        "mission plan is an area survey"
+                    );
+                    engine
+                })
+            }
+        };
+        match built {
+            Ok(engine) => {
                 info!(
-                    route = %record.route_input,
                     max_horizontal_mps = limits.max_horizontal_mps,
                     max_vertical_mps = limits.max_vertical_mps,
                     max_yaw_rate_rps = limits.max_yaw_rate_rps,

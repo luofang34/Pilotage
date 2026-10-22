@@ -292,6 +292,28 @@ pub enum HostError {
         "PILOTAGE_MISSION_TARGET=real-vehicle requires PILOTAGE_MISSION_OWNSHIP=vehicle-estimate"
     )]
     MissionTruthOnRealVehicle,
+    /// Both a route and an area were given; a mission flies one plan.
+    #[error("set one of PILOTAGE_MISSION_ROUTE and PILOTAGE_MISSION_AREA, not both")]
+    MissionPlanConflict,
+    /// `PILOTAGE_MISSION_AREA` was not at least three `lat_deg,lon_deg`
+    /// pairs separated by semicolons.
+    #[error(
+        "invalid PILOTAGE_MISSION_AREA value {value:?} (expected at least three \"lat_deg,lon_deg\" pairs separated by ';')"
+    )]
+    MissionArea {
+        /// The rejected value.
+        value: String,
+    },
+    /// A survey parameter variable did not parse or is outside its range.
+    #[error("invalid {variable} value {value:?}: {reason}")]
+    MissionSurveyParameter {
+        /// The environment variable being parsed.
+        variable: &'static str,
+        /// The rejected value.
+        value: String,
+        /// What the variable accepts.
+        reason: &'static str,
+    },
     /// Loading or selecting the mission navdata snapshot failed.
     #[error("failed to load mission navdata: {0}")]
     MissionNavdata(#[source] crate::mission_navdata::NavdataError),

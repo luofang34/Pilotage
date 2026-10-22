@@ -9,6 +9,16 @@
 //!   executor (ADR-0025 automation principal). The value is the route
 //!   string expanded against the navdata snapshot; the literal `fixture`
 //!   selects [`pilotage_mission::fixture::DEMO_ROUTE`].
+//! - `PILOTAGE_MISSION_AREA`: presence enables the executor over an area
+//!   survey instead of a route. The value is the polygon as
+//!   `lat_deg,lon_deg;lat_deg,lon_deg;...` with at least three vertices.
+//!   The survey height is `PILOTAGE_MISSION_CRUISE_HEIGHT`, 110 m when
+//!   unset. Set one of the route and the area, not both.
+//! - `PILOTAGE_MISSION_SURVEY_FOV_DEG`: the camera's across-track field
+//!   of view in degrees for a nadir camera; unset keeps the
+//!   [`pilotage_mission::SurveyRequest`] default.
+//! - `PILOTAGE_MISSION_SURVEY_SIDELAP`: the footprint fraction adjacent
+//!   lines share, `0` to `0.95`; unset keeps the request default.
 //! - `PILOTAGE_MISSION_NAVDATA`: `fixture` (the default) builds the demo
 //!   snapshot and round-trips it through the real blob container; any
 //!   other value is a navdata store directory whose `*/*.acnav` blobs are
@@ -38,7 +48,7 @@ use std::path::PathBuf;
 
 use chrono::NaiveDate;
 use pilotage_mission::fixture::GeoPointDegrees;
-use pilotage_mission::{ExecutionTarget, OwnshipSource};
+use pilotage_mission::{ExecutionTarget, OwnshipSource, SurveyRequest};
 
 use crate::error::HostError;
 
@@ -85,11 +95,23 @@ pub enum MissionNavdataSource {
     Store(PathBuf),
 }
 
+/// The survey height when `PILOTAGE_MISSION_CRUISE_HEIGHT` is unset.
+pub const SURVEY_DEFAULT_HEIGHT_M: f64 = 110.0;
+
+/// What the mission executor flies.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MissionPlanRequest {
+    /// A route string expanded against the navdata snapshot at plan build.
+    Route(String),
+    /// An area survey planned at the cruise height above the anchor.
+    Survey(SurveyRequest),
+}
+
 /// Configuration of the in-process mission executor.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MissionOptions {
-    /// Route string expanded against the snapshot at plan build.
-    pub route: String,
+    /// The plan the executor flies.
+    pub plan: MissionPlanRequest,
     /// Snapshot source: fixture or a scanned store directory.
     pub navdata: MissionNavdataSource,
     /// Mission anchor, in the degree convention navdata uses; converted to
@@ -138,13 +160,18 @@ fn parse_sim_camera_port(value: &str) -> Result<u16, HostError> {
 /// Parses the `PILOTAGE_MISSION_*` family; `PILOTAGE_MISSION_ROUTE` being
 /// unset disables the executor entirely.
 fn mission_from_env() -> Result<Option<MissionOptions>, HostError> {
-    let Some(route) = env_var("PILOTAGE_MISSION_ROUTE")? else {
-        return Ok(None);
-    };
-    let route = if route == "fixture" {
-        pilotage_mission::fixture::DEMO_ROUTE.to_owned()
-    } else {
-        route
+    let plan = match (
+        env_var("PILOTAGE_MISSION_ROUTE")?,
+        env_var("PILOTAGE_MISSION_AREA")?,
+    ) {
+        (None, None) => return Ok(None),
+        (Some(_), Some(_)) => return Err(HostError::MissionPlanConflict),
+        (Some(route), None) => MissionPlanRequest::Route(if route == "fixture" {
+            pilotage_mission::fixture::DEMO_ROUTE.to_owned()
+        } else {
+            route
+        }),
+        (None, Some(area)) => MissionPlanRequest::Survey(survey_from_env(&area)?),
     };
     let navdata = match env_var("PILOTAGE_MISSION_NAVDATA")? {
         None => MissionNavdataSource::Fixture,
@@ -165,11 +192,14 @@ fn mission_from_env() -> Result<Option<MissionOptions>, HostError> {
                 },
             )?),
         };
-    if date.is_none() && matches!(navdata, MissionNavdataSource::Store(_)) {
+    if date.is_none()
+        && matches!(navdata, MissionNavdataSource::Store(_))
+        && matches!(plan, MissionPlanRequest::Route(_))
+    {
         return Err(HostError::MissionDateMissing);
     }
     let cruise_height_m = match env_var("PILOTAGE_MISSION_CRUISE_HEIGHT")? {
-        None => None,
+        None => matches!(plan, MissionPlanRequest::Survey(_)).then_some(SURVEY_DEFAULT_HEIGHT_M),
         Some(value) => Some(parse_cruise_height(&value)?),
     };
     let ownship_source = match env_var("PILOTAGE_MISSION_OWNSHIP")? {
@@ -182,7 +212,7 @@ fn mission_from_env() -> Result<Option<MissionOptions>, HostError> {
     };
     check_vehicle_pairing(ownship_source, execution_target)?;
     Ok(Some(MissionOptions {
-        route,
+        plan,
         navdata,
         anchor,
         date,
@@ -190,6 +220,73 @@ fn mission_from_env() -> Result<Option<MissionOptions>, HostError> {
         ownship_source,
         execution_target,
     }))
+}
+
+/// The survey request from `PILOTAGE_MISSION_AREA` and the optional
+/// camera parameters.
+fn survey_from_env(area: &str) -> Result<SurveyRequest, HostError> {
+    let mut request = SurveyRequest::new(parse_area(area)?);
+    if let Some(value) = env_var("PILOTAGE_MISSION_SURVEY_FOV_DEG")? {
+        request.across_track_fov_rad = parse_survey_fov_deg(&value)?.to_radians();
+    }
+    if let Some(value) = env_var("PILOTAGE_MISSION_SURVEY_SIDELAP")? {
+        request.sidelap = parse_survey_sidelap(&value)?;
+    }
+    Ok(request)
+}
+
+/// Parses `lat_deg,lon_deg;lat_deg,lon_deg;...` into polygon vertices.
+fn parse_area(value: &str) -> Result<Vec<[f64; 2]>, HostError> {
+    let invalid = || HostError::MissionArea {
+        value: value.to_owned(),
+    };
+    let vertices = value
+        .split(';')
+        .map(|pair| {
+            let parts: Vec<&str> = pair.split(',').map(str::trim).collect();
+            let [latitude, longitude] = parts.as_slice() else {
+                return Err(invalid());
+            };
+            let parse = |part: &str| part.parse::<f64>().map_err(|_| invalid());
+            Ok([parse(latitude)?, parse(longitude)?])
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if vertices.len() < 3 {
+        return Err(invalid());
+    }
+    Ok(vertices)
+}
+
+/// Parses `PILOTAGE_MISSION_SURVEY_FOV_DEG`: a finite angle in (0, 180).
+fn parse_survey_fov_deg(value: &str) -> Result<f64, HostError> {
+    let invalid = |reason| HostError::MissionSurveyParameter {
+        variable: "PILOTAGE_MISSION_SURVEY_FOV_DEG",
+        value: value.to_owned(),
+        reason,
+    };
+    let degrees = value
+        .parse::<f64>()
+        .map_err(|_| invalid("expected a number of degrees"))?;
+    if !degrees.is_finite() || degrees <= 0.0 || degrees >= 180.0 {
+        return Err(invalid("expected an angle between 0 and 180 degrees"));
+    }
+    Ok(degrees)
+}
+
+/// Parses `PILOTAGE_MISSION_SURVEY_SIDELAP`: a finite fraction in [0, 0.95].
+fn parse_survey_sidelap(value: &str) -> Result<f64, HostError> {
+    let invalid = |reason| HostError::MissionSurveyParameter {
+        variable: "PILOTAGE_MISSION_SURVEY_SIDELAP",
+        value: value.to_owned(),
+        reason,
+    };
+    let sidelap = value
+        .parse::<f64>()
+        .map_err(|_| invalid("expected a fraction"))?;
+    if !sidelap.is_finite() || !(0.0..=0.95).contains(&sidelap) {
+        return Err(invalid("expected a fraction between 0 and 0.95"));
+    }
+    Ok(sidelap)
 }
 
 /// Parses `PILOTAGE_MISSION_OWNSHIP`; an unknown word fails startup.
@@ -272,97 +369,4 @@ fn parse_anchor(value: &str) -> Result<GeoPointDegrees, HostError> {
 }
 
 #[cfg(test)]
-mod tests {
-    #![allow(clippy::expect_used, clippy::panic)]
-
-    use super::{
-        check_vehicle_pairing, parse_cruise_height, parse_execution_target, parse_ownship_source,
-        parse_sim_camera_port,
-    };
-    use crate::error::HostError;
-    use pilotage_mission::{ExecutionTarget, OwnshipSource};
-
-    #[test]
-    fn ownship_source_and_target_words_parse_and_unknown_words_fail() {
-        assert_eq!(
-            parse_ownship_source("simulation-truth").expect("known"),
-            OwnshipSource::SimulationTruth
-        );
-        assert_eq!(
-            parse_ownship_source("vehicle-estimate").expect("known"),
-            OwnshipSource::vehicle_estimate()
-        );
-        assert!(matches!(
-            parse_ownship_source("truth").expect_err("unknown"),
-            HostError::MissionOwnshipSource { value } if value == "truth"
-        ));
-        assert_eq!(
-            parse_execution_target("simulator").expect("known"),
-            ExecutionTarget::Simulator
-        );
-        assert_eq!(
-            parse_execution_target("real-vehicle").expect("known"),
-            ExecutionTarget::RealVehicle
-        );
-        assert!(matches!(
-            parse_execution_target("drone").expect_err("unknown"),
-            HostError::MissionTarget { value } if value == "drone"
-        ));
-    }
-
-    #[test]
-    fn simulation_truth_on_a_real_vehicle_is_refused_at_startup() {
-        assert!(matches!(
-            check_vehicle_pairing(OwnshipSource::SimulationTruth, ExecutionTarget::RealVehicle),
-            Err(HostError::MissionTruthOnRealVehicle)
-        ));
-        for (source, target) in [
-            (OwnshipSource::SimulationTruth, ExecutionTarget::Simulator),
-            (
-                OwnshipSource::vehicle_estimate(),
-                ExecutionTarget::Simulator,
-            ),
-            (
-                OwnshipSource::vehicle_estimate(),
-                ExecutionTarget::RealVehicle,
-            ),
-        ] {
-            assert!(check_vehicle_pairing(source, target).is_ok());
-        }
-    }
-
-    #[test]
-    fn a_negative_cruise_height_is_refused_with_the_value() {
-        let error = parse_cruise_height("-5.0").expect_err("below launch elevation");
-        assert!(
-            matches!(error, HostError::MissionCruiseHeightRange { height } if height == -5.0),
-            "got {error:?}"
-        );
-    }
-
-    #[test]
-    fn a_non_finite_cruise_height_is_refused() {
-        let error = parse_cruise_height("NaN").expect_err("not flyable");
-        assert!(matches!(error, HostError::MissionCruiseHeightRange { .. }));
-        let error = parse_cruise_height("inf").expect_err("not flyable");
-        assert!(matches!(error, HostError::MissionCruiseHeightRange { .. }));
-    }
-
-    #[test]
-    fn a_sim_camera_port_must_name_a_port_a_producer_can_dial() {
-        assert_eq!(parse_sim_camera_port("45991").expect("a port"), 45991);
-        for value in ["0", "65536", "-1", "camera", ""] {
-            let error = parse_sim_camera_port(value).expect_err("not a dialable port");
-            assert!(
-                matches!(&error, HostError::SimCameraPort { value: refused } if refused == value),
-                "got {error:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn zero_cruise_height_legitimately_disables_the_climb() {
-        let height = parse_cruise_height("0").expect("zero is the no-climb configuration");
-        assert_eq!(height, 0.0);
-    }
-}
+mod tests;
