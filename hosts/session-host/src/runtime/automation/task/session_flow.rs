@@ -22,9 +22,12 @@ use super::{
 };
 
 /// Height above the launch point, metres, from which a real vehicle counts
-/// as launched. Below it the vehicle is on the ground or in ground effect
-/// and refuses velocity control.
-pub(super) const AIRBORNE_HEIGHT_M: f64 = 2.0;
+/// as launched. A DJI native takeoff hovers at about 1.2 m; below this the
+/// vehicle is on the ground and refuses velocity control.
+pub(super) const AIRBORNE_HEIGHT_M: f64 = 1.0;
+/// How long a held, airborne mission waits before it asks for the motion
+/// lease again.
+pub(super) const LEASE_RETRY_NS: u64 = 5_000_000_000;
 
 impl MissionTask {
     /// One reliable bootstrap-stream reply, decoded with the same
@@ -176,10 +179,12 @@ impl MissionTask {
         self.update(|status| status.awaiting_launch = true);
     }
 
-    /// Notes the vehicle airborne: the next tick asks for the lease.
+    /// Notes the vehicle airborne: the next tick asks for the lease, and
+    /// the mission keeps asking while another principal holds the scope.
     fn on_airborne(&mut self, height_m: f64) {
         self.awaiting_launch = false;
         self.lease_due = true;
+        self.lease_wanted = true;
         info!(
             height_m,
             "the aircraft is airborne; the mission asks for the motion lease"
@@ -197,12 +202,35 @@ impl MissionTask {
                 "mission motion lease granted"
             );
             self.take_generation(response.generation);
+        } else if self.lease_wanted {
+            // A human holds the scope after the launch: the mission holds
+            // and asks again until the human releases or hands it over.
+            debug!(reason = ?response.reason, "mission motion lease denied; retrying");
+            self.hold("the motion lease is held by another principal");
+            self.schedule_lease_retry();
         } else {
             // A human already holds the scope: the mission waits for a
             // handover instead of ending (ADR-0051).
             error!(reason = ?response.reason, "mission motion lease denied");
             self.hold("the motion lease was denied; waiting for a handover");
         }
+    }
+
+    /// Arms the next lease request `LEASE_RETRY_NS` from now.
+    pub(super) fn schedule_lease_retry(&mut self) {
+        if self.lease_wanted && !self.fenced {
+            self.lease_retry_at =
+                Some(self.mission_now().as_nanos().saturating_add(LEASE_RETRY_NS));
+            self.update(|status| status.lease_retries = status.lease_retries.wrapping_add(1));
+        }
+    }
+
+    /// Whether a held mission's retry has come due at `now` on the mission clock.
+    pub(super) fn lease_retry_due(&self, now: u64) -> bool {
+        self.held
+            && !self.fenced
+            && !self.awaiting_launch
+            && self.lease_retry_at.is_some_and(|at| now >= at)
     }
 
     /// Routes a correlated action result back into the mission engine.

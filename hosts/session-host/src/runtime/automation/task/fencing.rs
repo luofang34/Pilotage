@@ -60,12 +60,17 @@ impl MissionTask {
         }
     }
 
-    fn on_revoked_event(&mut self, revoked: &wire::ScopeLeaseRevoked) {
+    pub(super) fn on_revoked_event(&mut self, revoked: &wire::ScopeLeaseRevoked) {
         if !our_pair(revoked.vehicle.as_ref(), revoked.scope.as_ref()) {
             return;
         }
-        if self.our_principal(revoked.principal.as_ref()) && self.generation.is_some() {
-            self.hold("the motion lease was revoked");
+        if self.our_principal(revoked.principal.as_ref()) {
+            if self.generation.is_some() {
+                self.hold("the motion lease was revoked");
+            }
+        } else if self.held && self.lease_wanted && !self.awaiting_launch {
+            // The human who held the scope released it: ask at once.
+            self.lease_due = true;
         }
     }
 
@@ -194,6 +199,7 @@ impl MissionTask {
             mission.hold(now);
         }
         warn!(reason, "mission held");
+        self.schedule_lease_retry();
         self.update(|status| {
             status.held = true;
             status.lease_generation = None;

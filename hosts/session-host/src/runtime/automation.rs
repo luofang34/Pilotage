@@ -64,6 +64,8 @@ pub struct AutomationStatus {
     pub held: bool,
     /// A real vehicle's mission is waiting for its pilot to launch it.
     pub awaiting_launch: bool,
+    /// Lease requests scheduled while another principal held the scope.
+    pub lease_retries: u32,
     /// Transfers back that resumed the mission.
     pub resumes: u32,
     /// Offers this principal made to humans who requested the scope.

@@ -92,6 +92,12 @@ pub(super) struct MissionTask {
     awaiting_launch: bool,
     /// The lease request the next tick sends.
     lease_due: bool,
+    /// Once airborne, a real vehicle's mission keeps asking for the motion
+    /// lease whenever it is held: a human who took or holds the scope
+    /// gives it back by releasing it.
+    lease_wanted: bool,
+    /// Mission-clock time of the next lease request while held.
+    lease_retry_at: Option<u64>,
 }
 
 impl MissionTask {
@@ -126,6 +132,8 @@ impl MissionTask {
             neutral_frames: 0,
             awaiting_launch: false,
             lease_due: false,
+            lease_wanted: false,
+            lease_retry_at: None,
         }
     }
 
@@ -158,6 +166,8 @@ impl MissionTask {
             neutral_frames: 0,
             awaiting_launch: false,
             lease_due: false,
+            lease_wanted: false,
+            lease_retry_at: None,
         }
     }
 
@@ -241,8 +251,10 @@ impl MissionTask {
         if self.fenced {
             return true;
         }
-        if self.lease_due {
+        let now = self.elapsed_nanos();
+        if self.lease_due || self.lease_retry_due(now) {
             self.lease_due = false;
+            self.lease_retry_at = None;
             if !self.request_lease().await {
                 return false;
             }

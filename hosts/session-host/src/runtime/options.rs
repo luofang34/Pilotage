@@ -45,8 +45,10 @@
 //! - `PILOTAGE_MISSION_TARGET`: `simulator` (the default) or
 //!   `real-vehicle`. A real vehicle requires `vehicle-estimate`. Its
 //!   mission has no arm phase: the pilot arms and launches the aircraft,
-//!   and the mission holds until the vehicle reports 2 m above the
-//!   launch point, then requests the motion lease and climbs.
+//!   and the mission holds until the vehicle reports 1 m above the
+//!   launch point, then requests the motion lease and climbs. While a
+//!   human holds the scope it asks again every five seconds and at once
+//!   when that lease is released.
 //! - `PILOTAGE_SIM_CAMERA_PORT`: presence enables the simulator camera
 //!   attachment on that loopback port. A world-model camera producer
 //!   dials it, renders from the vehicle's simulator truth, and returns

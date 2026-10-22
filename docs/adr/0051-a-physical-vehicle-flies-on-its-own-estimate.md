@@ -106,10 +106,15 @@ launched by its pilot, so a real-vehicle mission has no arm phase and its
 first phase is the climb. The mission principal does not request the motion
 lease while the vehicle is on the ground, where the vehicle refuses velocity
 control: after its welcome it holds, with the phase clocks stopped, until the
-vehicle's estimate reports at least 2 m above the launch point. Then it
+vehicle's estimate reports at least 1 m above the launch point. Then it
 requests the lease and, once granted, resumes with one neutral frame and
-climbs to the survey height. The pilot keeps the original remote controller
-and can take the aircraft at any time; the hold and resume rules above apply.
+climbs to the survey height. A human may hold the scope at that moment, for
+example after a software takeoff from the App: the mission stays held and
+asks again every five seconds, and at once when that lease is released, so
+releasing control hands the aircraft to the mission. The pilot keeps the
+original remote controller and can take the aircraft at any time; a native
+takeover is not a lease event, so the mission does not resume from it
+without a host restart.
 
 ## Consequences
 

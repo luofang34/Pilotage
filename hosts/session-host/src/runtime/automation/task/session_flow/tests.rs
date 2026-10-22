@@ -165,10 +165,24 @@ mod launch {
         assert_eq!(status.borrow().resumes, 1);
     }
 
+    fn released_by(principal: u64) -> wire::ScopeLeaseRevoked {
+        wire::ScopeLeaseRevoked {
+            vehicle: Some(wire::VehicleId {
+                value: HOST_VEHICLE.as_u64(),
+            }),
+            scope: Some(wire::ScopeId {
+                value: MISSION_SCOPE.to_owned(),
+            }),
+            principal: Some(wire::PrincipalId { value: principal }),
+            ..Default::default()
+        }
+    }
+
     #[tokio::test]
-    async fn a_denied_lease_after_the_launch_holds_the_mission_again() {
-        let (mut task, _status) = waiting_task();
+    async fn a_denied_lease_after_the_launch_holds_and_retries() {
+        let (mut task, status) = waiting_task();
         task.on_telemetry(&estimate_at(AIRBORNE_HEIGHT_M + 5.0, 1));
+        task.lease_due = false;
         task.on_lease_response(&LeaseResponse {
             vehicle: HOST_VEHICLE,
             scope: ScopeId::new(MISSION_SCOPE),
@@ -176,6 +190,21 @@ mod launch {
             generation: Generation::new(0),
             reason: None,
         });
-        assert!(task.held && task.generation.is_none());
+        assert!(task.held && task.generation.is_none() && task.lease_wanted);
+        let retry_at = task.lease_retry_at.expect("a retry is scheduled");
+        assert!(!task.lease_retry_due(retry_at - 1));
+        assert!(task.lease_retry_due(retry_at));
+        assert_eq!(status.borrow().lease_retries, 1);
+        // The human who holds the scope releases it: the mission asks at once.
+        task.on_revoked_event(&released_by(21));
+        assert!(task.lease_due, "a foreign release re-requests the lease");
+    }
+
+    #[tokio::test]
+    async fn before_the_launch_a_release_does_not_ask_for_the_lease() {
+        let (mut task, _status) = waiting_task();
+        task.on_revoked_event(&released_by(21));
+        assert!(!task.lease_due && !task.lease_wanted && task.awaiting_launch);
+        assert!(!task.lease_retry_due(u64::MAX));
     }
 }
