@@ -31,6 +31,11 @@
 //! - `PILOTAGE_MISSION_CRUISE_HEIGHT`: cruise height above the anchor in
 //!   meters. `0` skips the climb phase (planar vehicles); unset keeps the
 //!   [`pilotage_mission::MissionConfig`] default.
+//! - `PILOTAGE_MISSION_CRUISE_SPEED`: along-track cruise speed in meters per
+//!   second. It also raises the mission's horizontal ceiling to that speed;
+//!   the host then tightens the ceiling to the envelope the vehicle
+//!   advertises. Unset keeps the [`pilotage_mission::MissionConfig`]
+//!   default.
 //! - `PILOTAGE_MISSION_OWNSHIP`: `simulation-truth` (the default) fuses a
 //!   simulator's truth oracle; `vehicle-estimate` flies the vehicle's own
 //!   exported estimate as a declared pass-through solution (ADR-0051).
@@ -127,6 +132,9 @@ pub struct MissionOptions {
     pub ownship_source: OwnshipSource,
     /// The execution target the mission document is admitted for.
     pub execution_target: ExecutionTarget,
+    /// Cruise speed override in meters per second; `None` keeps the
+    /// [`pilotage_mission::MissionConfig`] default.
+    pub cruise_mps: Option<f64>,
 }
 
 impl RuntimeOptions {
@@ -202,6 +210,10 @@ fn mission_from_env() -> Result<Option<MissionOptions>, HostError> {
         None => matches!(plan, MissionPlanRequest::Survey(_)).then_some(SURVEY_DEFAULT_HEIGHT_M),
         Some(value) => Some(parse_cruise_height(&value)?),
     };
+    let cruise_mps = match env_var("PILOTAGE_MISSION_CRUISE_SPEED")? {
+        None => None,
+        Some(value) => Some(parse_cruise_speed(&value)?),
+    };
     let ownship_source = match env_var("PILOTAGE_MISSION_OWNSHIP")? {
         None => OwnshipSource::SimulationTruth,
         Some(value) => parse_ownship_source(&value)?,
@@ -219,7 +231,23 @@ fn mission_from_env() -> Result<Option<MissionOptions>, HostError> {
         cruise_height_m,
         ownship_source,
         execution_target,
+        cruise_mps,
     }))
+}
+
+/// Parses and range-screens `PILOTAGE_MISSION_CRUISE_SPEED`: a finite
+/// positive speed. The vehicle's advertised envelope bounds it later.
+fn parse_cruise_speed(value: &str) -> Result<f64, HostError> {
+    let speed = value
+        .parse::<f64>()
+        .map_err(|source| HostError::MissionCruiseSpeed {
+            value: value.to_owned(),
+            source,
+        })?;
+    if !speed.is_finite() || speed <= 0.0 {
+        return Err(HostError::MissionCruiseSpeedRange { speed });
+    }
+    Ok(speed)
 }
 
 /// The survey request from `PILOTAGE_MISSION_AREA` and the optional

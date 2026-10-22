@@ -119,6 +119,12 @@ impl MissionPlan {
         }
         config.ownship_source = options.ownship_source;
         config.execution_target = options.execution_target;
+        if let Some(cruise_mps) = options.cruise_mps {
+            // The ceiling follows the asked speed here; the welcome tightens
+            // it to the advertised envelope before the engine flies.
+            config.cruise_mps = cruise_mps;
+            config.limits.max_horizontal_mps = config.limits.max_horizontal_mps.max(cruise_mps);
+        }
         config
     }
 }
@@ -367,6 +373,7 @@ pub fn spawn_reference_mission_rig() -> Result<MissionRig, HostError> {
         cruise_height_m: Some(0.0),
         ownship_source: pilotage_mission::OwnshipSource::SimulationTruth,
         execution_target: pilotage_mission::ExecutionTarget::Simulator,
+        cruise_mps: None,
     };
     spawn_reference_rig(options)
 }
@@ -405,6 +412,7 @@ pub fn spawn_reference_survey_rig() -> Result<MissionRig, HostError> {
         cruise_height_m: Some(0.0),
         ownship_source: pilotage_mission::OwnshipSource::SimulationTruth,
         execution_target: pilotage_mission::ExecutionTarget::Simulator,
+        cruise_mps: None,
     };
     spawn_reference_rig(options)
 }

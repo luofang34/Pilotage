@@ -270,6 +270,22 @@ pub enum HostError {
         /// The rejected height in meters.
         height: f64,
     },
+    /// `PILOTAGE_MISSION_CRUISE_SPEED` was not a number.
+    #[error("invalid PILOTAGE_MISSION_CRUISE_SPEED value {value:?}: {source}")]
+    MissionCruiseSpeed {
+        /// The rejected value.
+        value: String,
+        /// The float parse failure.
+        #[source]
+        source: std::num::ParseFloatError,
+    },
+    /// `PILOTAGE_MISSION_CRUISE_SPEED` parsed but cannot be flown: the speed
+    /// must be finite and positive.
+    #[error("PILOTAGE_MISSION_CRUISE_SPEED must be a finite speed > 0 m/s, got {speed}")]
+    MissionCruiseSpeedRange {
+        /// The rejected speed in meters per second.
+        speed: f64,
+    },
     /// `PILOTAGE_MISSION_OWNSHIP` named no known ownship source.
     #[error(
         "invalid PILOTAGE_MISSION_OWNSHIP value {value:?} (expected \"simulation-truth\" or \"vehicle-estimate\")"
