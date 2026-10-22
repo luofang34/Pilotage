@@ -55,8 +55,20 @@ impl Connection {
         {
             return Ok(());
         }
-        let Some((fence, packet)) = self.flight.landing_override_input(input, now, *sequence)?
-        else {
+        let cancel = self.flight.landing_override_input(input, now, *sequence)?;
+        let followup = cancel
+            .map(|(fence, packet)| (Purpose::LandingOverride(fence.clone()), fence, packet))
+            .or_else(|| {
+                if observations.flight_cached(now)?.mode != 12 {
+                    return None;
+                }
+                self.flight
+                    .confirm_landing_input(input, now, *sequence)
+                    .map(|(fence, packet)| {
+                        (Purpose::LandingConfirmation(fence.clone()), fence, packet)
+                    })
+            });
+        let Some((purpose, fence, packet)) = followup else {
             return Ok(());
         };
         *sequence = sequence.wrapping_add(1);
@@ -64,7 +76,7 @@ impl Connection {
             bytes: self.input.framing().command(packet.bytes()),
             offset: 0,
             expires_at: Some(fence.send_until),
-            purpose: Purpose::LandingOverride(fence),
+            purpose,
         });
         Ok(())
     }

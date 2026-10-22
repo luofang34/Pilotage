@@ -13,6 +13,9 @@ impl FlightExecution {
         now: Duration,
     ) {
         self.poll(now);
+        if self.cycle.observe(report, model_revision, now) {
+            self.takeoff_uncertain = false;
+        }
         let Some(procedure) = &mut self.procedure else {
             return;
         };
@@ -38,7 +41,9 @@ impl FlightExecution {
         let complete = match procedure.command {
             BasicFlightCommand::Takeoff => report.is_flying && report.motors_running,
             BasicFlightCommand::Land => !report.is_flying && !report.motors_running,
-            BasicFlightCommand::ReturnHome | BasicFlightCommand::CancelLanding => false,
+            BasicFlightCommand::ReturnHome
+            | BasicFlightCommand::CancelLanding
+            | BasicFlightCommand::ConfirmLanding => false,
         };
         if !complete {
             procedure.completion_reports = 0;

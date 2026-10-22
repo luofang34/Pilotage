@@ -14,6 +14,9 @@ pub(super) struct LandingOverride {
     pub(super) fence: FlightFence,
     packet: BasicFlightPacket,
     written: bool,
+    written_at: Option<Duration>,
+    hover_reports: u8,
+    hover_at: Option<Duration>,
     finished: bool,
     accepted_at: Option<Duration>,
     complete_until: Duration,
@@ -44,8 +47,8 @@ impl FlightExecution {
             procedure.manual_ready = true;
             return Ok(None);
         }
-        if !procedure.manual_ready
-            && !(procedure.manual_descent && input.value.interrupts_descent())
+        if !input.value.interrupts_descent()
+            || !(procedure.manual_ready || procedure.manual_descent)
         {
             return Ok(None);
         }
@@ -56,6 +59,9 @@ impl FlightExecution {
             fence: fence.clone(),
             packet,
             written: false,
+            written_at: None,
+            hover_reports: 0,
+            hover_at: None,
             finished: false,
             accepted_at: None,
             complete_until: now.saturating_add(Duration::from_secs(2)),
@@ -88,6 +94,7 @@ impl FlightExecution {
             .and_then(|p| p.override_control.as_mut())
         {
             control.written = now < control.fence.send_until;
+            control.written_at = control.written.then_some(now);
         }
     }
 
@@ -128,7 +135,7 @@ impl FlightExecution {
         let Some(procedure) = &mut self.procedure else {
             return false;
         };
-        let Some(control) = &procedure.override_control else {
+        let Some(control) = &mut procedure.override_control else {
             return false;
         };
         if !report.is_flying && !report.motors_running {
@@ -136,13 +143,24 @@ impl FlightExecution {
         }
         if procedure.sample.phase == Phase::InProgress
             && !control.finished
-            && control.accepted_at.is_some_and(|at| now > at)
+            && control.written_at.is_some_and(|at| now > at)
             && report.mode == 6
             && report.is_flying
             && report.motors_running
         {
-            procedure.manual_released = true;
-            self.transition(Phase::Cancelled, Some(Reason::Interrupted), None, now);
+            // A lost ACK does not negate independently observed exit from landing.
+            // Distinct receive cycles must confirm hover before mode acquisition.
+            if control.hover_at.is_none_or(|at| now > at) {
+                control.hover_reports = control.hover_reports.saturating_add(1);
+                control.hover_at = Some(now);
+            }
+            if control.hover_reports >= 3 {
+                procedure.manual_released = true;
+                self.transition(Phase::Cancelled, Some(Reason::Interrupted), None, now);
+            }
+        } else {
+            control.hover_reports = 0;
+            control.hover_at = None;
         }
         true
     }

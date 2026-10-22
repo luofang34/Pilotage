@@ -12,6 +12,8 @@ pub enum BasicFlightCommand {
     ReturnHome,
     /// Cancel native landing and request hover; feedback must confirm the change.
     CancelLanding,
+    /// Continue landing only when fresh FC feedback requests confirmation.
+    ConfirmLanding,
 }
 
 impl BasicFlightCommand {
@@ -27,6 +29,7 @@ impl BasicFlightCommand {
             // DJI OSDK FlightCommand::exitLanding uses the same function endpoint.
             // https://github.com/dji-sdk/Onboard-SDK/blob/master/osdk-core/api/inc/dji_control.hpp
             Self::CancelLanding => 14,
+            Self::ConfirmLanding => 30,
         };
         let [low, high] = sequence.to_le_bytes();
         let mut bytes = [0x55, 14, 4, 0, 2, 3, low, high, 0x40, 3, 0x2a, value, 0, 0];

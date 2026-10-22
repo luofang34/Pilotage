@@ -213,6 +213,7 @@ impl DjiAdapter {
         self.read_available_blocking(io_started);
         // Recording can take time. Recheck age at the command write boundary.
         let now = clock();
+        self.connection.guard_remote_control(now);
         self.connection
             .drive_motion(&self.observations, now, &mut self.control.sequence);
         self.connection.drive_mode_session(&self.observations, now);
@@ -352,6 +353,22 @@ impl DjiAdapter {
 }
 
 impl VehicleAdapter for DjiAdapter {
+    fn take_control_authority_losses(&mut self) -> Vec<pilotage_adapter_api::ControlAuthorityLoss> {
+        self.connection
+            .flight
+            .take_authority_loss()
+            .map(
+                |(session, generation)| pilotage_adapter_api::ControlAuthorityLoss {
+                    vehicle: self.vehicle,
+                    scope: ScopeId::new(pilotage_protocol::MOTION_SCOPE),
+                    session: pilotage_protocol::SessionId::new(session),
+                    generation: pilotage_protocol::Generation::new(generation),
+                },
+            )
+            .into_iter()
+            .collect()
+    }
+
     fn capabilities(&self) -> AdapterCapabilities {
         let mut capabilities = capability::capabilities(
             self.vehicle,

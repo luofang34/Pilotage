@@ -33,6 +33,48 @@ fn release_envelope() -> DomainEnvelope {
 }
 
 #[test]
+fn device_authority_loss_fences_only_the_matching_session_and_generation() {
+    let mut engine = engine_with_silence(Duration::from_secs(1));
+    let client = ClientKey::new(1);
+    let session = welcome(&mut engine, client);
+    let generation = grant(&mut engine, client, 1);
+    let loss = pilotage_adapter_api::ControlAuthorityLoss {
+        vehicle: VEHICLE,
+        scope: motion(),
+        session,
+        generation,
+    };
+    let outcome = engine.handle_device_authority_loss(&loss, MonoTimestamp::from_nanos(10));
+    assert_eq!(engaged_neutralize(&outcome), 1);
+    let stale = engine.handle_client_message(
+        client,
+        DomainEnvelope::Frame(neutral_frame(
+            session,
+            generation,
+            SequenceNum::new(1),
+            MonoTimestamp::from_nanos(11),
+        )),
+        MonoTimestamp::from_nanos(11),
+    );
+    assert_eq!(cleared(&stale), 0);
+    let fresh = grant(&mut engine, client, 20);
+    assert_ne!(fresh, generation);
+    let late = engine.handle_device_authority_loss(&loss, MonoTimestamp::from_nanos(21));
+    assert!(late.actions.is_empty());
+    let activation = engine.handle_client_message(
+        client,
+        DomainEnvelope::Frame(neutral_frame(
+            session,
+            fresh,
+            SequenceNum::new(1),
+            MonoTimestamp::from_nanos(22),
+        )),
+        MonoTimestamp::from_nanos(22),
+    );
+    assert_eq!(cleared(&activation), 1);
+}
+
+#[test]
 fn a_holder_release_is_acknowledged_fenced_and_neutralized() {
     let mut engine = engine_with_silence(Duration::from_nanos(100));
     let client = ClientKey::new(1);

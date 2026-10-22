@@ -89,6 +89,20 @@ impl AuthorityRoute {
         ))
     }
 
+    /// A lane closed by an authority event, without denying a fresh request.
+    #[must_use]
+    pub fn lane_closed(
+        &self,
+        vehicle: u64,
+        scope: &str,
+        generation: u64,
+    ) -> Option<(AuthorityScope, AuthorityEvent)> {
+        if vehicle != self.vehicle_id {
+            return None;
+        }
+        Some((self.slot(scope)?, AuthorityEvent::Revoked { generation }))
+    }
+
     /// A grant or revocation addressed to this principal. Every other
     /// authority event (another principal's lease, a transfer, an override,
     /// a warning) is not a transition of this table.

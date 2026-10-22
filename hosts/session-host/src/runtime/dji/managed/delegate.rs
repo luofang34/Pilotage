@@ -29,6 +29,12 @@ impl ManagedDji {
 }
 
 impl VehicleAdapter for ManagedDji {
+    fn take_control_authority_losses(&mut self) -> Vec<pilotage_adapter_api::ControlAuthorityLoss> {
+        self.adapter
+            .as_mut()
+            .map_or_else(Vec::new, VehicleAdapter::take_control_authority_losses)
+    }
+
     fn capabilities(&self) -> AdapterCapabilities {
         self.adapter
             .as_ref()

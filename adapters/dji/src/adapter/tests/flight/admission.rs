@@ -76,6 +76,7 @@ fn land_accepts_running_motors_and_low_or_absent_battery() {
     let mut h = Harness::flight(DjiControlMode::Observed, Framing::LogicLink);
     feed(&mut h, &probe());
     feed_fc(&mut h, 1, 12);
+    remote(&mut h, 1, [1024; 4]);
     h.step(10);
     assert_eq!(
         h.apply(request(ControlAction::Land, 1), 10).disposition,
@@ -124,6 +125,7 @@ fn discrete_scope_refuses_axes_legacy_missing_identity_and_expired_window() {
 fn battery_must_be_observed_under_the_current_model_binding_and_cannot_renew_by_replay() {
     let mut h = Harness::flight(DjiControlMode::Observed, Framing::LogicLink);
     feed(&mut h, &probe());
+    remote(&mut h, 1, [1024; 4]);
     feed_battery(&mut h, 1, 50);
     feed_fc(&mut h, 1, 0);
     h.step(10);
@@ -150,6 +152,7 @@ fn fresh_fc_reports_do_not_renew_battery_age_and_land_remains_available() {
     let mut h = ready();
     for sequence in 2..=13 {
         feed_fc(&mut h, sequence, 0);
+        remote(&mut h, sequence, [1024; 4]);
         feed_battery(&mut h, 1, 50);
         h.step(10 + u64::from(sequence - 1) * 250);
     }
