@@ -146,7 +146,10 @@ struct DjiHostConfig {
     experimental_flight: bool,
 }
 
-pub(super) fn start_blocking(vehicle: VehicleId) -> Result<DjiRuntime, DjiHostError> {
+pub(super) fn start_blocking(
+    vehicle: VehicleId,
+    origin: std::time::Instant,
+) -> Result<DjiRuntime, DjiHostError> {
     let config = config_from_values(
         std::env::var_os(SERIAL),
         std::env::var_os(USB_REGISTRY_ID),
@@ -159,7 +162,7 @@ pub(super) fn start_blocking(vehicle: VehicleId) -> Result<DjiRuntime, DjiHostEr
     let virtual_stick = parse_virtual_stick(std::env::var_os(VIRTUAL_STICK))?;
     let (streams, updates) = mpsc::channel(2);
     let (frames, producer) = dji_video::supervise(config.ffmpeg.clone(), updates);
-    match managed::ManagedDji::start_blocking(vehicle, config, virtual_stick, streams) {
+    match managed::ManagedDji::start_blocking(vehicle, config, virtual_stick, streams, origin) {
         Ok(adapter) => Ok(DjiRuntime {
             adapter,
             frames: Some(frames),

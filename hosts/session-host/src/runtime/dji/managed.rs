@@ -43,6 +43,7 @@ impl ManagedDji {
         config: DjiHostConfig,
         virtual_stick: bool,
         streams: mpsc::Sender<Option<EncodedVideoStream>>,
+        origin: Instant,
     ) -> Result<Self, DjiHostError> {
         #[cfg(target_os = "macos")]
         let events = if matches!(config.attachment, AttachmentSelection::AutoUsb) {
@@ -58,7 +59,7 @@ impl ManagedDji {
             config,
             virtual_stick,
             streams,
-            origin: Instant::now(),
+            origin,
             adapter: None,
             identity: None,
             #[cfg(target_os = "macos")]
@@ -86,6 +87,7 @@ impl ManagedDji {
         capture_path: PathBuf,
     ) -> Result<(), DjiHostError> {
         let vehicle = self.vehicle;
+        let origin = self.origin;
         let config = DjiConfig {
             attachment,
             capture_path,
@@ -96,7 +98,7 @@ impl ManagedDji {
         };
         self.pending = Some(Operation::start(move || {
             Completion::Opened(
-                DjiAdapter::start_blocking(vehicle, config)
+                DjiAdapter::start_with_host_clock_blocking(vehicle, config, origin)
                     .map(Box::new)
                     .map_err(DjiHostError::Adapter),
             )
