@@ -69,11 +69,43 @@ function testTokensResolveToInlineTileSources() {
   assert.equal(coastline.maxzoom, 7, "overzoom past the deepest tile is the renderer's");
   const terrain = style.sources["pilotage-terrain"];
   assert.deepEqual(terrain.tiles, [`${ASSETS_BASE}terrain/{z}/{x}/{y}.png`]);
-  assert.equal(terrain.maxzoom, 13, "overzoom past the deepest tile is the renderer's");
   assert.equal(style.glyphs, `${ASSETS_BASE}fonts/{fontstack}/{range}.pbf`);
 }
 testTokensResolveToInlineTileSources();
 console.log("ok - testTokensResolveToInlineTileSources");
+
+function testEverySourceReadingAnArchiveIsResolved() {
+  // The terrain archive is drawn by more than one source. A source left
+  // holding its token asks the renderer for a placeholder URL.
+  const style = resolved();
+  assert.doesNotMatch(JSON.stringify(style.sources), /__PILOTAGE_/);
+  const readers = Object.entries(sharedStyle.sources).filter(
+    ([, source]) => source.url === TERRAIN_TOKEN,
+  );
+  assert.ok(readers.length > 1, "the shared style reads the terrain archive more than once");
+  const archive = tileJsonBySource["pilotage-terrain"];
+  for (const [name, declared] of readers) {
+    const source = style.sources[name];
+    assert.deepEqual(source.tiles, [`${ASSETS_BASE}terrain/{z}/{x}/{y}.png`], name);
+    // Each source keeps the zoom range the style gives it. The source that
+    // draws everywhere is capped where the archive stops covering the whole
+    // Earth; taking the archive's deepest zoom instead would draw nothing
+    // wherever only the shallow bands exist.
+    assert.equal(source.minzoom, declared.minzoom ?? archive.minzoom, `${name} minzoom`);
+    assert.equal(source.maxzoom, declared.maxzoom ?? archive.maxzoom, `${name} maxzoom`);
+  }
+}
+testEverySourceReadingAnArchiveIsResolved();
+console.log("ok - testEverySourceReadingAnArchiveIsResolved");
+
+function testADeclaredRangeNeverReachesPastTheArchive() {
+  const forged = structuredClone(sharedStyle);
+  forged.sources["pilotage-terrain"].maxzoom = 20;
+  const terrain = resolved({ template: forged }).sources["pilotage-terrain"];
+  assert.equal(terrain.maxzoom, tileJsonBySource["pilotage-terrain"].maxzoom);
+}
+testADeclaredRangeNeverReachesPastTheArchive();
+console.log("ok - testADeclaredRangeNeverReachesPastTheArchive");
 
 function testTheCoastlineSourceStopsWhereTheArchiveIsStillGlobal() {
   // A vector tile the archive does not hold draws nothing, and no
@@ -126,8 +158,11 @@ function testResolutionPreservesTheSharedContract() {
   // Attribution is a licence condition of the tile sources; substitution
   // must never drop it.
   assert.deepEqual(sourceAttributions(style), sourceAttributions(sharedStyle));
-  // Terrain coverages share a provider; each source retains its attribution.
-  assert.equal(new Set(sourceAttributions(style)).size, 2);
+  // Sources reading one archive share its notice, shown once.
+  const notices = new Set(
+    Object.values(sharedStyle.sources).map((source) => source.attribution.trim()),
+  );
+  assert.deepEqual(sourceAttributions(style), [...notices].sort());
   // The template itself stays untouched: it is the shared document.
   assert.equal(sharedStyle.sources["pilotage-coastline"].url, COASTLINE_TOKEN);
   assert.equal(sharedStyle.sources["pilotage-terrain"].url, TERRAIN_TOKEN);
@@ -155,6 +190,19 @@ function testInvalidTemplateIsATypedRefusal() {
 }
 testInvalidTemplateIsATypedRefusal();
 console.log("ok - testInvalidTemplateIsATypedRefusal");
+
+function testATokenNamingNoArchiveIsATypedRefusal() {
+  const forged = structuredClone(sharedStyle);
+  forged.sources["pilotage-terrain-detail"].url = "__PILOTAGE_UNEXPORTED_MBTILES_URL__";
+  assert.throws(
+    () => resolved({ template: forged }),
+    (error) =>
+      error instanceof SituationStyleError &&
+      error.reason === STYLE_REASON.INVALID_TEMPLATE,
+  );
+}
+testATokenNamingNoArchiveIsATypedRefusal();
+console.log("ok - testATokenNamingNoArchiveIsATypedRefusal");
 
 function testUnusableTileJsonIsATypedRefusal() {
   for (const broken of [null, {}, { tiles: [] }, { tiles: ["a"], minzoom: 0 }]) {
