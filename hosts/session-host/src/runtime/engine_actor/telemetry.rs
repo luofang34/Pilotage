@@ -337,6 +337,8 @@ fn fc_state_to_wire(sample: FcStateSample) -> wire::FcState {
 }
 
 #[cfg(test)]
+mod mission_estimate;
+#[cfg(test)]
 mod tests;
 
 impl<A: pilotage_adapter_api::VehicleAdapter> super::EngineActor<A> {
