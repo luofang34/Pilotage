@@ -37,6 +37,11 @@ pub struct DjiConfig {
     /// Allow one explicit, bounded virtual-stick enable-and-disable diagnostic.
     /// This permits no velocity writes and starts no diagnostic automatically.
     pub experimental_virtual_stick_diagnostic: bool,
+    /// The north reference the operator verified for the aircraft's reported
+    /// heading. Set, the adapter publishes the reported attitude as an
+    /// authorized attitude under that reference, which geographic guidance
+    /// requires; unset, the attitude stays a display report.
+    pub heading_reference: Option<pilotage_protocol::HeadingReference>,
 }
 
 /// A failure to start a DJI connection.

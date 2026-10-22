@@ -76,6 +76,15 @@ impl Observations {
         }
     }
 
+    /// Declares the verified north reference the airframe attitude is
+    /// published under; `None` keeps it a display report.
+    pub(super) fn set_heading_reference(
+        &mut self,
+        reference: Option<pilotage_protocol::HeadingReference>,
+    ) {
+        self.airframe.heading_reference = reference;
+    }
+
     pub(super) fn receive(&mut self, frame: &DumlFrame, now: Duration) {
         let binding = self.model_deadline(now).map(|_| self.model_revision());
         self.battery.receive(frame, now, binding);

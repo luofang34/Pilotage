@@ -227,6 +227,27 @@ fn experimental_flight_requires_an_exact_opt_in() {
 }
 
 #[test]
+fn the_heading_reference_is_an_explicit_true_or_magnetic_declaration() {
+    use super::parse_heading_reference;
+    use pilotage_protocol::HeadingReference;
+    assert_eq!(parse_heading_reference(None).expect("absent"), None);
+    assert_eq!(
+        parse_heading_reference(Some("true".into())).expect("true north"),
+        Some(HeadingReference::True)
+    );
+    assert_eq!(
+        parse_heading_reference(Some("magnetic".into())).expect("magnetic north"),
+        Some(HeadingReference::Magnetic)
+    );
+    for value in ["", "1", "True", "yes", "true ", "grid"] {
+        assert!(matches!(
+            parse_heading_reference(Some(value.into())),
+            Err(DjiHostError::HeadingReference { .. })
+        ));
+    }
+}
+
+#[test]
 fn an_unknown_mode_cannot_enable_control() {
     for value in ["", "bench", "true", "observed ", "BENCH-INITIAL-HORIZONTAL"] {
         assert!(matches!(

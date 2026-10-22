@@ -72,6 +72,7 @@ pub struct DjiAdapter {
     experimental_flight: bool,
     experimental_virtual_stick: bool,
     experimental_virtual_stick_diagnostic: bool,
+    heading_reference: Option<pilotage_protocol::HeadingReference>,
 }
 
 impl DjiAdapter {
@@ -133,7 +134,7 @@ impl DjiAdapter {
         adapter.experimental_virtual_stick = config.experimental_virtual_stick;
         adapter.experimental_virtual_stick_diagnostic =
             config.experimental_virtual_stick_diagnostic;
-        Ok(adapter)
+        Ok(adapter.with_heading_reference(config.heading_reference))
     }
 
     /// Open an attachment on the session host's monotonic time origin.
@@ -218,6 +219,7 @@ impl DjiAdapter {
             experimental_flight: experimental_flight && control_mode == DjiControlMode::Observed,
             experimental_virtual_stick: false,
             experimental_virtual_stick_diagnostic: false,
+            heading_reference: None,
         })
     }
 
@@ -413,8 +415,11 @@ impl VehicleAdapter for DjiAdapter {
             self.profile,
             self.connection.execution.capabilities(),
             self.observations.incarnation(),
-            self.flight_enabled(),
-            self.motion_enabled(),
+            capability::FlightOptIns {
+                experimental_flight: self.flight_enabled(),
+                experimental_virtual_stick: self.motion_enabled(),
+                heading_reference: self.heading_reference,
+            },
         );
         capabilities.execution.render_capable = self.video_subscribed;
         capabilities

@@ -65,7 +65,11 @@ The host requires an authorized canonical attitude with the same
 acquisition identity as the fix. A reported Euler attitude has no verified
 north reference and cannot supply mission heading. Without that attitude,
 the host refuses the estimate, and the engine commands no
-velocity without one.
+velocity without one. An adapter whose device reports only Euler angles
+publishes them as an authorized attitude only when the operator declares
+the north reference they verified for that device, and it advertises that
+reference; the declaration is the operator's, recorded in the host's
+configuration, not a measurement.
 
 ### Limits
 

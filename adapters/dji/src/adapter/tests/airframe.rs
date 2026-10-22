@@ -111,6 +111,50 @@ fn captured_body_angles_are_reported_euler_without_navigation_or_authorization()
 }
 
 #[test]
+fn a_declared_heading_reference_publishes_an_authorized_attitude() -> TestResult {
+    let mut harness = Harness::mobile_with_heading(pilotage_protocol::HeadingReference::True);
+    assert_eq!(
+        harness.adapter.capabilities().vehicles[0].heading_reference,
+        Some(pilotage_protocol::HeadingReference::True)
+    );
+    let bytes = &captured_reports()[0];
+    let parsed = packets(bytes);
+    harness.feed(&crate::logiclink::encode_control(&parsed[0]))?;
+    harness.step(0);
+    let batch = harness.telemetry(0);
+    let avionics = batch.samples[0].avionics.unwrap();
+    assert_eq!(
+        avionics.valid_flags, 0b0001,
+        "the attitude alone is authorized"
+    );
+    assert_eq!(avionics.quality, 2, "no estimator status without a fix");
+    let AvionicsAttitudeSample::Canonical {
+        quat_wxyz: [w, x, y, z],
+        rates_rps,
+        stamp,
+    } = avionics.attitude.unwrap()
+    else {
+        panic!("a declared reference makes the attitude canonical");
+    };
+    assert!(rates_rps.is_none());
+    assert_eq!(stamp.role, SourceRole::OperationalEstimate);
+    let yaw = (2.0 * (w * z + x * y)).atan2(1.0 - 2.0 * (y * y + z * z));
+    assert!((yaw - (-67.6_f32).to_radians()).abs() < 1e-4, "yaw {yaw}");
+    let pitch = (2.0 * (w * y - z * x)).asin();
+    assert!(
+        (pitch - (-4.9_f32).to_radians()).abs() < 1e-4,
+        "pitch {pitch}"
+    );
+    let roll = (2.0 * (w * x + y * z)).atan2(1.0 - 2.0 * (x * x + y * y));
+    assert!((roll - 1.7_f32.to_radians()).abs() < 1e-4, "roll {roll}");
+    assert!(
+        (w * w + x * x + y * y + z * z - 1.0).abs() < 1e-5,
+        "unit quaternion"
+    );
+    Ok(())
+}
+
+#[test]
 fn motor_flag_is_separate_from_flying_arm_and_landed_state() -> TestResult {
     // Positive cases use the SDK bit definition. They are not flight captures.
     for flags in [0_u32, 8, 12, 6, 0xffff_fff7, u32::MAX] {

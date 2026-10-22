@@ -116,6 +116,15 @@ impl Harness {
         Self::with_framing(super::super::DjiControlMode::Observed, Framing::LogicLink)
     }
 
+    /// A mobile harness whose operator declared the verified heading reference.
+    pub(super) fn mobile_with_heading(reference: pilotage_protocol::HeadingReference) -> Self {
+        let Self { adapter, recording } = Self::mobile();
+        Self {
+            adapter: adapter.with_heading_reference(Some(reference)),
+            recording,
+        }
+    }
+
     pub(super) fn mobile_with_incarnation(incarnation: SourceIncarnation) -> Self {
         Self::with_identity(
             super::super::DjiControlMode::Observed,

@@ -19,6 +19,7 @@ const CAPTURE: &str = "PILOTAGE_DJI_CAPTURE";
 const CONTROL_MODE: &str = "PILOTAGE_DJI_CONTROL_MODE";
 const FFMPEG: &str = "PILOTAGE_DJI_FFMPEG";
 const VIRTUAL_STICK: &str = "PILOTAGE_DJI_VIRTUAL_STICK";
+const HEADING_REFERENCE: &str = "PILOTAGE_DJI_HEADING_REFERENCE";
 const EXPERIMENTAL_FLIGHT: &str = "PILOTAGE_DJI_EXPERIMENTAL_FLIGHT";
 
 mod attachment;
@@ -37,6 +38,12 @@ pub enum DjiHostError {
     /// A ground-only USB recovery opt-in was not recognized.
     #[error("{GROUND_RECOVERY} must be absent or 1, got {value:?}")]
     GroundRecovery {
+        /// The rejected setting.
+        value: OsString,
+    },
+    /// The verified heading reference was not recognized.
+    #[error("{HEADING_REFERENCE} must be absent, true or magnetic, got {value:?}")]
+    HeadingReference {
         /// The rejected setting.
         value: OsString,
     },
@@ -152,6 +159,8 @@ struct DjiHostConfig {
     ffmpeg: PathBuf,
     experimental_flight: bool,
     usb_ground_recovery: bool,
+    /// The north reference the operator verified for the reported heading.
+    heading_reference: Option<pilotage_protocol::HeadingReference>,
 }
 
 pub(super) fn start_blocking(
@@ -172,6 +181,7 @@ pub(super) fn start_blocking(
         Some(value) if value == "1" => true,
         Some(value) => return Err(DjiHostError::GroundRecovery { value }),
     };
+    config.heading_reference = parse_heading_reference(std::env::var_os(HEADING_REFERENCE))?;
     let virtual_stick = parse_virtual_stick(std::env::var_os(VIRTUAL_STICK))?;
     let (streams, updates) = mpsc::channel(2);
     let (frames, producer) = dji_video::supervise(config.ffmpeg.clone(), updates);
@@ -212,7 +222,23 @@ fn config_from_values(
         ffmpeg: parse_decoder(ffmpeg)?,
         experimental_flight: parse_experimental_flight(experimental_flight)?,
         usb_ground_recovery: false,
+        heading_reference: None,
     })
+}
+
+/// The heading reference the operator verified on the ground: `true` or
+/// `magnetic`. Anything else, including an empty value, is refused.
+fn parse_heading_reference(
+    value: Option<OsString>,
+) -> Result<Option<pilotage_protocol::HeadingReference>, DjiHostError> {
+    match value {
+        None => Ok(None),
+        Some(value) if value == "true" => Ok(Some(pilotage_protocol::HeadingReference::True)),
+        Some(value) if value == "magnetic" => {
+            Ok(Some(pilotage_protocol::HeadingReference::Magnetic))
+        }
+        Some(value) => Err(DjiHostError::HeadingReference { value }),
+    }
 }
 
 fn parse_virtual_stick(value: Option<OsString>) -> Result<bool, DjiHostError> {

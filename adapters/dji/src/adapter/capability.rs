@@ -30,15 +30,30 @@ fn availability<T>(
     }
 }
 
+/// The flight opt-ins the adapter advertises.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(super) struct FlightOptIns {
+    /// Discrete Takeoff and Land are offered.
+    pub experimental_flight: bool,
+    /// Lease-bound virtual-stick velocity is offered.
+    pub experimental_virtual_stick: bool,
+    /// The north reference the operator verified for the reported heading.
+    pub heading_reference: Option<pilotage_protocol::HeadingReference>,
+}
+
 pub(super) fn capabilities(
     vehicle: VehicleId,
     mode: DjiControlMode,
     profile: turret_dji::Mini3ControlProfile,
     payload: &turret_core::PayloadCapabilities,
     incarnation: pilotage_adapter_api::SourceIncarnation,
-    experimental_flight: bool,
-    experimental_virtual_stick: bool,
+    opt_ins: FlightOptIns,
 ) -> AdapterCapabilities {
+    let FlightOptIns {
+        experimental_flight,
+        experimental_virtual_stick,
+        heading_reference,
+    } = opt_ins;
     let mut payload =
         pilotage_adapter_api::payload_capabilities_to_wire("dji-camera", payload, &[GIMBAL_SCOPE]);
     payload.connection_incarnation = incarnation.into_bytes().to_vec();
@@ -60,7 +75,7 @@ pub(super) fn capabilities(
         vehicles: vec![VehicleDescriptor {
             id: vehicle,
             class: VehicleClass::Multicopter,
-            heading_reference: None,
+            heading_reference,
             display_name: match mode {
                 DjiControlMode::Observed => "DJI Mini 3",
                 DjiControlMode::BenchInitialHorizontal => "DJI Mini 3 · one-way bench",
@@ -136,5 +151,20 @@ fn flight_scope(actions: bool, continuous: bool) -> ScopeDescriptor {
             })
             .collect(),
         legacy: None,
+    }
+}
+
+impl super::DjiAdapter {
+    /// Declares the north reference the operator verified for the reported
+    /// heading. The attitude is then published as authorized under it, and
+    /// the vehicle advertises the reference.
+    #[must_use]
+    pub fn with_heading_reference(
+        mut self,
+        reference: Option<pilotage_protocol::HeadingReference>,
+    ) -> Self {
+        self.heading_reference = reference;
+        self.observations.set_heading_reference(reference);
+        self
     }
 }
