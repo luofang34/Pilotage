@@ -134,6 +134,29 @@ impl DjiAdapter {
         Ok(adapter)
     }
 
+    /// Open an attachment on the session host's monotonic time origin.
+    ///
+    /// Reconnected attachments need a new identity, but their host-clock
+    /// measurements must remain comparable with the session's timestamps.
+    ///
+    /// # Errors
+    /// Returns the attachment, capture, or identity error from opening the device.
+    pub fn start_with_host_clock_blocking(
+        vehicle: VehicleId,
+        config: DjiConfig,
+        origin: Instant,
+    ) -> Result<Self, DjiAdapterError> {
+        Self::start_blocking(vehicle, config).map(|adapter| adapter.with_host_clock(origin))
+    }
+
+    fn with_host_clock(mut self, origin: Instant) -> Self {
+        // Opening has not read or written application data, so no evidence uses
+        // the constructor's local clock yet. Both writes and reports use this origin.
+        self.origin = origin;
+        self.connection.origin = origin;
+        self
+    }
+
     fn from_connection(
         vehicle: VehicleId,
         transport: Box<dyn Transport>,

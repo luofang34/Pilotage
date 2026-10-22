@@ -17,6 +17,35 @@ fn captured_reports() -> Vec<Vec<u8>> {
 }
 
 #[test]
+fn a_late_attachment_keeps_measurements_and_write_deadlines_on_the_host_clock() -> TestResult {
+    let mut harness = Harness::mobile();
+    let origin = std::time::Instant::now()
+        .checked_sub(std::time::Duration::from_secs(300))
+        .unwrap();
+    harness.adapter = harness.adapter.with_host_clock(origin);
+    let bytes = captured_reports().remove(0);
+    harness.feed(&crate::logiclink::encode_control(&packets(&bytes)[0]))?;
+    harness
+        .adapter
+        .step(pilotage_adapter_api::StepBudget { ticks: 1 });
+    let batch = harness.adapter.sample_telemetry();
+    let sample = &batch.samples[0];
+    let motor = sample.fc_state.unwrap().motor_state.unwrap();
+    assert_eq!(motor.state, MotorState::Stopped);
+    assert_eq!(motor.stamp.clock, MeasurementClock::HostMonotonic);
+    assert!(motor.stamp.acquired_at_ns >= 300_000_000_000);
+    assert!(motor.stamp.acquired_at_ns <= origin.elapsed().as_nanos() as u64);
+    let stream = harness.adapter.subscribe_encoded_video().unwrap();
+    assert_eq!(stream.origin, origin);
+    let deadlines = harness.deadlines()?;
+    assert!(!deadlines.is_empty());
+    assert!(deadlines.iter().all(|deadline| {
+        *deadline < std::time::Instant::now() + std::time::Duration::from_secs(1)
+    }));
+    Ok(())
+}
+
+#[test]
 fn captured_body_angles_are_reported_euler_without_navigation_or_authorization() -> TestResult {
     let mut harness = Harness::mobile();
     for (index, bytes) in captured_reports().iter().enumerate() {

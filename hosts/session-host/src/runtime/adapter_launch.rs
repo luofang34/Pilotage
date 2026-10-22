@@ -146,7 +146,7 @@ fn spawn_dji_runtime_blocking(
         adapter,
         frames,
         producer,
-    } = super::dji::start_blocking(HOST_VEHICLE)?;
+    } = super::dji::start_blocking(HOST_VEHICLE, host.start.into_std())?;
     let engine = build_engine(&adapter, options);
     let video = SessionVideo {
         frames,
