@@ -294,8 +294,8 @@ async fn an_operator_takes_the_survey_over_and_hands_it_back() {
 }
 
 /// The survey principal arms, flies every line end of the two-line
-/// rectangle in order, and completes; the guidance it broadcasts names
-/// the survey's own waypoints.
+/// rectangle in order, comes home, and completes; the guidance it
+/// broadcasts names the survey's own waypoints.
 #[tokio::test(start_paused = true)]
 async fn survey_principal_flies_every_line_and_completes() {
     let rig = runtime::spawn_reference_survey_rig().expect("survey rig spawns");
@@ -305,7 +305,10 @@ async fn survey_principal_flies_every_line_and_completes() {
     let guidance = collect_guidance(&mut observer, 2).await;
     drop(observer);
     for state in &guidance {
-        assert_eq!(state.waypoint_count, 4, "two lines, two ends each");
+        assert_eq!(
+            state.waypoint_count, 5,
+            "two lines, two ends each, and home"
+        );
         assert!(
             state.to_ident.starts_with('L'),
             "the active waypoint is a survey line end, got {}",
