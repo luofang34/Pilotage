@@ -5,11 +5,13 @@
 //! command. They do not advertise flight capabilities for other DJI models.
 
 mod command;
+mod position;
 mod report;
 mod stream;
 mod virtual_stick;
 
 pub use command::{BasicFlightCommand, BasicFlightPacket};
+pub use position::{Mini3Fix, Mini3PositionReport};
 pub(crate) use report::osd_payload;
 pub use report::{Mini3FlightReport, VirtualStickReport};
 pub use stream::{
