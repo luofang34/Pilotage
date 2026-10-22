@@ -199,10 +199,17 @@ impl Device for Native {
         // SAFETY: This consumes the sole handle. Native retains its context only
         // when a pending callback could still use it and reports cleanup failure.
         let status = unsafe { dji_usb_close(self.handle.as_ptr(), &mut error) };
-        if status == 0 {
-            Ok(())
-        } else {
-            Err(error.into())
+        match status {
+            0 => Ok(()),
+            1 => {
+                tracing::warn!(
+                    stage = error.stage,
+                    status = error.status,
+                    "USB owner released; alternate setting could not be restored"
+                );
+                Ok(())
+            }
+            _ => Err(error.into()),
         }
     }
 }

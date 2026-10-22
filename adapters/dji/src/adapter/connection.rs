@@ -304,7 +304,7 @@ impl Connection {
     }
 
     pub(super) fn fail(&mut self, fault: DjiFault) {
-        error!(%fault, "DJI connection closed; control is fenced");
+        error!(%fault, "DJI transport failed; control is fenced");
         if let Some(pending) = &self.pending {
             if pending.offset > 0 {
                 if let Some((_, identity)) = pending.purpose.pitch() {
@@ -321,15 +321,14 @@ impl Connection {
         self.mode_session.transport_failed();
         self.fault = Some(fault);
         self.pending = None;
-        // Closing prevents a partial packet from being followed by a new command.
-        self.close_transport_blocking();
+        // The fault fences all writes immediately. The owner closes off the control loop.
         self.input.close();
         self.keyframes.close();
     }
 }
 
 impl Connection {
-    fn close_transport_blocking(&mut self) {
+    pub(super) fn close_transport_blocking(&mut self) {
         if let Some(transport) = self.transport.take() {
             match transport.close_blocking() {
                 Ok(()) => self.cleanup_confirmed = true,

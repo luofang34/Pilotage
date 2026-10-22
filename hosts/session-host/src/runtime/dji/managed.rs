@@ -11,6 +11,8 @@ use tokio::sync::mpsc;
 use super::{AttachmentSelection, DjiHostConfig, DjiHostError};
 
 mod delegate;
+mod operation;
+use operation::Operation;
 #[cfg(target_os = "macos")]
 mod selection;
 #[cfg(target_os = "macos")]
@@ -27,6 +29,8 @@ pub(in crate::runtime) struct ManagedDji {
     #[cfg(target_os = "macos")]
     selection: Selection,
     blocked: bool,
+    pending: Option<Operation<Completion>>,
+    candidates: Vec<u64>,
     retained: Option<FlightProcedureSample>,
     streams: mpsc::Sender<Option<EncodedVideoStream>>,
     #[cfg(target_os = "macos")]
@@ -60,15 +64,15 @@ impl ManagedDji {
             #[cfg(target_os = "macos")]
             selection: Selection::default(),
             blocked: false,
+            pending: None,
+            candidates: Vec::new(),
             retained: None,
             #[cfg(target_os = "macos")]
             events,
         };
         match &managed.config.attachment {
             AttachmentSelection::Explicit(attachment) => {
-                let adapter = managed
-                    .open_blocking(attachment.clone(), managed.config.capture_path.clone())?;
-                managed.install(adapter)?;
+                managed.begin_open(attachment.clone(), managed.config.capture_path.clone())?;
             }
             #[cfg(target_os = "macos")]
             AttachmentSelection::AutoUsb => managed.discover_blocking(),
@@ -76,41 +80,50 @@ impl ManagedDji {
         Ok(managed)
     }
 
-    fn open_blocking(
-        &self,
+    fn begin_open(
+        &mut self,
         attachment: DjiAttachment,
         capture_path: PathBuf,
-    ) -> Result<DjiAdapter, DjiHostError> {
-        DjiAdapter::start_blocking(
-            self.vehicle,
-            DjiConfig {
-                attachment,
-                capture_path,
-                control_mode: self.config.control_mode,
-                experimental_flight: self.config.experimental_flight,
-                experimental_virtual_stick: self.virtual_stick,
-                experimental_virtual_stick_diagnostic: false,
-            },
-        )
-        .map_err(DjiHostError::Adapter)
-    }
-
-    fn install(&mut self, mut adapter: DjiAdapter) -> Result<(), DjiHostError> {
-        if let Some(stream) = adapter.subscribe_encoded_video() {
-            self.streams
-                .try_send(Some(stream))
-                .map_err(|_| DjiHostError::VideoLifecycle)?;
-        }
-        self.adapter = Some(adapter);
-        tracing::info!(identity = ?self.identity, "DJI transport open; fresh aircraft evidence and control authority required");
+    ) -> Result<(), DjiHostError> {
+        let vehicle = self.vehicle;
+        let config = DjiConfig {
+            attachment,
+            capture_path,
+            control_mode: self.config.control_mode,
+            experimental_flight: self.config.experimental_flight,
+            experimental_virtual_stick: self.virtual_stick,
+            experimental_virtual_stick_diagnostic: false,
+        };
+        self.pending = Some(Operation::start(move || {
+            Completion::Opened(
+                DjiAdapter::start_blocking(vehicle, config)
+                    .map(Box::new)
+                    .map_err(DjiHostError::Adapter),
+            )
+        })?);
         Ok(())
     }
 
-    fn detach_blocking(&mut self) {
+    fn install(&mut self, mut adapter: DjiAdapter) {
+        if let Some(stream) = adapter.subscribe_encoded_video()
+            && self.streams.try_send(Some(stream)).is_err()
+        {
+            self.blocked = true;
+            self.begin_close(adapter);
+            tracing::error!(
+                "DJI video lifecycle unavailable; closing transport off the control loop"
+            );
+            return;
+        }
+        self.adapter = Some(adapter);
+        tracing::info!(identity = ?self.identity, "DJI transport open; fresh aircraft evidence and control authority required");
+    }
+
+    fn detach(&mut self) {
         let Some(mut adapter) = self.adapter.take() else {
             return;
         };
-        adapter.disconnect_blocking();
+        adapter.fence_transport();
         if let Some(procedure) = adapter
             .sample_telemetry()
             .samples
@@ -119,7 +132,7 @@ impl ManagedDji {
         {
             self.retained = Some(procedure);
         }
-        self.blocked |= !adapter.transport_released();
+        self.begin_close(adapter);
         self.identity = None;
         if self.streams.try_send(None).is_err() {
             self.blocked = true;
@@ -158,54 +171,109 @@ impl ManagedDji {
         };
         let ids: Vec<_> = candidates.iter().map(|c| c.registry_id).collect();
         let selected = self.selection.observe(&ids);
+        self.candidates = ids.clone();
         if self.identity.is_some_and(|id| !ids.contains(&id)) {
-            self.detach_blocking();
+            self.detach();
             // Expose the missing scopes for one engine step before a new owner.
             self.selection.defer(selected);
             return;
         }
         if self.adapter.is_none() && !self.blocked {
-            self.attach_selected_blocking(selected);
+            if self.pending.is_none() {
+                self.attach_selected(selected);
+            } else {
+                self.selection.defer(selected);
+            }
         }
     }
 
     #[cfg(target_os = "macos")]
-    fn attach_selected_blocking(&mut self, selected: Option<u64>) {
+    fn attach_selected(&mut self, selected: Option<u64>) {
         let Some(registry_id) = selected else {
             return;
         };
         let mut path = self.config.capture_path.as_os_str().to_os_string();
         path.push(format!(".usb-{registry_id:016x}.jsonl"));
         self.identity = Some(registry_id);
-        match self.open_blocking(DjiAttachment::MacUsb { registry_id }, PathBuf::from(path)) {
-            Ok(adapter) => {
-                if let Err(error) = self.install(adapter) {
-                    self.blocked = true;
-                    tracing::error!(%error, "DJI automatic attachment fenced");
-                }
-            }
+        if let Err(error) =
+            self.begin_open(DjiAttachment::MacUsb { registry_id }, PathBuf::from(path))
+        {
+            self.blocked = true;
+            tracing::error!(%error, "DJI connection task could not start");
+        }
+    }
+
+    fn begin_close(&mut self, mut adapter: DjiAdapter) {
+        match Operation::start(move || {
+            adapter.disconnect_blocking();
+            Completion::Closed(adapter.transport_released())
+        }) {
+            Ok(operation) => self.pending = Some(operation),
             Err(error) => {
-                self.blocked = matches!(
-                    &error,
-                    DjiHostError::Adapter(pilotage_adapter_dji::DjiAdapterError::Usb(
-                        pilotage_dji_usb::UsbError::StartupUnknown
-                            | pilotage_dji_usb::UsbError::CleanupUnknown
-                            | pilotage_dji_usb::UsbError::WorkerEnded
-                    ))
-                );
-                self.identity = None;
-                tracing::warn!(%error, "DJI open failed; this attachment will not be retried");
+                self.blocked = true;
+                tracing::error!(%error, "DJI cleanup task failed");
             }
         }
     }
 
+    fn poll_operation(&mut self) {
+        let Some(operation) = &mut self.pending else {
+            return;
+        };
+        let result = operation.poll();
+        if matches!(result, Ok(None)) {
+            if operation.expired() && !self.blocked {
+                self.blocked = true;
+                tracing::error!("DJI connection task exceeded deadline; reopening fenced");
+            }
+            return;
+        }
+        self.pending = None;
+        match result {
+            Ok(Some(Completion::Opened(Ok(adapter)))) => {
+                if self.blocked
+                    || self
+                        .identity
+                        .is_some_and(|id| !self.candidates.contains(&id))
+                {
+                    self.begin_close(*adapter);
+                } else {
+                    self.install(*adapter);
+                }
+            }
+            Ok(Some(Completion::Opened(Err(error)))) => {
+                #[cfg(target_os = "macos")]
+                {
+                    self.blocked |= matches!(
+                        &error,
+                        DjiHostError::Adapter(pilotage_adapter_dji::DjiAdapterError::Usb(
+                            pilotage_dji_usb::UsbError::StartupUnknown
+                                | pilotage_dji_usb::UsbError::CleanupUnknown
+                                | pilotage_dji_usb::UsbError::WorkerEnded
+                                | pilotage_dji_usb::UsbError::Native { stage: 15 | 17, .. }
+                        ))
+                    );
+                }
+                self.identity = None;
+                tracing::warn!(%error, "DJI open failed; awaiting an eligible state change");
+            }
+            Ok(Some(Completion::Closed(released))) => self.blocked |= !released,
+            Err(error) => {
+                self.blocked = true;
+                tracing::error!(%error, "DJI lifecycle worker ended");
+            }
+            Ok(None) => {}
+        }
+    }
+
     fn update_blocking(&mut self) {
+        self.poll_operation();
         if self
             .adapter
             .as_ref()
             .is_some_and(|a| a.status_cached().fault.is_some())
         {
-            self.detach_blocking();
+            self.detach();
             #[cfg(target_os = "macos")]
             return;
         }
@@ -214,9 +282,9 @@ impl ManagedDji {
             match events.changed() {
                 Ok(true) => self.discover_blocking(),
                 Ok(false) => {
-                    if self.adapter.is_none() && !self.blocked {
+                    if self.adapter.is_none() && self.pending.is_none() && !self.blocked {
                         let selected = self.selection.take_deferred();
-                        self.attach_selected_blocking(selected);
+                        self.attach_selected(selected);
                     }
                 }
                 Err(error) => {
@@ -227,4 +295,9 @@ impl ManagedDji {
             }
         }
     }
+}
+
+enum Completion {
+    Opened(Result<Box<DjiAdapter>, DjiHostError>),
+    Closed(bool),
 }
