@@ -2,10 +2,11 @@ use std::time::Duration;
 
 use pilotage_adapter_api::{
     AvionicsAttitudeSample, AvionicsSample, FcStateSample, LandingApproachSample, MeasurementClock,
-    MeasurementStamp, MotorStateSample, SourceIncarnation, SourceIntegrity, SourceRole,
+    MeasurementStamp, MotorStateSample, SourceIntegrity, SourceRole,
 };
 use pilotage_protocol::MotorState;
 
+use super::DjiTelemetrySource;
 use crate::DumlFrame;
 use crate::flight::{Mini3FlightReport, osd_payload};
 
@@ -144,7 +145,7 @@ impl AirframeObservations {
         &mut self,
         now: Duration,
         connection_valid: bool,
-        incarnation: SourceIncarnation,
+        source: DjiTelemetrySource,
     ) -> Option<AirframeSample> {
         let (report, received) = self.latest?;
         if !connection_valid
@@ -159,8 +160,8 @@ impl AirframeObservations {
             integrity: SourceIntegrity::ChecksummedOnly,
             // Route 0e is a relay. This key identifies its OSD stream.
             source_id: SOURCE_ID,
-            source_incarnation: incarnation,
-            source_epoch: 0,
+            source_incarnation: source.incarnation,
+            source_epoch: source.epoch,
             sequence: self.sequence,
             acquired_at_ns: received.as_nanos().min(u128::from(u64::MAX)) as u64,
             clock: MeasurementClock::HostMonotonic,

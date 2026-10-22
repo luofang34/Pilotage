@@ -116,6 +116,15 @@ impl Harness {
         Self::with_framing(super::super::DjiControlMode::Observed, Framing::LogicLink)
     }
 
+    pub(super) fn mobile_with_incarnation(incarnation: SourceIncarnation) -> Self {
+        Self::with_identity(
+            super::super::DjiControlMode::Observed,
+            Framing::LogicLink,
+            false,
+            incarnation,
+        )
+    }
+
     pub(super) fn flight(mode: super::super::DjiControlMode, framing: Framing) -> Self {
         Self::with_options(mode, framing, true)
     }
@@ -133,6 +142,20 @@ impl Harness {
         framing: Framing,
         experimental_flight: bool,
     ) -> Self {
+        Self::with_identity(
+            control_mode,
+            framing,
+            experimental_flight,
+            SourceIncarnation::new([42; 16]),
+        )
+    }
+
+    fn with_identity(
+        control_mode: super::super::DjiControlMode,
+        framing: Framing,
+        experimental_flight: bool,
+        incarnation: SourceIncarnation,
+    ) -> Self {
         let recording = Recording(
             Arc::new(Mutex::new(Wire {
                 write_limit: usize::MAX,
@@ -146,7 +169,7 @@ impl Harness {
             Box::new(recording.clone()),
             Box::new(recording.clone()),
             "injected-recording".into(),
-            SourceIncarnation::new([42; 16]),
+            incarnation,
             control_mode,
             experimental_flight,
         )

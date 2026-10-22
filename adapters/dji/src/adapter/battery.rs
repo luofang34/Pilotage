@@ -1,10 +1,10 @@
 use std::time::Duration;
 
 use pilotage_adapter_api::{
-    BatterySample, MeasurementClock, MeasurementStamp, SourceIncarnation, SourceIntegrity,
-    SourceRole,
+    BatterySample, MeasurementClock, MeasurementStamp, SourceIntegrity, SourceRole,
 };
 
+use super::DjiTelemetrySource;
 use crate::{DumlFrame, RouteAddress};
 
 // Three missing reports exhaust the observed 1 Hz battery stream.
@@ -99,7 +99,7 @@ impl BatteryObservations {
         &mut self,
         now: Duration,
         connection_valid: bool,
-        incarnation: SourceIncarnation,
+        source: DjiTelemetrySource,
     ) -> Option<BatterySample> {
         let (report, received) = self.latest?;
         if !connection_valid
@@ -120,8 +120,8 @@ impl BatteryObservations {
                 role: SourceRole::FcState,
                 integrity: SourceIntegrity::ChecksummedOnly,
                 source_id: SOURCE_ID,
-                source_incarnation: incarnation,
-                source_epoch: 0,
+                source_incarnation: source.incarnation,
+                source_epoch: source.epoch,
                 sequence: self.sequence,
                 // DUML supplies no verified acquisition clock for this report.
                 acquired_at_ns: received.as_nanos().min(u128::from(u64::MAX)) as u64,

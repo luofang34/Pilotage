@@ -22,7 +22,7 @@ fn a_late_attachment_keeps_measurements_and_write_deadlines_on_the_host_clock() 
     let origin = std::time::Instant::now()
         .checked_sub(std::time::Duration::from_secs(300))
         .unwrap();
-    harness.adapter = harness.adapter.with_host_clock(origin);
+    harness.adapter = harness.adapter.with_host_clock(origin, None);
     let bytes = captured_reports().remove(0);
     harness.feed(&crate::logiclink::encode_control(&packets(&bytes)[0]))?;
     harness
