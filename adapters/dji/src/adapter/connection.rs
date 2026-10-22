@@ -52,7 +52,7 @@ impl Transport for RawSerial {
 }
 
 pub(super) struct Connection {
-    origin: Instant,
+    pub(super) origin: Instant,
     pub(super) execution: Execution,
     pub(super) flight: FlightExecution,
     pub(super) motion: super::motion::Motion,
