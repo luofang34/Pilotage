@@ -12,10 +12,10 @@ use pilotage_geo::{
     LocalOriginId, PositionQuality, TerrainRefId, VerticalDatum, VerticalPosition,
 };
 use pilotage_mission::OwnshipAltitude;
-use pilotage_timing::MonoTimestamp;
+use pilotage_protocol::VehicleId;
+use pilotage_timing::{MonoTimestamp, SimTick};
 
-use super::super::sample_to_wire;
-use super::one_vehicle_sample;
+use super::sample_to_wire;
 use crate::runtime::automation::ownship::estimate_from_wire;
 
 const HEIGHT_M: f64 = 12.0;
