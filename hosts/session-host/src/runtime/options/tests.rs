@@ -1,9 +1,25 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use super::{
-    check_vehicle_pairing, parse_area, parse_cruise_height, parse_execution_target,
-    parse_ownship_source, parse_sim_camera_port, parse_survey_fov_deg, parse_survey_sidelap,
+    check_vehicle_pairing, parse_area, parse_cruise_height, parse_cruise_speed,
+    parse_execution_target, parse_ownship_source, parse_sim_camera_port, parse_survey_fov_deg,
+    parse_survey_sidelap,
 };
+
+#[test]
+fn a_cruise_speed_must_be_a_finite_positive_number() {
+    assert!((parse_cruise_speed("5.0").expect("flyable") - 5.0).abs() < 1e-12);
+    for value in ["0", "-2", "NaN", "inf"] {
+        assert!(matches!(
+            parse_cruise_speed(value),
+            Err(HostError::MissionCruiseSpeedRange { .. })
+        ));
+    }
+    assert!(matches!(
+        parse_cruise_speed("fast"),
+        Err(HostError::MissionCruiseSpeed { value, .. }) if value == "fast"
+    ));
+}
 use crate::error::HostError;
 use pilotage_mission::{ExecutionTarget, OwnshipSource};
 
