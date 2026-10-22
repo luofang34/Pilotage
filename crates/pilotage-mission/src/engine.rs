@@ -23,16 +23,22 @@ use navigate_guidance::{GuidanceRefusal, VelocityGuidanceConfig};
 use pilotage_mission_core::{
     ActionId, DirectiveReceipt, EngineState as CoreEngineState, FlightAction as CoreFlightAction,
     FlightPlanReference, MissionDocument, MissionEngine as CoreMissionEngine,
-    MissionTerminal as CoreMissionTerminal, PhaseStage, ReceiptResult,
+    MissionTerminal as CoreMissionTerminal, NavigationDataIdentity, PhaseStage, ReceiptResult,
 };
 
 pub use nav_guidance::{NavGuidance, NavQuality};
 pub use output::{MissionAction, MissionCounters, MissionEvent, MissionOutput, MissionState};
 
-use crate::config::MissionConfig;
+use crate::config::{MissionConfig, OwnshipSource};
 use crate::error::MissionBuildError;
-use crate::ownship::{OwnshipSample, TruthRole};
+use crate::ownship::{OwnshipAltitude, OwnshipSample, TruthRole};
+
+mod estimate;
+mod hold;
+
 use crate::provenance::{MissionPlanRecord, SnapshotProvenance};
+use crate::survey::{SurveyPlanRecord, SurveyRequest, plan_survey};
+use estimate::{EstimateBudget, VehicleEstimate};
 
 /// The single synthesized-GNSS source identity the engine stamps its
 /// observations with.
@@ -70,6 +76,15 @@ pub struct MissionEngine {
     /// zero would silently rotate every command to due north.
     last_yaw_rad: Option<f64>,
     last_refusal: Option<Discriminant<GuidanceRefusal>>,
+    /// The latest admitted sample under the vehicle-estimate source.
+    estimate: VehicleEstimate,
+    /// When the current hold began, while a human holds the motion scope.
+    hold_started: Option<MonotonicNanos>,
+    /// Time spent held before the current hold; the sequencing clock
+    /// excludes it.
+    held_total_ns: u64,
+    /// Hold and resume transitions the next tick announces.
+    hold_events: Vec<MissionEvent>,
 }
 
 impl MissionEngine {
@@ -121,22 +136,87 @@ impl MissionEngine {
             waypoints,
         );
         let execution = PlanExecution::new(plan, ExecutionConfig::default())?;
-        let (document, plan_reference) = document::build_document(
-            execution.plan(),
-            &config,
+        let route_input = config.route.clone();
+        let engine = Self::from_execution(
+            execution,
+            config,
             provenance.navigation_data_identity.clone(),
+            document::ROUTE_REVISION_PREFIX,
         )?;
         let record = MissionPlanRecord {
             provenance,
-            route_input: config.route.clone(),
+            route_input,
             waypoint_count: expanded_idents.len(),
             expanded_idents,
-            mission_identity: document.identity.clone(),
+            mission_identity: engine.document.identity.clone(),
         };
+        Ok((engine, record))
+    }
+
+    /// Builds an engine over an area survey of `request` at the configured
+    /// cruise height above the anchor. The plan's identity is the survey
+    /// request itself: no navigation data takes part.
+    ///
+    /// # Errors
+    ///
+    /// [`MissionBuildError::Survey`] when the request does not become a
+    /// plan, and the activation, geodesy, and document errors of
+    /// [`Self::new`].
+    pub fn from_survey(
+        request: &SurveyRequest,
+        config: MissionConfig,
+    ) -> Result<(Self, SurveyPlanRecord), MissionBuildError> {
+        let survey = plan_survey(request, &config.anchor, config.cruise_height_m)?;
+        let identity = NavigationDataIdentity {
+            cycle: "survey".to_owned(),
+            snapshot_id: format!("survey:{}", survey.digest),
+            snapshot_digest: survey.digest,
+        };
+        let idents: Vec<String> = survey
+            .plan
+            .waypoints
+            .iter()
+            .map(|waypoint| waypoint.ident.clone())
+            .collect();
+        let execution =
+            PlanExecution::new(survey.plan, ExecutionConfig::new(survey.capture_radius_m))?;
+        let mut engine = Self::from_execution(
+            execution,
+            config,
+            identity,
+            document::SURVEY_REVISION_PREFIX,
+        )?;
+        // A survey line is flown at cruise speed to its end; the arrival
+        // slowdown of a route would crawl the last 30 m of every line.
+        engine.guidance.arrival_slowdown_radius_m = 2.0 * survey.capture_radius_m;
+        let record = SurveyPlanRecord {
+            digest: survey.digest,
+            line_count: survey.line_count,
+            line_spacing_m: survey.line_spacing_m,
+            footprint_width_m: survey.footprint_width_m,
+            path_length_m: survey.path_length_m,
+            capture_radius_m: survey.capture_radius_m,
+            waypoint_count: idents.len(),
+            idents,
+            mission_identity: engine.document.identity.clone(),
+        };
+        Ok((engine, record))
+    }
+
+    /// The engine over an activated plan: the document, the anchor plane,
+    /// the fusion filter, and the guidance shaped by the config.
+    fn from_execution(
+        execution: PlanExecution,
+        config: MissionConfig,
+        identity: NavigationDataIdentity,
+        revision_prefix: &str,
+    ) -> Result<Self, MissionBuildError> {
+        let (document, plan_reference) =
+            document::build_document(execution.plan(), &config, identity, revision_prefix)?;
         let plane = LocalTangentPlane::new(config.anchor)?;
         let filter = NavigationFilter::new(FusionConfig::default(), config.clock);
         let guidance = guidance_config(&config);
-        let engine = Self {
+        Ok(Self {
             config,
             plane,
             filter,
@@ -154,22 +234,76 @@ impl MissionEngine {
             last_solution: None,
             last_yaw_rad: None,
             last_refusal: None,
-        };
-        Ok((engine, record))
+            estimate: VehicleEstimate::default(),
+            hold_started: None,
+            held_total_ns: 0,
+            hold_events: Vec::new(),
+        })
     }
 
-    /// Offers one ownship sample. Only [`TruthRole::SimulationTruth`]
-    /// samples become observations — see [`OwnshipSample`] for why any
+    /// Offers one ownship sample. The configured [`OwnshipSource`] names
+    /// the one role the engine admits — see [`OwnshipSample`] for why any
     /// other role is a counted refusal, never an aid. `now` is the
     /// admission reference on the engine's clock domain.
     pub fn on_ownship(&mut self, sample: &OwnshipSample, now: MonotonicNanos) {
-        if sample.role != TruthRole::SimulationTruth {
+        let admitted = match self.config.ownship_source {
+            OwnshipSource::SimulationTruth => TruthRole::SimulationTruth,
+            OwnshipSource::VehicleEstimate { .. } => TruthRole::OperationalEstimate,
+        };
+        if sample.role != admitted {
             self.counters.rejected_role = self.counters.rejected_role.wrapping_add(1);
             return;
         }
-        if let Some(yaw) = sample.yaw_rad {
-            self.last_yaw_rad = Some(yaw);
+        self.last_yaw_rad = sample.yaw_rad;
+        if admitted == TruthRole::OperationalEstimate {
+            self.estimate.accept(sample);
+            return;
         }
+        self.fuse_truth(sample, now);
+    }
+
+    /// NED meters from the mission anchor of a geodetic reading, for a
+    /// host that converts the vehicle's own fix into an ownship sample.
+    /// An above-anchor height is measured from the anchor altitude.
+    #[must_use]
+    pub fn ned_of(
+        &self,
+        latitude_rad: f64,
+        longitude_rad: f64,
+        altitude: OwnshipAltitude,
+    ) -> [f64; 3] {
+        let altitude_m = match altitude {
+            OwnshipAltitude::Ellipsoid(altitude_m) => altitude_m,
+            OwnshipAltitude::AboveAnchor(height_m) => self.config.anchor.altitude_m + height_m,
+        };
+        let offset = self.plane.to_ned(&GeodeticPosition::new(
+            latitude_rad,
+            longitude_rad,
+            altitude_m,
+        ));
+        [offset.north_m, offset.east_m, offset.down_m]
+    }
+
+    /// The pass-through solution budget, when the source is the vehicle's
+    /// own estimate.
+    fn estimate_budget(&self) -> Option<EstimateBudget> {
+        match self.config.ownship_source {
+            OwnshipSource::SimulationTruth => None,
+            OwnshipSource::VehicleEstimate {
+                sigma_m,
+                velocity_sigma_mps,
+                max_age,
+            } => Some(EstimateBudget {
+                sigma_m,
+                velocity_sigma_mps,
+                max_age,
+            }),
+        }
+    }
+
+    /// Synthesizes a GNSS-class fix from a simulation-truth sample and
+    /// offers it to the fusion filter.
+    fn fuse_truth(&mut self, sample: &OwnshipSample, now: MonotonicNanos) {
         let position =
             self.plane
                 .from_ned(&NedOffset::new(sample.ned[0], sample.ned[1], sample.ned[2]));
@@ -233,6 +367,9 @@ impl MissionEngine {
     pub fn state(&self) -> MissionState {
         if self.core_failed {
             return MissionState::Failed;
+        }
+        if self.hold_started.is_some() {
+            return MissionState::Held;
         }
         let Some(core) = self.core.as_ref() else {
             return MissionState::AwaitSolution;

@@ -8,6 +8,42 @@ use pilotage_protocol::{ControlAction, Generation, ScopeId, VehicleId};
 use super::*;
 
 #[test]
+fn observed_run_to_stop_allows_new_explicit_takeoff_without_replaying_uncertain_request() {
+    let mut h = ready();
+    h.apply(request(ControlAction::Takeoff, 1), 20);
+    h.step(30);
+    // Deliberately omit the ACK. Stopped reports alone cannot unlock a retry.
+    for sequence in 2..5 {
+        feed_fc(&mut h, sequence, 0);
+        h.step(30 + u64::from(sequence));
+    }
+    assert!(matches!(
+        h.apply(request(ControlAction::Takeoff, 2), 40).disposition,
+        Disposition::Rejected(_)
+    ));
+    feed_fc(&mut h, 5, 0x0c);
+    h.step(41);
+    for sequence in 6..9 {
+        feed_fc(&mut h, sequence, 0);
+        h.step(42 + u64::from(sequence));
+    }
+    assert_eq!(commands(&h).len(), 1);
+    // Close the original request by its own deadline; no automatic command is sent.
+    feed_fc(&mut h, 9, 0);
+    remote(&mut h, 2, [1024; 4]);
+    feed_battery(&mut h, 2, 80);
+    h.step(1100);
+    assert_eq!(commands(&h).len(), 1);
+    assert_eq!(
+        h.apply(request(ControlAction::Takeoff, 2), 1101)
+            .disposition,
+        Disposition::Accepted
+    );
+    h.step(1102);
+    assert_eq!(commands(&h).len(), 2);
+}
+
+#[test]
 fn queued_write_rechecks_expiry_model_and_motor_state() {
     for case in 0..5 {
         let mut h = ready();
@@ -107,7 +143,7 @@ fn lost_write_receipt_or_capture_failure_never_reports_accepted_or_retries() {
         }
         h.step(30);
         let status = progress(&mut h);
-        assert_eq!(status.phase, Phase::Failed);
+        assert_eq!(status.phase, Phase::OutcomeUnknown);
         assert_eq!(status.fc_outcome, None);
         assert_eq!(status.reason, Some(Reason::WriteFailed));
         let before = h.written().unwrap();

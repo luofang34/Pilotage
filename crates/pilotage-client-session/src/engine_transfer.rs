@@ -39,7 +39,7 @@ impl ClientEngine {
                     .map(|s| s.value.clone())
                     .unwrap_or_default();
                 let generation = applied.generation.as_ref().map_or(0, |g| g.value);
-                self.end_group_lanes(vehicle, &scope, generation, 1)
+                self.end_group_lanes(vehicle, &scope, generation)
                     .unwrap_or_default()
             }
             // The offer's time ran out and the scope stayed where it
@@ -73,7 +73,7 @@ impl ClientEngine {
             .map(|s| s.value.clone())
             .unwrap_or_default();
         let generation = revoked.generation.as_ref().map_or(0, |g| g.value);
-        if let Some(actions) = self.end_group_lanes(vehicle, &scope, generation, 0) {
+        if let Some(actions) = self.end_group_lanes(vehicle, &scope, generation) {
             return actions;
         }
         let pending = self
@@ -93,7 +93,7 @@ impl ClientEngine {
 
     /// Ends every lane of `vehicle` held under authority `group` (the group
     /// itself or one of its members) that the event at `generation`
-    /// supersedes, reporting each as a denied lease with `reason`.
+    /// supersedes, reporting each as a closed lane.
     ///
     /// Authority events name the group, so revoking or handing over the
     /// flight group ends the direct lane too. Fenced by generation: a
@@ -111,7 +111,6 @@ impl ClientEngine {
         vehicle: u64,
         group: &str,
         generation: u64,
-        reason: i32,
     ) -> Option<Vec<ClientAction>> {
         let members: Vec<((u64, String), u64)> = self
             .lanes
@@ -130,15 +129,11 @@ impl ClientEngine {
                 continue;
             }
             let (vehicle, scope) = key;
-            actions.push(ClientAction::Emit(ModuleEvent::Lease(
-                wire::LeaseResponse {
-                    vehicle: Some(wire::VehicleId { value: vehicle }),
-                    scope: Some(wire::ScopeId { value: scope }),
-                    granted: false,
-                    generation: Some(wire::Generation { value: generation }),
-                    reason,
-                },
-            )));
+            actions.push(ClientAction::Emit(ModuleEvent::ControlLaneClosed {
+                vehicle,
+                scope,
+                generation,
+            }));
         }
         Some(actions)
     }
@@ -234,7 +229,7 @@ impl ClientEngine {
             // actually held is worth reporting as lost.
             self.clear_pending_takeover(vehicle, &scope);
             actions.extend(
-                self.end_group_lanes(vehicle, &scope, generation, 1)
+                self.end_group_lanes(vehicle, &scope, generation)
                     .unwrap_or_default(),
             );
         }

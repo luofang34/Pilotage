@@ -3,7 +3,7 @@
 //! datagrams (telemetry, rejection notices), decoded with the same wire
 //! vocabulary remote clients read.
 
-use pilotage_mission::{MissionEngine, MissionLimits};
+use pilotage_mission::{MissionEngine, MissionLimits, OwnshipSource};
 use pilotage_protocol::{
     ControlAction, ControlActionResult, FrameRejected, FrameRejectionReason, LeaseRequest,
     LeaseResponse, ProfileActivation, ScopeId, ServerWelcome, wire,
@@ -14,6 +14,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::runtime::HOST_VEHICLE;
 
+use super::super::PlanSource;
 use super::nav_guidance::NavGuidancePublisher;
 use super::{
     ACTIVATION_REVISION, MISSION_SCOPE, MissionTask, NO_DEVICE_DIGEST, PROFILE_DIGEST, PROFILE_ID,
@@ -95,14 +96,29 @@ impl MissionTask {
             return false;
         }
         let limits = config.limits;
-        match MissionEngine::new(
-            &plan.navdata.snapshot,
-            plan.navdata.provenance.clone(),
-            config,
-        ) {
-            Ok((engine, record)) => {
+        let built = match &plan.source {
+            PlanSource::Navdata(navdata) => {
+                MissionEngine::new(&navdata.snapshot, navdata.provenance.clone(), config).map(
+                    |(engine, record)| {
+                        info!(route = %record.route_input, "mission plan is a route");
+                        engine
+                    },
+                )
+            }
+            PlanSource::Survey(request) => {
+                MissionEngine::from_survey(request, config).map(|(engine, record)| {
+                    info!(
+                        lines = record.line_count,
+                        waypoints = record.waypoint_count,
+                        "mission plan is an area survey"
+                    );
+                    engine
+                })
+            }
+        };
+        match built {
+            Ok(engine) => {
                 info!(
-                    route = %record.route_input,
                     max_horizontal_mps = limits.max_horizontal_mps,
                     max_vertical_mps = limits.max_vertical_mps,
                     max_yaw_rate_rps = limits.max_yaw_rate_rps,
@@ -148,8 +164,10 @@ impl MissionTask {
             self.generation = Some(response.generation);
             self.update(|status| status.lease_generation = Some(response.generation.as_u64()));
         } else {
+            // A human already holds the scope: the mission waits for a
+            // handover instead of ending (ADR-0051).
             error!(reason = ?response.reason, "mission motion lease denied");
-            self.fence("the motion lease was denied");
+            self.hold("the motion lease was denied; waiting for a handover");
         }
     }
 
@@ -223,7 +241,17 @@ impl MissionTask {
         if !ours {
             return;
         }
-        if let Some(ownship) = ownship::ownship_from_wire(sample, now, self.planar_pose_is_truth) {
+        let ownship = match self.ownship_source {
+            OwnshipSource::SimulationTruth => {
+                ownship::ownship_from_wire(sample, now, self.planar_pose_is_truth)
+            }
+            OwnshipSource::VehicleEstimate { .. } => {
+                ownship::estimate_from_wire(sample, now, |latitude_rad, longitude_rad, altitude| {
+                    mission.ned_of(latitude_rad, longitude_rad, altitude)
+                })
+            }
+        };
+        if let Some(ownship) = ownship {
             mission.on_ownship(&ownship, now);
         }
     }

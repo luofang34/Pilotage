@@ -13,8 +13,10 @@ use turret_core::{CommandIdentity, PayloadCapabilities};
 use turret_dji::Mini3ControlProfile;
 
 mod keyframe;
+mod landing;
 mod motion;
 mod pending;
+mod remote_control;
 mod virtual_stick;
 mod writer;
 
@@ -50,13 +52,15 @@ impl Transport for RawSerial {
 }
 
 pub(super) struct Connection {
-    origin: Instant,
+    pub(super) origin: Instant,
     pub(super) execution: Execution,
     pub(super) flight: FlightExecution,
     pub(super) motion: super::motion::Motion,
     pub(super) mode_session: super::virtual_stick::ModeSession,
+    remote_control: remote_control::RemoteControl,
     profile: Mini3ControlProfile,
     transport: Option<Box<dyn Transport>>,
+    pub(super) cleanup_confirmed: bool,
     capture: Box<dyn Write + Send>,
     capture_path: PathBuf,
     pub(super) input: Input,
@@ -87,8 +91,10 @@ impl Connection {
             flight: FlightExecution::new(incarnation),
             motion: super::motion::Motion::default(),
             mode_session: super::virtual_stick::ModeSession::new(incarnation),
+            remote_control: Default::default(),
             profile,
             transport: Some(transport),
+            cleanup_confirmed: false,
             capture,
             capture_path,
             input: Input::new(framing),
@@ -263,6 +269,7 @@ impl Connection {
             }
         };
         for frame in frames {
+            self.observe_remote_control(&frame, now);
             self.execution.response(&frame, now);
             self.flight.response(&frame, now);
             if frame.sender() == RouteAddress(6)
@@ -301,7 +308,12 @@ impl Connection {
     }
 
     pub(super) fn fail(&mut self, fault: DjiFault) {
-        error!(%fault, "DJI connection closed; explicit restart required");
+        error!(%fault, "DJI transport failed; control is fenced");
+        if let Some(binding) = self.motion.binding {
+            self.flight.revoke_motion_authority(binding);
+        } else {
+            self.flight.revoke_device_authority();
+        }
         if let Some(pending) = &self.pending {
             if pending.offset > 0 {
                 if let Some((_, identity)) = pending.purpose.pitch() {
@@ -318,19 +330,21 @@ impl Connection {
         self.mode_session.transport_failed();
         self.fault = Some(fault);
         self.pending = None;
-        // Closing prevents a partial packet from being followed by a new command.
-        self.close_transport_blocking();
+        // The fault fences all writes immediately. The owner closes off the control loop.
         self.input.close();
         self.keyframes.close();
     }
 }
 
 impl Connection {
-    fn close_transport_blocking(&mut self) {
-        if let Some(transport) = self.transport.take()
-            && let Err(error) = transport.close_blocking()
-        {
-            tracing::error!(%error, "DJI attachment cleanup unconfirmed; do not reopen automatically");
+    pub(super) fn close_transport_blocking(&mut self) {
+        if let Some(transport) = self.transport.take() {
+            match transport.close_blocking() {
+                Ok(()) => self.cleanup_confirmed = true,
+                Err(error) => {
+                    tracing::error!(%error, "DJI attachment cleanup unconfirmed; do not reopen automatically")
+                }
+            }
         }
     }
 }

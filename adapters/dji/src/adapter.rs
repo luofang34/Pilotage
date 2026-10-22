@@ -13,6 +13,7 @@ mod flight;
 mod input;
 mod motion;
 mod observation;
+mod observation_source;
 mod recording;
 #[cfg(test)]
 mod tests;
@@ -38,6 +39,7 @@ use connection::{Connection, Transport};
 use control::ControlState;
 pub use input::EncodedVideoChunk;
 use observation::Observations;
+pub use observation_source::DjiTelemetrySource;
 pub use video::EncodedVideoStream;
 pub use virtual_stick::{
     DjiVirtualStickDiagnosticError, DjiVirtualStickDiagnosticPhase,
@@ -73,6 +75,30 @@ pub struct DjiAdapter {
 }
 
 impl DjiAdapter {
+    /// Whether a failed attachment has confirmed release of its transport owner.
+    #[must_use]
+    pub fn transport_released(&self) -> bool {
+        self.connection.cleanup_confirmed
+    }
+
+    /// Close a removed attachment and fence all pending commands.
+    /// Already submitted flight actions retain an unknown result.
+    pub fn disconnect_blocking(&mut self) {
+        self.fence_transport();
+        self.connection.close_transport_blocking();
+    }
+
+    /// Stop protocol input and command submission without waiting for USB cleanup.
+    /// The owner must subsequently call [`Self::disconnect_blocking`] off the control loop.
+    pub fn fence_transport(&mut self) {
+        if self.connection.fault.is_none() {
+            self.connection.fail(DjiFault::Transport {
+                operation: "attachment removed",
+                source: std::io::ErrorKind::NotConnected.into(),
+            });
+        }
+    }
+
     /// Open one explicit attachment and a new raw capture file.
     ///
     /// No background task or reconnect loop is started. The first `step`
@@ -110,6 +136,41 @@ impl DjiAdapter {
         Ok(adapter)
     }
 
+    /// Open an attachment on the session host's monotonic time origin.
+    ///
+    /// Reconnected attachments need new command and payload identities. Pass
+    /// the last telemetry source to advance the aircraft report epoch within
+    /// the same host session. Keep the host clock origin unchanged.
+    ///
+    /// # Errors
+    /// Returns the attachment, capture, or identity error from opening the device.
+    pub fn start_with_host_clock_blocking(
+        vehicle: VehicleId,
+        config: DjiConfig,
+        origin: Instant,
+        previous: Option<DjiTelemetrySource>,
+    ) -> Result<Self, DjiAdapterError> {
+        Self::start_blocking(vehicle, config)
+            .map(|adapter| adapter.with_host_clock(origin, previous))
+    }
+
+    /// The host retains this source across attachments within one vehicle session.
+    #[must_use]
+    pub fn telemetry_source(&self) -> DjiTelemetrySource {
+        self.observations.telemetry_source
+    }
+
+    fn with_host_clock(mut self, origin: Instant, previous: Option<DjiTelemetrySource>) -> Self {
+        // Opening has not read or written application data, so no evidence uses
+        // the constructor's local clock yet. Both writes and reports use this origin.
+        self.origin = origin;
+        self.connection.origin = origin;
+        if let Some(previous) = previous {
+            self.observations.telemetry_source = previous.next_attachment();
+        }
+        self
+    }
+
     fn from_connection(
         vehicle: VehicleId,
         transport: Box<dyn Transport>,
@@ -123,8 +184,16 @@ impl DjiAdapter {
             DjiControlMode::Observed => HOST_PITCH_RATE_LIMIT_RPS,
             DjiControlMode::BenchInitialHorizontal => BENCH_PITCH_RATE_LIMIT_RPS,
         };
-        let profile =
-            Mini3ControlProfile::new(-900, turret_core::AngularRate::radians_per_second(rate)?)?;
+        let maximum = if control_mode == DjiControlMode::Observed {
+            600
+        } else {
+            0
+        };
+        let profile = Mini3ControlProfile::new(
+            -900,
+            maximum,
+            turret_core::AngularRate::radians_per_second(rate)?,
+        )?;
         let mut contract = profile.capabilities()?;
         let unavailable = (control_mode == DjiControlMode::Observed)
             .then_some(turret_core::UnavailableReason::MissingFeedback);
@@ -181,9 +250,11 @@ impl DjiAdapter {
         self.read_available_blocking(io_started);
         // Recording can take time. Recheck age at the command write boundary.
         let now = clock();
+        self.connection.guard_remote_control(now);
         self.connection
             .drive_motion(&self.observations, now, &mut self.control.sequence);
         self.connection.drive_mode_session(&self.observations, now);
+        self.connection.drive_landing(&self.observations, now);
         let ready = self.pending_pitch_ready(now);
         if !ready {
             self.control.cancel_observed();
@@ -319,6 +390,22 @@ impl DjiAdapter {
 }
 
 impl VehicleAdapter for DjiAdapter {
+    fn take_control_authority_losses(&mut self) -> Vec<pilotage_adapter_api::ControlAuthorityLoss> {
+        self.connection
+            .flight
+            .take_authority_loss()
+            .map(
+                |(session, generation)| pilotage_adapter_api::ControlAuthorityLoss {
+                    vehicle: self.vehicle,
+                    scope: ScopeId::new(pilotage_protocol::MOTION_SCOPE),
+                    session: pilotage_protocol::SessionId::new(session),
+                    generation: pilotage_protocol::Generation::new(generation),
+                },
+            )
+            .into_iter()
+            .collect()
+    }
+
     fn capabilities(&self) -> AdapterCapabilities {
         let mut capabilities = capability::capabilities(
             self.vehicle,

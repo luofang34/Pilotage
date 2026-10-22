@@ -2,9 +2,9 @@
 
 use navigate_contract::{AltitudeConstraint, FlightPlan, PlanRole, TurnType, Waypoint};
 use pilotage_mission_core::{
-    Comparison, Digest, ExecutionPolicy, ExecutionTarget, FlightAction, FlightPlanReference,
-    MissionAction, MissionCapability, MissionCondition, MissionDocument, MissionPhase,
-    NavigationCondition, NavigationDataIdentity,
+    Comparison, Digest, ExecutionPolicy, FlightAction, FlightPlanReference, MissionAction,
+    MissionCapability, MissionCondition, MissionDocument, MissionPhase, NavigationCondition,
+    NavigationDataIdentity,
 };
 use sha2::{Digest as _, Sha256};
 
@@ -23,12 +23,16 @@ pub(super) const FOLLOW_PLAN_PHASE_ID: &str = "follow-plan";
 pub(super) const CLIMB_CAPTURE_MARGIN_M: f64 = 1.0;
 
 const PLAN_DIGEST_DOMAIN: &[u8] = b"pilotage.flight-plan.v1\0";
-const MISSION_REVISION_PREFIX: &str = "operational-route-v1";
+/// Revision prefix of a mission built from a navdata route.
+pub(super) const ROUTE_REVISION_PREFIX: &str = "operational-route-v1";
+/// Revision prefix of a mission built from an area survey request.
+pub(super) const SURVEY_REVISION_PREFIX: &str = "operational-survey-v1";
 
 pub(super) fn build_document(
     plan: &FlightPlan,
     config: &MissionConfig,
     navigation_data_identity: NavigationDataIdentity,
+    revision_prefix: &str,
 ) -> Result<(MissionDocument, FlightPlanReference), MissionBuildError> {
     let plan_content_digest = plan_digest(plan)?;
     let plan_reference = FlightPlanReference {
@@ -36,12 +40,12 @@ pub(super) fn build_document(
         plan_content_digest,
         navigation_data_identity: navigation_data_identity.clone(),
     };
-    let revision_id = format!("{MISSION_REVISION_PREFIX}:{plan_content_digest}");
+    let revision_id = format!("{revision_prefix}:{plan_content_digest}");
     let document = MissionDocument::new(
         revision_id,
         navigation_data_identity,
         ExecutionPolicy {
-            target: ExecutionTarget::Simulator,
+            target: config.execution_target,
             retry_limit: OPERATIONAL_RETRY_LIMIT,
             receipt_timeout_ns: OPERATIONAL_RECEIPT_TIMEOUT_NS,
         },

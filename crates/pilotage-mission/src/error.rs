@@ -8,6 +8,8 @@ use navigate_fpl::PlanActivationError;
 use navigate_geodesy::GeodesyError;
 use pilotage_mission_core::CodecError;
 
+use crate::survey::SurveyError;
+
 /// Why a mission could not be built. Every variant carries the context
 /// an operator needs to act on the refusal.
 #[derive(Debug, thiserror::Error)]
@@ -62,6 +64,9 @@ pub enum MissionBuildError {
     /// The operational mission document did not validate or encode.
     #[error("mission document rejected")]
     MissionDocument(#[from] CodecError),
+    /// The survey request did not become a plan.
+    #[error("survey request rejected: {0}")]
+    Survey(#[from] SurveyError),
     /// A Navigate plan value has no canonical identity encoding.
     #[error("flight-plan identity cannot encode {field} value {value}")]
     PlanIdentity {

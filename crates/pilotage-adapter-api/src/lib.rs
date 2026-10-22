@@ -5,6 +5,7 @@
 //! calls and I/O live in adapter implementations such as
 //! `pilotage-adapter-reference`, per ADR-0002.
 
+mod authority;
 mod capability;
 mod control;
 mod flight_procedure;
@@ -14,6 +15,7 @@ mod telemetry;
 mod vehicle_adapter;
 mod video;
 
+pub use authority::ControlAuthorityLoss;
 pub use capability::{
     ActionCapability, AdapterCapabilities, ControlFeelDescriptor, ControlFeelMode, ExecutionMode,
     IntentCapability, LegacyAxisRoute, LegacyCommandMap, SIM_LIFECYCLE_SCOPE, ScopeDescriptor,
@@ -50,9 +52,9 @@ pub use step::{StepBudget, StepOutcome};
 pub use telemetry::{
     AvionicsAttitudeSample, AvionicsBaroSample, AvionicsKinematicsSample, AvionicsSample,
     BatterySample, FcCommandAck, FcStateSample, GeodeticFixSample, GimbalAttitudeSample,
-    LandedStateSample, MagneticVariationSample, MeasurementClock, MeasurementStamp,
-    MotorStateSample, Pose2d, SimTruthSample, SourceIncarnation, SourceIntegrity, SourceRole,
-    TelemetryBatch, TelemetrySample, VideoSource,
+    LandedStateSample, LandingApproachSample, MagneticVariationSample, MeasurementClock,
+    MeasurementStamp, MotorStateSample, Pose2d, SimTruthSample, SourceIncarnation, SourceIntegrity,
+    SourceRole, TelemetryBatch, TelemetrySample, VideoSource,
 };
 pub use vehicle_adapter::VehicleAdapter;
 pub use video::stamping::{

@@ -110,14 +110,32 @@ Select one RC-N1 attachment and a new capture file. The capture directory
 must exist. The host refuses to overwrite a capture.
 The host uses the session access settings above.
 
-For the upper USB port, set `PILOTAGE_DJI_USB=auto` to select the only matching
-DJI C5 device in the macOS I/O Registry. The device must already expose the
-iAP and `com.dji.logiclink` interfaces. Discovery only reads registry properties.
-The host stops if no device or more than one device matches. It checks the
-full USB descriptors when it opens the selected device.
-The host does not run the upper-port bootstrap procedure or change the USB
-role or device configuration. Connecting the cable alone does not ensure
-that the required profile is present.
+On macOS, the upper USB port uses automatic selection by default.
+The host subscribes to device events before it reads the I/O Registry.
+It waits for one DJI C5 device with iAP and `com.dji.logiclink` interfaces.
+It does not select a device when more than one candidate is present.
+It checks the full USB descriptors when it opens the selected device.
+After device removal, the host waits for a new attachment identity.
+Each attachment gets a separate capture file with a `.usb-<identity>.jsonl`
+suffix. Failed opens do not repeat for the same attachment.
+Keep the host running when you close or reopen a client. Client disconnects
+release control authority; they do not close USB. A new USB connection
+starts fresh protocol and video state. It does not replay commands.
+An interrupted flight action retains its unknown result.
+The host prepares the upper-port handshake on a separate connection task.
+It discovers the port and controller from the current system topology.
+An enumerated data interface opens directly. A client restart does not close
+that interface while the host remains active. An ambiguous connection is not
+selected automatically. macOS must authorize the connection.
+The handshake requires the AppleT8122USBXDCI controller and the
+`ncmAuxBringup` configuration. Other controller profiles are not enabled.
+
+For a missed initial handshake, set `PILOTAGE_DJI_USB_GROUND_RECOVERY=1`
+only when the aircraft is on the ground with stopped motors. This permits
+one software role cycle on the startup connection. The permission expires
+after five seconds and does not carry to a new connection. The receiver is
+ready before the cycle starts. A failed attempt does not repeat; the host
+reports that a reconnect is required. Do not enable this option in flight.
 
 ```sh
 PILOTAGE_DJI_USB=auto \
@@ -133,7 +151,7 @@ a `0x` prefix. The registry ID can change when the cable is disconnected.
 The upper interface supplies telemetry and H.264 video from one connection.
 Video decoding requires `ffmpeg` on `PATH`. Set `PILOTAGE_DJI_FFMPEG` to an
 absolute executable path to select another installation. A decoder that
-cannot start prevents host startup. Camera capture time and calibration
+cannot start leaves video unavailable. Camera capture time and calibration
 remain unknown.
 
 For the lower USB CDC port, select its callout path instead:
@@ -150,10 +168,15 @@ An invalid attachment or an unsupported platform fails startup. The host
 does not select another device or transport.
 
 This adapter exposes a DJI Mini 3 experimental object with gimbal control.
-Continuous flight and positioning control are not implemented.
+Flight velocity control requires the separate experimental opt-in below.
+The adapter publishes the aircraft's own position fix and ground velocity
+when the flight controller reports a satellite solution. The height is
+measured from the point where the motors last started. The attitude report
+has no verified north reference.
 Keep the propellers removed for bench tests.
 The default `observed` control mode requires fresh gimbal observations before
-it sends a pitch command. Pitch targets are limited to -90 through 0 degrees.
+it sends a pitch command. Observed pitch targets use the Mini 3 range of
+-90 through +60 degrees.
 The host limits target planning to 30 degrees per second. This is not a
 measured device speed limit. Recenter continues while control input and
 feedback remain valid. The host does not repeat an unchanged target after
@@ -179,8 +202,12 @@ Set `PILOTAGE_DJI_VIRTUAL_STICK=1` to expose experimental BODY-FRD velocity
 control on the upper USB interface. This setting is separate from Takeoff
 and Land. A new control lease must supply neutral input. Mode entry requires
 fresh airborne GPS-attitude reports and independent mode confirmation.
-Fresh input retains the stream at up to 20 writes per second. The limits are
-1 m/s horizontal speed, 0.5 m/s vertical speed, and 30 degrees/s yaw rate.
+Fresh input retains the stream at up to 20 writes per second. The adapter
+advertises the DJI virtual-stick protocol input range: 15 m/s
+horizontal speed, 4 m/s vertical speed, and 100 degrees/s yaw rate. The
+adapter adds no speed limit of its own. The aircraft applies its flight
+envelope, and a mission or an input profile scales demand to the advertised
+range. These bounds do not confirm the full flight envelope of a Mini 3.
 Input loss requests one zero-velocity write and mode release. Native flight
 modes and remote mode exit stop the stream without automatic reacquisition.
 A new lease requires confirmed release. Release virtual-stick control before

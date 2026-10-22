@@ -311,6 +311,14 @@ fn fc_state_to_wire(sample: FcStateSample) -> wire::FcState {
             state: motor.state.to_wire() as i32,
             stamp: Some(measurement_stamp_to_wire(motor.stamp)),
         }),
+        landing_approach: sample.landing_approach.map(|approach| {
+            wire::LandingApproachObservation {
+                surface_distance_m: approach.surface_distance_m,
+                vertical_speed_down_mps: approach.vertical_speed_down_mps,
+                is_flying: approach.is_flying,
+                stamp: Some(measurement_stamp_to_wire(approach.stamp)),
+            }
+        }),
         // 0 none observed, 1 arm, 2 disarm — the FC's verdict for the most
         // recent commanded arm/disarm (enactment truth).
         last_command_kind: sample

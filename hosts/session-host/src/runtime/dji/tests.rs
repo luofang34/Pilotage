@@ -10,9 +10,15 @@ use super::{
 
 #[test]
 fn the_attachment_and_capture_are_explicit() {
+    #[cfg(not(target_os = "macos"))]
     assert!(matches!(
         config_from_values(None, None, None, None, None, None, None),
         Err(DjiHostError::MissingAttachment)
+    ));
+    #[cfg(target_os = "macos")]
+    assert!(matches!(
+        parse_attachment(None, None, None),
+        Ok(AttachmentSelection::AutoUsb)
     ));
     assert!(matches!(
         config_from_values(

@@ -54,6 +54,7 @@ fn enable_timeout_has_one_fixed_cleanup_attempt_and_no_velocity_or_enable_retry(
         (7, 1350),
     ] {
         feed_fc(&mut h, sequence, 0);
+        super::super::flight::remote(&mut h, sequence, [1024; 4]);
         h.step(time);
     }
     assert_eq!(status(&h).reason, Some(Reason::EnableUnconfirmed));
@@ -104,6 +105,7 @@ fn repeated_mode_samples_cannot_renew_configuration_freshness() {
     ] {
         feed_fc(&mut h, sequence, 0);
         report(&mut h, 10, false, true, false);
+        super::super::flight::remote(&mut h, sequence, [1024; 4]);
         h.step(time);
     }
     assert_eq!(request(&mut h, 1512, 1600), Err(Error::MissingFeedback));
@@ -149,6 +151,7 @@ fn independent_one_hertz_mode_feedback_finishes_inside_the_original_fixed_budget
     h.step(13);
     for sequence in 2..=5 {
         feed_fc(&mut h, sequence, 0);
+        super::super::flight::remote(&mut h, sequence, [1024; 4]);
         if sequence == 5 {
             report(&mut h, 11, true, true, false);
         }

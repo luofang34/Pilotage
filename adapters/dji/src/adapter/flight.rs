@@ -1,7 +1,11 @@
 //! Discrete flight requests retain their identity through the only writer.
 
 mod admission;
+mod confirmation;
+mod cycle;
 mod observation;
+mod override_control;
+mod preparation;
 mod progress;
 
 use std::time::Duration;
@@ -36,20 +40,70 @@ struct Procedure {
     ack_until: Option<Duration>,
     written: bool,
     flight_sequence: Option<u16>,
-    airborne_reports: u8,
-    airborne_received: Option<Duration>,
+    completion_reports: u8,
+    completion_received: Option<Duration>,
+    preparation: Option<preparation::LandingPreparation>,
+    manual_sequence: u32,
+    manual_ready: bool,
+    manual_descent: bool,
+    manual_released: bool,
+    manual_resumed: bool,
+    override_control: Option<override_control::LandingOverride>,
 }
 
 pub(super) struct FlightExecution {
     incarnation: SourceIncarnation,
     authority: Option<(u64, u64)>,
     revoked: bool,
+    authority_loss: Option<(u64, u64)>,
     procedure: Option<Procedure>,
     takeoff_uncertain: bool,
     now: Duration,
+    confirmation: confirmation::Confirmation,
+    cycle: cycle::MotorCycle,
 }
 
 impl FlightExecution {
+    pub(in crate::adapter) fn retain_authority(&mut self, session: u64, generation: u64) {
+        self.authority = Some((session, generation));
+        self.revoked = false;
+    }
+
+    pub(in crate::adapter) fn holds_authority(&self) -> bool {
+        self.authority.is_some() && !self.revoked
+    }
+
+    pub(in crate::adapter) fn revoke_motion_authority(
+        &mut self,
+        binding: crate::flight::VirtualStickBinding,
+    ) {
+        if self.authority != Some((binding.session, binding.generation)) {
+            self.revoked = false;
+        }
+        self.authority = Some((binding.session, binding.generation));
+        self.revoke_device_authority();
+    }
+
+    pub(in crate::adapter) fn revoke_device_authority(&mut self) {
+        if !self.revoked {
+            self.authority_loss = self.authority;
+        }
+        self.revoked = true;
+    }
+
+    pub(in crate::adapter) fn take_authority_loss(&mut self) -> Option<(u64, u64)> {
+        self.authority_loss.take()
+    }
+
+    pub(in crate::adapter) fn authority_valid(&self, session: u64, generation: u64) -> bool {
+        self.authority.is_none_or(|current| {
+            !((current == (session, generation) && self.revoked)
+                || (current.0 == session
+                    && current.1 != generation
+                    && generation.wrapping_sub(current.1) >= 1 << 63))
+        })
+    }
+
     pub(in crate::adapter) fn active(&self) -> bool {
         self.procedure
             .as_ref()
@@ -61,9 +115,12 @@ impl FlightExecution {
             incarnation,
             authority: None,
             revoked: false,
+            authority_loss: None,
             procedure: None,
             takeoff_uncertain: false,
             now: Duration::ZERO,
+            confirmation: Default::default(),
+            cycle: Default::default(),
         }
     }
 
@@ -72,13 +129,7 @@ impl FlightExecution {
         frame: &ScopedControlFrame,
         command: BasicFlightCommand,
     ) -> Result<(), RejectReason> {
-        let incoming = (frame.session.as_u64(), frame.generation.as_u64());
-        if let Some(current) = self.authority
-            && ((incoming == current && self.revoked)
-                || (incoming.0 == current.0
-                    && incoming.1 != current.1
-                    && incoming.1.wrapping_sub(current.1) >= 1 << 63))
-        {
+        if !self.authority_valid(frame.session.as_u64(), frame.generation.as_u64()) {
             return Err(RejectReason::Fenced);
         }
         if command == BasicFlightCommand::Takeoff && self.takeoff_uncertain {
@@ -122,6 +173,10 @@ impl FlightExecution {
         self.authority = Some((frame.session.as_u64(), frame.generation.as_u64()));
         self.revoked = false;
         self.now = now;
+        self.confirmation = Default::default();
+        if command == BasicFlightCommand::Takeoff {
+            self.cycle = cycle::MotorCycle::new(model_revision);
+        }
         self.procedure = Some(Procedure {
             sample: FlightProcedureSample {
                 request: fence.request.clone(),
@@ -144,8 +199,15 @@ impl FlightExecution {
             ack_until: None,
             written: false,
             flight_sequence: None,
-            airborne_reports: 0,
-            airborne_received: None,
+            completion_reports: 0,
+            completion_received: None,
+            preparation: None,
+            manual_sequence: frame.sequence.as_u32(),
+            manual_ready: false,
+            manual_descent: false,
+            manual_released: false,
+            manual_resumed: false,
+            override_control: None,
         });
         Ok(fence)
     }
@@ -219,11 +281,5 @@ fn timestamp(now: Duration) -> MonoTimestamp {
 }
 
 fn terminal(phase: FlightProcedurePhase) -> bool {
-    matches!(
-        phase,
-        FlightProcedurePhase::Completed
-            | FlightProcedurePhase::Failed
-            | FlightProcedurePhase::TimedOut
-            | FlightProcedurePhase::Cancelled
-    )
+    phase.is_terminal()
 }

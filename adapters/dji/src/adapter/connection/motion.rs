@@ -23,6 +23,7 @@ impl Connection {
             until,
         } = input;
         if !self.input_clear()
+            || !self.remote_control.neutral_cached(now)
             || !self.version_observed
             || self.flight.active()
             || observations.model_deadline(now).is_none()
@@ -239,6 +240,7 @@ impl Connection {
         now: Duration,
     ) -> bool {
         let permitted = self.input_clear()
+            && self.remote_control.neutral_cached(now)
             && self.mode_session.enabled()
             && self
                 .motion

@@ -11,10 +11,11 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use navigate_contract::MonotonicNanos;
-use pilotage_mission::{MissionAction, MissionEngine, MissionEvent, NavGuidance};
+use pilotage_mission::{MissionAction, MissionEngine, MissionEvent, NavGuidance, OwnshipSource};
 use pilotage_protocol::{
     ClientHello, ControlActionCommand, ControlIntent, ControlPayload, Generation, PrincipalId,
-    SESSION_PROTOCOL_VERSION, ScopeId, ScopedControlFrame, SequenceNum, SessionId,
+    ReferenceFrame, SESSION_PROTOCOL_VERSION, ScopeId, ScopedControlFrame, SequenceNum, SessionId,
+    VelocityIntent,
 };
 use pilotage_session::DomainEnvelope;
 use pilotage_timing::MonoTimestamp;
@@ -76,6 +77,12 @@ pub(super) struct MissionTask {
     /// own state (true only for the deterministic reference adapter).
     /// Anything else must arrive under a stamped role or be refused.
     planar_pose_is_truth: bool,
+    /// Which telemetry lane becomes the mission's ownship.
+    ownship_source: OwnshipSource,
+    /// A human holds the motion scope; the mission waits for it back.
+    held: bool,
+    /// Frames still owed as neutral input under a new generation.
+    neutral_frames: u8,
 }
 
 impl MissionTask {
@@ -86,6 +93,7 @@ impl MissionTask {
         status: watch::Sender<AutomationStatus>,
         planar_pose_is_truth: bool,
     ) -> Self {
+        let ownship_source = plan.config().ownship_source;
         Self {
             engine,
             start,
@@ -101,6 +109,9 @@ impl MissionTask {
             pending_actions: HashMap::new(),
             nav_guidance: None,
             planar_pose_is_truth,
+            ownship_source,
+            held: false,
+            neutral_frames: 0,
         }
     }
 
@@ -127,6 +138,9 @@ impl MissionTask {
             pending_actions: HashMap::new(),
             nav_guidance: None,
             planar_pose_is_truth: true,
+            ownship_source: OwnshipSource::SimulationTruth,
+            held: false,
+            neutral_frames: 0,
         }
     }
 
@@ -185,10 +199,10 @@ impl MissionTask {
     async fn on_connection_message(&mut self, message: ToConnection) -> bool {
         match message {
             ToConnection::BootstrapMessage { bytes, .. } => self.on_bootstrap(&bytes).await,
-            ToConnection::AuthorityMessage(bytes) => {
-                self.on_authority(&bytes);
-                true
-            }
+            ToConnection::AuthorityMessage(bytes) => match self.on_authority(&bytes) {
+                Some(reply) => self.send_message(reply).await,
+                None => true,
+            },
             ToConnection::Datagram { bytes, .. } => {
                 self.on_datagram(&bytes);
                 true
@@ -202,10 +216,12 @@ impl MissionTask {
     }
 
     /// One mission tick: events are logged, an intent becomes a typed
-    /// frame, an action becomes a reliable command. Never runs while
-    /// fenced — human takeover wins and the task only holds (ADR-0025).
+    /// frame, an action becomes a reliable command. A fenced task does
+    /// nothing. A held task ticks the engine so its ownship and status
+    /// stay fresh, and sends nothing: the human holds the scope
+    /// (ADR-0025, ADR-0051).
     async fn on_tick(&mut self) -> bool {
-        if self.fenced || self.generation.is_none() {
+        if self.fenced || (self.generation.is_none() && !self.held) {
             return true;
         }
         let nanos = self.elapsed_nanos();
@@ -217,6 +233,9 @@ impl MissionTask {
         };
         self.log_events(&output.events);
         self.update(|status| status.mission_state = Some(output.state));
+        if self.held {
+            return true;
+        }
         let guidance = self.mission.as_ref().and_then(MissionEngine::nav_guidance);
         if !self.publish_nav_guidance(guidance.as_ref(), nanos).await {
             return false;
@@ -263,10 +282,24 @@ impl MissionTask {
     }
 
     /// Frames one typed intent under the held lease with a wrap-advancing
-    /// sequence and an exact host-clock sample stamp.
+    /// sequence and an exact host-clock sample stamp. The first frames
+    /// after a resume are neutral: a vehicle that requires neutral input
+    /// on a new lease admits the new generation on them.
     async fn send_intent(&mut self, intent: ControlIntent, sampled_at: MonoTimestamp) -> bool {
         let (Some(session), Some(generation)) = (self.session, self.generation) else {
             return true;
+        };
+        let intent = if self.neutral_frames > 0 {
+            self.neutral_frames = self.neutral_frames.saturating_sub(1);
+            ControlIntent::Velocity(VelocityIntent {
+                frame: ReferenceFrame::BodyFrd,
+                vx: 0.0,
+                vy: 0.0,
+                vz: 0.0,
+                yaw_rate: 0.0,
+            })
+        } else {
+            intent
         };
         self.sequence = self.sequence.wrapping_add(1);
         let frame = ScopedControlFrame {
@@ -363,7 +396,7 @@ impl MissionTask {
         u64::try_from(self.start.elapsed().as_nanos()).unwrap_or(u64::MAX)
     }
 
-    fn mission_now(&self) -> MonotonicNanos {
+    pub(super) fn mission_now(&self) -> MonotonicNanos {
         MonotonicNanos::from_nanos(self.elapsed_nanos())
     }
 

@@ -315,6 +315,20 @@ message FcState {
   // The FC's motor report, with an independent observation stamp.
   // Absence does not mean stopped. Arm state cannot supply this report.
   MotorStateObservation motor_state = 7;
+  // Downward ranging and descent feedback. Absence means unavailable.
+  LandingApproachObservation landing_approach = 8;
+}
+
+// One coherent observation. It does not identify a landing-protection mode.
+message LandingApproachObservation {
+  // Downward sensor distance to a surface, metres; not height above takeoff.
+  float surface_distance_m = 1;
+  // Observed vertical speed, positive down, metres per second.
+  float vertical_speed_down_mps = 2;
+  // False does not establish ground contact.
+  bool is_flying = 3;
+  // Absence makes this observation unconsumable.
+  MeasurementStamp stamp = 4;
 }
 
 // The FC's reported motor operation, not a measurement of rotor speed.
@@ -584,6 +598,8 @@ enum FlightProcedurePhase {
   // The adapter stopped tracking or issuing the procedure. This does not
   // confirm that the vehicle stopped its autonomous motion.
   FLIGHT_PROCEDURE_PHASE_CANCELLED = 7;
+  // Transport loss prevents a conclusive result. Never replay this request.
+  FLIGHT_PROCEDURE_PHASE_OUTCOME_UNKNOWN = 8;
 }
 
 enum FlightProcedureReason {

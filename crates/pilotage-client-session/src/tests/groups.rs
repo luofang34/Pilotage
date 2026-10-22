@@ -105,8 +105,8 @@ fn group_revoked(generation: u64) -> wire::authority_event::Event {
 
 fn reports_direct_lost(actions: &[ClientAction]) -> bool {
     actions.iter().any(|action| {
-        matches!(action, ClientAction::Emit(ModuleEvent::Lease(lease))
-            if !lease.granted && lease.scope.as_ref().is_some_and(|s| s.value == DIRECT))
+        matches!(action, ClientAction::Emit(ModuleEvent::ControlLaneClosed { scope, .. })
+            if scope == DIRECT)
     })
 }
 

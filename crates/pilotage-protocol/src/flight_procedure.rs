@@ -49,6 +49,8 @@ pub enum FlightProcedurePhase {
     TimedOut,
     /// The adapter ended the procedure; this does not confirm a vehicle stop.
     Cancelled,
+    /// Transport loss prevents a conclusive result. The request must not be replayed.
+    OutcomeUnknown,
 }
 
 impl FlightProcedurePhase {
@@ -57,7 +59,11 @@ impl FlightProcedurePhase {
     pub const fn is_terminal(self) -> bool {
         matches!(
             self,
-            Self::Completed | Self::Failed | Self::TimedOut | Self::Cancelled
+            Self::Completed
+                | Self::Failed
+                | Self::TimedOut
+                | Self::Cancelled
+                | Self::OutcomeUnknown
         )
     }
 
@@ -72,6 +78,7 @@ impl FlightProcedurePhase {
             Self::Failed => wire::FlightProcedurePhase::Failed,
             Self::TimedOut => wire::FlightProcedurePhase::TimedOut,
             Self::Cancelled => wire::FlightProcedurePhase::Cancelled,
+            Self::OutcomeUnknown => wire::FlightProcedurePhase::OutcomeUnknown,
         }
     }
 
@@ -87,6 +94,7 @@ impl FlightProcedurePhase {
             wire::FlightProcedurePhase::Failed => Some(Self::Failed),
             wire::FlightProcedurePhase::TimedOut => Some(Self::TimedOut),
             wire::FlightProcedurePhase::Cancelled => Some(Self::Cancelled),
+            wire::FlightProcedurePhase::OutcomeUnknown => Some(Self::OutcomeUnknown),
         }
     }
 }

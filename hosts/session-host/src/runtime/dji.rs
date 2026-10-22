@@ -4,16 +4,17 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 
 use pilotage_adapter_api::RawVideoFrame;
-use pilotage_adapter_dji::{DjiAdapter, DjiAdapterError, DjiConfig, DjiControlMode};
+use pilotage_adapter_dji::{DjiAdapterError, DjiControlMode};
 use pilotage_protocol::VehicleId;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use super::dji_video::{self, DjiVideoConfig, DjiVideoError};
+use super::dji_video::{self, DjiVideoError};
 
 const SERIAL: &str = "PILOTAGE_DJI_SERIAL";
 const USB_REGISTRY_ID: &str = "PILOTAGE_DJI_USB_REGISTRY_ID";
 const USB: &str = "PILOTAGE_DJI_USB";
+const GROUND_RECOVERY: &str = "PILOTAGE_DJI_USB_GROUND_RECOVERY";
 const CAPTURE: &str = "PILOTAGE_DJI_CAPTURE";
 const CONTROL_MODE: &str = "PILOTAGE_DJI_CONTROL_MODE";
 const FFMPEG: &str = "PILOTAGE_DJI_FFMPEG";
@@ -21,6 +22,7 @@ const VIRTUAL_STICK: &str = "PILOTAGE_DJI_VIRTUAL_STICK";
 const EXPERIMENTAL_FLIGHT: &str = "PILOTAGE_DJI_EXPERIMENTAL_FLIGHT";
 
 mod attachment;
+mod managed;
 use attachment::{AttachmentSelection, parse_attachment};
 
 /// A DJI host configuration or startup failure.
@@ -31,6 +33,12 @@ pub enum DjiHostError {
     Missing {
         /// The required environment variable.
         variable: &'static str,
+    },
+    /// A ground-only USB recovery opt-in was not recognized.
+    #[error("{GROUND_RECOVERY} must be absent or 1, got {value:?}")]
+    GroundRecovery {
+        /// The rejected setting.
+        value: OsString,
     },
     /// No attachment was selected.
     #[error("set exactly one of {SERIAL}, {USB_REGISTRY_ID}, or {USB}=auto")]
@@ -123,10 +131,16 @@ pub enum DjiHostError {
     /// Starting or operating the video decoder failed.
     #[error("DJI video decoder: {0}")]
     Video(#[source] DjiVideoError),
+    /// The video supervisor cannot accept a new connection.
+    #[error("DJI video lifecycle is unavailable")]
+    VideoLifecycle,
+    /// The connection lifecycle task could not start.
+    #[error("cannot start DJI connection lifecycle task: {0}")]
+    LifecycleSpawn(#[source] std::io::Error),
 }
 
 pub(super) struct DjiRuntime {
-    pub(super) adapter: DjiAdapter,
+    pub(super) adapter: managed::ManagedDji,
     pub(super) frames: Option<mpsc::Receiver<RawVideoFrame>>,
     pub(super) producer: Option<JoinHandle<()>>,
 }
@@ -137,10 +151,14 @@ struct DjiHostConfig {
     control_mode: DjiControlMode,
     ffmpeg: PathBuf,
     experimental_flight: bool,
+    usb_ground_recovery: bool,
 }
 
-pub(super) fn start_blocking(vehicle: VehicleId) -> Result<DjiRuntime, DjiHostError> {
-    let config = config_from_values(
+pub(super) fn start_blocking(
+    vehicle: VehicleId,
+    origin: std::time::Instant,
+) -> Result<DjiRuntime, DjiHostError> {
+    let mut config = config_from_values(
         std::env::var_os(SERIAL),
         std::env::var_os(USB_REGISTRY_ID),
         std::env::var_os(USB),
@@ -149,51 +167,25 @@ pub(super) fn start_blocking(vehicle: VehicleId) -> Result<DjiRuntime, DjiHostEr
         std::env::var_os(FFMPEG),
         std::env::var_os(EXPERIMENTAL_FLIGHT),
     )?;
-    let adapter_config = DjiConfig {
-        attachment: config.attachment.resolve_blocking()?,
-        capture_path: config.capture_path,
-        control_mode: config.control_mode,
-        experimental_flight: config.experimental_flight,
-        experimental_virtual_stick: parse_virtual_stick(std::env::var_os(VIRTUAL_STICK))?,
-        experimental_virtual_stick_diagnostic: false,
+    config.usb_ground_recovery = match std::env::var_os(GROUND_RECOVERY) {
+        None => false,
+        Some(value) if value == "1" => true,
+        Some(value) => return Err(DjiHostError::GroundRecovery { value }),
     };
-    tracing::info!(attachment = ?adapter_config.attachment,
-        capture = %adapter_config.capture_path.display(),
-        control_mode = ?adapter_config.control_mode,
-        experimental_flight = adapter_config.experimental_flight,
-        experimental_virtual_stick = adapter_config.experimental_virtual_stick,
-        "DJI experimental adapter configured");
-    if adapter_config.control_mode == DjiControlMode::BenchInitialHorizontal {
-        tracing::warn!(
-            "DJI one-way bench control starts from an operator-confirmed horizontal target; physical pose and stop are not confirmed"
-        );
+    let virtual_stick = parse_virtual_stick(std::env::var_os(VIRTUAL_STICK))?;
+    let (streams, updates) = mpsc::channel(2);
+    let (frames, producer) = dji_video::supervise(config.ffmpeg.clone(), updates);
+    match managed::ManagedDji::start_blocking(vehicle, config, virtual_stick, streams, origin) {
+        Ok(adapter) => Ok(DjiRuntime {
+            adapter,
+            frames: Some(frames),
+            producer: Some(producer),
+        }),
+        Err(error) => {
+            producer.abort();
+            Err(error)
+        }
     }
-    let mut adapter =
-        DjiAdapter::start_blocking(vehicle, adapter_config).map_err(DjiHostError::Adapter)?;
-    let video = adapter
-        .subscribe_encoded_video()
-        .map(|stream| {
-            dji_video::spawn(
-                DjiVideoConfig {
-                    ffmpeg: config.ffmpeg,
-                    incarnation: stream.incarnation,
-                    origin: tokio::time::Instant::from_std(stream.origin),
-                    keyframe_request: stream.keyframe_request,
-                },
-                stream.receiver,
-            )
-        })
-        .transpose()
-        .map_err(DjiHostError::Video)?;
-    let (frames, producer) = match video {
-        Some((frames, producer)) => (Some(frames), Some(producer)),
-        None => (None, None),
-    };
-    Ok(DjiRuntime {
-        adapter,
-        frames,
-        producer,
-    })
 }
 
 fn config_from_values(
@@ -219,6 +211,7 @@ fn config_from_values(
         control_mode: parse_control_mode(control_mode)?,
         ffmpeg: parse_decoder(ffmpeg)?,
         experimental_flight: parse_experimental_flight(experimental_flight)?,
+        usb_ground_recovery: false,
     })
 }
 

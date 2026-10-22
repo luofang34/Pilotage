@@ -80,6 +80,7 @@ pub fn fc_state_sample(
 ) -> Option<FcStateSample> {
     let report = report?;
     Some(FcStateSample {
+        landing_approach: None,
         arm_state: if report.armed { 2 } else { 1 },
         // The FC's verdict on the most recent commanded arm/disarm rides
         // the same report provenance: enactment truth the operator needs

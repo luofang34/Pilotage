@@ -16,6 +16,9 @@ impl Connection {
         send_until: Duration,
         observations: &Observations,
     ) -> Result<(), Error> {
+        if !self.remote_control.neutral_cached(now) {
+            return Err(Error::MissingFeedback);
+        }
         if !self.input_clear()
             || !self.version_observed
             || self.pending.is_some()
@@ -65,6 +68,7 @@ impl Connection {
             .model_deadline(now)
             .map(|_| observations.model_revision());
         self.mode_session.poll(now, binding);
+        self.guard_remote_control(now);
         let valid = self
             .pending
             .as_ref()
@@ -103,11 +107,12 @@ impl Connection {
         let fresh = observations.model_revision() == fence.model_revision
             && observations.model_deadline(now).is_some()
             && (fence.mode == VirtualStickMode::Disable
-                || (self.mode_session.retained()
-                    && observations.motion_deadline(now, false).is_some())
-                || observations
-                    .flight_deadline(BasicFlightCommand::Takeoff, now)
-                    .is_some());
+                || (self.remote_control.neutral_cached(now)
+                    && ((self.mode_session.retained()
+                        && observations.motion_deadline(now, false).is_some())
+                        || observations
+                            .flight_deadline(BasicFlightCommand::Takeoff, now)
+                            .is_some())));
         if self.input_clear()
             && self.version_observed
             && fresh

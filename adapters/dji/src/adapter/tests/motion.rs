@@ -9,7 +9,11 @@ use super::{
 };
 use crate::{adapter::FLIGHT_SCOPE, flight::VirtualStickMode};
 
+mod confirmation;
 mod diagonal;
+mod landing;
+mod override_control;
+mod remote_control;
 
 fn input(h: &mut Harness, sequence: u32, time: u64, values: [f32; 4]) -> Disposition {
     let [vx, vy, vz, yaw_rate] = values;
@@ -29,12 +33,16 @@ fn input(h: &mut Harness, sequence: u32, time: u64, values: [f32; 4]) -> Disposi
 }
 
 fn flying(h: &mut Harness, sequence: u16) {
+    flying_mode(h, sequence, 6);
+}
+
+fn flying_mode(h: &mut Harness, sequence: u16, mode: u8) {
     let mut bytes = super::harness::captured_hex_frames(include_str!(
         "../airframe/fixtures/mini3-reported-attitude.hex"
     ))
     .remove(0);
     bytes[6..8].copy_from_slice(&sequence.to_le_bytes());
-    bytes[41] = 6;
+    bytes[41] = mode;
     bytes[43] = 0x0c;
     super::harness::seal_duml(&mut bytes);
     super::flight::feed(h, &bytes);
@@ -61,6 +69,7 @@ fn held_four_axes_pass_through_adapter_writer_at_twenty_hz() {
         let now = 20 + u64::from(tick) * 10;
         if tick % 10 == 0 {
             flying(&mut h, 3 + (tick / 10) as u16);
+            super::flight::remote(&mut h, 3 + (tick / 10) as u16, [1024; 4]);
         }
         if tick % 100 == 0 {
             report(&mut h, 12 + (tick / 100) as u16, true, true, false);

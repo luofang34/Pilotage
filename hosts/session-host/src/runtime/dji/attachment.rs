@@ -11,19 +11,8 @@ pub(super) enum AttachmentSelection {
     AutoUsb,
 }
 
+#[cfg(test)]
 impl AttachmentSelection {
-    pub(super) fn resolve_blocking(self) -> Result<DjiAttachment, DjiHostError> {
-        #[cfg(target_os = "macos")]
-        {
-            self.resolve_with(pilotage_dji_usb::discover_upper_blocking)
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let Self::Explicit(attachment) = self;
-            Ok(attachment)
-        }
-    }
-
     #[cfg(target_os = "macos")]
     fn resolve_with(
         self,
@@ -56,7 +45,16 @@ pub(super) fn parse_attachment(
     usb: Option<OsString>,
 ) -> Result<AttachmentSelection, DjiHostError> {
     match (serial, usb_registry_id, usb) {
-        (None, None, None) => Err(DjiHostError::MissingAttachment),
+        (None, None, None) => {
+            #[cfg(target_os = "macos")]
+            {
+                Ok(AttachmentSelection::AutoUsb)
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                Err(DjiHostError::MissingAttachment)
+            }
+        }
         (Some(serial), None, None) => {
             let path = required_path(Some(serial), SERIAL)?;
             let prefix = if cfg!(target_os = "macos") {

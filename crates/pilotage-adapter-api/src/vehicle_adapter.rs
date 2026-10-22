@@ -27,6 +27,13 @@ pub trait VehicleAdapter {
         None
     }
 
+    /// Drain device-side grant losses, including manual takeover and transport failure.
+    /// The adapter fences commands before reporting a loss. The host revokes only the
+    /// matching session and generation, using the existing authority event stream.
+    fn take_control_authority_losses(&mut self) -> Vec<crate::ControlAuthorityLoss> {
+        Vec::new()
+    }
+
     /// Applies a single scoped control frame, returning how it was disposed
     /// of and the simulation tick the outcome corresponds to.
     fn apply_control(&mut self, frame: &ScopedControlFrame) -> ApplyOutcome;

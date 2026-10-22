@@ -270,6 +270,66 @@ pub enum HostError {
         /// The rejected height in meters.
         height: f64,
     },
+    /// `PILOTAGE_MISSION_CRUISE_SPEED` was not a number.
+    #[error("invalid PILOTAGE_MISSION_CRUISE_SPEED value {value:?}: {source}")]
+    MissionCruiseSpeed {
+        /// The rejected value.
+        value: String,
+        /// The float parse failure.
+        #[source]
+        source: std::num::ParseFloatError,
+    },
+    /// `PILOTAGE_MISSION_CRUISE_SPEED` parsed but cannot be flown: the speed
+    /// must be finite and positive.
+    #[error("PILOTAGE_MISSION_CRUISE_SPEED must be a finite speed > 0 m/s, got {speed}")]
+    MissionCruiseSpeedRange {
+        /// The rejected speed in meters per second.
+        speed: f64,
+    },
+    /// `PILOTAGE_MISSION_OWNSHIP` named no known ownship source.
+    #[error(
+        "invalid PILOTAGE_MISSION_OWNSHIP value {value:?} (expected \"simulation-truth\" or \"vehicle-estimate\")"
+    )]
+    MissionOwnshipSource {
+        /// The rejected value.
+        value: String,
+    },
+    /// `PILOTAGE_MISSION_TARGET` named no known execution target.
+    #[error(
+        "invalid PILOTAGE_MISSION_TARGET value {value:?} (expected \"simulator\" or \"real-vehicle\")"
+    )]
+    MissionTarget {
+        /// The rejected value.
+        value: String,
+    },
+    /// A real vehicle exports no simulation truth, so that pairing would
+    /// wait for a first solution for the whole mission.
+    #[error(
+        "PILOTAGE_MISSION_TARGET=real-vehicle requires PILOTAGE_MISSION_OWNSHIP=vehicle-estimate"
+    )]
+    MissionTruthOnRealVehicle,
+    /// Both a route and an area were given; a mission flies one plan.
+    #[error("set one of PILOTAGE_MISSION_ROUTE and PILOTAGE_MISSION_AREA, not both")]
+    MissionPlanConflict,
+    /// `PILOTAGE_MISSION_AREA` was not at least three `lat_deg,lon_deg`
+    /// pairs separated by semicolons.
+    #[error(
+        "invalid PILOTAGE_MISSION_AREA value {value:?} (expected at least three \"lat_deg,lon_deg\" pairs separated by ';')"
+    )]
+    MissionArea {
+        /// The rejected value.
+        value: String,
+    },
+    /// A survey parameter variable did not parse or is outside its range.
+    #[error("invalid {variable} value {value:?}: {reason}")]
+    MissionSurveyParameter {
+        /// The environment variable being parsed.
+        variable: &'static str,
+        /// The rejected value.
+        value: String,
+        /// What the variable accepts.
+        reason: &'static str,
+    },
     /// Loading or selecting the mission navdata snapshot failed.
     #[error("failed to load mission navdata: {0}")]
     MissionNavdata(#[source] crate::mission_navdata::NavdataError),

@@ -7,6 +7,7 @@ typedef struct {
     DjiUsb *usb;
     unsigned step, errors;
     BOOL completes;
+    IOReturn restoreStatus, closeStatus;
 } Fixture;
 
 static void step(Fixture *fixture, unsigned expected) {
@@ -25,18 +26,20 @@ static IOReturn restore(void *self, UInt8 alternate) {
     Fixture *fixture = self;
     step(fixture, 2);
     if (fixture->usb->pending || alternate != 0) fixture->errors++;
-    return kIOReturnSuccess;
+    return fixture->restoreStatus;
 }
 
 static IOReturn verify(void *self, UInt8 *alternate) {
+    Fixture *fixture = self;
     step(self, 3);
     *alternate = 0;
-    return kIOReturnSuccess;
+    return fixture->restoreStatus;
 }
 
 static IOReturn closeInterface(void *self) {
+    Fixture *fixture = self;
     step(self, 4);
-    return kIOReturnSuccess;
+    return fixture->closeStatus;
 }
 
 static ULONG releaseInterface(void *self) {
@@ -44,7 +47,7 @@ static ULONG releaseInterface(void *self) {
     return 0;
 }
 
-static int cleanupTest(BOOL completes) {
+static int cleanupTest(BOOL completes, IOReturn restoration, IOReturn closeStatus, int expected) {
     IOUSBInterfaceInterface650 table = {
         .AbortPipe = abortInput, .SetAlternateInterface = restore,
         .GetAlternateSetting = verify, .USBInterfaceClose = closeInterface,
@@ -52,7 +55,8 @@ static int cleanupTest(BOOL completes) {
     };
     DjiUsb *usb = calloc(1, sizeof(DjiUsb));
     if (usb == NULL) return 1;
-    Fixture fixture = {.table = &table, .usb = usb, .completes = completes};
+    Fixture fixture = {.table = &table, .usb = usb, .completes = completes,
+        .restoreStatus = restoration, .closeStatus = closeStatus};
     *usb = (DjiUsb){
         .interface = &fixture.table, .inputPipe = 1, .opened = YES,
         .originalKnown = YES, .changed = YES, .pending = YES,
@@ -65,7 +69,7 @@ static int cleanupTest(BOOL completes) {
         dji_read_complete(usb, kIOReturnAborted, NULL);
         result = dji_usb_close(usb, &error);
     }
-    return fixture.errors + (result != 0) + (fixture.step != 5);
+    return fixture.errors + (result != expected) + (fixture.step != 5);
 }
 
 static int completionTest(void) {
@@ -90,7 +94,10 @@ static int completionTest(void) {
 
 int dji_usb_lifecycle_test(void) {
     @autoreleasepool {
-        return cleanupTest(YES) + cleanupTest(NO) + completionTest();
+        return cleanupTest(YES, 0, 0, 0) + cleanupTest(NO, 0, 0, 0)
+            + cleanupTest(YES, kIOReturnNoDevice, kIOReturnNoDevice, 1)
+            + cleanupTest(YES, kIOReturnError, kIOReturnSuccess, 1)
+            + cleanupTest(YES, 0, kIOReturnError, -1) + completionTest();
     }
 }
 
