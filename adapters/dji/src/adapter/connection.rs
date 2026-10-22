@@ -16,6 +16,7 @@ mod keyframe;
 mod landing;
 mod motion;
 mod pending;
+mod remote_control;
 mod virtual_stick;
 mod writer;
 
@@ -56,6 +57,7 @@ pub(super) struct Connection {
     pub(super) flight: FlightExecution,
     pub(super) motion: super::motion::Motion,
     pub(super) mode_session: super::virtual_stick::ModeSession,
+    remote_control: remote_control::RemoteControl,
     profile: Mini3ControlProfile,
     transport: Option<Box<dyn Transport>>,
     pub(super) cleanup_confirmed: bool,
@@ -89,6 +91,7 @@ impl Connection {
             flight: FlightExecution::new(incarnation),
             motion: super::motion::Motion::default(),
             mode_session: super::virtual_stick::ModeSession::new(incarnation),
+            remote_control: Default::default(),
             profile,
             transport: Some(transport),
             cleanup_confirmed: false,
@@ -266,6 +269,7 @@ impl Connection {
             }
         };
         for frame in frames {
+            self.observe_remote_control(&frame, now);
             self.execution.response(&frame, now);
             self.flight.response(&frame, now);
             if frame.sender() == RouteAddress(6)
@@ -305,6 +309,11 @@ impl Connection {
 
     pub(super) fn fail(&mut self, fault: DjiFault) {
         error!(%fault, "DJI transport failed; control is fenced");
+        if let Some(binding) = self.motion.binding {
+            self.flight.revoke_motion_authority(binding);
+        } else {
+            self.flight.revoke_device_authority();
+        }
         if let Some(pending) = &self.pending {
             if pending.offset > 0 {
                 if let Some((_, identity)) = pending.purpose.pitch() {

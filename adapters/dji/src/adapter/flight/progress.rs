@@ -54,6 +54,10 @@ impl FlightExecution {
 
     pub(in crate::adapter) fn response(&mut self, frame: &DumlFrame, now: Duration) {
         self.poll(now);
+        self.confirmation.receive(frame, now);
+        if self.confirmation.response(frame) {
+            return;
+        }
         if self.landing_override_response(frame, now) {
             return;
         }

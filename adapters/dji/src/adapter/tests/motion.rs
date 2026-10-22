@@ -9,9 +9,11 @@ use super::{
 };
 use crate::{adapter::FLIGHT_SCOPE, flight::VirtualStickMode};
 
+mod confirmation;
 mod diagonal;
 mod landing;
 mod override_control;
+mod remote_control;
 
 fn input(h: &mut Harness, sequence: u32, time: u64, values: [f32; 4]) -> Disposition {
     let [vx, vy, vz, yaw_rate] = values;
@@ -67,6 +69,7 @@ fn held_four_axes_pass_through_adapter_writer_at_twenty_hz() {
         let now = 20 + u64::from(tick) * 10;
         if tick % 10 == 0 {
             flying(&mut h, 3 + (tick / 10) as u16);
+            super::flight::remote(&mut h, 3 + (tick / 10) as u16, [1024; 4]);
         }
         if tick % 100 == 0 {
             report(&mut h, 12 + (tick / 100) as u16, true, true, false);

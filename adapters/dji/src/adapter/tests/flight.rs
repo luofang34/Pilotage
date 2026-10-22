@@ -15,6 +15,7 @@ pub(super) fn ready() -> Harness {
     feed(&mut h, &probe());
     feed_fc(&mut h, 1, 0);
     feed_battery(&mut h, 1, 50);
+    remote(&mut h, 1, [1024; 4]);
     h.step(10);
     h
 }
@@ -31,6 +32,17 @@ pub(super) fn request(action: ControlAction, id: u32) -> ScopedControlFrame {
 
 pub(super) fn feed(h: &mut Harness, bytes: &[u8]) {
     h.feed(&crate::logiclink::encode_duml(bytes)).unwrap();
+}
+
+pub(super) fn remote(h: &mut Harness, sequence: u16, axes: [u16; 4]) {
+    let [lo, hi] = sequence.to_le_bytes();
+    let mut bytes = vec![0x55, 26, 4, 0, 6, 2, lo, hi, 0, 6, 5];
+    for axis in axes {
+        bytes.extend(axis.to_le_bytes());
+    }
+    bytes.extend([0, 4, 0, 0, 0, 0, 0]);
+    seal_duml(&mut bytes);
+    feed(h, &bytes);
 }
 
 pub(super) fn feed_fc(h: &mut Harness, sequence: u16, flags: u32) {

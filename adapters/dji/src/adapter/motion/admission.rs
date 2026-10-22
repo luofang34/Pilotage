@@ -68,6 +68,13 @@ impl DjiAdapter {
             value,
             until,
         };
+        if !self
+            .connection
+            .flight
+            .authority_valid(binding.session, binding.generation)
+        {
+            return Err(RejectReason::Fenced);
+        }
         if self.connection.flight.holds_landing_motion(binding) {
             return self.connection.landing_motion(
                 input,
@@ -79,11 +86,15 @@ impl DjiAdapter {
         if self.connection.motion.binding.is_none()
             && value == VirtualStickVelocity::ZERO
             && self.connection.input_clear()
+            && self.connection.remote_control_neutral_cached(now)
             && self.observations.model_deadline(now).is_some()
             && self.observations.motion_deadline(now, false).is_none()
         {
             // Neutral client input must not acquire virtual-stick during native
             // takeoff or while on the ground.
+            self.connection
+                .flight
+                .retain_authority(binding.session, binding.generation);
             return Ok(());
         }
         if self.connection.motion.stopped && self.connection.flight.take_landing_override(binding) {
@@ -119,6 +130,7 @@ impl DjiAdapter {
             Ok(())
         } else {
             if self.connection.fault.is_some()
+                || !self.connection.remote_control_neutral_cached(now)
                 || self.connection.mode_session.active()
                 || self.connection.mode_session.unresolved()
                 || self.observations.model_deadline(now).is_none()

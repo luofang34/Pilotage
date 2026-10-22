@@ -248,6 +248,14 @@ impl Link {
             ModuleEvent::Telemetry(sample) => self.emit_telemetry(&sample),
             ModuleEvent::Lease(response) => self.emit_lease(&response),
             ModuleEvent::LeaseReleased(released) => self.emit_lease_released(&released),
+            ModuleEvent::ControlLaneClosed { scope, generation, .. } => {
+                self.mirror_authority(&scope, AuthorityEvent::Revoked { generation });
+                self.delivery.event(LinkEvent::LeaseChanged {
+                    held: false,
+                    scope,
+                    detail: "control authority revoked".into(),
+                });
+            }
             ModuleEvent::ControlRejected(rejected) => self.emit_rejection(&rejected),
             ModuleEvent::ConnectionDown { retry_at_ms } => {
                 self.motion_request_pending = false;

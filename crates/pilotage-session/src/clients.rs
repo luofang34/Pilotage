@@ -120,6 +120,18 @@ impl ClientRegistry {
         self.clients.get(&client)
     }
 
+    pub(crate) fn session_holds(
+        &self,
+        session: SessionId,
+        pair: &ScopePair,
+        generation: Generation,
+    ) -> bool {
+        self.generation_of(pair) == Some(generation)
+            && self.clients.values().any(|client| {
+                client.session == session && self.holder_of(pair) == Some(client.principal)
+            })
+    }
+
     /// Returns whether the client has completed the handshake.
     pub(crate) fn is_welcomed(&self, client: ClientKey) -> bool {
         self.clients.contains_key(&client)

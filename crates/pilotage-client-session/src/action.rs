@@ -42,6 +42,16 @@ pub enum ModuleEvent {
     Lease(wire::LeaseResponse),
     /// The host confirmed a lease release.
     LeaseReleased(wire::LeaseReleased),
+    /// An authority event ended an open control lane. This is neither a
+    /// rejected lease request nor confirmation of a requested release.
+    ControlLaneClosed {
+        /// Vehicle whose lane closed.
+        vehicle: u64,
+        /// Concrete member scope of the closed lane.
+        scope: String,
+        /// Generation that fences the ended grant.
+        generation: u64,
+    },
     /// The host rejected a control frame. Fencing feedback, not noise.
     ControlRejected(wire::FrameRejected),
     /// The host confirmed a scope's link-loss recovery: the vehicle's

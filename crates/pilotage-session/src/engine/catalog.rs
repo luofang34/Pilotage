@@ -8,6 +8,39 @@ use pilotage_timing::MonoTimestamp;
 use std::collections::HashSet;
 
 impl SessionEngine {
+    /// Revoke a device-rejected grant without affecting a newer holder.
+    #[must_use]
+    pub fn handle_device_authority_loss(
+        &mut self,
+        loss: &pilotage_adapter_api::ControlAuthorityLoss,
+        now: MonoTimestamp,
+    ) -> SessionOutcome {
+        let mut actions = Actions::new(self.config.max_actions_per_call);
+        let Some(pair) = self.authority_pair(loss.vehicle, &loss.scope) else {
+            return actions.into_outcome();
+        };
+        if self
+            .clients
+            .session_holds(loss.session, &pair, loss.generation)
+        {
+            let effects = self.authority.handle(
+                AuthorityCommand::Revoke {
+                    vehicle: pair.0,
+                    scope: pair.1,
+                    authority_class: AuthorityClass::Administrator,
+                },
+                now,
+            );
+            self.fan_out_authority(
+                effects,
+                now,
+                LinkLossTrigger::AuthorityRevoked,
+                &mut actions,
+            );
+        }
+        actions.into_outcome()
+    }
+
     pub(super) fn invalidate_pending_for(
         &self,
         effect: &pilotage_authority::AuthorityEffect,

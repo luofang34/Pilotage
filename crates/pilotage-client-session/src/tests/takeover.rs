@@ -336,7 +336,7 @@ fn a_committed_transfer_opens_the_lane_and_a_departing_one_closes_it() {
     assert!(!engine.holds_control(), "moved authority closes the lane");
     assert!(actions.iter().any(|action| matches!(
         action,
-        ClientAction::Emit(ModuleEvent::Lease(response)) if !response.granted
+        ClientAction::Emit(ModuleEvent::ControlLaneClosed { .. })
     )));
 }
 
@@ -468,7 +468,7 @@ fn a_revoked_lane_closes_instead_of_commanding_a_stale_generation() {
     assert!(!engine.holds_control(), "the revoked lane is gone");
     assert!(actions.iter().any(|action| matches!(
         action,
-        ClientAction::Emit(ModuleEvent::Lease(response)) if !response.granted
+        ClientAction::Emit(ModuleEvent::ControlLaneClosed { .. })
     )));
     assert!(
         engine

@@ -115,6 +115,8 @@ impl VirtualStickVelocity {
 
     pub(crate) fn interrupts_descent(self) -> bool {
         let [forward, right, down, yaw] = self.values;
+        // A flight input is not itself a request to cancel landing. Separate
+        // deliberate climb or steering from release travel and cross-axis drift.
         down < -0.05 || forward.abs() > 0.1 || right.abs() > 0.1 || yaw.abs() > 0.1
     }
 

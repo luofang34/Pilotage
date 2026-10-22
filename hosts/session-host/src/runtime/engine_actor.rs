@@ -242,6 +242,11 @@ impl<A: VehicleAdapter> EngineActor<A> {
         self.record_stage(Stage::Apply, apply_start.elapsed());
         debug!(advanced = step_outcome.advanced, "adapter stepped");
 
+        for loss in self.adapter.take_control_authority_losses() {
+            let outcome = self.engine.handle_device_authority_loss(&loss, now);
+            self.enact(outcome);
+        }
+
         self.broadcast_telemetry(now);
     }
 

@@ -25,6 +25,7 @@ pub(super) enum Purpose {
     },
     Flight(FlightFence),
     LandingOverride(FlightFence),
+    LandingConfirmation(FlightFence),
     Mode(super::super::virtual_stick::ModeFence),
 }
 
@@ -46,6 +47,11 @@ impl Connection {
         observations: &Observations,
         now: Duration,
     ) -> Result<(), RejectReason> {
+        if !self.remote_control.neutral_cached(now) {
+            return Err(RejectReason::Other(
+                "fresh centered remote-controller sticks are required".to_owned(),
+            ));
+        }
         let prepare_landing = command == BasicFlightCommand::Land
             && self.mode_session.active()
             && self.mode_session.retained();
@@ -80,6 +86,11 @@ impl Connection {
             return Err(RejectReason::MeasurementUnavailable);
         }
         let packet = command.packet(sequence);
+        if command == BasicFlightCommand::Takeoff {
+            // Admission has just established stopped motors and an idle mode exchange.
+            // A new explicit flight must not inherit the preceding stream's stop latch.
+            self.motion = Default::default();
+        }
         let fence = self.flight.begin(
             frame,
             command,
@@ -117,7 +128,7 @@ impl Connection {
         if self.pending.as_ref().is_some_and(|pending| {
             matches!(
                 pending.purpose,
-                Purpose::Flight(_) | Purpose::LandingOverride(_)
+                Purpose::Flight(_) | Purpose::LandingOverride(_) | Purpose::LandingConfirmation(_)
             )
         }) {
             if self

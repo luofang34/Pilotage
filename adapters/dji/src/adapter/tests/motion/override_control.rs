@@ -1,11 +1,11 @@
 use super::*;
 use pilotage_adapter_api::{FlightProcedurePhase, FlightProcedureReason};
 
-fn landing() -> Harness {
+pub(super) fn landing() -> Harness {
     start_landing(enabled())
 }
 
-fn start_landing(mut h: Harness) -> Harness {
+pub(super) fn start_landing(mut h: Harness) -> Harness {
     assert_eq!(
         h.apply(landing::land(), 20).disposition,
         Disposition::Accepted
@@ -43,63 +43,69 @@ fn cancel(h: &mut Harness) -> u16 {
 }
 
 #[test]
-fn fresh_manual_takeover_cancels_landing_then_requires_ack_hover_and_enabled_feedback() {
-    let mut h = landing();
-    let sequence = cancel(&mut h);
-    flying_mode(&mut h, 4, 6);
-    let response = super::super::flight::ack(sequence, 0);
-    super::super::flight::feed(&mut h, &response);
-    h.step(29);
-    input(&mut h, 5, 29, [0.4, 0.0, 0.0, 0.0]);
-    h.step(30);
-    assert_eq!(commands(&h).last().unwrap().payload(), [14]);
-    flying_mode(&mut h, 5, 6);
-    h.step(31);
-    let progress = h
-        .adapter
-        .sample_telemetry()
-        .samples
-        .into_iter()
-        .find_map(|s| s.flight_procedure)
-        .unwrap();
-    assert_eq!(progress.phase, FlightProcedurePhase::Cancelled);
-    assert_eq!(progress.reason, Some(FlightProcedureReason::Interrupted));
-    assert_eq!(
-        input(&mut h, 6, 32, [0.4, 0.0, 0.0, 0.0]),
-        Disposition::Accepted
-    );
-    h.step(33);
-    let enable = commands(&h).pop().unwrap();
-    assert_eq!(enable.command_id(), 0x80);
-    assert_eq!(enable.payload(), [1]);
-    ack(&mut h, VirtualStickMode::Enable, enable.sequence(), 0);
-    report(&mut h, 13, true, true, false);
-    h.step(34);
-    input(&mut h, 7, 35, [0.4, 0.0, 0.0, 0.0]);
-    h.step(90);
-    let packet = commands(&h).pop().unwrap();
-    assert_eq!(packet.command_id(), 0x8e);
-    assert_eq!(
-        f32::from_le_bytes(packet.payload()[1..5].try_into().unwrap()),
-        0.4
-    );
-    assert_eq!(
-        commands(&h)
-            .iter()
-            .filter(|p| p.command_id() == 0x2a)
-            .count(),
-        2
-    );
-    h.step(150);
-    h.step(151);
-    assert!(matches!(
-        input(&mut h, 8, 152, [0.4, 0.0, 0.0, 0.0]),
-        Disposition::Rejected(_)
-    ));
+fn fresh_manual_takeover_uses_observed_hover_with_or_without_cancel_ack() {
+    for acknowledged in [false, true] {
+        let mut h = landing();
+        let sequence = cancel(&mut h);
+        flying_mode(&mut h, 4, 6);
+        let response = super::super::flight::ack(sequence, 0);
+        if acknowledged {
+            super::super::flight::feed(&mut h, &response);
+        }
+        h.step(29);
+        input(&mut h, 5, 29, [0.4, 0.0, 0.0, 0.0]);
+        h.step(30);
+        assert_eq!(commands(&h).last().unwrap().payload(), [14]);
+        flying_mode(&mut h, 5, 6);
+        h.step(31);
+        flying_mode(&mut h, 6, 6);
+        h.step(32);
+        let progress = h
+            .adapter
+            .sample_telemetry()
+            .samples
+            .into_iter()
+            .find_map(|s| s.flight_procedure)
+            .unwrap();
+        assert_eq!(progress.phase, FlightProcedurePhase::Cancelled);
+        assert_eq!(progress.reason, Some(FlightProcedureReason::Interrupted));
+        assert_eq!(
+            input(&mut h, 6, 32, [0.4, 0.0, 0.0, 0.0]),
+            Disposition::Accepted
+        );
+        h.step(33);
+        let enable = commands(&h).pop().unwrap();
+        assert_eq!(enable.command_id(), 0x80);
+        assert_eq!(enable.payload(), [1]);
+        ack(&mut h, VirtualStickMode::Enable, enable.sequence(), 0);
+        report(&mut h, 13, true, true, false);
+        h.step(34);
+        input(&mut h, 7, 35, [0.4, 0.0, 0.0, 0.0]);
+        h.step(90);
+        let packet = commands(&h).pop().unwrap();
+        assert_eq!(packet.command_id(), 0x8e);
+        assert_eq!(
+            f32::from_le_bytes(packet.payload()[1..5].try_into().unwrap()),
+            0.4
+        );
+        assert_eq!(
+            commands(&h)
+                .iter()
+                .filter(|p| p.command_id() == 0x2a)
+                .count(),
+            2
+        );
+        h.step(150);
+        h.step(151);
+        assert!(matches!(
+            input(&mut h, 8, 152, [0.4, 0.0, 0.0, 0.0]),
+            Disposition::Rejected(_)
+        ));
+    }
 }
 
 #[test]
-fn missing_or_rejected_cancel_response_cannot_resume_manual_velocity_or_retry_cancel() {
+fn missing_hover_or_refused_cancel_cannot_resume_velocity_or_retry_cancel() {
     for rejected in [false, true] {
         let mut h = landing();
         let sequence = cancel(&mut h);
@@ -107,7 +113,7 @@ fn missing_or_rejected_cancel_response_cannot_resume_manual_velocity_or_retry_ca
             super::super::flight::feed(&mut h, &super::super::flight::ack(sequence, 147));
         }
         for tick in 0..25_u16 {
-            flying_mode(&mut h, tick + 4, 6);
+            flying_mode(&mut h, tick + 4, if rejected { 6 } else { 12 });
             let now = 40 + u64::from(tick) * 100;
             h.step(now);
             input(&mut h, u32::from(tick) + 5, now, [0.4, 0.0, 0.0, 0.0]);
@@ -192,4 +198,28 @@ fn descent_landing_ignores_held_down_but_new_direction_requests_one_cancel() {
             2
         );
     }
+}
+
+#[test]
+fn centering_then_resuming_descent_or_small_cross_axis_drift_does_not_cancel() {
+    let mut h = enabled();
+    input(&mut h, 2, 19, [0.0, 0.0, 0.5, 0.0]);
+    let mut h = start_landing(h);
+    // The descent hold and cancellation must not disagree about a partial
+    // downward stroke after the operator briefly centers the stick.
+    for (sequence, value) in [
+        (3, [0.0; 4]),
+        (4, [0.0, 0.0, 0.0856, 0.0058]),
+        (5, [0.0, 0.0, 0.2672, 0.0082]),
+        (6, [0.0, 0.0, 0.5, 0.05]),
+        (7, [0.0, 0.0, 0.5, 0.0]),
+    ] {
+        let at = 25 + u64::from(sequence);
+        input(&mut h, sequence, at, value);
+        h.step(at);
+        assert_eq!(commands(&h).last().unwrap().payload(), [2]);
+    }
+    input(&mut h, 8, 34, [0.0, 0.0, -0.2, 0.0]);
+    h.step(34);
+    assert_eq!(commands(&h).last().unwrap().payload(), [14]);
 }

@@ -116,6 +116,22 @@ impl Connection {
                 let fence = fence.clone();
                 self.prepare_landing_override(&fence, observations, now)
             }
+            Purpose::LandingConfirmation(fence) => {
+                let permitted = self.input_clear()
+                    && self.version_observed
+                    && observations.flight_cached(now).is_some_and(|report| {
+                        report.is_flying && report.motors_running && report.mode == 12
+                    })
+                    && self.flight.permits_landing_confirmation(
+                        fence,
+                        observations.model_revision(),
+                        now,
+                    );
+                if !permitted {
+                    self.invalidate_flight(FlightProcedureReason::MeasurementUnavailable, now);
+                }
+                permitted
+            }
             Purpose::Mode(fence) => {
                 let fence = *fence;
                 self.prepare_mode(&fence, observations, now)
@@ -159,6 +175,9 @@ impl Connection {
             if matches!(purpose, Purpose::LandingOverride(_)) {
                 self.flight.landing_override_written(now);
             }
+            if matches!(purpose, Purpose::LandingConfirmation(_)) {
+                self.flight.landing_confirmation_written();
+            }
             self.pending = None;
             if let Some((_, identity)) = purpose.pitch()
                 && let Err(source) = self.execution.sent(identity, now)
@@ -184,7 +203,10 @@ impl Connection {
         if expired
             && matches!(
                 purpose,
-                Purpose::Mode(_) | Purpose::Stick(_) | Purpose::LandingOverride(_)
+                Purpose::Mode(_)
+                    | Purpose::Stick(_)
+                    | Purpose::LandingOverride(_)
+                    | Purpose::LandingConfirmation(_)
             )
         {
             self.fail(DjiFault::Transport {
