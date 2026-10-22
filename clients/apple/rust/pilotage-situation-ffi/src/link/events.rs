@@ -223,10 +223,8 @@ impl Link {
     pub(super) fn emit(&mut self, event: ModuleEvent) {
         match event {
             ModuleEvent::Admitted(admission) => {
-                // A fresh admission is a fresh transport session for the
-                // runtime's mirror and the telegraph alike. Any ask the
-                // last session left in flight is void with it, so the
-                // sticks may ask again.
+                // A new admission resets mirrored authority and pending requests.
+                // The telegraph belongs to this transport session.
                 self.motion_request_pending = false;
                 self.control.begin_session();
                 self.telegraph.reset();
@@ -248,7 +246,9 @@ impl Link {
             ModuleEvent::Telemetry(sample) => self.emit_telemetry(&sample),
             ModuleEvent::Lease(response) => self.emit_lease(&response),
             ModuleEvent::LeaseReleased(released) => self.emit_lease_released(&released),
-            ModuleEvent::ControlLaneClosed { scope, generation, .. } => {
+            ModuleEvent::ControlLaneClosed {
+                scope, generation, ..
+            } => {
                 self.mirror_authority(&scope, AuthorityEvent::Revoked { generation });
                 self.delivery.event(LinkEvent::LeaseChanged {
                     held: false,
