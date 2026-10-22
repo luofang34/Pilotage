@@ -62,23 +62,24 @@ fn app_diagonals_keep_direction_and_both_left_stick_axes_through_the_device_writ
             .iter()
             .map(|bytes| f32::from_le_bytes(*bytes))
             .collect();
-        assert!((values[0] - pitch * core::f32::consts::FRAC_1_SQRT_2).abs() < 1e-6);
-        assert!((values[1] - roll * core::f32::consts::FRAC_1_SQRT_2).abs() < 1e-6);
-        assert!(values[0].hypot(values[1]) <= 1.0);
-        assert_eq!(values[2], 0.5);
-        assert!((values[3] + 30.0).abs() < 1e-5);
+        let horizontal = crate::flight::HORIZONTAL_LIMIT_MPS;
+        assert!((values[0] - pitch * horizontal * core::f32::consts::FRAC_1_SQRT_2).abs() < 1e-4);
+        assert!((values[1] - roll * horizontal * core::f32::consts::FRAC_1_SQRT_2).abs() < 1e-4);
+        assert!(values[0].hypot(values[1]) <= horizontal);
+        assert_eq!(values[2], crate::flight::VERTICAL_LIMIT_MPS);
+        assert!((values[3] + 100.0).abs() < 1e-3);
     }
 }
 
 #[test]
 fn radial_limiting_does_not_admit_out_of_contract_or_non_finite_axes() {
     for values in [
-        [1.01, 0.0, 0.0, 0.0],
-        [0.0, -1.01, 0.0, 0.0],
+        [15.01, 0.0, 0.0, 0.0],
+        [0.0, -15.01, 0.0, 0.0],
         [f32::NAN, 0.0, 0.0, 0.0],
         [0.0, f32::INFINITY, 0.0, 0.0],
-        [1.0, 1.0, 0.51, 0.0],
-        [1.0, 1.0, 0.0, 0.53],
+        [15.0, 15.0, 4.01, 0.0],
+        [15.0, 15.0, 0.0, 1.75],
     ] {
         let mut h = enabled();
         assert!(matches!(

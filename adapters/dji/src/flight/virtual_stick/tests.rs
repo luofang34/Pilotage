@@ -79,10 +79,11 @@ fn body_frd_maps_to_forward_right_up_and_clockwise_degrees_without_ack_flag() {
 
 #[test]
 fn encoder_rejects_nonfinite_and_excessive_vector_norm() {
+    assert!(VirtualStickVelocity::new(10.6, 10.6, 4.0, 1.745).is_ok());
     for input in [
-        [1.0, 1.0, 0.0, 0.0],
-        [0.0, 0.0, 0.501, 0.0],
-        [0.0, 0.0, 0.0, 0.524],
+        [10.7, 10.7, 0.0, 0.0],
+        [0.0, 0.0, 4.01, 0.0],
+        [0.0, 0.0, 0.0, 1.75],
         [f32::NAN, 0.0, 0.0, 0.0],
         [0.0, f32::INFINITY, 0.0, 0.0],
         [0.0, 0.0, f32::NEG_INFINITY, 0.0],
