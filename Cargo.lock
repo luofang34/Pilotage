@@ -2374,6 +2374,7 @@ dependencies = [
  "pilotage-world",
  "prost",
  "serde_json",
+ "tempfile",
  "thiserror",
  "tokio",
  "tracing",

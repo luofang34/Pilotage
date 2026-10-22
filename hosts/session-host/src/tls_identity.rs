@@ -19,6 +19,8 @@ use wtransport::tls::Sha256Digest;
 
 use crate::error::HostError;
 
+mod store;
+
 /// How old a persisted identity may grow before it is regenerated.
 /// Self-signed identities are valid 14 days; regenerating at 10 leaves
 /// margin for clocks and long-running sessions.
@@ -51,16 +53,10 @@ pub async fn build_dev_identity() -> Result<DevIdentity, HostError> {
 
 async fn build_with_store(store: Option<PathBuf>) -> Result<DevIdentity, HostError> {
     if let Some(pair) = store.as_ref().filter(|pair| fresh(pair)) {
-        // The SAME file serves as both arguments: the PEM readers filter
-        // by block type, so the certificate loader takes the CERTIFICATE
-        // block and the key loader the PRIVATE KEY block. Keeping the
-        // pair in one file is what makes it a pair — a rename replaces
-        // both together, so no reader can ever see one identity's
-        // certificate beside another's key.
-        match Identity::load_pemfiles(pair, pair).await {
+        match store::load(pair).await {
             Ok(identity) => return Ok(wrap(identity)),
             Err(error) => {
-                tracing::warn!(%error, "persisted dev identity unreadable; regenerating");
+                tracing::warn!(%error, path = %pair.display(), "persisted dev identity unreadable; regenerating");
             }
         }
     }
@@ -68,7 +64,7 @@ async fn build_with_store(store: Option<PathBuf>) -> Result<DevIdentity, HostErr
     let identity =
         Identity::self_signed(["localhost", "127.0.0.1", "::1"]).map_err(HostError::Identity)?;
     if let Some(pair) = store {
-        persist(&identity, &pair);
+        store::persist_blocking(&identity, &pair);
     }
     Ok(wrap(identity))
 }
@@ -127,53 +123,6 @@ fn fresh(pair: &std::path::Path) -> bool {
         .is_some_and(|(issued, now)| now.as_secs().saturating_sub(issued) < REUSE_LIMIT.as_secs())
 }
 
-/// Best-effort persistence. The key and certificate blocks land in ONE
-/// file through one atomic rename: per-file atomicity over a split pair
-/// would still let two hosts racing a cold store interleave one's
-/// certificate with the other's key, and rustls refuses a mismatched
-/// pair at server-config time — after loading reported success. With a
-/// single file the last writer wins whole. The issuance marker lands
-/// after the pair, so a `fresh` pair is always complete; the file is
-/// owner-only, since it carries the secret key.
-fn persist(identity: &Identity, pair: &std::path::Path) {
-    let Some(cert) = identity.certificate_chain().as_slice().first() else {
-        return;
-    };
-    let write = || -> std::io::Result<()> {
-        if let Some(dir) = pair.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        let pid = std::process::id();
-        let atomic = |path: &std::path::Path, bytes: &[u8], secret: bool| {
-            let tmp = path.with_extension(format!("tmp.{pid}"));
-            std::fs::write(&tmp, bytes)?;
-            #[cfg(unix)]
-            if secret {
-                use std::os::unix::fs::PermissionsExt as _;
-                std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
-            }
-            #[cfg(not(unix))]
-            let _ = secret;
-            std::fs::rename(&tmp, path)
-        };
-        let combined = format!(
-            "{}{}",
-            identity.private_key().to_secret_pem(),
-            cert.to_pem()
-        );
-        atomic(pair, combined.as_bytes(), true)?;
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|_| std::io::Error::other("clock before the epoch"))?
-            .as_secs();
-        atomic(&issued_at_path(pair), now.to_string().as_bytes(), false)?;
-        Ok(())
-    };
-    if let Err(error) = write() {
-        tracing::warn!(%error, "could not persist the dev identity; it will rotate next run");
-    }
-}
-
 /// Encodes bytes as lowercase hex with no separators.
 fn hex_encode(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len() * 2);
@@ -184,84 +133,4 @@ fn hex_encode(bytes: &[u8]) -> String {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used, clippy::panic)]
-mod tests {
-    use super::{build_with_store, hex_encode};
-
-    #[test]
-    fn hex_encode_is_lowercase_no_separators() {
-        assert_eq!(hex_encode(&[0xAB, 0x01, 0xFF]), "ab01ff");
-    }
-
-    #[tokio::test]
-    async fn dev_identity_builds_and_hashes() {
-        // No store: ephemeral, touching nothing on disk.
-        let dev = build_with_store(None)
-            .await
-            .expect("self-signed identity builds");
-        assert_eq!(dev.cert_hash_hex.len(), 64);
-        assert!(dev.cert_hash_hex.chars().all(|c| c.is_ascii_hexdigit()));
-    }
-
-    #[tokio::test]
-    async fn the_identity_survives_a_restart() {
-        let dir = std::env::temp_dir().join(format!("pilotage-tls-test-{}", std::process::id()));
-        let store = Some(dir.join("dev-identity.pem"));
-        let first = build_with_store(store.clone())
-            .await
-            .expect("first identity");
-        let second = build_with_store(store).await.expect("second identity");
-        assert_eq!(
-            first.cert_hash_hex, second.cert_hash_hex,
-            "a client's pinned link must survive a host restart"
-        );
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn racing_cold_stores_never_leave_a_torn_pair() {
-        // The failure this pins: concurrent builds against a cold store
-        // interleaving one identity's certificate with another's key. A
-        // torn pair LOADS cleanly — the readers do not cross-check the
-        // blocks — and then panics inside the TLS stack at server-config
-        // time. So the racers must run on real parallel threads, and the
-        // settled identity must survive the server-config build itself,
-        // the exact point a torn pair detonates.
-        let dir = std::env::temp_dir().join(format!(
-            "pilotage-tls-race-{}-{}",
-            std::process::id(),
-            line!()
-        ));
-        let store = dir.join("dev-identity.pem");
-        let racers: Vec<_> = (0..8)
-            .map(|_| {
-                let store = Some(store.clone());
-                tokio::spawn(async move {
-                    build_with_store(store)
-                        .await
-                        .expect("a racing build must not fail")
-                        .cert_hash_hex
-                })
-            })
-            .collect();
-        for racer in racers {
-            racer.await.expect("racer task completes");
-        }
-        let settled = build_with_store(Some(store.clone()))
-            .await
-            .expect("the settled store loads");
-        let reloaded = build_with_store(Some(store))
-            .await
-            .expect("the settled store loads again");
-        assert_eq!(
-            settled.cert_hash_hex, reloaded.cert_hash_hex,
-            "the store must converge on one whole identity"
-        );
-        let server_config = wtransport::ServerConfig::builder()
-            .with_bind_address(([127, 0, 0, 1], 0).into())
-            .with_identity(settled.identity)
-            .build();
-        drop(server_config);
-        std::fs::remove_dir_all(&dir).ok();
-    }
-}
+mod tests;

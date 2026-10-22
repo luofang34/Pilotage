@@ -40,6 +40,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 prost.workspace = true
 jpeg-encoder = "0.7.0"
+tempfile = "3.27"
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 pilotage-adapter-dji.workspace = true
