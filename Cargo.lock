@@ -1921,6 +1921,7 @@ dependencies = [
  "pilotage-adapter-api",
  "pilotage-client-session",
  "pilotage-dji-usb",
+ "pilotage-geo",
  "pilotage-protocol",
  "pilotage-session",
  "pilotage-timing",

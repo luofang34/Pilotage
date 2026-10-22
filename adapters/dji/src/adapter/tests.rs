@@ -12,6 +12,7 @@ mod mobile;
 mod model;
 mod observation_source;
 mod observed;
+mod position;
 mod profile;
 mod recovery;
 mod virtual_stick;

@@ -8,7 +8,11 @@ use pilotage_protocol::MotorState;
 
 use super::DjiTelemetrySource;
 use crate::DumlFrame;
-use crate::flight::{Mini3FlightReport, osd_payload};
+use crate::flight::{Mini3Fix, Mini3FlightReport, Mini3PositionReport, osd_payload};
+
+mod navigation;
+
+use navigation::{Navigation, NavigationGroups};
 
 const MAX_AGE: Duration = Duration::from_millis(300);
 const SOURCE_ID: u64 = 0x0e_03_43;
@@ -20,6 +24,8 @@ pub(super) struct AirframeReport {
     motor_state: MotorState,
     flight: Mini3FlightReport,
     approach: Option<(f32, f32)>,
+    /// The FC's own fix, when the report carries a satellite solution.
+    position: Option<Mini3Fix>,
 }
 
 impl AirframeReport {
@@ -49,28 +55,49 @@ impl AirframeReport {
             } else {
                 MotorState::Stopped
             },
+            position: Mini3PositionReport::from_push(frame).and_then(|report| report.fix()),
         })
     }
 
-    fn avionics(self, stamp: MeasurementStamp) -> AvionicsSample {
+    /// The attitude is a device report with an unverified reference and
+    /// stays unauthorized. A fix adds the FC's own position and velocity
+    /// under the authorization its satellite use supports.
+    fn avionics(
+        self,
+        stamp: MeasurementStamp,
+        navigation: Option<NavigationGroups>,
+    ) -> AvionicsSample {
         let [pitch_rad, roll_rad, yaw_rad] = self
             .angles_tenths
             .map(|angle| (f32::from(angle) / 10.0).to_radians());
-        AvionicsSample {
-            attitude: Some(AvionicsAttitudeSample::ReportedEuler {
-                pitch_rad,
-                roll_rad,
-                yaw_rad,
-                stamp,
-            }),
-            kinematics: None,
-            baro: None,
-            geodetic: None,
-            magnetic_variation: None,
-            estimator_status_stamp: None,
-            valid_flags: 0,
-            // No estimator status accompanies this fallback value.
-            quality: ESTIMATOR_QUALITY_UNUSABLE,
+        let attitude = Some(AvionicsAttitudeSample::ReportedEuler {
+            pitch_rad,
+            roll_rad,
+            yaw_rad,
+            stamp,
+        });
+        match navigation {
+            Some(groups) => AvionicsSample {
+                attitude,
+                kinematics: Some(groups.kinematics),
+                baro: None,
+                geodetic: Some(groups.geodetic),
+                magnetic_variation: None,
+                estimator_status_stamp: Some(stamp),
+                valid_flags: groups.valid_flags,
+                quality: groups.quality,
+            },
+            None => AvionicsSample {
+                attitude,
+                kinematics: None,
+                baro: None,
+                geodetic: None,
+                magnetic_variation: None,
+                estimator_status_stamp: None,
+                valid_flags: 0,
+                // No estimator status accompanies this fallback value.
+                quality: ESTIMATOR_QUALITY_UNUSABLE,
+            },
         }
     }
 }
@@ -78,6 +105,8 @@ impl AirframeReport {
 pub(super) struct AirframeSample {
     pub(super) avionics: AvionicsSample,
     pub(super) fc_state: FcStateSample,
+    /// Horizontal ground speed from the FC's fix, metres per second.
+    pub(super) speed: Option<f64>,
 }
 
 #[derive(Default)]
@@ -87,6 +116,7 @@ pub(super) struct AirframeObservations {
     binding_revision: u64,
     sequence: u32,
     published_sequence: u32,
+    navigation: Navigation,
 }
 
 impl AirframeObservations {
@@ -112,6 +142,7 @@ impl AirframeObservations {
         };
         self.sequence = self.sequence.wrapping_add(1);
         self.latest = Some((report, now));
+        self.navigation.observe_motors(report.flight.motors_running);
     }
 
     pub(super) fn binding_revision(&self) -> u64 {
@@ -139,6 +170,7 @@ impl AirframeObservations {
         if self.latest.take().is_some() {
             self.binding_revision = self.binding_revision.wrapping_add(1);
         }
+        self.navigation.reset();
     }
 
     pub(super) fn sample(
@@ -166,12 +198,19 @@ impl AirframeObservations {
             acquired_at_ns: received.as_nanos().min(u128::from(u64::MAX)) as u64,
             clock: MeasurementClock::HostMonotonic,
         };
+        let estimate = MeasurementStamp {
+            // The role identifies the report, not estimator authorization.
+            role: SourceRole::OperationalEstimate,
+            ..stamp
+        };
+        let navigation = report
+            .position
+            .as_ref()
+            .and_then(|fix| self.navigation.groups(fix, estimate, self.binding_revision));
+        let speed = navigation.as_ref().map(|groups| groups.speed_mps);
         Some(AirframeSample {
-            avionics: report.avionics(MeasurementStamp {
-                // The role identifies the report, not estimator authorization.
-                role: SourceRole::OperationalEstimate,
-                ..stamp
-            }),
+            avionics: report.avionics(estimate, navigation),
+            speed,
             fc_state: FcStateSample {
                 arm_state: 0,
                 last_command: None,
