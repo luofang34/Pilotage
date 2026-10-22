@@ -242,15 +242,18 @@ impl ManagedDji {
                 }
             }
             Ok(Some(Completion::Opened(Err(error)))) => {
-                self.blocked |= matches!(
-                    &error,
-                    DjiHostError::Adapter(pilotage_adapter_dji::DjiAdapterError::Usb(
-                        pilotage_dji_usb::UsbError::StartupUnknown
-                            | pilotage_dji_usb::UsbError::CleanupUnknown
-                            | pilotage_dji_usb::UsbError::WorkerEnded
-                            | pilotage_dji_usb::UsbError::Native { stage: 15 | 17, .. }
-                    ))
-                );
+                #[cfg(target_os = "macos")]
+                {
+                    self.blocked |= matches!(
+                        &error,
+                        DjiHostError::Adapter(pilotage_adapter_dji::DjiAdapterError::Usb(
+                            pilotage_dji_usb::UsbError::StartupUnknown
+                                | pilotage_dji_usb::UsbError::CleanupUnknown
+                                | pilotage_dji_usb::UsbError::WorkerEnded
+                                | pilotage_dji_usb::UsbError::Native { stage: 15 | 17, .. }
+                        ))
+                    );
+                }
                 self.identity = None;
                 tracing::warn!(%error, "DJI open failed; awaiting an eligible state change");
             }
