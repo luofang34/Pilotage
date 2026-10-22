@@ -385,9 +385,14 @@ impl MissionEngine {
                     MissionState::Arming
                 }
             },
-            CoreEngineState::Running { phase_id, .. } if phase_id == document::CLIMB_PHASE_ID => {
-                MissionState::Climb
-            }
+            CoreEngineState::Running {
+                phase_id, stage, ..
+            } if phase_id == document::CLIMB_PHASE_ID => match stage {
+                PhaseStage::WaitingForEntry {} => MissionState::AwaitSolution,
+                PhaseStage::WaitingForReceipt { .. } | PhaseStage::WaitingForCompletion {} => {
+                    MissionState::Climb
+                }
+            },
             CoreEngineState::Running { phase_id, .. }
                 if phase_id == document::FOLLOW_PLAN_PHASE_ID =>
             {

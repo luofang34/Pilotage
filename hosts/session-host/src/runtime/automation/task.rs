@@ -11,7 +11,9 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use navigate_contract::MonotonicNanos;
-use pilotage_mission::{MissionAction, MissionEngine, MissionEvent, NavGuidance, OwnshipSource};
+use pilotage_mission::{
+    ExecutionTarget, MissionAction, MissionEngine, MissionEvent, NavGuidance, OwnshipSource,
+};
 use pilotage_protocol::{
     ClientHello, ControlActionCommand, ControlIntent, ControlPayload, Generation, PrincipalId,
     ReferenceFrame, SESSION_PROTOCOL_VERSION, ScopeId, ScopedControlFrame, SequenceNum, SessionId,
@@ -79,10 +81,17 @@ pub(super) struct MissionTask {
     planar_pose_is_truth: bool,
     /// Which telemetry lane becomes the mission's ownship.
     ownship_source: OwnshipSource,
+    /// The plan targets a real vehicle its pilot launches.
+    real_vehicle: bool,
     /// A human holds the motion scope; the mission waits for it back.
     held: bool,
     /// Frames still owed as neutral input under a new generation.
     neutral_frames: u8,
+    /// A real vehicle's mission waits for the pilot's launch before it
+    /// asks for the motion lease.
+    awaiting_launch: bool,
+    /// The lease request the next tick sends.
+    lease_due: bool,
 }
 
 impl MissionTask {
@@ -93,8 +102,11 @@ impl MissionTask {
         status: watch::Sender<AutomationStatus>,
         planar_pose_is_truth: bool,
     ) -> Self {
-        let ownship_source = plan.config().ownship_source;
+        let config = plan.config();
+        let ownship_source = config.ownship_source;
+        let real_vehicle = config.execution_target == ExecutionTarget::RealVehicle;
         Self {
+            real_vehicle,
             engine,
             start,
             plan: Some(plan),
@@ -112,6 +124,8 @@ impl MissionTask {
             ownship_source,
             held: false,
             neutral_frames: 0,
+            awaiting_launch: false,
+            lease_due: false,
         }
     }
 
@@ -124,6 +138,7 @@ impl MissionTask {
         status: watch::Sender<AutomationStatus>,
     ) -> Self {
         Self {
+            real_vehicle: false,
             engine,
             start,
             plan: None,
@@ -141,6 +156,8 @@ impl MissionTask {
             ownship_source: OwnshipSource::SimulationTruth,
             held: false,
             neutral_frames: 0,
+            awaiting_launch: false,
+            lease_due: false,
         }
     }
 
@@ -221,7 +238,16 @@ impl MissionTask {
     /// stay fresh, and sends nothing: the human holds the scope
     /// (ADR-0025, ADR-0051).
     async fn on_tick(&mut self) -> bool {
-        if self.fenced || (self.generation.is_none() && !self.held) {
+        if self.fenced {
+            return true;
+        }
+        if self.lease_due {
+            self.lease_due = false;
+            if !self.request_lease().await {
+                return false;
+            }
+        }
+        if self.generation.is_none() && !self.held {
             return true;
         }
         let nanos = self.elapsed_nanos();
