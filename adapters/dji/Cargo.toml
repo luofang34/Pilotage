@@ -12,6 +12,7 @@ thiserror.workspace = true
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 pilotage-adapter-api.workspace = true
+pilotage-geo.workspace = true
 pilotage-protocol.workspace = true
 pilotage-timing.workspace = true
 rustix = { workspace = true, features = ["termios"] }

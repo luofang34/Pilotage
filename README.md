@@ -151,6 +151,10 @@ does not select another device or transport.
 
 This adapter exposes a DJI Mini 3 experimental object with gimbal control.
 Continuous flight and positioning control are not implemented.
+The adapter publishes the aircraft's own position fix and ground velocity
+when the flight controller reports a satellite solution. The height is
+measured from the point where the motors last started. The attitude report
+has no verified north reference.
 Keep the propellers removed for bench tests.
 The default `observed` control mode requires fresh gimbal observations before
 it sends a pitch command. Pitch targets are limited to -90 through 0 degrees.

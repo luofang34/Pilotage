@@ -11,6 +11,7 @@ mod mapping;
 mod mobile;
 mod model;
 mod observed;
+mod position;
 mod profile;
 mod recovery;
 mod virtual_stick;
