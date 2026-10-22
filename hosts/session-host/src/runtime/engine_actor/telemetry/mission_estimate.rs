@@ -5,6 +5,7 @@ use navigate_contract::MonotonicNanos;
 use pilotage_adapter_api::{
     AvionicsAttitudeSample, AvionicsKinematicsSample, AvionicsSample, GeodeticFixSample,
     MeasurementClock, MeasurementStamp, SourceIncarnation, SourceIntegrity, SourceRole,
+    TelemetrySample,
 };
 use pilotage_geo::{
     BaroSettingId, DatumRealizationId, GeodeticPosition, GeoidModelId, HorizontalDatum,
@@ -18,6 +19,23 @@ use super::one_vehicle_sample;
 use crate::runtime::automation::ownship::estimate_from_wire;
 
 const HEIGHT_M: f64 = 12.0;
+
+/// One telemetry sample carrying only `avionics`.
+fn one_vehicle_sample(avionics: AvionicsSample) -> TelemetrySample {
+    TelemetrySample {
+        flight_procedure: None,
+        payload: None,
+        vehicle: VehicleId::new(9),
+        tick: SimTick::new(42),
+        pose: None,
+        speed: None,
+        avionics: Some(avionics),
+        sim_truth: None,
+        fc_state: None,
+        gimbal: None,
+        battery: None,
+    }
+}
 
 /// A canonical attitude at `yaw` and a local-relative fix under one
 /// estimate stamp, as the DJI airframe publishes them.
