@@ -110,13 +110,15 @@ fn flight_scope(actions: bool, continuous: bool) -> ScopeDescriptor {
         authority_group: None,
         scope: ScopeId::new(super::FLIGHT_SCOPE),
         axes: Vec::new(),
+        // The aircraft's documented virtual-stick control range: the
+        // adapter adds no limit of its own.
         intents: if continuous {
             vec![IntentCapability {
                 family: IntentFamily::Velocity,
                 frames: vec![pilotage_protocol::ReferenceFrame::BodyFrd],
-                max_linear: 1.0,
-                max_vertical: 0.5,
-                max_angular: core::f32::consts::FRAC_PI_6,
+                max_linear: crate::flight::HORIZONTAL_LIMIT_MPS,
+                max_vertical: crate::flight::VERTICAL_LIMIT_MPS,
+                max_angular: crate::flight::YAW_RATE_LIMIT_RPS,
                 max_yaw_rate: 0.0,
             }]
         } else {

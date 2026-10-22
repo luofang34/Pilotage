@@ -6,7 +6,7 @@ use pilotage_adapter_api::{
 use pilotage_protocol::{ControlIntent, ReferenceFrame, ScopedControlFrame, VelocityIntent};
 
 use crate::adapter::{DjiAdapter, DjiControlMode, control::write_deadline, input::Framing};
-use crate::flight::{VirtualStickBinding, VirtualStickVelocity};
+use crate::flight::{HORIZONTAL_LIMIT_MPS, VirtualStickBinding, VirtualStickVelocity};
 
 impl DjiAdapter {
     pub(in crate::adapter) fn motion_enabled(&self) -> bool {
@@ -146,16 +146,16 @@ impl DjiAdapter {
 }
 
 fn velocity_with_radial_limit(value: VelocityIntent) -> Result<VirtualStickVelocity, RejectReason> {
-    if value.vx.abs() > 1.0 || value.vy.abs() > 1.0 {
+    if value.vx.abs() > HORIZONTAL_LIMIT_MPS || value.vy.abs() > HORIZONTAL_LIMIT_MPS {
         return Err(RejectReason::Other(
             "DJI horizontal axis exceeds its advertised limit".into(),
         ));
     }
     // The shared velocity contract bounds each axis separately. Preserve the
-    // direction of a diagonal demand within the device's total-speed limit.
+    // direction of a diagonal demand within the aircraft's total-speed range.
     let length = value.vx.hypot(value.vy);
-    let scale = if length > 1.0 {
-        (1.0 - f32::EPSILON) / length
+    let scale = if length > HORIZONTAL_LIMIT_MPS {
+        HORIZONTAL_LIMIT_MPS * (1.0 - f32::EPSILON) / length
     } else {
         1.0
     };
