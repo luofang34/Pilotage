@@ -1,5 +1,3 @@
-#![allow(clippy::expect_used, clippy::panic)]
-
 use pilotage_protocol::{Generation, PrincipalId, wire};
 use pilotage_session::DomainEnvelope;
 use tokio::sync::{mpsc, watch};

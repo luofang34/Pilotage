@@ -18,10 +18,6 @@ crates/pilotage-flight-quality/src/signal.rs	jerk_square_integral += jerk * jerk
 crates/pilotage-flight-quality/src/signal.rs	square_integral += integral_square_linear(pair[0].value, pair[1].value, dt);
 crates/pilotage-input/src/button_tracker.rs	ButtonEdge::Pressed => presses += 1,
 crates/pilotage-input/src/button_tracker.rs	ButtonEdge::Released => releases += 1,
-crates/pilotage-mission/src/survey.rs	length += geometry::distance_m(line.end, next.start);
-crates/pilotage-mission/src/survey.rs	length += line.length_m();
-crates/pilotage-mission/src/survey/geometry.rs	offset += spacing_m;
-crates/pilotage-mission/src/survey/geometry.rs	twice += a[0] * b[1] - b[0] * a[1];
 crates/pilotage-navdata-tiles/src/mvt.rs	area += i64::from(points[index].0) * i64::from(points[next].1)
 crates/pilotage-navdata-tiles/src/tile.rs	area += i64::from(unique[index].0) * i64::from(unique[next].1)
 crates/pilotage-protocol/src/h264.rs	self.at += 1;

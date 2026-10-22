@@ -29,11 +29,14 @@ fn dot(a: Planar, b: Planar) -> f64 {
 /// The polygon's area by the shoelace formula, square meters, always
 /// non-negative. Vertices are in order without a repeated closing vertex.
 pub(super) fn area_m2(vertices: &[Planar]) -> f64 {
-    let mut twice = 0.0;
-    for (index, a) in vertices.iter().enumerate() {
-        let b = vertices[(index + 1) % vertices.len()];
-        twice += a[0] * b[1] - b[0] * a[1];
-    }
+    let twice: f64 = vertices
+        .iter()
+        .enumerate()
+        .map(|(index, a)| {
+            let b = vertices[(index + 1) % vertices.len()];
+            a[0] * b[1] - b[0] * a[1]
+        })
+        .sum();
     twice.abs() / 2.0
 }
 
@@ -76,16 +79,14 @@ pub(super) fn sweep_offsets(
     }
     let span = width_m - footprint_m;
     let steps = (span / spacing_m).ceil();
-    if !steps.is_finite() || steps as usize + 1 > max_lines {
+    if !steps.is_finite() || steps >= max_lines as f64 {
         return None;
     }
     let last = width_m - half;
-    let mut offsets = Vec::new();
-    let mut offset = half;
-    while offset < last {
-        offsets.push(offset);
-        offset += spacing_m;
-    }
+    let mut offsets: Vec<_> = (0..steps as usize)
+        .map(|index| half + index as f64 * spacing_m)
+        .filter(|offset| *offset < last)
+        .collect();
     offsets.push(last);
     Some(offsets)
 }

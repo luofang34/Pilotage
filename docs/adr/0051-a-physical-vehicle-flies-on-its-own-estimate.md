@@ -61,9 +61,10 @@ The cruise height stays a height above the anchor.
 
 ### Heading
 
-The host takes yaw from a canonical attitude when the vehicle stamps one.
-When the vehicle states only a reported Euler attitude, the host takes that
-heading. An absent heading stays absent, and the engine commands no
+The host requires an authorized canonical attitude with the same
+acquisition identity as the fix. A reported Euler attitude has no verified
+north reference and cannot supply mission heading. Without that attitude,
+the host refuses the estimate, and the engine commands no
 velocity without one.
 
 ### Limits

@@ -388,12 +388,14 @@ fn waypoints(
 }
 
 fn path_length_m(lines: &[Line]) -> f64 {
-    let mut length = 0.0;
-    for (index, line) in lines.iter().enumerate() {
-        length += line.length_m();
-        if let Some(next) = lines.get(index + 1) {
-            length += geometry::distance_m(line.end, next.start);
-        }
-    }
-    length
+    lines
+        .iter()
+        .enumerate()
+        .map(|(index, line)| {
+            line.length_m()
+                + lines
+                    .get(index + 1)
+                    .map_or(0.0, |next| geometry::distance_m(line.end, next.start))
+        })
+        .sum()
 }

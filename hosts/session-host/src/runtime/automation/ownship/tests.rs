@@ -1,5 +1,3 @@
-#![allow(clippy::expect_used, clippy::panic)]
-
 use super::*;
 
 fn now() -> MonotonicNanos {
@@ -86,7 +84,7 @@ fn an_attitude_group_supplies_the_yaw() {
 
 /// A vehicle's own fix on the wire: WGS-84, local-relative height with
 /// a declared origin, authorized position, degraded quality, and a
-/// reported Euler heading, as the DJI adapter publishes it.
+/// canonical attitude with the same acquisition identity.
 fn vehicle_estimate(role: wire::SourceRole) -> wire::TelemetrySample {
     let stamp = wire::MeasurementStamp {
         role: role as i32,
@@ -100,7 +98,10 @@ fn vehicle_estimate(role: wire::SourceRole) -> wire::TelemetrySample {
             vel_n_mps: 1.2,
             vel_e_mps: -0.5,
             vel_d_mps: 0.3,
-            valid_flags: 0b1100,
+            valid_flags: 0b1101,
+            quat_w: (0.75_f32).cos(),
+            quat_z: (0.75_f32).sin(),
+            attitude_stamp: Some(stamp.clone()),
             quality: 1,
             kinematics_stamp: Some(stamp.clone()),
             estimator_status_stamp: Some(stamp.clone()),
@@ -115,12 +116,6 @@ fn vehicle_estimate(role: wire::SourceRole) -> wire::TelemetrySample {
                 ..Default::default()
             }),
             geodetic_stamp: Some(stamp),
-            reported_euler: Some(wire::ReportedEulerAttitude {
-                pitch_rad: 0.1,
-                roll_rad: 0.0,
-                yaw_rad: 1.5,
-                stamp: Some(wire::MeasurementStamp::default()),
-            }),
             ..Default::default()
         }),
         ..Default::default()
@@ -138,7 +133,7 @@ fn recording_ned(lat_rad: f64, lon_rad: f64, altitude: OwnshipAltitude) -> [f64;
 }
 
 #[test]
-fn the_vehicle_fix_converts_through_the_anchor_with_the_reported_heading() {
+fn the_vehicle_fix_converts_through_the_anchor_with_an_authorized_heading() {
     let sample = vehicle_estimate(wire::SourceRole::OperationalEstimate);
     let ownship = estimate_from_wire(&sample, now(), recording_ned).expect("admitted");
     assert_eq!(ownship.role, TruthRole::OperationalEstimate);
@@ -151,7 +146,7 @@ fn the_vehicle_fix_converts_through_the_anchor_with_the_reported_heading() {
     assert!((ownship.ned_velocity[0] - 1.2).abs() < 1e-6);
     assert!((ownship.ned_velocity[1] + 0.5).abs() < 1e-6);
     assert!((ownship.ned_velocity[2] - 0.3).abs() < 1e-6);
-    assert!((ownship.yaw_rad.expect("reported heading") - 1.5).abs() < 1e-6);
+    assert!((ownship.yaw_rad.expect("canonical heading") - 1.5).abs() < 1e-6);
     assert_eq!(ownship.sequence, 11);
     assert_eq!(ownship.acquired_at, now());
 }
@@ -222,29 +217,28 @@ fn an_unauthorized_unusable_or_wrongly_labeled_estimate_is_refused() {
 }
 
 #[test]
-fn a_canonical_attitude_wins_over_the_reported_heading_and_absence_stays_absent() {
-    let mut sample = vehicle_estimate(wire::SourceRole::OperationalEstimate);
-    {
-        let avionics = sample.avionics.as_mut().expect("fixture carries avionics");
-        avionics.quat_w = 1.0;
-        avionics.attitude_stamp = Some(wire::MeasurementStamp::default());
+fn geographic_guidance_refuses_unknown_stale_or_unauthorized_attitude() {
+    type Mutation = fn(&mut wire::AvionicsState);
+    let cases: [Mutation; 5] = [
+        |a| {
+            a.attitude_stamp = None;
+            a.reported_euler = Some(wire::ReportedEulerAttitude {
+                yaw_rad: 1.5,
+                stamp: a.geodetic_stamp.clone(),
+                ..Default::default()
+            });
+        },
+        |a| a.valid_flags &= !1,
+        |a| a.attitude_stamp.as_mut().expect("attitude").sequence = 10,
+        |a| a.quat_w = f32::NAN,
+        |a| {
+            a.quat_w = 0.0;
+            a.quat_z = 0.0;
+        },
+    ];
+    for mutate in cases {
+        let mut sample = vehicle_estimate(wire::SourceRole::OperationalEstimate);
+        mutate(sample.avionics.as_mut().expect("avionics"));
+        assert!(estimate_from_wire(&sample, now(), recording_ned).is_none());
     }
-    let ownship = estimate_from_wire(&sample, now(), recording_ned).expect("admitted");
-    assert_eq!(
-        ownship.yaw_rad,
-        Some(0.0),
-        "identity quaternion is a zero yaw"
-    );
-
-    let mut sample = vehicle_estimate(wire::SourceRole::OperationalEstimate);
-    sample
-        .avionics
-        .as_mut()
-        .expect("fixture carries avionics")
-        .reported_euler = None;
-    let ownship = estimate_from_wire(&sample, now(), recording_ned).expect("admitted");
-    assert_eq!(
-        ownship.yaw_rad, None,
-        "no heading is no heading, never due north"
-    );
 }

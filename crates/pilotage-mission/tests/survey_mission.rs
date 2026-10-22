@@ -1,4 +1,4 @@
-#![allow(clippy::expect_used, clippy::panic)]
+#![cfg(test)]
 
 //! A survey mission flown closed-loop: the engine built from an area
 //! request arms, climbs, flies every line end in order, and completes.

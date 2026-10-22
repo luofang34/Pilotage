@@ -110,7 +110,7 @@ fn flight_scope(actions: bool, continuous: bool) -> ScopeDescriptor {
         authority_group: None,
         scope: ScopeId::new(super::FLIGHT_SCOPE),
         axes: Vec::new(),
-        // The aircraft's documented virtual-stick control range: the
+        // The DJI virtual-stick protocol control range: the
         // adapter adds no limit of its own.
         intents: if continuous {
             vec![IntentCapability {

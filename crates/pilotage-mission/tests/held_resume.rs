@@ -1,4 +1,4 @@
-#![allow(clippy::expect_used, clippy::panic)]
+#![cfg(test)]
 
 //! Hold and resume: while a human holds the motion scope the engine
 //! commands nothing and its sequencing clock pauses; on resume it flies

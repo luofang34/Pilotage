@@ -145,8 +145,8 @@ fn from_pose(sample: &wire::TelemetrySample, acquired_at: MonotonicNanos) -> Opt
 /// supplies the velocity. The sample is admitted only when the vehicle's
 /// estimator status authorizes its position and grades it usable, and
 /// when both the fix and the kinematics ride the estimate role. Yaw comes
-/// from a canonical attitude when one is stamped, else from the reported
-/// Euler heading the vehicle states; absent is absent.
+/// from an authorized canonical attitude with the same acquisition stamp.
+/// A reported Euler value has no verified navigation reference.
 pub(super) fn estimate_from_wire(
     sample: &wire::TelemetrySample,
     received_at: MonotonicNanos,
@@ -174,18 +174,7 @@ pub(super) fn estimate_from_wire(
         return None;
     }
     let altitude = estimate_altitude(fix)?;
-    let yaw_rad = avionics
-        .attitude_stamp
-        .as_ref()
-        .map(|_| {
-            quat_yaw(
-                avionics.quat_w,
-                avionics.quat_x,
-                avionics.quat_y,
-                avionics.quat_z,
-            )
-        })
-        .or_else(|| reported_yaw(avionics.reported_euler.as_ref()?));
+    let yaw_rad = authorized_yaw(avionics, fix_stamp)?;
     Some(OwnshipSample {
         ned: ned_of(
             fix.latitude_deg.to_radians(),
@@ -197,7 +186,7 @@ pub(super) fn estimate_from_wire(
             f64::from(avionics.vel_e_mps),
             f64::from(avionics.vel_d_mps),
         ],
-        yaw_rad,
+        yaw_rad: Some(yaw_rad),
         role: TruthRole::OperationalEstimate,
         acquired_at,
         sequence: fix_stamp.sequence,
@@ -217,14 +206,23 @@ fn estimate_altitude(fix: &wire::GeodeticFix) -> Option<OwnshipAltitude> {
     }
 }
 
-/// The heading a reported Euler attitude states, when it is stamped and
-/// finite.
-fn reported_yaw(attitude: &wire::ReportedEulerAttitude) -> Option<f64> {
-    attitude.stamp.as_ref()?;
-    attitude
-        .yaw_rad
-        .is_finite()
-        .then(|| f64::from(attitude.yaw_rad))
+// Geographic guidance needs a north-referenced body attitude, not a display value.
+fn authorized_yaw(avionics: &wire::AvionicsState, fix: &wire::MeasurementStamp) -> Option<f64> {
+    let attitude = avionics.attitude_stamp.as_ref()?;
+    if avionics.valid_flags & 1 == 0 || attitude != fix {
+        return None;
+    }
+    let q = [
+        avionics.quat_w,
+        avionics.quat_x,
+        avionics.quat_y,
+        avionics.quat_z,
+    ];
+    let norm = q.iter().map(|value| value * value).sum::<f32>();
+    if q.iter().any(|value| !value.is_finite()) || (norm - 1.0).abs() > 1e-3 {
+        return None;
+    }
+    Some(quat_yaw(q[0], q[1], q[2], q[3]))
 }
 
 /// Maps a wire source role onto the mission vocabulary; roles the mission

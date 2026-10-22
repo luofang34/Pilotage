@@ -66,7 +66,7 @@ impl VirtualStickModePacket {
 /// A bounded BODY-FRD velocity value for offline encoding.
 ///
 /// This type does not enable a mode or advertise a flight capability. It
-/// accepts the aircraft's documented virtual-stick control range and adds
+/// accepts the DJI virtual-stick protocol control range and adds
 /// no limit of its own; the aircraft applies its flight envelope, and a
 /// mission or an input profile scales demand to the advertised range.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -74,11 +74,11 @@ pub struct VirtualStickVelocity {
     values: [f32; 4],
 }
 
-/// The aircraft's documented virtual-stick horizontal control range, m/s.
+/// The DJI virtual-stick protocol horizontal control range, m/s.
 pub const HORIZONTAL_LIMIT_MPS: f32 = 15.0;
-/// The aircraft's documented virtual-stick vertical control range, m/s.
+/// The DJI virtual-stick protocol vertical control range, m/s.
 pub const VERTICAL_LIMIT_MPS: f32 = 4.0;
-/// The aircraft's documented virtual-stick yaw-rate control range,
+/// The DJI virtual-stick protocol yaw-rate control range,
 /// radians per second (100 degrees per second).
 pub const YAW_RATE_LIMIT_RPS: f32 = 1.745_329_3;
 
@@ -95,7 +95,7 @@ impl VirtualStickVelocity {
     pub const ZERO: Self = Self { values: [0.0; 4] };
 
     /// Validate forward/right/down speed in m/s and clockwise yaw rate in rad/s
-    /// against the aircraft's documented virtual-stick control range:
+    /// against the DJI virtual-stick protocol control range:
     /// [`HORIZONTAL_LIMIT_MPS`] in total, [`VERTICAL_LIMIT_MPS`], and
     /// [`YAW_RATE_LIMIT_RPS`].
     ///

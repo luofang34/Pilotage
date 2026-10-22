@@ -1,5 +1,3 @@
-#![allow(clippy::expect_used, clippy::panic)]
-
 use core::f64::consts::{FRAC_PI_2, PI};
 
 use navigate_contract::{AltitudeConstraint, GeodeticPosition, TurnType};

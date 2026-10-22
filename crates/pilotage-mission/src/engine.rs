@@ -254,9 +254,7 @@ impl MissionEngine {
             self.counters.rejected_role = self.counters.rejected_role.wrapping_add(1);
             return;
         }
-        if let Some(yaw) = sample.yaw_rad {
-            self.last_yaw_rad = Some(yaw);
-        }
+        self.last_yaw_rad = sample.yaw_rad;
         if admitted == TruthRole::OperationalEstimate {
             self.estimate.accept(sample);
             return;

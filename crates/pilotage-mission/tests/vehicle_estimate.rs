@@ -1,4 +1,4 @@
-#![allow(clippy::expect_used, clippy::panic)]
+#![cfg(test)]
 
 //! The vehicle-estimate ownship source: the engine flies a physical
 //! vehicle on its own exported estimate, declared as such, without
@@ -259,4 +259,28 @@ fn the_truth_source_keeps_refusing_the_estimate_role() {
     engine.on_ownship(&estimate.sample(now, TruthRole::OperationalEstimate), now);
     assert_eq!(engine.counters().rejected_role, 1);
     assert_eq!(engine.tick(now).state, MissionState::AwaitSolution);
+}
+
+#[test]
+fn a_missing_heading_does_not_reuse_the_previous_body_transform() {
+    let mut engine = build_engine(OwnshipSource::vehicle_estimate());
+    let mut estimate = Estimate::new();
+    let mut now = MonotonicNanos::from_nanos(1_000_000_000);
+    let mut events = Vec::new();
+    let mut moving = false;
+    for _ in 0..2_000 {
+        let output = step(&mut engine, &mut estimate, &mut now, &mut events);
+        if output.state == MissionState::Enroute && output.intent.is_some() {
+            moving = true;
+            break;
+        }
+    }
+    assert!(moving);
+    now = MonotonicNanos::from_nanos(now.as_nanos() + STEP_NANOS);
+    let mut sample = estimate.sample(now, TruthRole::OperationalEstimate);
+    sample.yaw_rad = None;
+    engine.on_ownship(&sample, now);
+    let output = engine.tick(now);
+    assert!(output.intent.is_none());
+    assert!(engine.counters().missing_yaw > 0);
 }
