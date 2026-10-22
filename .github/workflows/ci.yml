@@ -166,7 +166,7 @@ jobs:
       # JSBSim's C++ library, an external checkout at the release the
       # build script pins; the cache key follows the pin.
       - name: Cache the JSBSim build
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/jsbsim
           key: jsbsim-${{ runner.os }}-${{ hashFiles('scripts/build-jsbsim.sh') }}
