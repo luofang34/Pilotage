@@ -65,12 +65,22 @@ impl VirtualStickModePacket {
 
 /// A bounded BODY-FRD velocity value for offline encoding.
 ///
-/// This type does not enable a mode or advertise a flight capability. Its
-/// limits are an experimental host policy, not the aircraft's flight envelope.
+/// This type does not enable a mode or advertise a flight capability. It
+/// accepts the aircraft's documented virtual-stick control range and adds
+/// no limit of its own; the aircraft applies its flight envelope, and a
+/// mission or an input profile scales demand to the advertised range.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct VirtualStickVelocity {
     values: [f32; 4],
 }
+
+/// The aircraft's documented virtual-stick horizontal control range, m/s.
+pub const HORIZONTAL_LIMIT_MPS: f32 = 15.0;
+/// The aircraft's documented virtual-stick vertical control range, m/s.
+pub const VERTICAL_LIMIT_MPS: f32 = 4.0;
+/// The aircraft's documented virtual-stick yaw-rate control range,
+/// radians per second (100 degrees per second).
+pub const YAW_RATE_LIMIT_RPS: f32 = 1.745_329_3;
 
 /// Invalid velocity input for the experimental encoder.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
@@ -84,13 +94,13 @@ impl VirtualStickVelocity {
     /// Zero velocity on all four axes.
     pub const ZERO: Self = Self { values: [0.0; 4] };
 
-    /// Validate forward/right/down speed in m/s and clockwise yaw rate in rad/s.
-    ///
-    /// Horizontal speed is limited to 1 m/s in total, vertical speed to
-    /// 0.5 m/s, and yaw rate to 30 degrees/s.
+    /// Validate forward/right/down speed in m/s and clockwise yaw rate in rad/s
+    /// against the aircraft's documented virtual-stick control range:
+    /// [`HORIZONTAL_LIMIT_MPS`] in total, [`VERTICAL_LIMIT_MPS`], and
+    /// [`YAW_RATE_LIMIT_RPS`].
     ///
     /// # Errors
-    /// Returns an error for a non-finite value or a value outside these limits.
+    /// Returns an error for a non-finite value or a value outside that range.
     pub fn new(
         forward: f32,
         right: f32,
@@ -99,9 +109,9 @@ impl VirtualStickVelocity {
     ) -> Result<Self, VirtualStickVelocityError> {
         let values = [forward, right, down, yaw_rate];
         if values.iter().any(|value| !value.is_finite())
-            || forward.hypot(right) > 1.0
-            || down.abs() > 0.5
-            || yaw_rate.abs() > core::f32::consts::FRAC_PI_6
+            || forward.hypot(right) > HORIZONTAL_LIMIT_MPS
+            || down.abs() > VERTICAL_LIMIT_MPS
+            || yaw_rate.abs() > YAW_RATE_LIMIT_RPS
         {
             return Err(VirtualStickVelocityError::OutsideEnvelope);
         }

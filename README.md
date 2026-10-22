@@ -179,8 +179,12 @@ Set `PILOTAGE_DJI_VIRTUAL_STICK=1` to expose experimental BODY-FRD velocity
 control on the upper USB interface. This setting is separate from Takeoff
 and Land. A new control lease must supply neutral input. Mode entry requires
 fresh airborne GPS-attitude reports and independent mode confirmation.
-Fresh input retains the stream at up to 20 writes per second. The limits are
-1 m/s horizontal speed, 0.5 m/s vertical speed, and 30 degrees/s yaw rate.
+Fresh input retains the stream at up to 20 writes per second. The adapter
+advertises the aircraft's documented virtual-stick control range: 15 m/s
+horizontal speed, 4 m/s vertical speed, and 100 degrees/s yaw rate. The
+adapter adds no speed limit of its own. The aircraft applies its flight
+envelope, and a mission or an input profile scales demand to the advertised
+range.
 Input loss requests one zero-velocity write and mode release. Native flight
 modes and remote mode exit stop the stream without automatic reacquisition.
 A new lease requires confirmed release. Release virtual-stick control before

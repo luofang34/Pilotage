@@ -17,7 +17,8 @@ pub use stream::{
     VirtualStickWrite,
 };
 pub use virtual_stick::{
-    VirtualStickMode, VirtualStickModePacket, VirtualStickVelocity, VirtualStickVelocityError,
+    HORIZONTAL_LIMIT_MPS, VERTICAL_LIMIT_MPS, VirtualStickMode, VirtualStickModePacket,
+    VirtualStickVelocity, VirtualStickVelocityError, YAW_RATE_LIMIT_RPS,
 };
 
 #[cfg(test)]
