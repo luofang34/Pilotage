@@ -233,6 +233,46 @@ fn a_survey_is_flown_line_by_line_on_the_vehicle_estimate() {
     );
 }
 
+/// The first action a fresh engine asks for, once its ownship is valid.
+fn first_action(engine: &mut MissionEngine, role: TruthRole) -> Option<ControlAction> {
+    let mut truth = Truth::new();
+    let mut now = MonotonicNanos::from_nanos(1_000_000_000);
+    for _ in 0..40 {
+        now = MonotonicNanos::from_nanos(now.as_nanos() + STEP_NANOS);
+        truth.sequence = truth.sequence.wrapping_add(1);
+        engine.on_ownship(&truth.sample(now, role), now);
+        let output = engine.tick(now);
+        if let Some(action) = output.action {
+            return Some(action.action);
+        }
+        if output.intent.is_some() {
+            return None;
+        }
+    }
+    None
+}
+
+#[test]
+fn a_real_vehicle_starts_from_the_hover_and_a_simulator_arms_first() {
+    let (mut real, _) =
+        MissionEngine::from_survey(&request(), config(OwnshipSource::vehicle_estimate()))
+            .expect("survey builds");
+    assert!(
+        first_action(&mut real, TruthRole::OperationalEstimate).is_none(),
+        "a pilot-launched vehicle is never asked to arm"
+    );
+    assert_eq!(real.mission_document().phases.len(), 2);
+    let mut simulated = config(OwnshipSource::SimulationTruth);
+    simulated.execution_target = ExecutionTarget::Simulator;
+    let (mut simulator, _) =
+        MissionEngine::from_survey(&request(), simulated).expect("survey builds");
+    assert!(matches!(
+        first_action(&mut simulator, TruthRole::SimulationTruth),
+        Some(ControlAction::Arm)
+    ));
+    assert_eq!(simulator.mission_document().phases.len(), 3);
+}
+
 #[test]
 fn a_survey_that_does_not_plan_refuses_the_engine() {
     let mut request = request();

@@ -62,6 +62,8 @@ pub struct AutomationStatus {
     /// A human holds the motion scope: the mission stopped framing and
     /// waits for a transfer back (ADR-0051).
     pub held: bool,
+    /// A real vehicle's mission is waiting for its pilot to launch it.
+    pub awaiting_launch: bool,
     /// Transfers back that resumed the mission.
     pub resumes: u32,
     /// Offers this principal made to humans who requested the scope.

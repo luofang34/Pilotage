@@ -2,9 +2,9 @@
 
 use navigate_contract::{AltitudeConstraint, FlightPlan, PlanRole, TurnType, Waypoint};
 use pilotage_mission_core::{
-    Comparison, Digest, ExecutionPolicy, FlightAction, FlightPlanReference, MissionAction,
-    MissionCapability, MissionCondition, MissionDocument, MissionPhase, NavigationCondition,
-    NavigationDataIdentity,
+    Comparison, Digest, ExecutionPolicy, ExecutionTarget, FlightAction, FlightPlanReference,
+    MissionAction, MissionCapability, MissionCondition, MissionDocument, MissionPhase,
+    NavigationCondition, NavigationDataIdentity,
 };
 use sha2::{Digest as _, Sha256};
 
@@ -49,13 +49,24 @@ pub(super) fn build_document(
             retry_limit: OPERATIONAL_RETRY_LIMIT,
             receipt_timeout_ns: OPERATIONAL_RECEIPT_TIMEOUT_NS,
         },
-        vec![
-            arm_phase(),
-            climb_phase(config),
-            follow_plan_phase(plan_reference.clone()),
-        ],
+        phases(config, plan_reference.clone()),
     )?;
     Ok((document, plan_reference))
+}
+
+/// The phases the mission flies. A simulator's vehicle is armed by the
+/// mission; a real vehicle is armed and launched by its pilot, so its
+/// mission starts from the hover with the climb (ADR-0051).
+fn phases(config: &MissionConfig, plan: FlightPlanReference) -> Vec<MissionPhase> {
+    let mut phases = Vec::with_capacity(3);
+    if config.execution_target == ExecutionTarget::Simulator {
+        phases.push(arm_phase());
+    }
+    // The first phase waits for a valid solution; later phases follow on.
+    let first = phases.is_empty();
+    phases.push(climb_phase(config, first));
+    phases.push(follow_plan_phase(plan));
+    phases
 }
 
 fn arm_phase() -> MissionPhase {
@@ -77,8 +88,13 @@ fn arm_phase() -> MissionPhase {
     }
 }
 
-fn climb_phase(config: &MissionConfig) -> MissionPhase {
+fn climb_phase(config: &MissionConfig, first: bool) -> MissionPhase {
     let target_altitude_m = config.anchor.altitude_m + config.cruise_height_m;
+    let entry = if first {
+        MissionCondition::Navigation(NavigationCondition::GuidanceValid { expected: true })
+    } else {
+        MissionCondition::Always {}
+    };
     MissionPhase {
         id: CLIMB_PHASE_ID.to_owned(),
         required_capabilities: vec![
@@ -86,7 +102,7 @@ fn climb_phase(config: &MissionConfig) -> MissionPhase {
             MissionCapability::FlightControl,
             MissionCapability::NavigationState,
         ],
-        entry_conditions: vec![MissionCondition::Always {}],
+        entry_conditions: vec![entry],
         action: MissionAction::Flight(FlightAction::Climb { target_altitude_m }),
         cleanup_actions: Vec::new(),
         completion_conditions: vec![MissionCondition::Navigation(

@@ -157,7 +157,7 @@ impl MissionTask {
     /// mission resumes: the first frame under the new generation is
     /// neutral, which a vehicle that requires neutral input on a new
     /// lease admits.
-    fn take_generation(&mut self, generation: Generation) {
+    pub(super) fn take_generation(&mut self, generation: Generation) {
         self.generation = Some(generation);
         if self.held {
             self.held = false;
@@ -193,10 +193,7 @@ impl MissionTask {
         if let Some(mission) = self.mission.as_mut() {
             mission.hold(now);
         }
-        warn!(
-            reason,
-            "mission held; waiting for the motion scope to come back"
-        );
+        warn!(reason, "mission held");
         self.update(|status| {
             status.held = true;
             status.lease_generation = None;
