@@ -164,8 +164,10 @@ impl MissionTask {
             self.generation = Some(response.generation);
             self.update(|status| status.lease_generation = Some(response.generation.as_u64()));
         } else {
+            // A human already holds the scope: the mission waits for a
+            // handover instead of ending (ADR-0051).
             error!(reason = ?response.reason, "mission motion lease denied");
-            self.fence("the motion lease was denied");
+            self.hold("the motion lease was denied; waiting for a handover");
         }
     }
 

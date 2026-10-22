@@ -34,6 +34,7 @@ use crate::error::MissionBuildError;
 use crate::ownship::{OwnshipAltitude, OwnshipSample, TruthRole};
 
 mod estimate;
+mod hold;
 
 use crate::provenance::{MissionPlanRecord, SnapshotProvenance};
 use crate::survey::{SurveyPlanRecord, SurveyRequest, plan_survey};
@@ -77,6 +78,13 @@ pub struct MissionEngine {
     last_refusal: Option<Discriminant<GuidanceRefusal>>,
     /// The latest admitted sample under the vehicle-estimate source.
     estimate: VehicleEstimate,
+    /// When the current hold began, while a human holds the motion scope.
+    hold_started: Option<MonotonicNanos>,
+    /// Time spent held before the current hold; the sequencing clock
+    /// excludes it.
+    held_total_ns: u64,
+    /// Hold and resume transitions the next tick announces.
+    hold_events: Vec<MissionEvent>,
 }
 
 impl MissionEngine {
@@ -227,6 +235,9 @@ impl MissionEngine {
             last_yaw_rad: None,
             last_refusal: None,
             estimate: VehicleEstimate::default(),
+            hold_started: None,
+            held_total_ns: 0,
+            hold_events: Vec::new(),
         })
     }
 
@@ -358,6 +369,9 @@ impl MissionEngine {
     pub fn state(&self) -> MissionState {
         if self.core_failed {
             return MissionState::Failed;
+        }
+        if self.hold_started.is_some() {
+            return MissionState::Held;
         }
         let Some(core) = self.core.as_ref() else {
             return MissionState::AwaitSolution;

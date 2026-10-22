@@ -1,26 +1,34 @@
-//! Authority-event fencing for the mission principal: any transition
-//! that moves the motion scope away from this principal stops the
-//! mission cold, and re-leasing is a human decision, never automation's
-//! (ADR-0025).
+//! Authority-event handling for the mission principal (ADR-0010,
+//! ADR-0025, ADR-0051): a human who asks for the motion scope receives an
+//! offer; a transfer, revocation, or override away from this principal
+//! holds the mission; an offer back is accepted, and the mission resumes
+//! on the committed transfer. Only a closed connection fences the task
+//! for good.
 
-use pilotage_protocol::{Generation, wire};
-use tracing::warn;
+use pilotage_protocol::{
+    Generation, PrincipalId, ScopeId, ScopeTransferAccept, ScopeTransferOffer, wire,
+};
+use pilotage_session::DomainEnvelope;
+use tracing::{info, warn};
 
 use crate::runtime::HOST_VEHICLE;
 
 use super::{MISSION_SCOPE, MissionTask};
 
 impl MissionTask {
-    pub(super) fn on_authority(&mut self, bytes: &[u8]) {
+    /// Handles one authority event. Returns the reply the event asks
+    /// for: an offer to a human who requested the scope, or the
+    /// acceptance of an offer back to this principal.
+    pub(super) fn on_authority(&mut self, bytes: &[u8]) -> Option<DomainEnvelope> {
         let envelope = match pilotage_protocol::decode_envelope_length_delimited(bytes) {
             Ok((envelope, _rest)) => envelope,
             Err(error) => {
                 warn!(%error, "undecodable authority event");
-                return;
+                return None;
             }
         };
         let Some(wire::envelope::Payload::AuthorityEvent(event)) = envelope.payload else {
-            return;
+            return None;
         };
         use wire::authority_event::Event;
         match event.event {
@@ -28,27 +36,27 @@ impl MissionTask {
             Some(Event::ScopeLeaseRevoked(revoked)) => self.on_revoked_event(&revoked),
             Some(Event::EmergencyOverrideApplied(applied)) => self.on_override_event(&applied),
             Some(Event::ScopeTransferCommitted(committed)) => self.on_transfer_event(&committed),
+            Some(Event::ScopeTransferRequested(requested)) => {
+                return self.on_transfer_requested(&requested);
+            }
+            Some(Event::ScopeTransferOffered(offered)) => {
+                return self.on_transfer_offered(&offered);
+            }
             _ => {}
         }
+        None
     }
 
     fn on_granted_event(&mut self, granted: &wire::ScopeLeaseGranted) {
-        if !our_pair(granted.vehicle.as_ref(), granted.scope.as_ref()) {
-            return;
-        }
-        // Fencing is permanent for this task: a later grant naming this
-        // principal must not re-arm the generation or the status, or the
-        // status would claim a lease the tick loop refuses to use.
-        if self.fenced {
+        if !our_pair(granted.vehicle.as_ref(), granted.scope.as_ref()) || self.fenced {
             return;
         }
         if self.our_principal(granted.principal.as_ref()) {
             if let Some(generation) = granted.generation.as_ref() {
-                self.generation = Some(Generation::new(generation.value));
-                self.update(|status| status.lease_generation = Some(generation.value));
+                self.take_generation(Generation::new(generation.value));
             }
         } else if self.generation.is_some() {
-            self.fence("the motion scope was granted to another principal");
+            self.hold("the motion scope was granted to another principal");
         }
     }
 
@@ -57,7 +65,7 @@ impl MissionTask {
             return;
         }
         if self.our_principal(revoked.principal.as_ref()) && self.generation.is_some() {
-            self.fence("the motion lease was revoked");
+            self.hold("the motion lease was revoked");
         }
     }
 
@@ -66,17 +74,76 @@ impl MissionTask {
             return;
         }
         if !self.our_principal(applied.principal.as_ref()) && self.generation.is_some() {
-            self.fence("an emergency override preempted the motion scope");
+            self.hold("an emergency override preempted the motion scope");
         }
     }
 
+    /// A committed transfer either takes the scope away, which holds the
+    /// mission, or brings it back under a new generation, which resumes.
     fn on_transfer_event(&mut self, committed: &wire::ScopeTransferCommitted) {
-        if !our_pair(committed.vehicle.as_ref(), committed.scope.as_ref()) {
+        if !our_pair(committed.vehicle.as_ref(), committed.scope.as_ref()) || self.fenced {
             return;
         }
-        if !self.our_principal(committed.to_principal.as_ref()) && self.generation.is_some() {
-            self.fence("the motion scope transferred to another principal");
+        if self.our_principal(committed.to_principal.as_ref()) {
+            if let Some(generation) = committed.generation.as_ref() {
+                self.take_generation(Generation::new(generation.value));
+            }
+        } else if self.generation.is_some() {
+            self.hold("the motion scope transferred to another principal");
         }
+    }
+
+    /// A human asked for the scope this principal holds: offer it. Human
+    /// takeover wins (ADR-0025); the mission holds on the commit.
+    fn on_transfer_requested(
+        &mut self,
+        requested: &wire::ScopeTransferRequested,
+    ) -> Option<DomainEnvelope> {
+        if !our_pair(requested.vehicle.as_ref(), requested.scope.as_ref())
+            || self.fenced
+            || self.generation.is_none()
+        {
+            return None;
+        }
+        let requester = requested.from_principal.as_ref()?;
+        if self.our_principal(Some(requester)) {
+            return None;
+        }
+        info!(
+            requester = requester.value,
+            "a principal requested the motion scope; offering it"
+        );
+        self.update(|status| status.offers = status.offers.wrapping_add(1));
+        Some(DomainEnvelope::TransferOffer(ScopeTransferOffer {
+            vehicle: HOST_VEHICLE,
+            scope: ScopeId::new(MISSION_SCOPE),
+            to: PrincipalId::new(requester.value),
+        }))
+    }
+
+    /// A holder offered the scope back to this principal: accept. The
+    /// resume follows the committed transfer, never the offer.
+    fn on_transfer_offered(
+        &mut self,
+        offered: &wire::ScopeTransferOffered,
+    ) -> Option<DomainEnvelope> {
+        if !our_pair(offered.vehicle.as_ref(), offered.scope.as_ref())
+            || self.fenced
+            || !self.our_principal(offered.to_principal.as_ref())
+        {
+            return None;
+        }
+        info!(
+            from = offered
+                .from_principal
+                .as_ref()
+                .map(|principal| principal.value),
+            "the motion scope was offered back; accepting"
+        );
+        Some(DomainEnvelope::TransferAccept(ScopeTransferAccept {
+            vehicle: HOST_VEHICLE,
+            scope: ScopeId::new(MISSION_SCOPE),
+        }))
     }
 
     fn our_principal(&self, principal: Option<&wire::PrincipalId>) -> bool {
@@ -86,18 +153,70 @@ impl MissionTask {
         }
     }
 
+    /// Holds a generation this principal now frames against. A held
+    /// mission resumes: the first frame under the new generation is
+    /// neutral, which a vehicle that requires neutral input on a new
+    /// lease admits.
+    fn take_generation(&mut self, generation: Generation) {
+        self.generation = Some(generation);
+        if self.held {
+            self.held = false;
+            self.neutral_frames = 1;
+            let now = self.mission_now();
+            let held = self
+                .mission
+                .as_mut()
+                .and_then(|mission| mission.resume(now));
+            info!(
+                generation = generation.as_u64(),
+                held_ns = held.map(|held| held.as_nanos()),
+                "mission resumed under a new generation"
+            );
+            self.update(|status| status.resumes = status.resumes.wrapping_add(1));
+        }
+        self.update(|status| {
+            status.held = false;
+            status.lease_generation = Some(generation.as_u64());
+        });
+    }
+
+    /// Holds the mission: a human took the motion scope. The engine keeps
+    /// its ownship fresh and pauses its sequencing clock; this task stops
+    /// framing until a transfer brings the scope back (ADR-0051).
+    pub(super) fn hold(&mut self, reason: &str) {
+        if self.fenced || self.held {
+            return;
+        }
+        self.held = true;
+        self.generation = None;
+        let now = self.mission_now();
+        if let Some(mission) = self.mission.as_mut() {
+            mission.hold(now);
+        }
+        warn!(
+            reason,
+            "mission held; waiting for the motion scope to come back"
+        );
+        self.update(|status| {
+            status.held = true;
+            status.lease_generation = None;
+        });
+    }
+
     /// Drops the held generation and stops framing, permanently for this
-    /// task: re-leasing is a human decision, never automation's
-    /// (ADR-0025).
+    /// task. Only the engine closing the connection ends a mission this
+    /// way; every authority transition is a hold.
     pub(super) fn fence(&mut self, reason: &str) {
         if self.fenced {
             return;
         }
         self.fenced = true;
+        self.held = false;
         self.generation = None;
         warn!(reason, "mission authority fenced; holding without re-lease");
         self.update(|status| {
             status.fenced = true;
+            status.held = false;
             status.lease_generation = None;
         });
     }
@@ -110,44 +229,4 @@ fn our_pair(vehicle: Option<&wire::VehicleId>, scope: Option<&wire::ScopeId>) ->
 }
 
 #[cfg(test)]
-mod tests {
-    #![allow(clippy::expect_used, clippy::panic)]
-
-    use pilotage_protocol::PrincipalId;
-    use tokio::sync::{mpsc, watch};
-
-    use super::super::MissionTask;
-    use crate::runtime::{HOST_VEHICLE, automation::AutomationStatus};
-    use pilotage_protocol::wire;
-
-    #[tokio::test]
-    async fn a_grant_after_fencing_does_not_re_arm_the_generation() {
-        let (engine_tx, _engine_rx) = mpsc::channel(4);
-        let (status_tx, status_rx) = watch::channel(AutomationStatus::default());
-        let mut task = MissionTask::without_plan(
-            engine_tx.downgrade(),
-            tokio::time::Instant::now(),
-            status_tx,
-        );
-        task.principal = Some(PrincipalId::new(9));
-        task.fence("test fence");
-        let granted = wire::ScopeLeaseGranted {
-            vehicle: Some(wire::VehicleId {
-                value: HOST_VEHICLE.as_u64(),
-            }),
-            scope: Some(wire::ScopeId {
-                value: super::MISSION_SCOPE.to_owned(),
-            }),
-            principal: Some(wire::PrincipalId { value: 9 }),
-            generation: Some(wire::Generation { value: 5 }),
-            ..Default::default()
-        };
-        task.on_granted_event(&granted);
-        assert!(task.fenced, "fencing is permanent for the task");
-        assert_eq!(
-            task.generation, None,
-            "a later grant must not re-arm a fenced principal"
-        );
-        assert_eq!(status_rx.borrow().lease_generation, None);
-    }
-}
+mod tests;

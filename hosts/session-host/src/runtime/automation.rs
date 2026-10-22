@@ -56,10 +56,16 @@ pub struct AutomationStatus {
     pub activation_sent: bool,
     /// Fencing generation of the held motion lease.
     pub lease_generation: Option<u64>,
-    /// Authority moved away (denied, revoked, or granted to another
-    /// principal): the mission stopped framing and holds — it never
-    /// re-leases on its own, human takeover wins (ADR-0025).
+    /// The engine closed this principal's connection, or the mission is
+    /// otherwise ended for this task; nothing resumes it.
     pub fenced: bool,
+    /// A human holds the motion scope: the mission stopped framing and
+    /// waits for a transfer back (ADR-0051).
+    pub held: bool,
+    /// Transfers back that resumed the mission.
+    pub resumes: u32,
+    /// Offers this principal made to humans who requested the scope.
+    pub offers: u32,
     /// The vehicle accepted the arm action.
     pub arm_accepted: bool,
     /// Current mission phase, once the engine is built.
@@ -224,6 +230,52 @@ pub struct MissionRig {
     status: watch::Receiver<AutomationStatus>,
     actor: JoinHandle<()>,
     automation: JoinHandle<()>,
+    start: Instant,
+}
+
+/// A synthetic operator client registered with the engine actor: it
+/// sends envelopes as a remote connection would and reads the replies and
+/// authority events the actor sends it.
+pub struct Participant {
+    client: ClientKey,
+    engine_tx: mpsc::Sender<ToEngine>,
+    outbound: mpsc::Receiver<ToConnection>,
+    start: Instant,
+}
+
+impl Participant {
+    /// Sends one envelope as this client, stamped with the host clock.
+    pub async fn send(&self, message: pilotage_session::DomainEnvelope) -> bool {
+        let nanos = u64::try_from(self.start.elapsed().as_nanos()).unwrap_or(u64::MAX);
+        self.engine_tx
+            .send(ToEngine::ClientMessage {
+                client: self.client,
+                message: Box::new(message),
+                now: pilotage_timing::MonoTimestamp::from_nanos(nanos),
+            })
+            .await
+            .is_ok()
+    }
+
+    /// The next reliable bootstrap reply, or `None` once the actor is gone.
+    pub async fn next_bootstrap(&mut self) -> Option<Vec<u8>> {
+        while let Some(message) = self.outbound.recv().await {
+            if let ToConnection::BootstrapMessage { bytes, .. } = message {
+                return Some(bytes);
+            }
+        }
+        None
+    }
+
+    /// The next authority event, or `None` once the actor is gone.
+    pub async fn next_authority(&mut self) -> Option<Vec<u8>> {
+        while let Some(message) = self.outbound.recv().await {
+            if let ToConnection::AuthorityMessage(bytes) = message {
+                return Some(bytes);
+            }
+        }
+        None
+    }
 }
 
 /// A synthetic client registered with the engine actor purely to read
@@ -267,6 +319,26 @@ impl MissionRig {
             .await
             .ok();
         TelemetryObserver { outbound }
+    }
+
+    /// Registers an operator client under `client`, a key the accept loop
+    /// never allocates in a test, and hands back its two-way handle.
+    pub async fn participant(&self, client: u64) -> Participant {
+        let (outbound_tx, outbound) = mpsc::channel(OUTBOUND_QUEUE_CAPACITY);
+        let client = ClientKey::new(client);
+        self.engine_tx
+            .send(ToEngine::ClientConnected {
+                client,
+                sender: outbound_tx,
+            })
+            .await
+            .ok();
+        Participant {
+            client,
+            engine_tx: self.engine_tx.clone(),
+            outbound,
+            start: self.start,
+        }
     }
 
     /// Closes the engine actor's command channel and waits for the actor
@@ -349,6 +421,7 @@ fn spawn_reference_rig(options: MissionOptions) -> Result<MissionRig, HostError>
         engine_tx,
         status,
         actor,
+        start,
         automation,
     })
 }

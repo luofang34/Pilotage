@@ -29,7 +29,7 @@ mod video_lifecycle;
 mod wire_codec;
 // The mission rig is exported for the in-process integration test: the
 // same actor/principal wiring the runtime uses, without a transport.
-pub use automation::{AutomationStatus, MissionRig, TelemetryObserver};
+pub use automation::{AutomationStatus, MissionRig, Participant, TelemetryObserver};
 #[cfg(feature = "sim")]
 pub use automation::{spawn_reference_mission_rig, spawn_reference_survey_rig};
 pub use options::{
