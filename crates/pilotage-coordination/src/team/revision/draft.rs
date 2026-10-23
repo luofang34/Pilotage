@@ -131,7 +131,7 @@ impl TeamLane {
                 .map(|(_, path)| path.clone())
                 .collect();
             if kept.len() < unflown.len() {
-                dropped += unflown.len() - kept.len();
+                dropped = dropped.saturating_add(unflown.len() - kept.len());
                 keep.push((member.clone(), kept));
             }
         }
