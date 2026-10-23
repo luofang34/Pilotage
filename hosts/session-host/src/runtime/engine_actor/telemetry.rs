@@ -15,6 +15,9 @@ const ESTIMATOR_QUALITY_UNUSABLE: u32 = 2;
 
 mod attitude;
 mod flight_procedure;
+mod magnetic;
+
+pub(super) use magnetic::MagneticCorrection;
 
 pub(super) fn sample_to_wire(
     sample: TelemetrySample,
@@ -345,6 +348,11 @@ impl<A: pilotage_adapter_api::VehicleAdapter> super::EngineActor<A> {
     pub(super) fn broadcast_telemetry(&mut self, now: MonoTimestamp) {
         let batch = self.adapter.sample_telemetry();
         let capabilities = self.adapter.capabilities();
+        let references: Vec<_> = capabilities
+            .vehicles
+            .iter()
+            .map(|vehicle| (vehicle.id, vehicle.heading_reference))
+            .collect();
         let refreshed = self.engine.refresh_capabilities(capabilities, now);
         self.enact(refreshed);
         #[cfg(feature = "sim")]
@@ -362,7 +370,13 @@ impl<A: pilotage_adapter_api::VehicleAdapter> super::EngineActor<A> {
                 }
                 sample
             };
+            let mut sample = sample;
             let vehicle = sample.vehicle;
+            let reference = references
+                .iter()
+                .find(|(id, _)| *id == vehicle)
+                .and_then(|(_, reference)| *reference);
+            self.magnetic.apply(&mut sample, reference);
             #[cfg(feature = "sim")]
             if let Some(recorder) = self.recorder.as_mut() {
                 recorder.record(&sample, now);

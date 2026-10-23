@@ -176,8 +176,12 @@ has no verified north reference. A survey mission needs an authorized
 heading. Verify the reported heading on the ground against a compass or the
 DJI Fly app, then set `PILOTAGE_DJI_HEADING_REFERENCE=true` or `magnetic`
 for the reference you verified; the adapter then publishes the attitude as
-an authorized attitude under that reference and advertises it. Unset, the
-mission receives no heading and commands no velocity.
+an authorized attitude under that reference and advertises it. With
+`magnetic`, the host turns that attitude to true north by the shared
+geomagnetic model's declination at the aircraft's own fix and states the
+variation it applied in the same sample, so the mission and every client
+read a true heading. Unset, the mission receives no heading and commands no
+velocity.
 The gimbal angles reach the wire as a gimbal attitude only when you set
 `PILOTAGE_DJI_GIMBAL_YAW_FRAME=earth` or `vehicle` for the frame you
 verified the reported gimbal yaw against; a client's live survey needs that
