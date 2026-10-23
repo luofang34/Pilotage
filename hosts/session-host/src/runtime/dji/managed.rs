@@ -101,6 +101,7 @@ impl ManagedDji {
             experimental_virtual_stick: self.virtual_stick,
             experimental_virtual_stick_diagnostic: false,
             heading_reference: self.config.heading_reference,
+            gimbal_yaw_frame: self.config.gimbal_yaw_frame,
         };
         self.pending = Some(Operation::start(move || {
             Completion::Opened(

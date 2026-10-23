@@ -182,6 +182,7 @@ impl AviateAdapter {
             arm_incarnation,
             started_at: std::time::Instant::now(),
             last_reset: None,
+            #[cfg(feature = "sim")]
             view_publish_failed: false,
             reset_latch: None,
             #[cfg(test)]

@@ -270,7 +270,7 @@ fn downward_range(payload: &[u8; 70], angles: [i16; 3]) -> Option<(f32, f32)> {
 
 /// The body-FRD to world-NED quaternion (w, x, y, z) of roll, pitch and yaw
 /// applied in the yaw-pitch-roll order the reported angles describe.
-fn quaternion_from_euler(roll_rad: f32, pitch_rad: f32, yaw_rad: f32) -> [f32; 4] {
+pub(super) fn quaternion_from_euler(roll_rad: f32, pitch_rad: f32, yaw_rad: f32) -> [f32; 4] {
     let (sr, cr) = (roll_rad / 2.0).sin_cos();
     let (sp, cp) = (pitch_rad / 2.0).sin_cos();
     let (sy, cy) = (yaw_rad / 2.0).sin_cos();

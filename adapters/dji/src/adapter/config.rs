@@ -42,6 +42,12 @@ pub struct DjiConfig {
     /// authorized attitude under that reference, which geographic guidance
     /// requires; unset, the attitude stays a display report.
     pub heading_reference: Option<pilotage_protocol::HeadingReference>,
+    /// The frame the operator verified the gimbal's reported yaw is
+    /// relative to. Set, the adapter publishes the gimbal attitude on the
+    /// wire under that frame, which a client needs to place the camera's
+    /// view on the map; unset, the gimbal angles stay a payload-device
+    /// report with no frame.
+    pub gimbal_yaw_frame: Option<pilotage_protocol::GimbalYawFrame>,
 }
 
 /// A failure to start a DJI connection.
