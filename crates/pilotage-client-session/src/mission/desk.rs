@@ -151,6 +151,34 @@ impl MissionDesk {
         (named.is_empty() || named == proposal.digest.as_slice()).then_some(proposal)
     }
 
+    /// The proposal an approval names: the one this client holds, else the
+    /// one the lane's status names, which another client made. The status
+    /// carries the objective's height, so the approval's ceiling is sized
+    /// the same either way.
+    #[must_use]
+    pub fn approvable(&self) -> Option<wire::MissionProposal> {
+        if let Some(held) = self.current_proposal() {
+            return Some(held.clone());
+        }
+        let status = self.status.as_ref()?;
+        if status.proposal_digest.is_empty() {
+            return None;
+        }
+        Some(wire::MissionProposal {
+            digest: status.proposal_digest.clone(),
+            objective: Some(wire::MissionObjective {
+                kind: Some(wire::mission_objective::Kind::Survey(
+                    wire::SurveyObjective {
+                        height_m: status.height_m,
+                        ..wire::SurveyObjective::default()
+                    },
+                )),
+                ..wire::MissionObjective::default()
+            }),
+            ..wire::MissionProposal::default()
+        })
+    }
+
     /// The commands the lane's state offers under `policy`, none before
     /// admission.
     #[must_use]
@@ -159,8 +187,10 @@ impl MissionDesk {
             return Offered::default();
         }
         let state = self.state();
-        let proposal = self.current_proposal().filter(|_| state == Lane::Proposed);
-        let height = proposal.and_then(|proposal| approved_height_m(proposal, policy));
+        let proposal = self.approvable().filter(|_| state == Lane::Proposed);
+        let height = proposal
+            .as_ref()
+            .and_then(|proposal| approved_height_m(proposal, policy));
         let named = self
             .status
             .as_ref()
@@ -205,9 +235,9 @@ impl MissionDesk {
             }
             MissionCommand::Approve { digest, policy } => {
                 let named = digest.as_deref().map(parse_hex).transpose()?;
-                let proposal = match (self.current_proposal(), named) {
-                    (Some(held), None) => held.clone(),
-                    (Some(held), Some(named)) if held.digest == named => held.clone(),
+                let proposal = match (self.approvable(), named) {
+                    (Some(held), None) => held,
+                    (Some(held), Some(named)) if held.digest == named => held,
                     // Another client proposed: only a stated ceiling bounds
                     // the approval, as this client never saw the objective.
                     (None, Some(named)) if policy.max_height_m.is_some() => wire::MissionProposal {

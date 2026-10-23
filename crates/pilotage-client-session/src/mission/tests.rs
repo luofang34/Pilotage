@@ -184,3 +184,29 @@ fn a_receipt_for_an_intent_this_desk_did_not_send_changes_nothing() {
     assert!(desk.on_receipt(stray).is_none());
     assert!(desk.receipt().unwrap().accepted());
 }
+
+#[test]
+fn a_proposal_another_client_made_is_approved_from_the_lanes_status() {
+    let mut desk = MissionDesk::new("person", 7);
+    let mut named = status(wire::MissionLaneState::Proposed, b"\x42");
+    named.height_m = 110.0;
+    desk.on_status(named);
+    assert_eq!(
+        desk.offered(true, &ApprovalPolicy::default()).approve,
+        Some(120.0)
+    );
+    let command = MissionCommand::Approve {
+        digest: None,
+        policy: ApprovalPolicy::default(),
+    };
+    let Ok(Action::Approve(approval)) = desk.resolve(&command, 0) else {
+        panic!("an approval");
+    };
+    assert_eq!(approval.proposal_digest, b"\x42");
+    assert_eq!(approval.envelope.unwrap().max_height_m, 120.0);
+    // Without a height the lane states, the policy must state one.
+    let mut unbounded = status(wire::MissionLaneState::Proposed, b"\x42");
+    unbounded.height_m = 0.0;
+    desk.on_status(unbounded);
+    assert_eq!(desk.resolve(&command, 0), Err(DeskRefusal::NoHeight));
+}

@@ -140,14 +140,19 @@ fn only_the_approver_secret_approves_a_proposal() {
             refused.reason
         );
 
-        let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+        // The person approves the agent's proposal as the App's button does:
+        // no digest and the default policy, sized from the lane's status.
+        while person
+            .desk
+            .status()
+            .is_none_or(|s| s.proposal_digest != digest)
+        {
+            person.step().await;
+        }
         let approved = person
             .ask(MissionCommand::Approve {
-                digest: Some(hex),
-                policy: ApprovalPolicy {
-                    max_height_m: Some(70.0),
-                    ..ApprovalPolicy::default()
-                },
+                digest: None,
+                policy: ApprovalPolicy::default(),
             })
             .await;
         assert!(approved.accepted(), "{}", approved.reason);

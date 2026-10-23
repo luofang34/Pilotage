@@ -329,11 +329,10 @@ impl Lane {
     #[must_use]
     pub fn status(&self) -> wire::MissionStatus {
         let proposal = self.proposal.as_ref().map(|compiled| &compiled.proposal);
-        let survey_area = proposal
+        let survey = proposal
             .and_then(|p| p.objective.as_ref())
             .and_then(|o| o.kind.as_ref())
-            .map(|wire::mission_objective::Kind::Survey(survey)| survey.area.clone())
-            .unwrap_or_default();
+            .map(|wire::mission_objective::Kind::Survey(survey)| survey);
         wire::MissionStatus {
             lane: self.config.name.clone(),
             state: self.state as i32,
@@ -364,7 +363,8 @@ impl Lane {
             detail: self.detail.clone(),
             members: Vec::new(),
             sequence: self.sequence,
-            area: survey_area,
+            area: survey.map(|s| s.area.clone()).unwrap_or_default(),
+            height_m: survey.map_or(0.0, |s| s.height_m),
         }
     }
 

@@ -138,12 +138,11 @@ pub(super) fn team_status(team: &TeamLane) -> wire::MissionStatus {
         Phase::Failed => wire::MissionLaneState::Failed,
     };
     let proposal = team.proposal.as_ref();
-    let area = team
+    let survey = team
         .objective
         .as_ref()
         .and_then(|o| o.kind.as_ref())
-        .map(|wire::mission_objective::Kind::Survey(survey)| survey.area.clone())
-        .unwrap_or_default();
+        .map(|wire::mission_objective::Kind::Survey(survey)| survey);
     let active = team
         .book
         .statuses()
@@ -171,7 +170,8 @@ pub(super) fn team_status(team: &TeamLane) -> wire::MissionStatus {
         detail: team.detail.clone(),
         members: team.statuses.values().cloned().collect(),
         sequence: team.sequence,
-        area,
+        area: survey.map(|s| s.area.clone()).unwrap_or_default(),
+        height_m: survey.map_or(0.0, |s| s.height_m),
     }
 }
 
