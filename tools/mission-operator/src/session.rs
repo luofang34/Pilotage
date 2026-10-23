@@ -29,6 +29,7 @@ struct Session {
     last_status: Option<wire::MissionStatus>,
     /// Receipts not yet claimed by the intent they answer.
     receipts: Vec<wire::MissionReceipt>,
+    last_telemetry: Option<Instant>,
 }
 
 pub(crate) async fn execute(command: Command) -> Result<bool, OperatorError> {
@@ -125,6 +126,7 @@ impl Session {
             requests: 0,
             last_status: None,
             receipts: Vec::new(),
+            last_telemetry: None,
         };
         let actions = session.engine.handle(TransportEvent::Connected, 0);
         session.perform(actions).await?;
@@ -226,6 +228,7 @@ impl Session {
                     .send_bootstrap(&bytes)
                     .await
                     .map_err(OperatorError::Link)?,
+                ClientAction::Emit(ModuleEvent::Telemetry(sample)) => self.telemetry(&sample),
                 ClientAction::Emit(ModuleEvent::MissionStatus(status)) => {
                     emit(&status_json(&status));
                     self.last_status = Some((*status).clone());
@@ -242,6 +245,31 @@ impl Session {
             }
         }
         Ok(produced)
+    }
+}
+
+impl Session {
+    /// With `PILOTAGE_OPERATOR_TELEMETRY=1`, one line a second with the
+    /// vehicle's position, height and ground speed.
+    fn telemetry(&mut self, sample: &wire::TelemetrySample) {
+        let Some(avionics) = sample.avionics.as_ref() else {
+            return;
+        };
+        let Some(fix) = avionics.geodetic.as_ref() else {
+            return;
+        };
+        if std::env::var_os("PILOTAGE_OPERATOR_TELEMETRY").is_none()
+            || self
+                .last_telemetry
+                .is_some_and(|at| at.elapsed() < Duration::from_secs(1))
+        {
+            return;
+        }
+        self.last_telemetry = Some(Instant::now());
+        let speed = avionics.vel_n_mps.hypot(avionics.vel_e_mps);
+        emit(
+            &json!({"lat": fix.latitude_deg, "lon": fix.longitude_deg, "height_m": -avionics.pos_d_m, "speed_mps": speed}),
+        );
     }
 }
 
