@@ -57,6 +57,7 @@ members = [
     "hosts/session-host",
     "adapters/gazebo",
     "adapters/sim-video",
+    "adapters/sim-multicopter",
     "clients/web-instruments",
     "clients/web-instrument-shell",
     "clients/web-control",
@@ -158,6 +159,7 @@ pilotage-svs-db = { path = "crates/pilotage-svs-db" }
 pilotage-adapter-reference = { path = "adapters/reference-headless" }
 pilotage-adapter-gazebo = { path = "adapters/gazebo" }
 pilotage-sim-video = { path = "adapters/sim-video" }
+pilotage-adapter-sim-multicopter = { path = "adapters/sim-multicopter" }
 pilotage-adapter-aviate = { path = "adapters/aviate", default-features = false }
 pilotage-adapter-px4 = { path = "adapters/px4", default-features = false }
 pilotage-adapter-ardupilot = { path = "adapters/ardupilot" }
