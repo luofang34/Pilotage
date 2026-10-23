@@ -104,15 +104,11 @@ async fn launch_adapter(
         #[cfg(feature = "sim")]
         AdapterKind::SimMulticopter => launch_sim_multicopter(options, sim_camera_port, host).await,
         #[cfg(not(feature = "sim"))]
-        AdapterKind::SimMulticopter => Err(HostError::AdapterNotInBuild {
-            adapter: "sim-multicopter",
-        }),
-        #[cfg(not(feature = "sim"))]
-        AdapterKind::Reference => Err(HostError::AdapterNotInBuild {
-            adapter: "reference",
-        }),
-        #[cfg(not(feature = "sim"))]
-        AdapterKind::Gazebo => Err(HostError::AdapterNotInBuild { adapter: "gazebo" }),
+        AdapterKind::SimMulticopter | AdapterKind::Reference | AdapterKind::Gazebo => {
+            Err(HostError::AdapterNotInBuild {
+                adapter: adapter.name(),
+            })
+        }
         AdapterKind::Aviate => {
             let mut adapter = start_aviate().await?;
             let engine = build_engine(&adapter, options);
