@@ -99,16 +99,14 @@ impl TeamLane {
                 if tried || !self.book.settled(&owner, &line, self.statuses.get(&owner)) {
                     continue;
                 }
-                // The line's own member when it is free, else one that
-                // finished, else the owner after its plan.
-                let flyer = if self.idle(&owner) {
-                    owner.clone()
-                } else {
-                    self.idle_member().unwrap_or_else(|| owner.clone())
-                };
-                self.detail = if flyer == owner {
+                // Another member flies it, so the second look does not come
+                // from the camera that failed: one that has finished now, else
+                // the first to finish. The owner flies it only when no other
+                // member is still flying to take it.
+                let flyer = self.idle_member_besides(&owner).unwrap_or_default();
+                self.detail = if flyer.is_empty() {
                     format!(
-                        "judge: {owner} {line} had too few usable pictures; {owner} flies it again after its lines, inside the approved envelope"
+                        "judge: {owner} {line} had too few usable pictures; the next member to finish flies it again, inside the approved envelope"
                     )
                 } else {
                     format!(
@@ -140,9 +138,12 @@ impl TeamLane {
                 .any(|r| r.member == member && r.in_progress())
     }
 
-    /// A member that is idle.
-    fn idle_member(&self) -> Option<String> {
-        self.member_proposals.keys().find(|m| self.idle(m)).cloned()
+    /// A member other than `owner` that is idle.
+    fn idle_member_besides(&self, owner: &str) -> Option<String> {
+        self.member_proposals
+            .keys()
+            .find(|m| m.as_str() != owner && self.idle(m))
+            .cloned()
     }
 
     /// Starts the first queued extra flight of each member that completed
@@ -163,16 +164,51 @@ impl TeamLane {
             if !complete || busy {
                 continue;
             }
-            let Some(index) = self
-                .reflies
-                .iter()
-                .position(|r| r.member == member && r.state == ReflyState::Queued)
-            else {
+            let Some(index) = self.next_extra(&member) else {
                 continue;
             };
+            if let Some(extra) = self.reflies.get_mut(index) {
+                extra.member.clone_from(&member);
+            }
             intents.extend(self.start_extra(index, context));
         }
         intents
+    }
+
+    /// The extra flight a free `member` takes next: one assigned to it,
+    /// else a re-flight of another member's line, else of its own line
+    /// once no other member is still flying to take it.
+    fn next_extra(&self, member: &str) -> Option<usize> {
+        let queued = |r: &Refly| r.state == ReflyState::Queued;
+        if let Some(index) = self
+            .reflies
+            .iter()
+            .position(|r| queued(r) && r.member == member)
+        {
+            return Some(index);
+        }
+        let open = |r: &Refly| queued(r) && r.member.is_empty();
+        if let Some(index) = self
+            .reflies
+            .iter()
+            .position(|r| open(r) && r.owner != member)
+        {
+            return Some(index);
+        }
+        let others_flying = self.member_proposals.keys().any(|m| {
+            m != member
+                && self.lost.get(m) != Some(&true)
+                && self
+                    .statuses
+                    .get(m)
+                    .is_some_and(|s| s.state != wire::MissionLaneState::Complete as i32)
+        });
+        if others_flying {
+            return None;
+        }
+        self.reflies
+            .iter()
+            .position(|r| open(r) && r.owner == member)
     }
 
     fn start_extra(&mut self, index: usize, context: &IntentContext) -> Vec<MemberIntent> {

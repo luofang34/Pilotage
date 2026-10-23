@@ -1,6 +1,7 @@
 //! The judge's verdicts steer the team mid-run: a line flown without
-//! enough usable pictures is flown again by a member that has finished,
-//! once the verdict settled, while the line's own member flies on.
+//! enough usable pictures is flown again by another member that has
+//! finished, once the verdict settled, while the line's own member flies
+//! on; the owner flies it only when nobody else is left to.
 
 use pilotage_protocol::wire;
 
@@ -92,4 +93,17 @@ fn a_finished_member_flies_a_bad_line_again_while_its_owner_flies_on() {
         .expect("SIM-2's line 1");
     assert_eq!(line.state, wire::MissionTaskState::Done as i32);
     assert_eq!(line.reflown, 1);
+}
+
+#[test]
+fn of_several_finished_members_one_other_than_the_owner_takes_it() {
+    let (mut fleet, _) = super::revision::running_fleet(false);
+    for member in ["SIM-1", "SIM-3"] {
+        let started = fly_lines(&mut fleet, member, (1, 99), &[]);
+        assert!(started.is_empty());
+    }
+    // Both others are idle: one of them takes it at once.
+    let decided = fly_lines(&mut fleet, "SIM-2", (1, 2), &[1]);
+    assert_eq!(decided.len(), 1);
+    assert_ne!(decided[0].member, "SIM-2");
 }

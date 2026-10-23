@@ -297,13 +297,15 @@ fn a_team_survey_is_proposed_approved_flown_and_adapted_inside_its_envelope() {
     );
 
     // SIM-2 flies its first line with unusable pictures; the team flies it
-    // again without asking the operator, and then completes.
+    // again without asking the operator, with another member's camera, and
+    // then completes.
     let refly = fleet.fly(&[("SIM-2", "line-01")]);
     assert_eq!(refly.len(), 1, "one re-flight");
-    assert_eq!(refly.first().map(|i| i.member.as_str()), Some("SIM-2"));
+    let flyer = refly.first().map(|i| i.member.clone()).unwrap_or_default();
+    assert_ne!(flyer, "SIM-2", "not the camera that failed");
     fleet.route(refly);
     assert_eq!(
-        fleet.members.get("SIM-2").map(Lane::state),
+        fleet.members.get(&flyer).map(Lane::state),
         Some(wire::MissionLaneState::Running)
     );
     let more = fleet.fly(&[]);
