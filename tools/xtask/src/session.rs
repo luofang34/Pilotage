@@ -22,7 +22,7 @@ pub(crate) mod preflight;
 mod stages;
 
 /// How often the supervisor re-checks stage health.
-const SUPERVISE_INTERVAL: Duration = Duration::from_millis(500);
+pub(crate) const SUPERVISE_INTERVAL: Duration = Duration::from_millis(500);
 
 /// How many times a restartable stage may die and be relaunched before
 /// the session gives up (a crash loop is a failure, not a lifecycle).
@@ -156,7 +156,7 @@ fn private_web_root_unless_primary(ctx: &mut SessionContext) -> Result<(), Xtask
 /// `true` on ctrl-c. Registration happens synchronously in this call so
 /// no child can be spawned while the default (kill-the-launcher-only)
 /// disposition is still active.
-fn spawn_cancel_listener() -> Result<tokio::sync::watch::Receiver<bool>, XtaskError> {
+pub(crate) fn spawn_cancel_listener() -> Result<tokio::sync::watch::Receiver<bool>, XtaskError> {
     let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
         .map_err(|source| XtaskError::Io {
             context: "registering the ctrl-c handler",
@@ -295,7 +295,7 @@ pub(crate) fn sim_run_dir(instance: u16) -> PathBuf {
 
 /// Ensures the stage-log directory exists with the previous run's logs
 /// preserved out of the way, announcing where they went.
-fn prepared_log_dir(log_dir: &Path) -> Result<PathBuf, XtaskError> {
+pub(crate) fn prepared_log_dir(log_dir: &Path) -> Result<PathBuf, XtaskError> {
     let log_dir = log_dir.to_path_buf();
     std::fs::create_dir_all(&log_dir).map_err(|source| XtaskError::Io {
         context: "creating the session log directory",

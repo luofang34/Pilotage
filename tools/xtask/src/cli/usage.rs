@@ -63,6 +63,26 @@ commands:
       --open               open every vehicle's viewer URL
       --no-open            open none (default)
 
+  mission [options]
+      Launch a mission fleet from a fleet file: one simulated multicopter
+      host per aircraft, one coordinator per section over its aircraft,
+      and a command coordinator over the sections. Every host admits a
+      mission approver only with target/xtask-mission/approver.token.
+      Places the file's camera fault on the aircraft's planned line,
+      writes target/xtask-mission/fleet.json for the App, prints the App
+      and agent commands, and tears every host down on ctrl-c.
+
+      --plan <path>        fleet file (default:
+                           sim/missions/princeton-landmarks.json)
+      --decision <spec>    decision provider the aircraft judge their
+                           pictures with, as PILOTAGE_DECISION takes it
+                           (default: none: pictures are counted, not
+                           judged)
+      --decision-every <s> seconds between picture assessments
+      --no-fault           leave the fleet file's camera fault out
+      --ready-timeout <s>  how long each host may take to listen
+                           (default: 60)
+
   reset [options]
       Reset the running simulation world and restart its FC.
 

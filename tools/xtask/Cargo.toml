@@ -9,6 +9,11 @@ publish = false
 workspace = true
 
 [dependencies]
+navigate-contract = { workspace = true }
+pilotage-client-session = { workspace = true }
+pilotage-coordination = { workspace = true }
+pilotage-mission = { workspace = true }
+pilotage-protocol = { workspace = true }
 pilotage-trial = { workspace = true }
 pilotage-world = { workspace = true }
 rusqlite = { workspace = true }
