@@ -280,7 +280,19 @@ impl TeamLane {
     /// the estimates combined, and the member proposals it binds.
     fn compose(&mut self, context: &IntentContext) -> wire::MissionProposal {
         let mut tasks = Vec::new();
-        let mut estimates = wire::MissionEstimates::default();
+        let each: Vec<wire::MissionEstimates> = self
+            .member_proposals
+            .values()
+            .filter_map(|p| p.estimates)
+            .collect();
+        let estimates = wire::MissionEstimates {
+            path_length_m: each.iter().map(|e| e.path_length_m).sum(),
+            duration_s: each.iter().map(|e| e.duration_s).fold(0.0, f64::max),
+            energy_wh: each.iter().map(|e| e.energy_wh).sum(),
+            lines: each.iter().map(|e| e.lines).sum(),
+            line_spacing_m: each.first().map_or(0.0, |e| e.line_spacing_m),
+            footprint_width_m: each.first().map_or(0.0, |e| e.footprint_width_m),
+        };
         let mut members = Vec::new();
         for (member, proposal) in &self.member_proposals {
             for task in &proposal.tasks {
@@ -288,14 +300,6 @@ impl TeamLane {
                 task.task_id = format!("{member}/{}", task.task_id);
                 task.member.clone_from(member);
                 tasks.push(task);
-            }
-            if let Some(e) = proposal.estimates.as_ref() {
-                estimates.path_length_m = estimates.path_length_m + e.path_length_m;
-                estimates.duration_s = estimates.duration_s.max(e.duration_s);
-                estimates.energy_wh = estimates.energy_wh + e.energy_wh;
-                estimates.lines = estimates.lines.saturating_add(e.lines);
-                estimates.line_spacing_m = e.line_spacing_m;
-                estimates.footprint_width_m = e.footprint_width_m;
             }
             members.push(wire::MemberProposal {
                 member: member.clone(),
