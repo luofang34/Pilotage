@@ -90,7 +90,7 @@ impl Flight {
             self.max_leg = self.max_leg.max(guidance.leg_index);
             self.waypoint_count = guidance.waypoint_count;
         }
-        if let Some(fix) = sample.avionics.as_ref().and_then(|a| a.geodetic.clone()) {
+        if let Some(fix) = sample.avionics.as_ref().and_then(|a| a.geodetic) {
             self.max_height_m = self.max_height_m.max(fix.height_m);
             self.last_fix = Some(fix);
             self.estimates += 1;
