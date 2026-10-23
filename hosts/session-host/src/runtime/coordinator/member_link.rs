@@ -84,7 +84,7 @@ async fn drive(
     started: Instant,
 ) -> bool {
     let mut engine = ClientEngine::new(ClientConfig {
-        join_token: None,
+        join_token: host.token.clone(),
         client_name: "pilotage-coordinator".to_owned(),
         reconnect: ReconnectPolicy::default(),
     });

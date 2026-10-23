@@ -43,6 +43,13 @@ pub enum ToEngine {
         /// zeroed or centered.
         state: Option<Box<wire::NavGuidanceState>>,
     },
+    /// Who an admitted connection is to the mission lane.
+    Requester {
+        /// The connection.
+        client: ClientKey,
+        /// Its name and grant.
+        requester: pilotage_mission::Requester,
+    },
     /// A mission intent from a client, for the host's mission lane
     /// (ADR-0052).
     MissionIntent {

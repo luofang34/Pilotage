@@ -11,6 +11,7 @@ fn remote_interfaces_require_a_token_but_local_defaults_are_usable() {
         let mut options = NetworkOptions {
             bind_ip: address.parse().unwrap(),
             join_token: None,
+            approver_token: None,
         };
         assert!(matches!(
             options.validate(),
@@ -108,4 +109,32 @@ impl Drop for TokenFile {
     fn drop(&mut self) {
         std::fs::remove_file(&self.0).ok();
     }
+}
+
+#[test]
+fn the_approver_secret_admits_as_approver_and_the_join_secret_does_not() {
+    let join = JoinToken::from_hex(&"ab".repeat(32)).unwrap();
+    let approver = JoinToken::from_hex(&"cd".repeat(32)).unwrap();
+    let open = super::Admission::default();
+    assert_eq!(
+        open.check(&[]),
+        Some(true),
+        "without secrets everyone approves"
+    );
+
+    let guarded = super::Admission {
+        join_token: Some(join.clone()),
+        approver_token: Some(approver.clone()),
+    };
+    assert_eq!(guarded.check(approver.as_bytes()), Some(true));
+    assert_eq!(guarded.check(join.as_bytes()), Some(false));
+    assert_eq!(guarded.check(&[]), None);
+    assert_eq!(guarded.check(&[0xee; 32]), None);
+
+    let approver_only = super::Admission {
+        join_token: None,
+        approver_token: Some(approver.clone()),
+    };
+    assert_eq!(approver_only.check(&[]), Some(false));
+    assert_eq!(approver_only.check(approver.as_bytes()), Some(true));
 }

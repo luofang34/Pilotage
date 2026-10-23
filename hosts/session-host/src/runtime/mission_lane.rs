@@ -13,7 +13,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use pilotage_adapter_api::RawVideoFrame;
 use pilotage_mission::{
-    FrameAssessment, IntentContext, Lane, LaneEffect, MissionState, RunProgress,
+    FrameAssessment, IntentContext, Lane, LaneEffect, MissionState, Requester, RunProgress,
+    Steering,
 };
 use pilotage_protocol::wire;
 use pilotage_session::ClientKey;
@@ -44,6 +45,8 @@ pub(crate) enum LaneInbound {
     Intent {
         /// The sender.
         client: ClientKey,
+        /// Who the sender is.
+        requester: pilotage_mission::Requester,
         /// The intent.
         intent: Box<wire::MissionIntent>,
     },
@@ -95,6 +98,7 @@ struct LaneTask {
     ids: u64,
     judge: Option<judge::Judge>,
     last_publish: Option<Instant>,
+    steering: Steering,
 }
 
 impl LaneTask {
@@ -111,6 +115,7 @@ impl LaneTask {
             runs: 0,
             ids: 0,
             last_publish: None,
+            steering: Steering::default(),
         }
     }
 
@@ -121,8 +126,8 @@ impl LaneTask {
         loop {
             tokio::select! {
                 message = inbound.recv() => match message {
-                    Some(LaneInbound::Intent { client, intent }) => {
-                        if !self.on_intent(client, &intent).await {
+                    Some(LaneInbound::Intent { client, requester, mut intent }) => {
+                        if !self.on_intent(client, &requester, &mut intent).await {
                             break;
                         }
                     }
@@ -151,7 +156,22 @@ impl LaneTask {
         }
     }
 
-    async fn on_intent(&mut self, client: ClientKey, intent: &wire::MissionIntent) -> bool {
+    async fn on_intent(
+        &mut self,
+        client: ClientKey,
+        requester: &Requester,
+        intent: &mut wire::MissionIntent,
+    ) -> bool {
+        if let Err(reason) = self.steering.admit(intent, requester) {
+            info!(request = %intent.request_id, %reason, "mission intent refused");
+            let receipt = Steering::refusal(intent, &self.lane.status().lane, reason);
+            return self
+                .send(
+                    Some(client),
+                    wire::envelope::Payload::MissionReceipt(receipt),
+                )
+                .await;
+        }
         self.ids = self.ids.wrapping_add(1);
         let now_unix_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -163,6 +183,9 @@ impl LaneTask {
             fresh_id: format!("{}-{now_unix_ms}-{}", self.lane.status().lane, self.ids),
         };
         let reply = self.lane.on_intent(intent, &context);
+        if reply.receipt.outcome == wire::MissionReceiptOutcome::Accepted as i32 {
+            self.steering.accepted(intent, requester);
+        }
         info!(request = %reply.receipt.request_id, outcome = reply.receipt.outcome, reason = %reply.receipt.reason, "mission intent answered");
         let receipt = wire::envelope::Payload::MissionReceipt(reply.receipt);
         if !self.send(Some(client), receipt).await {

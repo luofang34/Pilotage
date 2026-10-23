@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use pilotage_coordination::{MemberIntent, TeamLane, TeamReply};
-use pilotage_mission::IntentContext;
+use pilotage_mission::{IntentContext, Requester, Steering};
 use pilotage_protocol::wire;
 use pilotage_session::ClientKey;
 use tokio::sync::mpsc;
@@ -58,6 +58,7 @@ pub(crate) async fn spawn(
         operator_requests: BTreeMap::new(),
         ids: 0,
         last_publish: None,
+        steering: Steering::default(),
     };
     tokio::spawn(async move {
         task.run(inbound, events).await;
@@ -73,6 +74,7 @@ struct TeamTask {
     operator_requests: BTreeMap<String, ClientKey>,
     ids: u64,
     last_publish: Option<Instant>,
+    steering: Steering,
 }
 
 impl TeamTask {
@@ -85,13 +87,8 @@ impl TeamTask {
         loop {
             tokio::select! {
                 message = inbound.recv() => match message {
-                    Some(LaneInbound::Intent { client, intent }) => {
-                        let context = self.context();
-                        let reply = self.lane.on_intent(&intent, &context);
-                        if reply.receipt.is_none() {
-                            self.operator_requests.insert(intent.request_id.clone(), client);
-                        }
-                        self.answer(reply).await;
+                    Some(LaneInbound::Intent { client, requester, mut intent }) => {
+                        self.on_intent(client, &requester, &mut intent).await;
                     }
                     Some(LaneInbound::Frame(_)) => {}
                     None => break,
@@ -106,6 +103,33 @@ impl TeamTask {
                 break;
             }
         }
+    }
+
+    async fn on_intent(
+        &mut self,
+        client: ClientKey,
+        requester: &Requester,
+        intent: &mut wire::MissionIntent,
+    ) {
+        if let Err(reason) = self.steering.admit(intent, requester) {
+            info!(request = %intent.request_id, %reason, "team intent refused");
+            let receipt = Steering::refusal(intent, &self.lane.status().lane, reason);
+            self.reply_to(Some(client), receipt).await;
+            return;
+        }
+        let context = self.context();
+        let reply = self.lane.on_intent(intent, &context);
+        match &reply.receipt {
+            None => {
+                self.operator_requests
+                    .insert(intent.request_id.clone(), client);
+            }
+            Some(receipt) if receipt.outcome == wire::MissionReceiptOutcome::Accepted as i32 => {
+                self.steering.accepted(intent, requester);
+            }
+            Some(_) => {}
+        }
+        self.answer(reply).await;
     }
 
     async fn on_member_event(&mut self, event: MemberEvent) {
@@ -131,16 +155,20 @@ impl TeamTask {
             let to = self.operator_requests.remove(&receipt.request_id);
             info!(request = %receipt.request_id, outcome = receipt.outcome, reason = %receipt.reason, "team intent answered");
             if to.is_some() || !receipt.request_id.is_empty() {
-                self.engine
-                    .send(ToEngine::MissionPublish {
-                        to,
-                        payload: Box::new(wire::envelope::Payload::MissionReceipt(receipt)),
-                    })
-                    .await
-                    .ok();
+                self.reply_to(to, receipt).await;
             }
         }
         self.send(reply.intents).await;
+    }
+
+    async fn reply_to(&self, to: Option<ClientKey>, receipt: wire::MissionReceipt) {
+        self.engine
+            .send(ToEngine::MissionPublish {
+                to,
+                payload: Box::new(wire::envelope::Payload::MissionReceipt(receipt)),
+            })
+            .await
+            .ok();
     }
 
     async fn send(&self, intents: Vec<MemberIntent>) {

@@ -142,6 +142,15 @@ protected host.
 
 The host checks the first client message before it sends capabilities,
 telemetry, or video. A missing or invalid secret closes the connection.
+
+To keep mission approval with a person, also supply
+`--approver-token-file` with a second secret of the same format. A client
+that presents the approver secret can approve a mission proposal and set
+the limits the mission lanes adapt inside. A client that presents only the
+join secret, such as an automated agent, can propose, start an approved
+proposal, hold, and abort. It cannot approve, and it cannot resume a
+mission that an approver held. Without the approver secret, every admitted
+client can approve.
 The client stops automatic connection attempts after admission is rejected.
 Admission does not grant a control lease. Connection recovery restores
 observation only; the operator must request control again. Network delay

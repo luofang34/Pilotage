@@ -12,8 +12,6 @@ workspace = true
 pilotage-input = { workspace = true }
 pilotage-protocol = { workspace = true }
 prost = { workspace = true }
-thiserror = { workspace = true }
-
-[dev-dependencies]
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+thiserror = { workspace = true }

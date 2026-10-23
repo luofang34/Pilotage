@@ -13,6 +13,38 @@ pub struct NetworkOptions {
     pub bind_ip: IpAddr,
     /// Required admission secret, including on loopback when configured.
     pub join_token: Option<JoinToken>,
+    /// The secret that admits a client as a mission approver. Without it,
+    /// every admitted client may approve.
+    pub approver_token: Option<JoinToken>,
+}
+
+/// The secrets a connection's first frame is checked against.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Admission {
+    /// See [`NetworkOptions::join_token`].
+    pub join_token: Option<JoinToken>,
+    /// See [`NetworkOptions::approver_token`].
+    pub approver_token: Option<JoinToken>,
+}
+
+impl Admission {
+    /// `None` refuses the presented secret; `Some(may_approve)` admits.
+    /// The approver secret admits on its own.
+    #[must_use]
+    pub fn check(&self, presented: &[u8]) -> Option<bool> {
+        if self
+            .approver_token
+            .as_ref()
+            .is_some_and(|token| token.matches(presented))
+        {
+            return Some(true);
+        }
+        let joined = self
+            .join_token
+            .as_ref()
+            .is_none_or(|token| token.matches(presented));
+        joined.then_some(self.approver_token.is_none())
+    }
 }
 
 impl Default for NetworkOptions {
@@ -20,6 +52,7 @@ impl Default for NetworkOptions {
         Self {
             bind_ip: Ipv4Addr::LOCALHOST.into(),
             join_token: None,
+            approver_token: None,
         }
     }
 }
@@ -72,9 +105,32 @@ impl NetworkOptions {
         let options = Self {
             bind_ip,
             join_token: path.map(read_token_blocking).transpose()?,
+            approver_token: None,
         };
         options.validate()?;
         Ok(options)
+    }
+
+    /// Adds the mission approver secret from a token file.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NetworkError`] if the path or contents are invalid.
+    pub fn with_approver_token_file_blocking(
+        mut self,
+        path: Option<&Path>,
+    ) -> Result<Self, NetworkError> {
+        self.approver_token = path.map(read_token_blocking).transpose()?;
+        Ok(self)
+    }
+
+    /// The secrets each connection is admitted against.
+    #[must_use]
+    pub fn admission(&self) -> Admission {
+        Admission {
+            join_token: self.join_token.clone(),
+            approver_token: self.approver_token.clone(),
+        }
     }
 
     /// Require credentials before exposing a non-loopback interface.
@@ -92,7 +148,7 @@ impl NetworkOptions {
     }
 }
 
-fn read_token_blocking(path: &Path) -> Result<JoinToken, NetworkError> {
+pub(crate) fn read_token_blocking(path: &Path) -> Result<JoinToken, NetworkError> {
     if !path.is_absolute() {
         return Err(NetworkError::RelativeTokenPath {
             path: path.to_owned(),

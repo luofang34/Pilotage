@@ -96,14 +96,15 @@ pub async fn run_connection(
     start: Instant,
     to_engine: mpsc::Sender<ToEngine>,
     media: Option<MediaHandle>,
-    join_token: Option<pilotage_protocol::JoinToken>,
+    admission: crate::runtime::Admission,
 ) {
     let Some(admission::AdmittedBootstrap {
         send,
         recv,
         hello,
         pending,
-    }) = admission::admit(&connection, join_token.as_ref()).await
+        may_approve,
+    }) = admission::admit(&connection, &admission).await
     else {
         return;
     };
@@ -142,6 +143,17 @@ pub async fn run_connection(
         if let Some(media) = &media {
             media.deregister(client);
         }
+        return;
+    }
+    let requester = pilotage_mission::Requester {
+        subject: hello.client_name.clone(),
+        may_approve,
+    };
+    if to_engine
+        .send(ToEngine::Requester { client, requester })
+        .await
+        .is_err()
+    {
         return;
     }
     forward(&to_engine, client, DomainEnvelope::Hello(hello), start).await;

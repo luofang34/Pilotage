@@ -177,6 +177,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
                 }
             },
             ToEngine::MissionIntent { client, intent } => self.on_mission_intent(client, intent),
+            ToEngine::Requester { client, requester } => self.on_requester(client, requester),
             ToEngine::MissionPublish { to, payload } => self.publish_mission(to, *payload),
             ToEngine::MissionLane { sender } => self.mission_lane = Some(sender),
             ToEngine::DumpLatencySummary { reply } => {

@@ -3,7 +3,10 @@
 //! - `PILOTAGE_COORDINATOR_MEMBERS`: a JSON file listing the members:
 //!   `[{"name": "SIM-1", "url": "https://127.0.0.1:4501/pilotage",
 //!   "cert_sha256": "<64 hex>", "launch": [lat, lon, alt_m]}]`. The name is
-//!   the member's lane name; the certificate pins its host.
+//!   the member's lane name; the certificate pins its host. An optional
+//!   `"token_file"` names the absolute path of the secret the coordinator
+//!   presents to that host; the approver secret lets it pass the team's
+//!   approval down.
 //! - `PILOTAGE_LANE_NAME`: the team lane's name; default `TEAM`.
 
 use std::path::PathBuf;
@@ -22,6 +25,7 @@ pub(crate) struct MemberHost {
     pub name: String,
     pub url: String,
     pub cert_sha256: [u8; 32],
+    pub token: Option<pilotage_protocol::JoinToken>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -37,6 +41,8 @@ struct MemberEntry {
     url: String,
     cert_sha256: String,
     launch: [f64; 3],
+    #[serde(default)]
+    token_file: Option<PathBuf>,
 }
 
 impl CoordinatorConfig {
@@ -66,6 +72,12 @@ impl CoordinatorConfig {
                     &format!("{}: cert_sha256 is not 64 hex digits", entry.name),
                 )
             })?;
+            let token = entry
+                .token_file
+                .as_deref()
+                .map(crate::runtime::network::read_token_blocking)
+                .transpose()
+                .map_err(|e| members_error(path.clone(), &format!("{}: {e}", entry.name)))?;
             let [latitude_deg, longitude_deg, launch_altitude_m] = entry.launch;
             members.push(Member {
                 name: entry.name.clone(),
@@ -79,6 +91,7 @@ impl CoordinatorConfig {
                 name: entry.name,
                 url: entry.url,
                 cert_sha256,
+                token,
             });
         }
         Ok(Self {

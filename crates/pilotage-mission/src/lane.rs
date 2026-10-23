@@ -10,6 +10,7 @@ mod approval;
 mod compile;
 mod digest;
 mod run;
+mod steering;
 
 #[cfg(test)]
 mod tests;
@@ -22,6 +23,7 @@ use crate::survey::SurveyRequest;
 pub use compile::SurveyDefaults;
 pub use digest::proposal_digest;
 pub use run::{FrameAssessment, RunProgress};
+pub use steering::{HOST_ISSUER, Requester, Steering};
 
 use compile::Compiled;
 use run::RunTracker;

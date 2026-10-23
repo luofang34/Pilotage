@@ -16,6 +16,14 @@ use crate::runtime::mission_lane::LaneInbound;
 use crate::runtime::wire_codec::encode_mission_payload;
 
 impl<A: VehicleAdapter> EngineActor<A> {
+    pub(super) fn on_requester(
+        &mut self,
+        client: ClientKey,
+        requester: pilotage_mission::Requester,
+    ) {
+        self.clients.set_requester(client, requester);
+    }
+
     pub(super) fn on_mission_intent(
         &mut self,
         client: ClientKey,
@@ -26,7 +34,12 @@ impl<A: VehicleAdapter> EngineActor<A> {
             self.refuse_mission(client, request_id, "this host runs no mission lane");
             return;
         };
-        match lane.try_send(LaneInbound::Intent { client, intent }) {
+        let requester = self.clients.requester(client);
+        match lane.try_send(LaneInbound::Intent {
+            client,
+            requester,
+            intent,
+        }) {
             Ok(()) => {}
             Err(TrySendError::Full(_)) => {
                 self.refuse_mission(

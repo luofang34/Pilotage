@@ -24,6 +24,7 @@ mod engine;
 mod engine_mission;
 mod engine_transfer;
 mod event;
+pub mod mission;
 mod motion;
 mod reconnect;
 mod streams;

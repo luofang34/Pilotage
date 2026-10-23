@@ -118,16 +118,22 @@ fn explicit_remote_network_flags_parse_without_embedding_a_secret() {
         "0.0.0.0",
         "--join-token-file",
         "/tmp/pilotage-token",
+        "--approver-token-file",
+        "/tmp/pilotage-approver",
     ]
     .map(str::to_owned);
     let parsed = parse_args(&args).unwrap();
     assert_eq!(parsed.bind_ip, std::net::Ipv4Addr::UNSPECIFIED);
     assert_eq!(parsed.join_token_file, Some("/tmp/pilotage-token".into()));
+    assert_eq!(
+        parsed.approver_token_file,
+        Some("/tmp/pilotage-approver".into())
+    );
 }
 
 #[test]
 fn malformed_network_flags_are_rejected() {
-    for flag in ["--bind", "--join-token-file"] {
+    for flag in ["--bind", "--join-token-file", "--approver-token-file"] {
         assert_eq!(
             parse_args(&[flag.to_owned()]),
             Err(CliError::MissingNetworkValue(flag.to_owned()))

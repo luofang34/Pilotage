@@ -1,22 +1,26 @@
 //! `mission-operator`: a headless operator for a mission lane (ADR-0052).
-//! It connects to one host as an ordinary client and sends the operator's
-//! intents: the same ones a client's mission panel sends.
+//! It connects to one host as an ordinary client and sends the commands
+//! every client sends, through the same mission desk as the App.
 //!
 //! ```text
-//! mission-operator --host URL --cert HEX propose OBJECTIVE.json
-//! mission-operator --host URL --cert HEX approve DIGEST [--max-height M] [--expires-min N] [--refly N] [--no-revise]
-//! mission-operator --host URL --cert HEX start DIGEST | hold | resume | abort
-//! mission-operator --host URL --cert HEX watch [--seconds N]
-//! mission-operator --host URL --cert HEX run OBJECTIVE.json --approve [envelope options] [--seconds N]
+//! mission-operator --host URL --cert HEX [--token-file PATH] [--name NAME] COMMAND
+//!   propose OBJECTIVE.json
+//!   approve [DIGEST] [--max-height M] [--expires-min N] [--refly N] [--no-revise] [--reserve F]
+//!   start [DIGEST] | hold | resume | abort
+//!   watch [--seconds N]
+//!   run OBJECTIVE.json --approve [policy options] [--seconds N]
+//!   agent
 //! ```
 //!
-//! `run` proposes, approves under the stated envelope, starts and watches
+//! `run` proposes, approves under the stated policy, starts and watches
 //! until the lane ends; `--approve` states the operator's approval
-//! explicitly. Every receipt and status goes to standard output as one
-//! JSON object per line.
+//! explicitly. `agent` reads commands from standard input, one JSON object
+//! per line such as `{"command": "hold"}`, for an automated agent. Every
+//! receipt and status goes to standard output as one JSON object per line.
+//! The host decides what the client may do from the secret in
+//! `--token-file`: only its approver secret lets a client approve.
 
 mod cli;
-mod objective;
 mod session;
 
 use std::io::Write as _;

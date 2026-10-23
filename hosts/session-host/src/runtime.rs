@@ -44,7 +44,7 @@ pub use options::{
     RuntimeOptions, SURVEY_DEFAULT_HEIGHT_M,
 };
 mod network;
-pub use network::{NetworkError, NetworkOptions};
+pub use network::{Admission, NetworkError, NetworkOptions};
 // The envelope encoder is exported for the wire-fixture test: the committed
 // browser fixture must be THIS host's bytes, not a hand-maintained copy.
 pub use wire_codec::encode_envelope_message;
@@ -318,7 +318,7 @@ async fn run_until_shutdown<A>(
     engine_rx: mpsc::Receiver<ToEngine>,
     shutdown_rx: oneshot::Receiver<()>,
     start: tokio::time::Instant,
-    join_token: Option<pilotage_protocol::JoinToken>,
+    admission: Admission,
 ) where
     A: VehicleAdapter + Send + 'static,
 {
@@ -335,7 +335,7 @@ async fn run_until_shutdown<A>(
     ));
 
     tokio::select! {
-        () = accept_loop(&endpoint, &engine_tx, &mut tasks, start, media.clone(), join_token) => {}
+        () = accept_loop(&endpoint, &engine_tx, &mut tasks, start, media.clone(), admission) => {}
         result = shutdown_rx => {
             // A dropped sender (host caller gone without an explicit
             // shutdown) is treated the same as an explicit signal, so
@@ -368,7 +368,7 @@ async fn run_with_media_until_shutdown<A>(
     engine_rx: mpsc::Receiver<ToEngine>,
     shutdown_rx: oneshot::Receiver<()>,
     start: tokio::time::Instant,
-    join_token: Option<pilotage_protocol::JoinToken>,
+    admission: Admission,
 ) where
     A: VehicleAdapter + Send + 'static,
 {
@@ -381,7 +381,7 @@ async fn run_with_media_until_shutdown<A>(
         engine_rx,
         shutdown_rx,
         start,
-        join_token,
+        admission,
     )
     .await;
     // The adapter is gone. Give the producer and media writers one shared
@@ -415,7 +415,7 @@ async fn accept_loop(
     tasks: &mut JoinSet<()>,
     start: tokio::time::Instant,
     media: Option<MediaHandle>,
-    join_token: Option<pilotage_protocol::JoinToken>,
+    admission: Admission,
 ) {
     let next_client = AtomicU64::new(0);
     loop {
@@ -442,7 +442,7 @@ async fn accept_loop(
                 start,
                 engine_tx,
                 media.clone(),
-                join_token.clone(),
+                admission.clone(),
             ),
         ));
     }
@@ -457,7 +457,7 @@ async fn accept_and_run(
     start: tokio::time::Instant,
     engine_tx: mpsc::Sender<ToEngine>,
     media: Option<MediaHandle>,
-    join_token: Option<pilotage_protocol::JoinToken>,
+    admission: Admission,
 ) {
     let session_request = match incoming.await {
         Ok(request) => request,
@@ -473,7 +473,7 @@ async fn accept_and_run(
             return;
         }
     };
-    connection::run_connection(connection, client, start, engine_tx, media, join_token).await;
+    connection::run_connection(connection, client, start, engine_tx, media, admission).await;
 }
 
 /// Wraps a future so its exit is logged by name (ADR-0015: critical tasks

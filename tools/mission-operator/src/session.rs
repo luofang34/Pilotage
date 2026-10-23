@@ -1,10 +1,15 @@
-//! One operator session with a host: admission, intents, receipts and the
-//! lane's status, each written as one JSON line.
+//! One operator session with a host: admission, commands, receipts and the
+//! lane's status, each written as one JSON line. The desk that resolves
+//! commands into intents is the one every client uses.
 
 use std::io::Write as _;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use pilotage_client_link::Link;
+use pilotage_client_session::mission::{
+    ApprovalPolicy, FiledReceipt, MissionCommand, MissionDesk, ProposalView, ReceiptView,
+    SurveyFile,
+};
 use pilotage_client_session::{
     ClientAction, ClientConfig, ClientEngine, ModuleEvent, ReconnectPolicy, TransportEvent,
 };
@@ -13,8 +18,9 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
-use crate::cli::{Action, Command, Envelope, OperatorError, hex};
-use crate::objective;
+use crate::cli::{Action, Command, OperatorError};
+
+mod agent;
 
 /// How long a receipt may take: a team answers after its members do.
 const RECEIPT_TIMEOUT: Duration = Duration::from_secs(60);
@@ -23,52 +29,32 @@ struct Session {
     link: Link,
     transport: mpsc::Receiver<TransportEvent>,
     engine: ClientEngine,
+    desk: MissionDesk,
+    policy: ApprovalPolicy,
     started: Instant,
-    requests: u64,
-    /// The newest status of the lane.
-    last_status: Option<wire::MissionStatus>,
-    /// Receipts not yet claimed by the intent they answer.
-    receipts: Vec<wire::MissionReceipt>,
+    /// Status lines go out on every status, or only on a change.
+    every_status: bool,
+    last_shown: Option<(Value, Instant)>,
     last_telemetry: Option<Instant>,
 }
 
 pub(crate) async fn execute(command: Command) -> Result<bool, OperatorError> {
-    let mut session = Session::open(&command.url, command.cert_sha256).await?;
+    let mut session = Session::open(&command).await?;
     let deadline = Instant::now() + Duration::from_secs(command.seconds);
     let outcome = match command.action {
-        Action::Propose(path) => {
-            let objective = objective::read_blocking(&path)?;
-            session
-                .ask(wire::mission_intent::Action::Propose(objective))
-                .await
-                .map(|r| accepted(&r))
-        }
-        Action::Approve(digest, envelope) => session
-            .ask(approval(digest, envelope))
+        Action::Send(mission) => session
+            .ask(&mission)
             .await
-            .map(|r| accepted(&r)),
-        Action::Start(digest) => session.ask(start(digest)).await.map(|r| accepted(&r)),
-        Action::Hold => session
-            .ask(wire::mission_intent::Action::Hold(wire::MissionHold {}))
-            .await
-            .map(|r| accepted(&r)),
-        Action::Resume => session
-            .ask(wire::mission_intent::Action::Resume(wire::MissionResume {}))
-            .await
-            .map(|r| accepted(&r)),
-        Action::Abort => session
-            .ask(wire::mission_intent::Action::Abort(wire::MissionAbort {}))
-            .await
-            .map(|r| accepted(&r)),
+            .map(|r| r.is_some_and(|r| r.accepted())),
         Action::Watch => session.watch(deadline).await,
-        Action::Run(path, envelope) => session.run(&path, envelope, deadline).await,
+        Action::Run(objective) => session.run(objective, deadline).await,
+        Action::Agent => {
+            session.every_status = false;
+            session.agent().await
+        }
     };
     session.link.shutdown().await;
     outcome
-}
-
-fn accepted(receipt: &wire::MissionReceipt) -> bool {
-    receipt.outcome == wire::MissionReceiptOutcome::Accepted as i32
 }
 
 fn now_ms() -> u64 {
@@ -77,55 +63,25 @@ fn now_ms() -> u64 {
         .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
 }
 
-fn approval(digest: Vec<u8>, envelope: Envelope) -> wire::mission_intent::Action {
-    let now = now_ms();
-    wire::mission_intent::Action::Approve(wire::MissionApproval {
-        approval_id: format!("approval-{now}"),
-        proposal_digest: digest,
-        approver: Some(wire::RecordOrigin {
-            issuer: "local".to_owned(),
-            subject: "mission-operator".to_owned(),
-            organization: String::new(),
-        }),
-        envelope: Some(wire::AdaptationEnvelope {
-            max_height_m: envelope.max_height_m,
-            min_reserve_fraction: envelope.min_reserve,
-            expires_unix_ms: now + u64::try_from(envelope.expires.as_millis()).unwrap_or(u64::MAX),
-            bound: Vec::new(),
-            permit_execute: true,
-            permit_revise: envelope.revise,
-            permit_allocate: true,
-            permit_change_objective: false,
-            max_refly_lines: envelope.refly_lines,
-        }),
-        approved_unix_ms: now,
-    })
-}
-
-fn start(digest: Vec<u8>) -> wire::mission_intent::Action {
-    wire::mission_intent::Action::Start(wire::MissionStart {
-        proposal_digest: digest,
-    })
-}
-
 impl Session {
-    async fn open(url: &str, cert_sha256: [u8; 32]) -> Result<Self, OperatorError> {
-        let (link, transport) = Link::connect(url, cert_sha256)
+    async fn open(command: &Command) -> Result<Self, OperatorError> {
+        let (link, transport) = Link::connect(&command.url, command.cert_sha256)
             .await
             .map_err(OperatorError::Link)?;
         let engine = ClientEngine::new(ClientConfig {
-            join_token: None,
-            client_name: "mission-operator".to_owned(),
+            join_token: command.token.clone(),
+            client_name: command.name.clone(),
             reconnect: ReconnectPolicy::default(),
         });
         let mut session = Self {
             link,
             transport,
             engine,
+            desk: MissionDesk::new(&command.name, now_ms()),
+            policy: command.policy,
             started: Instant::now(),
-            requests: 0,
-            last_status: None,
-            receipts: Vec::new(),
+            every_status: true,
+            last_shown: None,
             last_telemetry: None,
         };
         let actions = session.engine.handle(TransportEvent::Connected, 0);
@@ -134,31 +90,41 @@ impl Session {
         while session.engine.admission().is_none() {
             session.step(deadline).await?;
         }
+        emit(&json!({"event": "admitted", "as": command.name}));
         Ok(session)
     }
 
-    /// Sends one intent and waits for its receipt.
+    /// Resolves and sends `command`. Returns the request id, or `None`
+    /// when the desk refused it, which it reports.
+    async fn submit(&mut self, command: &MissionCommand) -> Result<Option<String>, OperatorError> {
+        let sent = self
+            .desk
+            .resolve(command, now_ms())
+            .and_then(|action| self.desk.send(&self.engine, action));
+        match sent {
+            Ok((request_id, actions)) => {
+                self.perform(actions).await?;
+                Ok(Some(request_id))
+            }
+            Err(refusal) => {
+                emit(&json!({"event": "refused", "by": "desk", "reason": refusal.to_string()}));
+                Ok(None)
+            }
+        }
+    }
+
+    /// Sends `command` and waits for its receipt.
     async fn ask(
         &mut self,
-        action: wire::mission_intent::Action,
-    ) -> Result<wire::MissionReceipt, OperatorError> {
-        self.requests = self.requests.wrapping_add(1);
-        let request_id = format!("operator-{}-{}", now_ms(), self.requests);
-        let actions = self.engine.mission_intent(wire::MissionIntent {
-            request_id: request_id.clone(),
-            action: Some(action),
-        });
-        self.perform(actions).await?;
+        command: &MissionCommand,
+    ) -> Result<Option<FiledReceipt>, OperatorError> {
+        let Some(request_id) = self.submit(command).await? else {
+            return Ok(None);
+        };
         let deadline = Instant::now() + RECEIPT_TIMEOUT;
         loop {
-            if let Some(index) = self
-                .receipts
-                .iter()
-                .position(|r| r.request_id == request_id)
-            {
-                let receipt = self.receipts.swap_remove(index);
-                emit(&receipt_json(&receipt));
-                return Ok(receipt);
+            if let Some(receipt) = self.desk.receipt().filter(|r| r.request_id == request_id) {
+                return Ok(Some(receipt.clone()));
             }
             self.step(deadline).await?;
         }
@@ -170,7 +136,7 @@ impl Session {
                 return Ok(false);
             }
             if let Some(ModuleEvent::MissionStatus(_)) = self.step(deadline).await?
-                && let Some(done) = self.last_status.as_ref().and_then(|s| terminal(s.state))
+                && let Some(done) = terminal(self.desk.state())
             {
                 return Ok(done);
             }
@@ -179,29 +145,40 @@ impl Session {
 
     async fn run(
         &mut self,
-        path: &std::path::Path,
-        envelope: Envelope,
+        objective: SurveyFile,
         deadline: Instant,
     ) -> Result<bool, OperatorError> {
-        let objective = objective::read_blocking(path)?;
-        let receipt = self
-            .ask(wire::mission_intent::Action::Propose(objective))
-            .await?;
-        let Some(digest) = receipt
-            .proposal
-            .as_ref()
-            .filter(|_| accepted(&receipt))
-            .map(|p| p.digest.clone())
-        else {
-            return Ok(false);
-        };
-        if !accepted(&self.ask(approval(digest.clone(), envelope)).await?) {
-            return Ok(false);
-        }
-        if !accepted(&self.ask(start(digest)).await?) {
-            return Ok(false);
+        let steps = [
+            MissionCommand::Propose { objective },
+            MissionCommand::Approve {
+                digest: None,
+                policy: self.policy,
+            },
+            MissionCommand::Start { digest: None },
+        ];
+        for command in &steps {
+            if !self.ask(command).await?.is_some_and(|r| r.accepted()) {
+                return Ok(false);
+            }
+            if matches!(command, MissionCommand::Approve { .. }) {
+                self.await_state(wire::MissionLaneState::Admitted, deadline)
+                    .await?;
+            }
         }
         self.watch(deadline).await
+    }
+
+    /// Waits until the lane's status reports `state`, so a start names the
+    /// proposal the lane admitted.
+    async fn await_state(
+        &mut self,
+        state: wire::MissionLaneState,
+        deadline: Instant,
+    ) -> Result<(), OperatorError> {
+        while self.desk.state() != state {
+            self.step(deadline).await?;
+        }
+        Ok(())
     }
 
     /// Waits for the next transport event and performs what it asks.
@@ -211,6 +188,13 @@ impl Session {
             .await
             .map_err(|_| OperatorError::Host("timed out".to_owned()))?
             .ok_or_else(|| OperatorError::Host("the link closed".to_owned()))?;
+        self.on_transport(event).await
+    }
+
+    async fn on_transport(
+        &mut self,
+        event: TransportEvent,
+    ) -> Result<Option<ModuleEvent>, OperatorError> {
         let now = u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX);
         let actions = self.engine.handle(event, now);
         self.perform(actions).await
@@ -230,12 +214,12 @@ impl Session {
                     .map_err(OperatorError::Link)?,
                 ClientAction::Emit(ModuleEvent::Telemetry(sample)) => self.telemetry(&sample),
                 ClientAction::Emit(ModuleEvent::MissionStatus(status)) => {
-                    emit(&status_json(&status));
-                    self.last_status = Some((*status).clone());
+                    self.desk.on_status(status.clone());
+                    self.show_status();
                     produced = Some(ModuleEvent::MissionStatus(status));
                 }
                 ClientAction::Emit(ModuleEvent::MissionReceipt(receipt)) => {
-                    self.receipts.push(*receipt)
+                    self.on_receipt(*receipt)
                 }
                 ClientAction::Stop(fault) => return Err(OperatorError::Host(fault.to_string())),
                 ClientAction::ScheduleReconnect { .. } => {
@@ -246,9 +230,42 @@ impl Session {
         }
         Ok(produced)
     }
-}
 
-impl Session {
+    fn on_receipt(&mut self, receipt: wire::MissionReceipt) {
+        let proposal = receipt.proposal.as_ref().map(ProposalView::of);
+        let Some(filed) = self.desk.on_receipt(receipt) else {
+            return;
+        };
+        let mut line = json!({"event": "receipt"});
+        merge(&mut line, &ReceiptView::of(filed));
+        if let Some(proposal) = proposal.filter(|_| filed.accepted()) {
+            line["proposal"] = json!(proposal);
+        }
+        emit(&line);
+    }
+
+    /// Writes the lane's status: every one, or in agent mode only a change
+    /// of what the lane does, and at least every ten seconds.
+    fn show_status(&mut self) {
+        let Some(view) = self.desk.view(true, &self.policy) else {
+            return;
+        };
+        let mut line = json!({"event": "status"});
+        merge(&mut line, &view);
+        let mut gist = line.clone();
+        gist["sequence"] = Value::Null;
+        if !self.every_status
+            && self
+                .last_shown
+                .as_ref()
+                .is_some_and(|(shown, at)| *shown == gist && at.elapsed() < Duration::from_secs(10))
+        {
+            return;
+        }
+        self.last_shown = Some((gist, Instant::now()));
+        emit(&line);
+    }
+
     /// With `PILOTAGE_OPERATOR_TELEMETRY=1`, one line a second with the
     /// vehicle's position, height and ground speed.
     fn telemetry(&mut self, sample: &wire::TelemetrySample) {
@@ -268,53 +285,27 @@ impl Session {
         self.last_telemetry = Some(Instant::now());
         let speed = avionics.vel_n_mps.hypot(avionics.vel_e_mps);
         emit(
-            &json!({"lat": fix.latitude_deg, "lon": fix.longitude_deg, "height_m": -avionics.pos_d_m, "speed_mps": speed}),
+            &json!({"event": "telemetry", "lat": fix.latitude_deg, "lon": fix.longitude_deg, "height_m": -avionics.pos_d_m, "speed_mps": speed}),
         );
     }
 }
 
 /// `Some(ended well)` for a lane that ended.
-fn terminal(state: i32) -> Option<bool> {
-    match wire::MissionLaneState::try_from(state).ok()? {
+fn terminal(state: wire::MissionLaneState) -> Option<bool> {
+    match state {
         wire::MissionLaneState::Complete => Some(true),
         wire::MissionLaneState::Failed | wire::MissionLaneState::Aborted => Some(false),
         _ => None,
     }
 }
 
-fn state_name(state: i32) -> String {
-    wire::MissionLaneState::try_from(state)
-        .map_or_else(|_| state.to_string(), |s| format!("{s:?}").to_lowercase())
-}
-
-fn task_state_name(state: i32) -> String {
-    wire::MissionTaskState::try_from(state)
-        .map_or_else(|_| state.to_string(), |s| format!("{s:?}").to_lowercase())
-}
-
-fn status_json(status: &wire::MissionStatus) -> Value {
-    let tasks: Vec<Value> = status
-        .tasks
-        .iter()
-        .map(|t| {
-            let e = t.evidence.clone().unwrap_or_default();
-            json!({"task": t.task_id, "state": task_state_name(t.state), "frames": e.frames, "assessed": e.assessed, "usable": e.usable, "reflown": t.reflown})
-        })
-        .collect();
-    let members: Vec<Value> = status
-        .members
-        .iter()
-        .map(|m| json!({"lane": m.lane, "state": state_name(m.state), "active": m.active_task, "simulated": m.simulated, "detail": m.detail}))
-        .collect();
-    json!({"status": status.lane, "state": state_name(status.state), "sequence": status.sequence, "simulated": status.simulated, "active": status.active_task, "detail": status.detail, "tasks": tasks, "members": members})
-}
-
-fn receipt_json(receipt: &wire::MissionReceipt) -> Value {
-    let proposal = receipt.proposal.as_ref().map(|p| {
-        let e = p.estimates.unwrap_or_default();
-        json!({"digest": hex(&p.digest), "tasks": p.tasks.len(), "members": p.members.len(), "lines": e.lines, "path_length_m": e.path_length_m.round(), "duration_s": e.duration_s.round(), "line_spacing_m": e.line_spacing_m})
-    });
-    json!({"receipt": receipt.request_id, "lane": receipt.lane, "accepted": accepted(receipt), "reason": receipt.reason, "proposal": proposal})
+/// Adds the fields of `value` to the object `line`.
+fn merge(line: &mut Value, value: &impl serde::Serialize) {
+    if let (Some(line), Ok(Value::Object(fields))) =
+        (line.as_object_mut(), serde_json::to_value(value))
+    {
+        line.extend(fields);
+    }
 }
 
 fn emit(value: &Value) {

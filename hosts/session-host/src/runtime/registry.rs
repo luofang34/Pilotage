@@ -6,6 +6,7 @@
 
 use std::collections::BTreeMap;
 
+use pilotage_mission::Requester;
 use pilotage_session::ClientKey;
 use tokio::sync::mpsc;
 
@@ -23,6 +24,8 @@ pub const OUTBOUND_QUEUE_CAPACITY: usize = 256;
 #[derive(Debug, Default)]
 pub struct ClientRegistry {
     clients: BTreeMap<ClientKey, mpsc::Sender<ToConnection>>,
+    /// Who each admitted connection is to the mission lane.
+    requesters: BTreeMap<ClientKey, Requester>,
 }
 
 impl ClientRegistry {
@@ -39,6 +42,25 @@ impl ClientRegistry {
     /// Removes a client on disconnect.
     pub fn remove(&mut self, client: ClientKey) {
         self.clients.remove(&client);
+        self.requesters.remove(&client);
+    }
+
+    /// Records who an admitted connection is.
+    pub fn set_requester(&mut self, client: ClientKey, requester: Requester) {
+        self.requesters.insert(client, requester);
+    }
+
+    /// Who `client` is to the mission lane. A client that no connection
+    /// admitted runs inside the host, so it may approve.
+    #[must_use]
+    pub fn requester(&self, client: ClientKey) -> Requester {
+        self.requesters
+            .get(&client)
+            .cloned()
+            .unwrap_or_else(|| Requester {
+                subject: format!("in-process-{}", client.as_u64()),
+                may_approve: true,
+            })
     }
 
     /// Returns the sender for one client, if it is still connected.

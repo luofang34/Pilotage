@@ -68,6 +68,8 @@ pub struct CliArgs {
     pub bind_ip: IpAddr,
     /// Absolute path to a hexadecimal admission secret.
     pub join_token_file: Option<PathBuf>,
+    /// Absolute path to the secret that admits a mission approver.
+    pub approver_token_file: Option<PathBuf>,
     /// Which vehicle adapter to embed.
     pub adapter: AdapterKind,
 }
@@ -116,6 +118,7 @@ pub fn parse_args(args: &[String]) -> Result<CliArgs, CliError> {
     let mut adapter = AdapterKind::default();
     let mut bind_ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
     let mut join_token_file = None;
+    let mut approver_token_file = None;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
@@ -130,6 +133,12 @@ pub fn parse_args(args: &[String]) -> Result<CliArgs, CliError> {
                     .next()
                     .ok_or_else(|| CliError::MissingNetworkValue(arg.clone()))?;
                 join_token_file = Some(PathBuf::from(value));
+            }
+            "--approver-token-file" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| CliError::MissingNetworkValue(arg.clone()))?;
+                approver_token_file = Some(PathBuf::from(value));
             }
             "--port" => {
                 let value = iter.next().ok_or(CliError::MissingPortValue)?;
@@ -160,6 +169,7 @@ pub fn parse_args(args: &[String]) -> Result<CliArgs, CliError> {
         port,
         bind_ip,
         join_token_file,
+        approver_token_file,
         adapter,
     })
 }
