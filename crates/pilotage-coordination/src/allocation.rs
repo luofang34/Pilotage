@@ -7,6 +7,14 @@ use pilotage_protocol::wire;
 
 use crate::geometry::{Local, clip_to_strip, dot, longest_edge_bearing, sweep_offsets};
 
+/// How far inside its outer swath edges a band or a strip is cut, metres.
+/// A member measures the band in a tangent plane at its own launch point,
+/// where the band's edges can stand a little wider than in the team's
+/// frame: over kilometres of lines, enough to fit one line more. Cut this
+/// much inside, the member lays exactly the team's lines, each shifted
+/// inward by no more than this.
+const EDGE_INSET_M: f64 = 2.0;
+
 /// One member's share of a survey.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Assignment {
@@ -80,8 +88,8 @@ pub fn allocate(
         let (Some(first), Some(last)) = (offsets.get(next), offsets.get(next + take - 1)) else {
             break;
         };
-        let half = footprint_m / 2.0;
-        let band = clip_to_strip(&vertices, axis, low + first - half, low + last + half);
+        let edge = footprint_m / 2.0 - EDGE_INSET_M;
+        let band = clip_to_strip(&vertices, axis, low + first - edge, low + last + edge);
         assignments.push(Assignment {
             member: member.clone(),
             band: band.iter().map(|p| local.unproject(*p)).collect(),
@@ -137,8 +145,8 @@ impl Across {
     }
 
     /// The area clipped to the swaths of the lines at `positions`, one
-    /// footprint wide around each: a member's planner lays those lines in
-    /// it, given the team's spacing.
+    /// footprint wide around each less the edge inset: a member's planner
+    /// lays those lines in it, given the team's spacing.
     pub(crate) fn strip(
         &self,
         area: &[wire::GeoPoint],
@@ -151,8 +159,8 @@ impl Across {
             return Vec::new();
         }
         let vertices: Vec<[f64; 2]> = area.iter().map(|p| self.local.project(p)).collect();
-        let half = footprint_m / 2.0;
-        clip_to_strip(&vertices, self.axis, low - half, high + half)
+        let edge = footprint_m / 2.0 - EDGE_INSET_M;
+        clip_to_strip(&vertices, self.axis, low - edge, high + edge)
             .iter()
             .map(|p| self.local.unproject(*p))
             .collect()
