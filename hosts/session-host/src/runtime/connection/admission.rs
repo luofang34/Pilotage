@@ -4,9 +4,12 @@ use std::time::Duration;
 use std::{future::Future, task::Poll};
 
 use pilotage_protocol::{ADMISSION_REJECTED_CLOSE_CODE, ClientHello};
-use pilotage_session::DomainEnvelope;
+use pilotage_session::{ClientKey, DomainEnvelope};
+use tokio::sync::mpsc;
+use tokio::time::Instant;
 use wtransport::{Connection, RecvStream, SendStream};
 
+use crate::runtime::engine_actor::ToEngine;
 use crate::runtime::wire_codec::{
     InboundBootstrap, MAX_BOOTSTRAP_FRAME_LEN, complete_frame_len, decode_bootstrap_message,
 };
@@ -102,4 +105,28 @@ async fn discard_buffered_datagrams(connection: &Connection) -> Option<()> {
             None => return Some(()),
         }
     }
+}
+
+/// Tells the engine who the admitted client is to the mission lane, then
+/// forwards its hello. Returns `false` when the engine is gone.
+pub(super) async fn introduce(
+    to_engine: &mpsc::Sender<ToEngine>,
+    client: ClientKey,
+    hello: pilotage_protocol::ClientHello,
+    may_approve: bool,
+    start: Instant,
+) -> bool {
+    let requester = pilotage_mission::Requester {
+        subject: hello.client_name.clone(),
+        may_approve,
+    };
+    if to_engine
+        .send(ToEngine::Requester { client, requester })
+        .await
+        .is_err()
+    {
+        return false;
+    }
+    super::forward(to_engine, client, DomainEnvelope::Hello(hello), start).await;
+    true
 }

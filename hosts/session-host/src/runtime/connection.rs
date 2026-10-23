@@ -145,18 +145,9 @@ pub async fn run_connection(
         }
         return;
     }
-    let requester = pilotage_mission::Requester {
-        subject: hello.client_name.clone(),
-        may_approve,
-    };
-    if to_engine
-        .send(ToEngine::Requester { client, requester })
-        .await
-        .is_err()
-    {
+    if !admission::introduce(&to_engine, client, hello, may_approve, start).await {
         return;
     }
-    forward(&to_engine, client, DomainEnvelope::Hello(hello), start).await;
 
     tokio::select! {
         () = run_reader(&connection, recv, pending, client, start, &to_engine, media.as_ref()) => {}
