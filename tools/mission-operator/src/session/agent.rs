@@ -1,13 +1,13 @@
 //! Agent mode: commands arrive on standard input, one JSON object per
 //! line, and are sent without waiting for their receipts. Receipts and
-//! status changes go out as they arrive. The session ends when standard
-//! input closes.
+//! status changes go out as they arrive. `{"command": "status"}` prints
+//! the lane's full view, with every task's path and evidence. The session
+//! ends when standard input closes.
 
 use pilotage_client_session::mission::MissionCommand;
-use serde_json::json;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
-use super::{Session, emit};
+use super::Session;
 use crate::cli::OperatorError;
 
 impl Session {
@@ -17,15 +17,19 @@ impl Session {
             tokio::select! {
                 line = lines.next_line() => match line.map_err(OperatorError::Stdin)? {
                     Some(line) if line.trim().is_empty() => {}
+                    Some(line) if is_status(&line) => {
+                        match self.desk.view(true, &self.policy) {
+                            Some(view) => self.output.full(&view),
+                            None => self.output.refused("desk", "the lane has published no status yet"),
+                        }
+                    }
                     Some(line) => match serde_json::from_str::<MissionCommand>(&line) {
                         Ok(command) => {
                             if let Some(request) = self.submit(&command).await? {
-                                emit(&json!({"event": "sent", "request": request}));
+                                self.output.sent(&request);
                             }
                         }
-                        Err(error) => {
-                            emit(&json!({"event": "refused", "by": "parser", "reason": error.to_string()}));
-                        }
+                        Err(error) => self.output.refused("parser", &error.to_string()),
                     },
                     None => return Ok(true),
                 },
@@ -38,4 +42,10 @@ impl Session {
             }
         }
     }
+}
+
+/// A request for the full view: `{"command": "status"}`.
+fn is_status(line: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(line)
+        .is_ok_and(|value| value.get("command").and_then(|c| c.as_str()) == Some("status"))
 }

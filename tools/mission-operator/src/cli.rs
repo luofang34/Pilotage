@@ -51,9 +51,11 @@ pub(crate) struct Command {
     pub policy: ApprovalPolicy,
     /// How long `watch` and `run` wait at most.
     pub seconds: u64,
+    /// Lines for a person rather than JSON lines for a program.
+    pub human: bool,
 }
 
-const USAGE: &str = "mission-operator --host URL --cert HEX [--token-file PATH] [--name NAME] (propose FILE | approve [DIGEST] [policy] | start [DIGEST] | hold | resume | abort | watch | run FILE --approve [policy] | agent | survey-agent FILE) [--seconds N]; policy: --max-height M --expires-min N --refly N --no-revise --reserve F";
+const USAGE: &str = "mission-operator --host URL --cert HEX [--token-file PATH] [--name NAME] [--json | --human] (propose FILE | approve [DIGEST] [policy] | start [DIGEST] | hold | resume | abort | watch | run FILE --approve [policy] | agent | survey-agent FILE) [--seconds N]; policy: --max-height M --expires-min N --refly N --no-revise --reserve F";
 
 pub(crate) fn parse(args: &[String]) -> Result<Command, OperatorError> {
     let usage = || OperatorError::Usage(USAGE.to_owned());
@@ -64,6 +66,8 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, OperatorError> {
     let mut seconds = 3_600;
     let mut policy = ApprovalPolicy::default();
     let mut approve = false;
+    // A terminal gets lines for a person; a pipe gets JSON lines.
+    let mut human = std::io::IsTerminal::is_terminal(&std::io::stdout());
     let mut positional = Vec::new();
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
@@ -80,6 +84,8 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, OperatorError> {
             "--reserve" => policy.min_reserve_fraction = value()?.parse().map_err(|_| usage())?,
             "--no-revise" => policy.permit_revise = false,
             "--approve" => approve = true,
+            "--json" => human = false,
+            "--human" => human = true,
             other => positional.push(other.to_owned()),
         }
     }
@@ -110,6 +116,7 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, OperatorError> {
         action,
         policy,
         seconds,
+        human,
     })
 }
 

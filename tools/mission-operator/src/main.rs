@@ -3,7 +3,7 @@
 //! every client sends, through the same mission desk as the App.
 //!
 //! ```text
-//! mission-operator --host URL --cert HEX [--token-file PATH] [--name NAME] COMMAND
+//! mission-operator --host URL --cert HEX [--token-file PATH] [--name NAME] [--json | --human] COMMAND
 //!   propose OBJECTIVE.json
 //!   approve [DIGEST] [--max-height M] [--expires-min N] [--refly N] [--no-revise] [--reserve F]
 //!   start [DIGEST] | hold | resume | abort
@@ -19,7 +19,9 @@
 //! per line such as `{"command": "hold"}`, for an automated agent.
 //! `survey-agent` is such an agent, scripted: it proposes, waits for a
 //! person to approve, starts, and resumes only the holds it may. Every
-//! receipt and status goes to standard output as one JSON object per line.
+//! receipt and status change goes to standard output: one short line for a
+//! person on a terminal, one JSON object per line otherwise (`--json` and
+//! `--human` choose).
 //! The host decides what the client may do from the secret in
 //! `--token-file`: only its approver secret lets a client approve.
 
