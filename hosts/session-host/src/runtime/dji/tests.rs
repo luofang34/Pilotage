@@ -248,6 +248,29 @@ fn the_heading_reference_is_an_explicit_true_or_magnetic_declaration() {
 }
 
 #[test]
+fn the_gimbal_yaw_frame_is_an_explicit_earth_or_vehicle_declaration() {
+    use pilotage_protocol::GimbalYawFrame;
+
+    use super::parse_gimbal_yaw_frame;
+
+    assert_eq!(parse_gimbal_yaw_frame(None).expect("absent"), None);
+    assert_eq!(
+        parse_gimbal_yaw_frame(Some("earth".into())).expect("earth frame"),
+        Some(GimbalYawFrame::Earth)
+    );
+    assert_eq!(
+        parse_gimbal_yaw_frame(Some("vehicle".into())).expect("vehicle frame"),
+        Some(GimbalYawFrame::Vehicle)
+    );
+    for value in ["", "Earth", "body", "true", "1"] {
+        assert!(matches!(
+            parse_gimbal_yaw_frame(Some(value.into())),
+            Err(DjiHostError::GimbalYawFrame { .. })
+        ));
+    }
+}
+
+#[test]
 fn an_unknown_mode_cannot_enable_control() {
     for value in ["", "bench", "true", "observed ", "BENCH-INITIAL-HORIZONTAL"] {
         assert!(matches!(
