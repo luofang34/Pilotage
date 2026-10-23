@@ -25,6 +25,34 @@ pub enum AdapterKind {
     Betaflight,
     /// The DJI USB bench adapter. Flight and positioning are not implemented.
     Dji,
+    /// No vehicle: a coordinator whose mission lane works through member
+    /// hosts (ADR-0028, ADR-0052).
+    Coordinator,
+}
+
+impl AdapterKind {
+    /// The adapter's name on the command line.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Reference => "reference",
+            Self::Gazebo => "gazebo",
+            Self::Aviate => "aviate",
+            Self::Px4 => "px4",
+            Self::ArduPilot => "ardupilot",
+            Self::Betaflight => "betaflight",
+            Self::Dji => "dji",
+            Self::Coordinator => "coordinator",
+        }
+    }
+
+    /// Whether the adapter drives a simulation by its nature. Adapters that
+    /// can drive either a simulation or a physical vehicle report `false`;
+    /// a lane then takes `PILOTAGE_LANE_SIMULATED`.
+    #[must_use]
+    pub const fn is_simulator(self) -> bool {
+        matches!(self, Self::Reference | Self::Gazebo)
+    }
 }
 
 /// Parsed command-line configuration.
@@ -116,6 +144,7 @@ pub fn parse_args(args: &[String]) -> Result<CliArgs, CliError> {
                     "ardupilot" => AdapterKind::ArduPilot,
                     "betaflight" => AdapterKind::Betaflight,
                     "dji" => AdapterKind::Dji,
+                    "coordinator" => AdapterKind::Coordinator,
                     other => return Err(CliError::InvalidAdapter(other.to_owned())),
                 };
             }

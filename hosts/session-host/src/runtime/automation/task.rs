@@ -5,7 +5,10 @@
 
 mod fencing;
 mod nav_guidance;
+mod run_control;
 mod session_flow;
+
+pub(crate) use run_control::RunControl;
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -30,6 +33,8 @@ use crate::runtime::connection::ToConnection;
 use crate::runtime::engine_actor::ToEngine;
 
 use super::ownship;
+use pilotage_session::ClientKey;
+
 use super::{AutomationStatus, MISSION_CLIENT, MissionPlan};
 use nav_guidance::{NavGuidancePublisher, NavPublication};
 
@@ -98,6 +103,14 @@ pub(super) struct MissionTask {
     lease_wanted: bool,
     /// Mission-clock time of the next lease request while held.
     lease_retry_at: Option<u64>,
+    /// The key this principal registers under.
+    client: ClientKey,
+    /// Hold, resume and abort from the mission lane.
+    controls: Option<mpsc::Receiver<RunControl>>,
+    /// An operator's hold: the vehicle is kept stopped in place.
+    operator_hold: bool,
+    /// Neutral frames still owed before an abort releases the lease.
+    stopping: Option<u8>,
 }
 
 impl MissionTask {
@@ -134,6 +147,10 @@ impl MissionTask {
             lease_due: false,
             lease_wanted: false,
             lease_retry_at: None,
+            client: MISSION_CLIENT,
+            controls: None,
+            operator_hold: false,
+            stopping: None,
         }
     }
 
@@ -168,6 +185,10 @@ impl MissionTask {
             lease_due: false,
             lease_wanted: false,
             lease_retry_at: None,
+            client: MISSION_CLIENT,
+            controls: None,
+            operator_hold: false,
+            stopping: None,
         }
     }
 
@@ -181,7 +202,7 @@ impl MissionTask {
     ) {
         let connected = self
             .send_command(ToEngine::ClientConnected {
-                client: MISSION_CLIENT,
+                client: self.client,
                 sender: outbound_tx,
             })
             .await;
@@ -198,6 +219,7 @@ impl MissionTask {
         }
         let mut ticker = tokio::time::interval(TICK_INTERVAL);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut controls = self.controls.take();
         loop {
             tokio::select! {
                 message = outbound_rx.recv() => match message {
@@ -208,6 +230,7 @@ impl MissionTask {
                     }
                     None => break,
                 },
+                control = run_control::next(&mut controls) => self.on_control(control),
                 _ = ticker.tick() => {
                     if !self.on_tick().await {
                         break;
@@ -262,6 +285,9 @@ impl MissionTask {
         if self.generation.is_none() && !self.held {
             return true;
         }
+        if self.operator_hold || self.stopping.is_some() {
+            return self.hold_tick().await;
+        }
         let nanos = self.elapsed_nanos();
         let output = {
             let Some(mission) = self.mission.as_mut() else {
@@ -270,7 +296,14 @@ impl MissionTask {
             mission.tick(MonotonicNanos::from_nanos(nanos))
         };
         self.log_events(&output.events);
-        self.update(|status| status.mission_state = Some(output.state));
+        let progress = self.mission.as_ref().map(MissionEngine::plan_progress);
+        self.update(|status| {
+            status.mission_state = Some(output.state);
+            if let Some((target, complete)) = progress {
+                status.target_waypoint = Some(target);
+                status.plan_complete = complete;
+            }
+        });
         if self.held {
             return true;
         }
@@ -457,7 +490,7 @@ impl MissionTask {
 
     async fn send_message_at(&self, message: DomainEnvelope, now: MonoTimestamp) -> bool {
         self.send_command(ToEngine::ClientMessage {
-            client: MISSION_CLIENT,
+            client: self.client,
             message: Box::new(message),
             now,
         })

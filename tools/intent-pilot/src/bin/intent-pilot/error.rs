@@ -35,28 +35,9 @@ pub(crate) enum PilotError {
     /// The model adapter cannot start.
     #[error("the model adapter is not usable")]
     Model(#[source] intent_pilot::ModelProcessError),
-    /// The WebTransport endpoint cannot be built.
-    #[error("cannot build the client endpoint")]
-    Endpoint(#[source] std::io::Error),
-    /// The host refused or dropped the connection attempt.
-    #[error("cannot connect to {url}")]
-    Connect {
-        /// The host URL.
-        url: String,
-        /// The connection failure.
-        #[source]
-        source: wtransport::error::ConnectingError,
-    },
-    /// A stream to the host cannot be opened.
-    #[error("cannot open the {stream} stream")]
-    Stream {
-        /// Which stream.
-        stream: &'static str,
-        /// The transport failure. It is boxed because the transport has
-        /// one error type for each step of opening a stream.
-        #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
-    },
+    /// The link to the host failed.
+    #[error("the link to the host failed")]
+    Link(#[source] pilotage_client_link::LinkError),
     /// The host did not complete a protocol step in time.
     #[error("the host did not complete `{step}` in {seconds} s")]
     HostTimeout {
@@ -70,15 +51,6 @@ pub(crate) enum PilotError {
     Unoffered {
         /// What is missing from the advertisement.
         detail: String,
-    },
-    /// A write to the host failed.
-    #[error("the link to the host went down during {stage}")]
-    LinkDown {
-        /// What the pilot was sending.
-        stage: &'static str,
-        /// The transport failure, boxed for the same reason as `Stream`.
-        #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
     },
     /// Another principal holds the motion scope now. The pilot stops and
     /// does not ask for the lease again.

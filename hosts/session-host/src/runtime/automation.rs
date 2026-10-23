@@ -13,6 +13,8 @@
 pub(crate) mod ownship;
 mod task;
 
+pub(crate) use task::RunControl;
+
 use navigate_contract::{ClockDomainId, GeodeticPosition};
 use pilotage_mission::{MissionConfig, MissionEngine, MissionState, SurveyRequest};
 use pilotage_session::ClientKey;
@@ -83,6 +85,15 @@ pub struct AutomationStatus {
     pub frames_rejected: u64,
     /// The engine closed this principal's connection.
     pub closed: bool,
+    /// Index of the waypoint the plan flies toward, once the engine is
+    /// built.
+    pub target_waypoint: Option<usize>,
+    /// The plan's last waypoint is captured.
+    pub plan_complete: bool,
+    /// An operator's hold keeps the vehicle stopped in place.
+    pub operator_held: bool,
+    /// An abort stopped the vehicle, released the lease and ended the run.
+    pub stopped: bool,
 }
 
 /// Where the plan comes from: a navdata snapshot the route expands
@@ -94,18 +105,42 @@ pub(crate) enum PlanSource {
     Survey(SurveyRequest),
 }
 
-/// A validated mission: the plan source and the options the flight engine
+/// A validated mission: the plan source and the config the flight engine
 /// is built from once capabilities are known.
 pub(crate) struct MissionPlan {
     source: PlanSource,
-    options: MissionOptions,
+    config: MissionConfig,
 }
 
 impl MissionPlan {
     /// The mission config over this plan's route and anchor; limits are
     /// tightened by the caller from the advertised capabilities.
     fn config(&self) -> MissionConfig {
-        Self::config_for(&self.options)
+        self.config.clone()
+    }
+
+    /// A survey plan over an explicit config: a run a mission lane admitted.
+    pub(crate) fn survey(request: SurveyRequest, config: MissionConfig) -> Self {
+        Self {
+            source: PlanSource::Survey(request),
+            config,
+        }
+    }
+
+    /// The config every lane proposal starts from; compilation sets the
+    /// anchor, height and speed from the objective.
+    pub(crate) fn lane_template(
+        ownship_source: pilotage_mission::OwnshipSource,
+        execution_target: pilotage_mission::ExecutionTarget,
+    ) -> MissionConfig {
+        let mut config = MissionConfig::new(
+            String::new(),
+            GeodeticPosition::new(0.0, 0.0, 0.0),
+            MISSION_CLOCK,
+        );
+        config.ownship_source = ownship_source;
+        config.execution_target = execution_target;
+        config
     }
 
     /// The mission config the options describe. A survey carries no route.
@@ -158,7 +193,7 @@ fn prepare_survey(
 ) -> Result<MissionPlan, HostError> {
     let plan = MissionPlan {
         source: PlanSource::Survey(request.clone()),
-        options: options.clone(),
+        config: MissionPlan::config_for(options),
     };
     let (_, record) = MissionEngine::from_survey(request, plan.config())
         .map_err(|source| HostError::MissionBuild(Box::new(source)))?;
@@ -187,7 +222,7 @@ fn prepare_route(options: &MissionOptions) -> Result<MissionPlan, HostError> {
     .map_err(|source| HostError::MissionBuild(Box::new(source)))?;
     let plan = MissionPlan {
         source: PlanSource::Navdata(navdata),
-        options: options.clone(),
+        config: MissionPlan::config_for(options),
     };
     info!(
         route = %record.route_input,
@@ -219,15 +254,36 @@ pub(crate) fn spawn_mission_task(
     plan: MissionPlan,
     planar_pose_is_truth: bool,
 ) -> (JoinHandle<()>, watch::Receiver<AutomationStatus>) {
+    spawn_mission_run(
+        engine_tx,
+        start,
+        plan,
+        planar_pose_is_truth,
+        MISSION_CLIENT,
+        None,
+    )
+}
+
+/// Spawns one run of a mission lane as its own principal under `client`,
+/// steered by `controls`.
+pub(crate) fn spawn_mission_run(
+    engine_tx: &mpsc::Sender<ToEngine>,
+    start: Instant,
+    plan: MissionPlan,
+    planar_pose_is_truth: bool,
+    client: ClientKey,
+    controls: Option<mpsc::Receiver<RunControl>>,
+) -> (JoinHandle<()>, watch::Receiver<AutomationStatus>) {
     let (status_tx, status_rx) = watch::channel(AutomationStatus::default());
     let (outbound_tx, outbound_rx) = mpsc::channel(OUTBOUND_QUEUE_CAPACITY);
-    let task = task::MissionTask::new(
+    let mut task = task::MissionTask::new(
         engine_tx.downgrade(),
         start,
         plan,
         status_tx,
         planar_pose_is_truth,
     );
+    task.bind(client, controls);
     let handle = tokio::spawn(async move {
         task.run(outbound_tx, outbound_rx).await;
         tracing::debug!(task = "mission-automation", "task exited");

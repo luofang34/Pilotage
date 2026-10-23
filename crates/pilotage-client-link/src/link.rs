@@ -1,7 +1,8 @@
-//! The WebTransport port: sockets and tasks, no protocol decisions.
+//! The native WebTransport port of the client session: sockets and
+//! tasks, no protocol decisions.
 //!
 //! Reader tasks report bytes as `TransportEvent`s. The client engine in
-//! the pilot loop decides what the bytes mean. The port pins the host's
+//! the session loop decides what the bytes mean. The port pins the host's
 //! certificate hash, as the browser client does, and has no option that
 //! turns certificate validation off.
 
@@ -9,23 +10,23 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use pilotage_client_session::{StreamId, TransportEvent};
+
+use crate::LinkError;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use wtransport::tls::Sha256Digest;
 use wtransport::{ClientConfig, Connection, Endpoint, RecvStream, SendStream};
 
-use crate::error::PilotError;
-
 /// Deadline for each connection step, in seconds.
 const CONNECT_TIMEOUT_S: u64 = 10;
 /// Time the reader tasks get to stop before they are aborted.
 const SHUTDOWN_GRACE: Duration = Duration::from_millis(500);
-/// Events the pilot loop may fall behind by before readers wait.
+/// Events the session loop may fall behind by before readers wait.
 const EVENT_QUEUE: usize = 1024;
 const READ_BUFFER_BYTES: usize = 64 * 1024;
 
 /// An open link to the host.
-pub(crate) struct Link {
+pub struct Link {
     connection: Arc<Connection>,
     bootstrap: SendStream,
     readers: Vec<(&'static str, JoinHandle<()>)>,
@@ -33,18 +34,18 @@ pub(crate) struct Link {
 
 impl Link {
     /// Connects, opens the bootstrap stream and starts the reader tasks.
-    pub(crate) async fn connect(
+    pub async fn connect(
         url: &str,
         cert_sha256: [u8; 32],
-    ) -> Result<(Self, mpsc::Receiver<TransportEvent>), PilotError> {
+    ) -> Result<(Self, mpsc::Receiver<TransportEvent>), LinkError> {
         let config = ClientConfig::builder()
             .with_bind_default()
             .with_server_certificate_hashes([Sha256Digest::new(cert_sha256)])
             .build();
-        let endpoint = Endpoint::client(config).map_err(PilotError::Endpoint)?;
+        let endpoint = Endpoint::client(config).map_err(LinkError::Endpoint)?;
         let connection = within("connect", endpoint.connect(url))
             .await?
-            .map_err(|source| PilotError::Connect {
+            .map_err(|source| LinkError::Connect {
                 url: url.to_owned(),
                 source,
             })?;
@@ -80,21 +81,21 @@ impl Link {
     }
 
     /// Writes bytes to the reliable bootstrap stream.
-    pub(crate) async fn send_bootstrap(&mut self, bytes: &[u8]) -> Result<(), PilotError> {
+    pub async fn send_bootstrap(&mut self, bytes: &[u8]) -> Result<(), LinkError> {
         self.bootstrap
             .write_all(bytes)
             .await
-            .map_err(|source| PilotError::LinkDown {
+            .map_err(|source| LinkError::LinkDown {
                 stage: "bootstrap write",
                 source: Box::new(source),
             })
     }
 
     /// Sends one datagram.
-    pub(crate) fn send_datagram(&self, bytes: &[u8]) -> Result<(), PilotError> {
+    pub fn send_datagram(&self, bytes: &[u8]) -> Result<(), LinkError> {
         self.connection
             .send_datagram(bytes)
-            .map_err(|source| PilotError::LinkDown {
+            .map_err(|source| LinkError::LinkDown {
                 stage: "datagram send",
                 source: Box::new(source),
             })
@@ -102,8 +103,8 @@ impl Link {
 
     /// Closes the connection and stops the reader tasks. A task that does
     /// not stop in the grace time is named in the log and aborted.
-    pub(crate) async fn shutdown(self) {
-        self.connection.close(0_u32.into(), b"pilot done");
+    pub async fn shutdown(self) {
+        self.connection.close(0_u32.into(), b"client done");
         for (name, mut reader) in self.readers {
             if tokio::time::timeout(SHUTDOWN_GRACE, &mut reader)
                 .await
@@ -119,10 +120,10 @@ impl Link {
 async fn within<F: std::future::Future>(
     step: &'static str,
     future: F,
-) -> Result<F::Output, PilotError> {
+) -> Result<F::Output, LinkError> {
     tokio::time::timeout(Duration::from_secs(CONNECT_TIMEOUT_S), future)
         .await
-        .map_err(|_| PilotError::HostTimeout {
+        .map_err(|_| LinkError::HostTimeout {
             step,
             seconds: CONNECT_TIMEOUT_S,
         })
@@ -131,14 +132,14 @@ async fn within<F: std::future::Future>(
 fn stream_error(
     stream: &'static str,
     source: impl std::error::Error + Send + Sync + 'static,
-) -> PilotError {
-    PilotError::Stream {
+) -> LinkError {
+    LinkError::Stream {
         stream,
         source: Box::new(source),
     }
 }
 
-/// Reports the loss once. A closed receiver means the pilot loop is gone,
+/// Reports the loss once. A closed receiver means the session loop is gone,
 /// and then nobody is left to tell.
 async fn report_lost(events: &mpsc::Sender<TransportEvent>, detail: String) {
     events
@@ -213,7 +214,7 @@ async fn read_datagrams(connection: Arc<Connection>, events: mpsc::Sender<Transp
                 let event = TransportEvent::DatagramReceived(datagram.payload().to_vec());
                 // Telemetry is periodic. A full queue drops this sample
                 // and keeps the reader running; the next sample replaces
-                // it. A closed queue means the pilot loop is gone.
+                // it. A closed queue means the session loop is gone.
                 if let Err(mpsc::error::TrySendError::Closed(_)) = events.try_send(event) {
                     return;
                 }

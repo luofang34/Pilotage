@@ -431,6 +431,16 @@ impl ClientEngine {
             Some(wire::envelope::Payload::LinkLossCleared(cleared)) => {
                 vec![ClientAction::Emit(ModuleEvent::LinkLossCleared(cleared))]
             }
+            Some(wire::envelope::Payload::MissionStatus(status)) => {
+                vec![ClientAction::Emit(ModuleEvent::MissionStatus(Box::new(
+                    status,
+                )))]
+            }
+            Some(wire::envelope::Payload::MissionReceipt(receipt)) => {
+                vec![ClientAction::Emit(ModuleEvent::MissionReceipt(Box::new(
+                    receipt,
+                )))]
+            }
             _ => Vec::new(),
         }
     }

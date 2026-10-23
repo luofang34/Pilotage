@@ -28,6 +28,12 @@ pilotage-adapter-px4 = { workspace = true }
 pilotage-adapter-ardupilot = { workspace = true }
 pilotage-adapter-betaflight = { workspace = true }
 pilotage-mission = { workspace = true }
+pilotage-decision = { workspace = true, features = ["http"] }
+pilotage-coordination = { workspace = true }
+pilotage-client-link = { workspace = true }
+pilotage-client-session = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 pilotage-timing = { workspace = true }
 navigate-contract = { workspace = true }
 aerocontext-core = { workspace = true }
@@ -65,8 +71,6 @@ sim = [
 
 [dev-dependencies]
 pilotage-adapter-reference.workspace = true
-pilotage-client-session = { workspace = true }
-serde_json = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 wtransport = { workspace = true, features = ["dangerous-configuration", "quinn"] }
 

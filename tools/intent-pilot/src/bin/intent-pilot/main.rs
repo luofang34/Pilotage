@@ -9,7 +9,6 @@
 
 mod cli;
 mod error;
-mod link;
 mod pilot;
 mod record;
 mod script;

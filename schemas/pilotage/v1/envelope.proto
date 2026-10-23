@@ -7,6 +7,7 @@ package pilotage.v1;
 import "pilotage/v1/authority.proto";
 import "pilotage/v1/capability.proto";
 import "pilotage/v1/control.proto";
+import "pilotage/v1/mission.proto";
 import "pilotage/v1/session.proto";
 import "pilotage/v1/telemetry.proto";
 
@@ -42,5 +43,11 @@ message Envelope {
     ScopeTransferRequest scope_transfer_request = 21;
     ScopeTransferOffer scope_transfer_offer = 22;
     ScopeTransferAccept scope_transfer_accept = 23;
+    // Mission lanes (ADR-0052); additive arms. Intents travel on the
+    // reliable session stream from a client; receipts and status travel
+    // on the session-events stream from the host.
+    MissionIntent mission_intent = 24;
+    MissionReceipt mission_receipt = 25;
+    MissionStatus mission_status = 26;
   }
 }

@@ -31,6 +31,8 @@ struct HostSide {
     engine_rx: mpsc::Receiver<ToEngine>,
     shutdown_rx: oneshot::Receiver<()>,
     start: tokio::time::Instant,
+    /// The mission lane's frame sampling, when the host runs a lane.
+    lane_frames: Option<mpsc::Sender<super::mission_lane::LaneInbound>>,
 }
 
 /// The session's video: a frame source for the media task, and the task
@@ -50,6 +52,7 @@ pub(super) async fn spawn_adapter_runtime(
     engine_rx: mpsc::Receiver<ToEngine>,
     shutdown_rx: oneshot::Receiver<()>,
     start: tokio::time::Instant,
+    lane_frames: Option<mpsc::Sender<super::mission_lane::LaneInbound>>,
 ) -> Result<JoinHandle<()>, HostError> {
     let sim_camera_port = options.sim_camera_port.take();
     let host = HostSide {
@@ -59,6 +62,7 @@ pub(super) async fn spawn_adapter_runtime(
         engine_rx,
         shutdown_rx,
         start,
+        lane_frames,
     };
     launch_adapter(adapter, options, sim_camera_port, host).await
 }
@@ -124,6 +128,13 @@ async fn launch_adapter(
                 pilotage_adapter_betaflight::BetaflightAdapter::start(HOST_VEHICLE, config);
             let engine = build_engine(&adapter, options);
             let video = session_video("betaflight", None, sim_camera_port, &host.engine_tx).await?;
+            Ok(spawn_runtime(engine, adapter, video, host))
+        }
+        AdapterKind::Coordinator => {
+            let adapter = super::coordinator::CoordinatorAdapter;
+            let engine = build_engine(&adapter, options);
+            let video =
+                session_video("coordinator", None, sim_camera_port, &host.engine_tx).await?;
             Ok(spawn_runtime(engine, adapter, video, host))
         }
         #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -216,6 +227,7 @@ where
         engine_rx,
         shutdown_rx,
         start,
+        lane_frames,
     } = host;
     let Some(frames) = video.frames else {
         return tokio::spawn(run_until_shutdown(
@@ -230,6 +242,7 @@ where
             join_token,
         ));
     };
+    let frames = super::mission_lane::tap(frames, lane_frames);
     let (media, media_task) = media::spawn_media_task(frames, start);
     // Own the tasks before spawning the future so cancellation before its
     // first poll also stops the decoder and media tasks.

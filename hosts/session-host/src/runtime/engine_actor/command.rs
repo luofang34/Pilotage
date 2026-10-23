@@ -43,6 +43,28 @@ pub enum ToEngine {
         /// zeroed or centered.
         state: Option<Box<wire::NavGuidanceState>>,
     },
+    /// A mission intent from a client, for the host's mission lane
+    /// (ADR-0052).
+    MissionIntent {
+        /// Sender of the intent; its receipt goes back to it.
+        client: ClientKey,
+        /// The decoded intent.
+        intent: Box<wire::MissionIntent>,
+    },
+    /// A mission receipt or status from the lane, for one client or, with
+    /// `to` absent, for every client, on the reliable session-events
+    /// stream.
+    MissionPublish {
+        /// The one recipient, or `None` for every client.
+        to: Option<ClientKey>,
+        /// The payload to publish.
+        payload: Box<wire::envelope::Payload>,
+    },
+    /// The mission lane that receives intents.
+    MissionLane {
+        /// Where intents go.
+        sender: mpsc::Sender<crate::runtime::mission_lane::LaneInbound>,
+    },
     /// A one-shot latency summary request, used by the shutdown path to log
     /// the accumulated per-stage timings before the process exits.
     DumpLatencySummary {

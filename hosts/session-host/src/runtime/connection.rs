@@ -430,6 +430,12 @@ async fn drain_bootstrap_frames(
                 }
                 forward(to_engine, client, *message, start).await;
             }
+            Ok((InboundBootstrap::Mission(intent), _rest)) => {
+                let command = ToEngine::MissionIntent { client, intent };
+                if to_engine.send(command).await.is_err() {
+                    return Ok(ControlFlow::Break(()));
+                }
+            }
             Ok((InboundBootstrap::MediaAttach, _rest)) => {
                 if let Some(media) = media {
                     media.reattach(client, connection.clone());

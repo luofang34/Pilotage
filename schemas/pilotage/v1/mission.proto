@@ -1,0 +1,280 @@
+// Mission records, intents, receipts and status (ADR-0052).
+//
+// A mission is five records: the objective (what the operator wants), the
+// proposal (a compiled plan with its estimates and assumptions), the
+// approval (a permission bound to one proposal digest with an adaptation
+// envelope), the plan (the immutable mission document the host executes,
+// referenced here by its digest) and the run (what the vehicle did,
+// reported in the status). A lane is the one mission executor of a
+// vehicle or of a team; a coordinator's lane speaks the same messages to
+// its operator as a vehicle's lane does.
+syntax = "proto3";
+
+package pilotage.v1;
+
+// A WGS-84 position, degrees.
+message GeoPoint {
+  double latitude_deg = 1;
+  double longitude_deg = 2;
+}
+
+// Who made a record: the identity issuer, the subject at that issuer and
+// the owning organization (ADR-0049).
+message RecordOrigin {
+  string issuer = 1;
+  string subject = 2;
+  string organization = 3;
+}
+
+// An area survey: cover the polygon with nadir pictures at a height above
+// the launch point. A zero numeric field takes the host's default.
+message SurveyObjective {
+  // The area, at least three vertices, in order.
+  repeated GeoPoint area = 1;
+  // The launch point; the plan returns here when `return_to_launch`.
+  GeoPoint launch = 2;
+  // The launch point's altitude in the plan's altitude reference, metres.
+  double launch_altitude_m = 3;
+  // Height above the launch point, metres.
+  double height_m = 4;
+  // Along-track speed asked of guidance, metres per second.
+  double cruise_mps = 5;
+  // Overlap between neighbouring lines, a fraction in [0, 0.95].
+  double sidelap = 6;
+  // Across-track camera field of view, degrees.
+  double across_track_fov_deg = 7;
+  bool return_to_launch = 8;
+  // Completion evidence: usable pictures each line needs; zero means one.
+  uint32 min_usable_frames_per_line = 9;
+  // Line bearing, degrees clockwise from true north. Absent follows the
+  // area's longest edge. A team fixes it, so its members' lines align.
+  optional double line_bearing_deg = 10;
+}
+
+// What the operator wants. A route is one way to satisfy it.
+message MissionObjective {
+  // A globally unique identifier (a time-ordered UUID, text form).
+  string objective_id = 1;
+  RecordOrigin origin = 2;
+  // Append-only revision; the first is 1.
+  uint64 revision = 3;
+  // SHA-256 of the previous revision's encoding; empty for revision 1.
+  bytes previous_digest = 4;
+  string title = 5;
+  oneof kind {
+    SurveyObjective survey = 10;
+  }
+}
+
+enum MissionTaskKind {
+  MISSION_TASK_KIND_UNSPECIFIED = 0;
+  // One survey line with its picture acquisition.
+  MISSION_TASK_KIND_SURVEY_LINE = 1;
+  // The way back over the launch point.
+  MISSION_TASK_KIND_RETURN_HOME = 2;
+}
+
+// One bounded task of a plan.
+message MissionTaskPlan {
+  string task_id = 1;
+  MissionTaskKind kind = 2;
+  // The task's path, in fly order.
+  repeated GeoPoint path = 3;
+  double length_m = 4;
+  // The lane that executes the task, for a team proposal; empty for a
+  // vehicle's own proposal.
+  string member = 5;
+}
+
+message MissionEstimates {
+  double path_length_m = 1;
+  double duration_s = 2;
+  // Zero when the vehicle states no energy model.
+  double energy_wh = 3;
+  uint32 lines = 4;
+  double line_spacing_m = 5;
+  double footprint_width_m = 6;
+}
+
+// What a proposal rests on. Admission checks them again.
+message MissionAssumptions {
+  // How the plan reaches the vehicle, such as `host-guided-velocity`.
+  string execution_strategy = 1;
+  string vehicle_name = 2;
+  // The vehicle is a simulation, not a physical aircraft.
+  bool simulated = 3;
+  double max_horizontal_mps = 4;
+  // The plan's content digest and revision in the mission core.
+  bytes plan_digest = 5;
+  string plan_revision = 6;
+  // The usable energy and the reserve the estimate used; zero is unknown.
+  double usable_energy_wh = 7;
+}
+
+// A member lane's proposal inside a team proposal.
+message MemberProposal {
+  string member = 1;
+  MissionProposal proposal = 2;
+}
+
+// A compiled, grounded plan with its estimates. It grants nothing.
+message MissionProposal {
+  string proposal_id = 1;
+  string objective_id = 2;
+  // SHA-256 over this message with `digest` empty.
+  bytes digest = 3;
+  repeated MissionTaskPlan tasks = 4;
+  MissionEstimates estimates = 5;
+  MissionAssumptions assumptions = 6;
+  // For a team: the member proposals the team proposal binds.
+  repeated MemberProposal members = 7;
+  // The objective the proposal was compiled from.
+  MissionObjective objective = 8;
+}
+
+// The limits inside which a lane may adapt an approved plan without a new
+// approval, and the permissions it holds.
+message AdaptationEnvelope {
+  // Highest height above the launch point, metres.
+  double max_height_m = 1;
+  // Least remaining battery fraction at which the plan must end.
+  double min_reserve_fraction = 2;
+  // Civil time after which the approval no longer admits anything.
+  uint64 expires_unix_ms = 3;
+  // The area adaptation may fly in; empty means the objective's area.
+  repeated GeoPoint bound = 4;
+  bool permit_execute = 5;
+  bool permit_revise = 6;
+  bool permit_allocate = 7;
+  bool permit_change_objective = 8;
+  // Survey lines a lane may fly again without a new approval.
+  uint32 max_refly_lines = 9;
+}
+
+// A permission bound to one proposal digest.
+message MissionApproval {
+  string approval_id = 1;
+  bytes proposal_digest = 2;
+  RecordOrigin approver = 3;
+  AdaptationEnvelope envelope = 4;
+  uint64 approved_unix_ms = 5;
+}
+
+message MissionStart {
+  bytes proposal_digest = 1;
+}
+
+message MissionHold {}
+
+message MissionResume {}
+
+message MissionAbort {}
+
+message MissionSkip {
+  string task_id = 1;
+}
+
+// A request from a principal to a lane. Every intent gets one receipt.
+message MissionIntent {
+  // Chosen by the sender; the receipt echoes it.
+  string request_id = 1;
+  oneof action {
+    MissionObjective propose = 10;
+    MissionApproval approve = 11;
+    MissionStart start = 12;
+    MissionHold hold = 13;
+    MissionResume resume = 14;
+    MissionAbort abort = 15;
+    MissionSkip skip = 16;
+  }
+}
+
+enum MissionReceiptOutcome {
+  MISSION_RECEIPT_OUTCOME_UNSPECIFIED = 0;
+  MISSION_RECEIPT_OUTCOME_ACCEPTED = 1;
+  MISSION_RECEIPT_OUTCOME_REFUSED = 2;
+  // The lane asked for a transition it has not yet observed.
+  MISSION_RECEIPT_OUTCOME_UNCERTAIN = 3;
+}
+
+message MissionReceipt {
+  string request_id = 1;
+  MissionReceiptOutcome outcome = 2;
+  string reason = 3;
+  // The proposal a `propose` intent compiled.
+  MissionProposal proposal = 4;
+  string lane = 5;
+}
+
+enum MissionLaneState {
+  MISSION_LANE_STATE_UNSPECIFIED = 0;
+  MISSION_LANE_STATE_IDLE = 1;
+  MISSION_LANE_STATE_PROPOSED = 2;
+  MISSION_LANE_STATE_ADMITTED = 3;
+  MISSION_LANE_STATE_RUNNING = 4;
+  MISSION_LANE_STATE_HELD = 5;
+  MISSION_LANE_STATE_UNCERTAIN = 6;
+  MISSION_LANE_STATE_COMPLETE = 7;
+  MISSION_LANE_STATE_ABORTED = 8;
+  MISSION_LANE_STATE_FAILED = 9;
+}
+
+enum MissionTaskState {
+  MISSION_TASK_STATE_UNSPECIFIED = 0;
+  MISSION_TASK_STATE_PENDING = 1;
+  MISSION_TASK_STATE_ACTIVE = 2;
+  MISSION_TASK_STATE_DONE = 3;
+  // Flown, without the completion evidence the objective needs.
+  MISSION_TASK_STATE_INCOMPLETE = 4;
+  MISSION_TASK_STATE_SKIPPED = 5;
+}
+
+// What a task acquired and what the judgment service said about it.
+message MissionTaskEvidence {
+  // Pictures captured while the task was active.
+  uint32 frames = 1;
+  // Pictures a judgment service assessed.
+  uint32 assessed = 2;
+  // Assessed pictures judged usable for mapping.
+  uint32 usable = 3;
+  // Assessed pictures that showed a possible hazard.
+  uint32 hazards = 4;
+  string note = 5;
+}
+
+message MissionTaskStatus {
+  string task_id = 1;
+  MissionTaskKind kind = 2;
+  MissionTaskState state = 3;
+  MissionTaskEvidence evidence = 4;
+  // Fraction of the task's path flown, [0, 1].
+  double progress = 5;
+  // The member lane that holds the task, for a team.
+  string member = 6;
+  // Times the task was flown again.
+  uint32 reflown = 7;
+}
+
+// One lane's state, published on the reliable stream when it changes and
+// at a slow steady rate.
+message MissionStatus {
+  string lane = 1;
+  MissionLaneState state = 2;
+  string objective_id = 3;
+  bytes proposal_digest = 4;
+  bytes plan_digest = 5;
+  string run_id = 6;
+  repeated MissionTaskStatus tasks = 7;
+  string active_task = 8;
+  // The recovery the lane applies when it cannot continue.
+  string recovery_policy = 9;
+  MissionEstimates estimates = 10;
+  bool simulated = 11;
+  string detail = 12;
+  // A team lane's member lanes, as their own statuses.
+  repeated MissionStatus members = 13;
+  // Increases with every published change.
+  uint64 sequence = 14;
+  // The objective's area, for display.
+  repeated GeoPoint area = 15;
+}

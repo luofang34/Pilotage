@@ -10,6 +10,7 @@ mod automation;
 mod aviate_profile;
 mod betaflight_config;
 mod connection;
+mod coordinator;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) mod dji;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -18,6 +19,7 @@ mod engine_actor;
 #[cfg(feature = "sim")]
 mod gazebo_launch;
 mod media;
+mod mission_lane;
 mod options;
 mod px4_config;
 mod registry;
@@ -251,6 +253,24 @@ async fn spawn_host_runtime(
         }
         None => None,
     };
+    // Without an environment mission the host runs a mission lane that
+    // clients issue missions to (ADR-0052).
+    let lane = match mission {
+        Some(_) => None,
+        None if adapter == AdapterKind::Coordinator => {
+            let config = coordinator::CoordinatorConfig::from_env_blocking()?;
+            let (sender, _) = tokio::sync::mpsc::channel(1);
+            Some((sender, coordinator::spawn(&engine_tx, config).await))
+        }
+        None => {
+            let config = mission_lane::LaneRuntimeConfig::from_env(
+                adapter.name(),
+                adapter.is_simulator(),
+                matches!(adapter, AdapterKind::Reference),
+            )?;
+            Some(mission_lane::spawn(&engine_tx, start, config).await)
+        }
+    };
     let runtime = adapter_launch::spawn_adapter_runtime(
         adapter,
         options,
@@ -259,16 +279,20 @@ async fn spawn_host_runtime(
         engine_rx,
         shutdown_rx,
         start,
+        lane.as_ref().map(|(sender, _)| sender.clone()),
     )
     .await?;
-    Ok(match mission {
+    let principal = mission
+        .map(|(task, _status)| task)
+        .or(lane.map(|(_, task)| task));
+    Ok(match principal {
         None => runtime,
-        Some((mission_task, _status)) => tokio::spawn(async move {
+        Some(principal) => tokio::spawn(async move {
             runtime.await.ok();
             // The principal holds only a weak engine handle, so it drains
             // out once the engine actor is gone; joining it here keeps
             // teardown complete before the host reports shutdown.
-            mission_task.await.ok();
+            principal.await.ok();
         }),
     })
 }

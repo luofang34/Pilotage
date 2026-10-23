@@ -15,8 +15,8 @@ use pilotage_protocol::wire;
 use tokio::sync::mpsc;
 
 use crate::error::PilotError;
-use crate::link::Link;
 use pilotage_agent::{Demand, Discrete};
+use pilotage_client_link::Link;
 
 /// The profile identity this control source announces.
 pub(crate) const PROFILE_ID: &str = "automation.intent-pilot/v1";
@@ -42,7 +42,9 @@ pub(crate) struct Session {
 impl Session {
     /// Connects, waits for admission, and takes the motion lease.
     pub(crate) async fn open(url: &str, cert_sha256: [u8; 32]) -> Result<Self, PilotError> {
-        let (link, events) = Link::connect(url, cert_sha256).await?;
+        let (link, events) = Link::connect(url, cert_sha256)
+            .await
+            .map_err(PilotError::Link)?;
         let mut engine = ClientEngine::new(ClientConfig {
             join_token: None,
             client_name: "intent-pilot".to_owned(),
@@ -298,8 +300,14 @@ impl Session {
     ) -> Result<(), PilotError> {
         for action in actions {
             match action {
-                ClientAction::SendBootstrap(bytes) => self.link.send_bootstrap(&bytes).await?,
-                ClientAction::SendDatagram(bytes) => self.link.send_datagram(&bytes)?,
+                ClientAction::SendBootstrap(bytes) => self
+                    .link
+                    .send_bootstrap(&bytes)
+                    .await
+                    .map_err(PilotError::Link)?,
+                ClientAction::SendDatagram(bytes) => {
+                    self.link.send_datagram(&bytes).map_err(PilotError::Link)?
+                }
                 ClientAction::Emit(event) => emitted.push(event),
                 // The pilot flies one scenario on one connection. A lost
                 // connection ends the run; it does not reconnect to a

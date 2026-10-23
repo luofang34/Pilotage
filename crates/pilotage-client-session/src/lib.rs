@@ -21,6 +21,7 @@ mod catalog;
 mod control;
 mod direct_flight;
 mod engine;
+mod engine_mission;
 mod engine_transfer;
 mod event;
 mod motion;

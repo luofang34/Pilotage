@@ -35,6 +35,7 @@ mod action_dedup;
 mod apply;
 mod drops;
 mod link_loss;
+mod mission;
 mod rejection_dedup;
 use action_dedup::ActionDedup;
 use drops::{DropCounters, MessageClass};
@@ -81,6 +82,8 @@ pub struct EngineActor<A: VehicleAdapter> {
     /// guidance to show: its telemetry carries the field absent rather
     /// than a centered or zeroed one.
     nav_guidance: BTreeMap<VehicleId, wire::NavGuidanceState>,
+    /// The mission lane that receives client intents (ADR-0052).
+    mission_lane: Option<mpsc::Sender<crate::runtime::mission_lane::LaneInbound>>,
     /// Turns a declared magnetic heading true with the shared model.
     magnetic: telemetry::MagneticCorrection,
     /// The simulation flight recorder, when `PILOTAGE_RECORD_DIR` asks
@@ -119,6 +122,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
             adapter_rejection_dedup: RejectionDedup::default(),
             link_loss_enact_failures: 0,
             nav_guidance: BTreeMap::new(),
+            mission_lane: None,
             magnetic: telemetry::MagneticCorrection::at_host_time(),
             #[cfg(feature = "sim")]
             recorder: recorder::Recorder::from_env(),
@@ -172,6 +176,9 @@ impl<A: VehicleAdapter> EngineActor<A> {
                     self.nav_guidance.remove(&vehicle);
                 }
             },
+            ToEngine::MissionIntent { client, intent } => self.on_mission_intent(client, intent),
+            ToEngine::MissionPublish { to, payload } => self.publish_mission(to, *payload),
+            ToEngine::MissionLane { sender } => self.mission_lane = Some(sender),
             ToEngine::DumpLatencySummary { reply } => {
                 let summary = self.latency_summary();
                 // The receiver may have already given up waiting; a dropped
