@@ -100,6 +100,8 @@ impl ManagedDji {
             experimental_flight: self.config.experimental_flight,
             experimental_virtual_stick: self.virtual_stick,
             experimental_virtual_stick_diagnostic: false,
+            heading_reference: self.config.heading_reference,
+            gimbal_yaw_frame: self.config.gimbal_yaw_frame,
         };
         self.pending = Some(Operation::start(move || {
             Completion::Opened(
@@ -175,7 +177,7 @@ impl ManagedDji {
             vehicles: vec![VehicleDescriptor {
                 id: self.vehicle,
                 class: VehicleClass::Multicopter,
-                heading_reference: None,
+                heading_reference: self.config.heading_reference,
                 display_name: self.connection_label().into(),
                 scopes: Vec::new(),
                 link_loss_actions: Vec::new(),

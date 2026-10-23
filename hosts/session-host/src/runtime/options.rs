@@ -13,7 +13,9 @@
 //!   survey instead of a route. The value is the polygon as
 //!   `lat_deg,lon_deg;lat_deg,lon_deg;...` with at least three vertices.
 //!   The survey height is `PILOTAGE_MISSION_CRUISE_HEIGHT`, 110 m when
-//!   unset. Set one of the route and the area, not both.
+//!   unset. The plan ends over the anchor at that height, where the
+//!   mission completes and the pilot lands the vehicle. Set one of the
+//!   route and the area, not both.
 //! - `PILOTAGE_MISSION_SURVEY_FOV_DEG`: the camera's across-track field
 //!   of view in degrees for a nadir camera; unset keeps the
 //!   [`pilotage_mission::SurveyRequest`] default.
@@ -43,7 +45,12 @@
 //!   vehicle measures from its launch point is read as height above the
 //!   anchor.
 //! - `PILOTAGE_MISSION_TARGET`: `simulator` (the default) or
-//!   `real-vehicle`. A real vehicle requires `vehicle-estimate`.
+//!   `real-vehicle`. A real vehicle requires `vehicle-estimate`. Its
+//!   mission has no arm phase: the pilot arms and launches the aircraft,
+//!   and the mission holds until the vehicle reports 1 m above the
+//!   launch point, then requests the motion lease and climbs. While a
+//!   human holds the scope it asks again every five seconds and at once
+//!   when that lease is released.
 //! - `PILOTAGE_SIM_CAMERA_PORT`: presence enables the simulator camera
 //!   attachment on that loopback port. A world-model camera producer
 //!   dials it, renders from the vehicle's simulator truth, and returns

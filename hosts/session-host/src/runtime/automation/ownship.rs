@@ -147,7 +147,7 @@ fn from_pose(sample: &wire::TelemetrySample, acquired_at: MonotonicNanos) -> Opt
 /// when both the fix and the kinematics ride the estimate role. Yaw comes
 /// from an authorized canonical attitude with the same acquisition stamp.
 /// A reported Euler value has no verified navigation reference.
-pub(super) fn estimate_from_wire(
+pub(crate) fn estimate_from_wire(
     sample: &wire::TelemetrySample,
     received_at: MonotonicNanos,
     ned_of: impl Fn(f64, f64, OwnshipAltitude) -> [f64; 3],

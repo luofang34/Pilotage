@@ -81,6 +81,8 @@ pub struct EngineActor<A: VehicleAdapter> {
     /// guidance to show: its telemetry carries the field absent rather
     /// than a centered or zeroed one.
     nav_guidance: BTreeMap<VehicleId, wire::NavGuidanceState>,
+    /// Turns a declared magnetic heading true with the shared model.
+    magnetic: telemetry::MagneticCorrection,
     /// The simulation flight recorder, when `PILOTAGE_RECORD_DIR` asks
     /// for one. Simulation-only by construction (ADR-0040): a flight
     /// build does not carry the module, not merely leave it idle.
@@ -117,6 +119,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
             adapter_rejection_dedup: RejectionDedup::default(),
             link_loss_enact_failures: 0,
             nav_guidance: BTreeMap::new(),
+            magnetic: telemetry::MagneticCorrection::at_host_time(),
             #[cfg(feature = "sim")]
             recorder: recorder::Recorder::from_env(),
             #[cfg(feature = "sim")]

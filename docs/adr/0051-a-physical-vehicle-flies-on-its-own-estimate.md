@@ -65,7 +65,20 @@ The host requires an authorized canonical attitude with the same
 acquisition identity as the fix. A reported Euler attitude has no verified
 north reference and cannot supply mission heading. Without that attitude,
 the host refuses the estimate, and the engine commands no
-velocity without one.
+velocity without one. An adapter whose device reports only Euler angles
+publishes them as an authorized attitude only when the operator declares
+the north reference they verified for that device, and it advertises that
+reference; the declaration is the operator's, recorded in the host's
+configuration, not a measurement. When the declared reference is magnetic
+and the vehicle states no variation of its own, the host turns the
+attitude to true north by the shared geomagnetic model's declination at
+the vehicle's fix and states the variation it applied in the same sample.
+The estimate and every client then read a true heading.
+
+The same rule applies to the gimbal. The adapter publishes the gimbal
+attitude only under the yaw frame the operator declares for the device's
+reported gimbal yaw. Without the declaration, the gimbal angles stay a
+payload-device report with no frame.
 
 ### Limits
 
@@ -98,6 +111,25 @@ held: the scope is unassigned and nothing resumes it. To resume, the human
 requests the lease and offers the scope to the mission. The same recovery
 applies after an operator link loss. Only a closed connection ends the
 principal.
+
+### Launch
+
+A simulator's vehicle is armed by the mission. A real vehicle is armed and
+launched by its pilot, so a real-vehicle mission has no arm phase and its
+first phase is the climb. The mission principal does not request the motion
+lease while the vehicle is on the ground, where the vehicle refuses velocity
+control: after its welcome it holds, with the phase clocks stopped, until the
+vehicle's estimate reports at least 1 m above the launch point. Then it
+requests the lease and, once granted, resumes with one neutral frame and
+climbs to the survey height. A survey plan ends over the launch point at the
+survey height: the mission completes there and commands nothing more, and
+the pilot takes the vehicle and lands it. A human may hold the scope at that moment, for
+example after a software takeoff from the App: the mission stays held and
+asks again every five seconds, and at once when that lease is released, so
+releasing control hands the aircraft to the mission. The pilot keeps the
+original remote controller and can take the aircraft at any time; a native
+takeover is not a lease event, so the mission does not resume from it
+without a host restart.
 
 ## Consequences
 

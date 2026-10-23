@@ -1,7 +1,10 @@
 use std::time::Duration;
 
-use pilotage_adapter_api::{SourceIncarnation, TelemetryBatch, TelemetrySample};
-use pilotage_protocol::{VehicleId, wire};
+use pilotage_adapter_api::{
+    GimbalAttitudeSample, MeasurementClock, MeasurementStamp, SourceIncarnation, SourceIntegrity,
+    SourceRole, TelemetryBatch, TelemetrySample,
+};
+use pilotage_protocol::{GimbalAxisLocks, GimbalReference, GimbalYawFrame, VehicleId, wire};
 use pilotage_timing::SimTick;
 use turret_dji::Mini3ControlProfile;
 
@@ -10,6 +13,9 @@ use crate::{DumlFrame, GimbalAngles, RouteAddress};
 use super::{DjiTelemetrySource, airframe::AirframeObservations, battery::BatteryObservations};
 
 const MAX_AGE: Duration = Duration::from_millis(300);
+/// The payload-device route the gimbal angles arrive on; the attitude
+/// carries the same identity as the angle observations.
+const GIMBAL_SOURCE_ID: u64 = 4;
 
 #[derive(Clone, Copy)]
 pub(super) struct Pose {
@@ -26,6 +32,11 @@ pub(super) struct Observations {
     pub(super) telemetry_source: DjiTelemetrySource,
     sequence: u32,
     published_sequence: u32,
+    /// The push sequence the attitude group last carried.
+    attitude_published_sequence: u32,
+    /// The frame the operator declared for the reported gimbal yaw; the
+    /// attitude group stays empty without it.
+    gimbal_yaw_frame: Option<GimbalYawFrame>,
     battery: BatteryObservations,
     airframe: AirframeObservations,
 }
@@ -71,9 +82,26 @@ impl Observations {
             telemetry_source: DjiTelemetrySource::new(incarnation),
             sequence: 0,
             published_sequence: 0,
+            attitude_published_sequence: 0,
+            gimbal_yaw_frame: None,
             battery: BatteryObservations::default(),
             airframe: AirframeObservations::default(),
         }
+    }
+
+    /// Declares the verified north reference the airframe attitude is
+    /// published under; `None` keeps it a display report.
+    pub(super) fn set_heading_reference(
+        &mut self,
+        reference: Option<pilotage_protocol::HeadingReference>,
+    ) {
+        self.airframe.heading_reference = reference;
+    }
+
+    /// Declares the frame the operator verified for the gimbal's reported
+    /// yaw; `None` keeps the gimbal angles off the attitude group.
+    pub(super) fn set_gimbal_yaw_frame(&mut self, frame: Option<GimbalYawFrame>) {
+        self.gimbal_yaw_frame = frame;
     }
 
     pub(super) fn receive(&mut self, frame: &DumlFrame, now: Duration) {
@@ -209,13 +237,14 @@ impl Observations {
         connection_valid: bool,
     ) -> TelemetryBatch {
         let payload = self.sample_payload(now, connection_valid);
+        let gimbal = self.sample_gimbal_attitude(now, connection_valid);
         let battery = self
             .battery
             .sample(now, connection_valid, self.telemetry_source);
         let airframe = self
             .airframe
             .sample(now, connection_valid, self.telemetry_source);
-        if payload.is_none() && battery.is_none() && airframe.is_none() {
+        if payload.is_none() && gimbal.is_none() && battery.is_none() && airframe.is_none() {
             return TelemetryBatch::default();
         }
         let (avionics, fc_state, speed) = airframe
@@ -224,6 +253,7 @@ impl Observations {
         TelemetryBatch {
             samples: vec![TelemetrySample {
                 battery,
+                gimbal,
                 avionics,
                 fc_state,
                 speed,
@@ -252,6 +282,57 @@ impl Observations {
                 None
             }
         }
+    }
+
+    /// The gimbal attitude of the newest angle push, once per push, while
+    /// the operator has declared the frame of its yaw. Freshness is the
+    /// only other gate: the attitude is a report, not pitch-command
+    /// evidence, so the control admission rules do not apply to it.
+    fn sample_gimbal_attitude(
+        &mut self,
+        now: Duration,
+        connection_valid: bool,
+    ) -> Option<GimbalAttitudeSample> {
+        let yaw_frame = self.gimbal_yaw_frame?;
+        if !connection_valid
+            || self.sequence == self.attitude_published_sequence
+            || !self.age(now).is_some_and(|age| age <= MAX_AGE)
+        {
+            return None;
+        }
+        let pose = self.latest?;
+        self.attitude_published_sequence = self.sequence;
+        let radians = |tenths: i16| f32::from(tenths).to_radians() / 10.0;
+        Some(GimbalAttitudeSample {
+            quat_wxyz: super::airframe::quaternion_from_euler(
+                radians(pose.angles.roll_tenths),
+                radians(pose.angles.pitch_tenths),
+                radians(pose.angles.yaw_tenths),
+            ),
+            // The push carries angles only.
+            rates_rps: [f32::NAN; 3],
+            reference: GimbalReference {
+                yaw_frame,
+                // A three-axis gimbal holds roll and pitch to the horizon.
+                // The push names follow mode only, so no yaw lock is claimed.
+                locks: GimbalAxisLocks {
+                    roll: true,
+                    pitch: true,
+                    yaw: false,
+                },
+            },
+            failure_flags: 0,
+            stamp: MeasurementStamp {
+                role: SourceRole::PayloadDevice,
+                integrity: SourceIntegrity::ChecksummedOnly,
+                source_id: GIMBAL_SOURCE_ID,
+                source_incarnation: self.telemetry_source.incarnation,
+                source_epoch: self.telemetry_source.epoch,
+                sequence: self.sequence,
+                acquired_at_ns: pose.received.as_nanos().min(u128::from(u64::MAX)) as u64,
+                clock: MeasurementClock::HostMonotonic,
+            },
+        })
     }
 
     pub(super) fn empty_state(&self) -> wire::PayloadState {

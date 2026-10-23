@@ -24,7 +24,7 @@ mod terrain;
 mod world;
 
 pub use error::{TerrainError, WorldError};
-pub use geomag::{GeomagModel, MagneticEpoch, MagneticField, WMM2025};
+pub use geomag::{GeomagModel, MagneticEpoch, MagneticField, WMM2025, magnetic_field_at};
 pub use position::{LocalTangentPlane, Ned, PositionError, local_plane, world_position};
 pub use site::{DEFAULT_SITE, Ground, N51, NAMED_SITES, Placement, Site, ZURICH};
 #[cfg(feature = "archive")]

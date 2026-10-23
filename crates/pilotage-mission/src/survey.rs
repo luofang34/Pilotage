@@ -59,6 +59,10 @@ pub struct SurveyRequest {
     /// A measured ground footprint width, meters, in place of the one the
     /// field of view and the height give. `None` derives the footprint.
     pub footprint_width_m: Option<f64>,
+    /// Whether the plan ends over the anchor at the survey height, so the
+    /// vehicle comes back before the mission completes and the pilot
+    /// lands it. Default true.
+    pub return_to_launch: bool,
 }
 
 impl SurveyRequest {
@@ -74,6 +78,7 @@ impl SurveyRequest {
             line_bearing_rad: None,
             capture_radius_m: 5.0,
             footprint_width_m: None,
+            return_to_launch: true,
         }
     }
 
@@ -95,6 +100,7 @@ impl SurveyRequest {
         hasher.update(self.capture_radius_m.to_le_bytes());
         hasher.update([u8::from(self.footprint_width_m.is_some())]);
         hasher.update(self.footprint_width_m.unwrap_or(0.0).to_le_bytes());
+        hasher.update([u8::from(self.return_to_launch)]);
         Digest::from_bytes(hasher.finalize().into())
     }
 }
@@ -240,10 +246,12 @@ pub fn plan_survey(
     );
     let digest = request.digest();
     let altitude_m = anchor.altitude_m + height_above_anchor_m;
+    // The plane's origin is the anchor: the launch point.
+    let home = request.return_to_launch.then_some([0.0, 0.0]);
     let plan = FlightPlan::new(
         format!("survey:{digest}"),
         PlanRole::Mission,
-        waypoints(&lines, &plane, height_above_anchor_m, altitude_m),
+        waypoints(&lines, home, &plane, height_above_anchor_m, altitude_m),
     );
     Ok(SurveyPlan {
         plan,
@@ -251,19 +259,25 @@ pub fn plan_survey(
         line_count: lines.len(),
         line_spacing_m,
         footprint_width_m,
-        path_length_m: path_length_m(&lines),
-        capture_radius_m: request.capture_radius_m.min(shortest_leg_m(&lines) / 2.0),
+        path_length_m: path_length_m(&lines, home),
+        capture_radius_m: request
+            .capture_radius_m
+            .min(shortest_leg_m(&lines, home) / 2.0),
     })
 }
 
-/// The shortest leg of the path: a line or the gap between two lines.
-fn shortest_leg_m(lines: &[Line]) -> f64 {
+/// The shortest leg of the path: a line, the gap between two lines, or
+/// the way home.
+fn shortest_leg_m(lines: &[Line], home: Option<Planar>) -> f64 {
     let mut shortest = f64::INFINITY;
     for (index, line) in lines.iter().enumerate() {
         shortest = shortest.min(line.length_m());
         if let Some(next) = lines.get(index + 1) {
             shortest = shortest.min(geometry::distance_m(line.end, next.start));
         }
+    }
+    if let (Some(last), Some(home)) = (lines.last(), home) {
+        shortest = shortest.min(geometry::distance_m(last.end, home));
     }
     shortest
 }
@@ -360,6 +374,7 @@ fn project(
 /// order, all at the survey altitude.
 fn waypoints(
     lines: &[Line],
+    home: Option<Planar>,
     plane: &LocalTangentPlane,
     height_above_anchor_m: f64,
     altitude_m: f64,
@@ -384,11 +399,16 @@ fn waypoints(
                         .with_turn(TurnType::FlyOver)
                 })
         })
+        .chain(home.map(|point| {
+            Waypoint::new("HOME".to_owned(), place(point))
+                .with_altitude(AltitudeConstraint::At(altitude_m))
+                .with_turn(TurnType::FlyOver)
+        }))
         .collect()
 }
 
-fn path_length_m(lines: &[Line]) -> f64 {
-    lines
+fn path_length_m(lines: &[Line], home: Option<Planar>) -> f64 {
+    let along: f64 = lines
         .iter()
         .enumerate()
         .map(|(index, line)| {
@@ -397,5 +417,10 @@ fn path_length_m(lines: &[Line]) -> f64 {
                     .get(index + 1)
                     .map_or(0.0, |next| geometry::distance_m(line.end, next.start))
         })
-        .sum()
+        .sum();
+    along
+        + match (lines.last(), home) {
+            (Some(last), Some(home)) => geometry::distance_m(last.end, home),
+            _ => 0.0,
+        }
 }

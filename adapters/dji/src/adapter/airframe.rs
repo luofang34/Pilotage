@@ -17,6 +17,8 @@ use navigation::{Navigation, NavigationGroups};
 const MAX_AGE: Duration = Duration::from_millis(300);
 const SOURCE_ID: u64 = 0x0e_03_43;
 const ESTIMATOR_QUALITY_UNUSABLE: u32 = 2;
+/// The estimator validity bit for an authorized attitude.
+const VALID_ATTITUDE: u32 = 0b0001;
 
 #[derive(Clone, Copy)]
 pub(super) struct AirframeReport {
@@ -60,22 +62,34 @@ impl AirframeReport {
     }
 
     /// The attitude is a device report with an unverified reference and
-    /// stays unauthorized. A fix adds the FC's own position and velocity
-    /// under the authorization its satellite use supports.
+    /// stays unauthorized, unless the operator declared the reference they
+    /// verified: then it is published as an authorized attitude under it.
+    /// A fix adds the FC's own position and velocity under the
+    /// authorization its satellite use supports.
     fn avionics(
         self,
         stamp: MeasurementStamp,
         navigation: Option<NavigationGroups>,
+        verified_heading: bool,
     ) -> AvionicsSample {
         let [pitch_rad, roll_rad, yaw_rad] = self
             .angles_tenths
             .map(|angle| (f32::from(angle) / 10.0).to_radians());
-        let attitude = Some(AvionicsAttitudeSample::ReportedEuler {
-            pitch_rad,
-            roll_rad,
-            yaw_rad,
-            stamp,
+        let attitude = Some(if verified_heading {
+            AvionicsAttitudeSample::Canonical {
+                quat_wxyz: quaternion_from_euler(roll_rad, pitch_rad, yaw_rad),
+                rates_rps: None,
+                stamp,
+            }
+        } else {
+            AvionicsAttitudeSample::ReportedEuler {
+                pitch_rad,
+                roll_rad,
+                yaw_rad,
+                stamp,
+            }
         });
+        let attitude_flag = if verified_heading { VALID_ATTITUDE } else { 0 };
         match navigation {
             Some(groups) => AvionicsSample {
                 attitude,
@@ -84,7 +98,7 @@ impl AirframeReport {
                 geodetic: Some(groups.geodetic),
                 magnetic_variation: None,
                 estimator_status_stamp: Some(stamp),
-                valid_flags: groups.valid_flags,
+                valid_flags: groups.valid_flags | attitude_flag,
                 quality: groups.quality,
             },
             None => AvionicsSample {
@@ -94,7 +108,7 @@ impl AirframeReport {
                 geodetic: None,
                 magnetic_variation: None,
                 estimator_status_stamp: None,
-                valid_flags: 0,
+                valid_flags: attitude_flag,
                 // No estimator status accompanies this fallback value.
                 quality: ESTIMATOR_QUALITY_UNUSABLE,
             },
@@ -117,6 +131,9 @@ pub(super) struct AirframeObservations {
     sequence: u32,
     published_sequence: u32,
     navigation: Navigation,
+    /// The north reference the operator verified; `None` publishes the
+    /// attitude as a display report.
+    pub(super) heading_reference: Option<pilotage_protocol::HeadingReference>,
 }
 
 impl AirframeObservations {
@@ -209,7 +226,7 @@ impl AirframeObservations {
             .and_then(|fix| self.navigation.groups(fix, estimate, self.binding_revision));
         let speed = navigation.as_ref().map(|groups| groups.speed_mps);
         Some(AirframeSample {
-            avionics: report.avionics(estimate, navigation),
+            avionics: report.avionics(estimate, navigation, self.heading_reference.is_some()),
             speed,
             fc_state: FcStateSample {
                 arm_state: 0,
@@ -249,4 +266,18 @@ fn downward_range(payload: &[u8; 70], angles: [i16; 3]) -> Option<(f32, f32)> {
     let speed = i16::from_le_bytes([payload[22], payload[23]]);
     (speed.unsigned_abs() <= 200)
         .then_some((f32::from(payload[41]) / 10.0, f32::from(speed) / 10.0))
+}
+
+/// The body-FRD to world-NED quaternion (w, x, y, z) of roll, pitch and yaw
+/// applied in the yaw-pitch-roll order the reported angles describe.
+pub(super) fn quaternion_from_euler(roll_rad: f32, pitch_rad: f32, yaw_rad: f32) -> [f32; 4] {
+    let (sr, cr) = (roll_rad / 2.0).sin_cos();
+    let (sp, cp) = (pitch_rad / 2.0).sin_cos();
+    let (sy, cy) = (yaw_rad / 2.0).sin_cos();
+    [
+        cr * cp * cy + sr * sp * sy,
+        sr * cp * cy - cr * sp * sy,
+        cr * sp * cy + sr * cp * sy,
+        cr * cp * sy - sr * sp * cy,
+    ]
 }

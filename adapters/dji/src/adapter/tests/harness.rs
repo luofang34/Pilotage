@@ -116,6 +116,24 @@ impl Harness {
         Self::with_framing(super::super::DjiControlMode::Observed, Framing::LogicLink)
     }
 
+    /// A mobile harness whose operator declared the verified heading reference.
+    pub(super) fn mobile_with_heading(reference: pilotage_protocol::HeadingReference) -> Self {
+        let Self { adapter, recording } = Self::mobile();
+        Self {
+            adapter: adapter.with_heading_reference(Some(reference)),
+            recording,
+        }
+    }
+
+    /// A harness whose operator declared the gimbal's yaw frame.
+    pub(super) fn with_gimbal_frame(frame: pilotage_protocol::GimbalYawFrame) -> Self {
+        let Self { adapter, recording } = Self::new();
+        Self {
+            adapter: adapter.with_gimbal_yaw_frame(Some(frame)),
+            recording,
+        }
+    }
+
     pub(super) fn mobile_with_incarnation(incarnation: SourceIncarnation) -> Self {
         Self::with_identity(
             super::super::DjiControlMode::Observed,

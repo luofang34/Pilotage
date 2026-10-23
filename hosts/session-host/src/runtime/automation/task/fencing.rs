@@ -60,12 +60,17 @@ impl MissionTask {
         }
     }
 
-    fn on_revoked_event(&mut self, revoked: &wire::ScopeLeaseRevoked) {
+    pub(super) fn on_revoked_event(&mut self, revoked: &wire::ScopeLeaseRevoked) {
         if !our_pair(revoked.vehicle.as_ref(), revoked.scope.as_ref()) {
             return;
         }
-        if self.our_principal(revoked.principal.as_ref()) && self.generation.is_some() {
-            self.hold("the motion lease was revoked");
+        if self.our_principal(revoked.principal.as_ref()) {
+            if self.generation.is_some() {
+                self.hold("the motion lease was revoked");
+            }
+        } else if self.held && self.lease_wanted && !self.awaiting_launch {
+            // The human who held the scope released it: ask at once.
+            self.lease_due = true;
         }
     }
 
@@ -157,7 +162,7 @@ impl MissionTask {
     /// mission resumes: the first frame under the new generation is
     /// neutral, which a vehicle that requires neutral input on a new
     /// lease admits.
-    fn take_generation(&mut self, generation: Generation) {
+    pub(super) fn take_generation(&mut self, generation: Generation) {
         self.generation = Some(generation);
         if self.held {
             self.held = false;
@@ -193,10 +198,8 @@ impl MissionTask {
         if let Some(mission) = self.mission.as_mut() {
             mission.hold(now);
         }
-        warn!(
-            reason,
-            "mission held; waiting for the motion scope to come back"
-        );
+        warn!(reason, "mission held");
+        self.schedule_lease_retry();
         self.update(|status| {
             status.held = true;
             status.lease_generation = None;

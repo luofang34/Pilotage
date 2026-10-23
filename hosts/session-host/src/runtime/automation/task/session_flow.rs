@@ -21,6 +21,14 @@ use super::{
     PROFILE_REVISION, ownship,
 };
 
+/// Height above the launch point, metres, from which a real vehicle counts
+/// as launched. A DJI native takeoff hovers at about 1.2 m; below this the
+/// vehicle is on the ground and refuses velocity control.
+pub(super) const AIRBORNE_HEIGHT_M: f64 = 1.0;
+/// How long a held, airborne mission waits before it asks for the motion
+/// lease again.
+pub(super) const LEASE_RETRY_NS: u64 = 5_000_000_000;
+
 impl MissionTask {
     /// One reliable bootstrap-stream reply, decoded with the same
     /// envelope framing the remote clients read.
@@ -67,13 +75,15 @@ impl MissionTask {
                 debug!(?released, "lease release acknowledged");
                 true
             }
+            Some(wire::envelope::Payload::HostCapabilities(capabilities)) => {
+                self.on_capabilities(&capabilities).await
+            }
             _ => true,
         }
     }
 
-    /// The welcome closes the handshake: capture identities, tighten the
-    /// mission ceilings to the advertised envelope, build the flight
-    /// engine, then announce the profile and request the motion lease.
+    /// The welcome closes the handshake: capture identities, then start
+    /// the mission against the advertised capabilities.
     async fn on_welcome(&mut self, welcome: ServerWelcome) -> bool {
         // Fencing is permanent for this task: even a fresh welcome must
         // not restart activation or re-lease the motion scope.
@@ -84,17 +94,45 @@ impl MissionTask {
         self.principal = Some(welcome.principal);
         self.nav_guidance = Some(NavGuidancePublisher::for_session(welcome.session));
         self.update(|status| status.session = Some(welcome.session.as_u64()));
+        self.try_start(&welcome.host_capabilities).await
+    }
+
+    /// Capabilities the host announces after the welcome: a real vehicle
+    /// whose transport opened late advertises its velocity control only
+    /// now, and the mission that waited for it starts.
+    pub(super) async fn on_capabilities(&mut self, capabilities: &wire::HostCapabilities) -> bool {
+        if self.fenced || self.plan.is_none() || self.session.is_none() {
+            return true;
+        }
+        self.try_start(capabilities).await
+    }
+
+    /// Tightens the mission ceilings to the advertised envelope, builds the
+    /// flight engine, announces the profile, and asks for the motion lease
+    /// or waits for the launch. A real vehicle that advertises no velocity
+    /// control yet keeps its plan for a later capability announcement.
+    async fn try_start(&mut self, capabilities: &wire::HostCapabilities) -> bool {
+        let Some(session) = self.session else {
+            return true;
+        };
         let Some(plan) = self.plan.take() else {
             return true;
         };
         let mut config = plan.config();
-        if !tighten_limits(&mut config.limits, &welcome.host_capabilities) {
+        if !tighten_limits(&mut config.limits, capabilities) {
+            if self.real_vehicle {
+                info!("the vehicle advertises no velocity control yet; the mission waits for it");
+                self.plan = Some(plan);
+                self.update(|status| status.awaiting_capabilities = true);
+                return true;
+            }
             // Streaming velocity intents the host never advertised would
             // fail open against the command gate; a mission with no
             // authorized envelope does not fly.
             self.fence("no vehicle.motion velocity capability advertised");
             return false;
         }
+        self.update(|status| status.awaiting_capabilities = false);
         let limits = config.limits;
         let built = match &plan.source {
             PlanSource::Navdata(navdata) => {
@@ -132,7 +170,7 @@ impl MissionTask {
             }
         }
         let activation = DomainEnvelope::ProfileActivation(ProfileActivation {
-            session: welcome.session,
+            session,
             profile_id: PROFILE_ID.to_owned(),
             profile_revision: PROFILE_REVISION,
             activation_revision: ACTIVATION_REVISION,
@@ -145,11 +183,43 @@ impl MissionTask {
             return false;
         }
         self.update(|status| status.activation_sent = true);
+        if self.real_vehicle {
+            self.wait_for_launch();
+            return true;
+        }
+        self.request_lease().await
+    }
+
+    /// Asks for the motion lease.
+    pub(super) async fn request_lease(&mut self) -> bool {
         let lease = DomainEnvelope::Lease(LeaseRequest {
             vehicle: HOST_VEHICLE,
             scope: ScopeId::new(MISSION_SCOPE),
         });
         self.send_message(lease).await
+    }
+
+    /// Holds a real vehicle's mission until its pilot has launched it: the
+    /// mission does not ask for the motion lease on the ground, where the
+    /// vehicle would refuse velocity control, and its phase clocks do not
+    /// run (ADR-0051).
+    pub(super) fn wait_for_launch(&mut self) {
+        self.awaiting_launch = true;
+        self.hold("waiting for the pilot to launch the aircraft");
+        self.update(|status| status.awaiting_launch = true);
+    }
+
+    /// Notes the vehicle airborne: the next tick asks for the lease, and
+    /// the mission keeps asking while another principal holds the scope.
+    fn on_airborne(&mut self, height_m: f64) {
+        self.awaiting_launch = false;
+        self.lease_due = true;
+        self.lease_wanted = true;
+        info!(
+            height_m,
+            "the aircraft is airborne; the mission asks for the motion lease"
+        );
+        self.update(|status| status.awaiting_launch = false);
     }
 
     fn on_lease_response(&mut self, response: &LeaseResponse) {
@@ -161,14 +231,36 @@ impl MissionTask {
                 generation = response.generation.as_u64(),
                 "mission motion lease granted"
             );
-            self.generation = Some(response.generation);
-            self.update(|status| status.lease_generation = Some(response.generation.as_u64()));
+            self.take_generation(response.generation);
+        } else if self.lease_wanted {
+            // A human holds the scope after the launch: the mission holds
+            // and asks again until the human releases or hands it over.
+            debug!(reason = ?response.reason, "mission motion lease denied; retrying");
+            self.hold("the motion lease is held by another principal");
+            self.schedule_lease_retry();
         } else {
             // A human already holds the scope: the mission waits for a
             // handover instead of ending (ADR-0051).
             error!(reason = ?response.reason, "mission motion lease denied");
             self.hold("the motion lease was denied; waiting for a handover");
         }
+    }
+
+    /// Arms the next lease request `LEASE_RETRY_NS` from now.
+    pub(super) fn schedule_lease_retry(&mut self) {
+        if self.lease_wanted && !self.fenced {
+            self.lease_retry_at =
+                Some(self.mission_now().as_nanos().saturating_add(LEASE_RETRY_NS));
+            self.update(|status| status.lease_retries = status.lease_retries.wrapping_add(1));
+        }
+    }
+
+    /// Whether a held mission's retry has come due at `now` on the mission clock.
+    pub(super) fn lease_retry_due(&self, now: u64) -> bool {
+        self.held
+            && !self.fenced
+            && !self.awaiting_launch
+            && self.lease_retry_at.is_some_and(|at| now >= at)
     }
 
     /// Routes a correlated action result back into the mission engine.
@@ -251,8 +343,13 @@ impl MissionTask {
                 })
             }
         };
-        if let Some(ownship) = ownship {
-            mission.on_ownship(&ownship, now);
+        let Some(ownship) = ownship else {
+            return;
+        };
+        mission.on_ownship(&ownship, now);
+        let height_m = -ownship.ned[2];
+        if self.awaiting_launch && height_m >= AIRBORNE_HEIGHT_M {
+            self.on_airborne(height_m);
         }
     }
 }
@@ -312,53 +409,4 @@ fn velocity_capability(capabilities: &wire::HostCapabilities) -> Option<&wire::I
 }
 
 #[cfg(test)]
-mod tests {
-    #![allow(clippy::expect_used, clippy::panic)]
-
-    use super::*;
-
-    fn advertised(max_linear: f32) -> wire::HostCapabilities {
-        wire::HostCapabilities {
-            vehicles: vec![wire::VehicleDescriptor {
-                vehicle: Some(wire::VehicleId {
-                    value: HOST_VEHICLE.as_u64(),
-                }),
-                scopes: vec![wire::ScopeDescriptor {
-                    payload: None,
-                    scope: Some(wire::ScopeId {
-                        value: MISSION_SCOPE.to_owned(),
-                    }),
-                    intents: vec![wire::IntentCapability {
-                        family: wire::IntentFamily::Velocity as i32,
-                        max_linear,
-                        ..Default::default()
-                    }],
-                    ..Default::default()
-                }],
-                ..Default::default()
-            }],
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn a_missing_velocity_capability_is_mission_fatal_not_fail_open() {
-        let mut limits = MissionLimits::default();
-        let configured = limits;
-        assert!(!tighten_limits(
-            &mut limits,
-            &wire::HostCapabilities::default()
-        ));
-        assert_eq!(
-            limits, configured,
-            "refusal, not silent flight on unadvertised ceilings"
-        );
-    }
-
-    #[test]
-    fn an_advertised_envelope_tightens_the_configured_ceilings() {
-        let mut limits = MissionLimits::default();
-        assert!(tighten_limits(&mut limits, &advertised(1.0)));
-        assert_eq!(limits.max_horizontal_mps, 1.0);
-    }
-}
+mod tests;

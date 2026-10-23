@@ -3,6 +3,9 @@
 
 pub use world_geomag::{GeomagModel, MagneticField, WMM2025};
 
+use crate::error::WorldError;
+use crate::position::world_position;
+
 /// The date a world's magnetic field is evaluated at.
 ///
 /// A world fixes its epoch when it starts, so a run is deterministic: the
@@ -27,6 +30,36 @@ impl MagneticEpoch {
     pub fn decimal_year(self) -> f64 {
         self.decimal_year
     }
+}
+
+/// The main magnetic field at a point at `epoch`, in north-east-down
+/// components, from the one model every world shares. `height_m` is a
+/// world (MSL) height; see [`crate::world_position`] for how it meets the
+/// ellipsoid. A host uses this to turn a vehicle's magnetic heading true
+/// without a simulated world around it.
+///
+/// # Errors
+///
+/// Returns [`WorldError::MagneticField`] for a point outside the model's
+/// domain or an epoch outside its validity.
+pub fn magnetic_field_at(
+    latitude_deg: f64,
+    longitude_deg: f64,
+    height_m: f64,
+    epoch: MagneticEpoch,
+) -> Result<MagneticField, WorldError> {
+    let decimal_year = epoch.decimal_year();
+    world_geomag::wmm2025(
+        world_position(latitude_deg, longitude_deg, height_m),
+        world_core::DecimalYear(decimal_year),
+    )
+    .map_err(|source| WorldError::MagneticField {
+        latitude_deg,
+        longitude_deg,
+        height_m,
+        decimal_year,
+        source,
+    })
 }
 
 #[cfg(test)]

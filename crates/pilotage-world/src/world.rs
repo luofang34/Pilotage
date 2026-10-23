@@ -7,7 +7,7 @@ use world_atmosphere::{Altitude, AtmosphereModel, AtmospherePoint, AtmosphereSta
 
 use crate::error::WorldError;
 use crate::geomag::{GeomagModel, MagneticEpoch, MagneticField, WMM2025};
-use crate::position::{LocalTangentPlane, local_plane, world_position};
+use crate::position::{LocalTangentPlane, local_plane};
 use crate::site::{Ground, Placement, Site};
 use crate::terrain::{TerrainSample, TerrainSource};
 
@@ -174,18 +174,7 @@ impl<T: TerrainSource, A: AtmosphereModel> World<T, A> {
         longitude_deg: f64,
         height_m: f64,
     ) -> Result<MagneticField, WorldError> {
-        let decimal_year = self.epoch.decimal_year();
-        world_geomag::wmm2025(
-            world_position(latitude_deg, longitude_deg, height_m),
-            world_core::DecimalYear(decimal_year),
-        )
-        .map_err(|source| WorldError::MagneticField {
-            latitude_deg,
-            longitude_deg,
-            height_m,
-            decimal_year,
-            source,
-        })
+        crate::geomag::magnetic_field_at(latitude_deg, longitude_deg, height_m, self.epoch)
     }
 
     /// The air at a point: the world's atmosphere model at its epoch.

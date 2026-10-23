@@ -172,7 +172,23 @@ Flight velocity control requires the separate experimental opt-in below.
 The adapter publishes the aircraft's own position fix and ground velocity
 when the flight controller reports a satellite solution. The height is
 measured from the point where the motors last started. The attitude report
-has no verified north reference.
+has no verified north reference. A survey mission needs an authorized
+heading. Verify the reported heading on the ground against a compass or the
+DJI Fly app, then set `PILOTAGE_DJI_HEADING_REFERENCE=true` or `magnetic`
+for the reference you verified; the adapter then publishes the attitude as
+an authorized attitude under that reference and advertises it. With
+`magnetic`, the host turns that attitude to true north by the shared
+geomagnetic model's declination at the aircraft's own fix and states the
+variation it applied in the same sample, so the mission and every client
+read a true heading. Unset, the mission receives no heading and commands no
+velocity.
+The gimbal angles reach the wire as a gimbal attitude only when you set
+`PILOTAGE_DJI_GIMBAL_YAW_FRAME=earth` or `vehicle` for the frame you
+verified the reported gimbal yaw against; a client's live survey needs that
+attitude to place each picture. Verify the frame on the ground: with the
+gimbal in follow mode, turn the aircraft by hand. A gimbal yaw that follows
+the aircraft heading is `earth`; a gimbal yaw that stays near zero is
+`vehicle`.
 Keep the propellers removed for bench tests.
 The default `observed` control mode requires fresh gimbal observations before
 it sends a pitch command. Observed pitch targets use the Mini 3 range of
