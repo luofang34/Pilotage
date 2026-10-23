@@ -11,6 +11,8 @@
 //! drains out behind the actor.
 
 pub(crate) mod ownship;
+#[cfg(feature = "sim")]
+mod sim_multicopter_rig;
 mod task;
 
 use navigate_contract::{ClockDomainId, GeodeticPosition};
@@ -31,6 +33,8 @@ use crate::runtime::engine_actor::ToEngine;
 use crate::runtime::engine_actor::{ENGINE_QUEUE_CAPACITY, EngineActor};
 use crate::runtime::registry::OUTBOUND_QUEUE_CAPACITY;
 use crate::runtime::{MissionOptions, MissionPlanRequest};
+#[cfg(feature = "sim")]
+pub use sim_multicopter_rig::spawn_sim_multicopter_rig;
 
 /// The mission principal's driver-assigned client key. The accept loop
 /// allocates keys from zero with a `fetch_add`, so `u64::MAX` can only
