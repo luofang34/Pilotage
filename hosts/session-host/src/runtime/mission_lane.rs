@@ -12,7 +12,9 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use pilotage_adapter_api::RawVideoFrame;
-use pilotage_mission::{FrameAssessment, IntentContext, Lane, LaneEffect, RunProgress};
+use pilotage_mission::{
+    FrameAssessment, IntentContext, Lane, LaneEffect, MissionState, RunProgress,
+};
 use pilotage_protocol::wire;
 use pilotage_session::ClientKey;
 use tokio::sync::{mpsc, watch};
@@ -218,11 +220,7 @@ impl LaneTask {
         };
         let status = run.status.borrow().clone();
         let finished = run.handle.is_finished();
-        self.lane.on_progress(&RunProgress {
-            target_waypoint: status.target_waypoint,
-            plan_complete: status.plan_complete,
-            ended: finished || status.fenced || status.closed,
-        });
+        self.lane.on_progress(&run_progress(&status, finished));
         // A run whose lane ended stops the vehicle in place and releases
         // it, so the next run of this lane can take the motion lease.
         let ended = !matches!(
@@ -273,3 +271,19 @@ impl LaneTask {
             .is_ok()
     }
 }
+
+/// The lane's view of its run: a run that exited, was fenced or closed,
+/// or whose mission failed has ended.
+fn run_progress(status: &AutomationStatus, finished: bool) -> RunProgress {
+    RunProgress {
+        target_waypoint: status.target_waypoint,
+        plan_complete: status.plan_complete,
+        ended: finished
+            || status.fenced
+            || status.closed
+            || status.mission_state == Some(MissionState::Failed),
+    }
+}
+
+#[cfg(test)]
+mod tests;
