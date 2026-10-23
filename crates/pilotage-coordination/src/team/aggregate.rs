@@ -80,12 +80,19 @@ impl TaskBook {
                     member: member.to_owned(),
                     ..task.clone()
                 });
+            self.paths
+                .entry(id.clone())
+                .or_insert_with(|| task.path.clone());
+            // This team flew the line again: the member's own verdict is
+            // older and keeps arriving with every report it publishes.
+            if entry.reflown > task.reflown {
+                continue;
+            }
             entry.state = task.state;
             entry.evidence.clone_from(&task.evidence);
             entry.progress = task.progress;
             // A member team reports the lines it flew again itself.
             entry.reflown = entry.reflown.max(task.reflown);
-            self.paths.entry(id).or_insert_with(|| task.path.clone());
         }
     }
 

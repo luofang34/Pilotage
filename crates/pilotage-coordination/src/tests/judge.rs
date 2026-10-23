@@ -93,6 +93,22 @@ fn a_finished_member_flies_a_bad_line_again_while_its_owner_flies_on() {
         .expect("SIM-2's line 1");
     assert_eq!(line.state, wire::MissionTaskState::Done as i32);
     assert_eq!(line.reflown, 1);
+
+    // SIM-2 keeps reporting its own, older verdict on that line.
+    let sim2 = fleet.members.get("SIM-2").map(Lane::status).expect("SIM-2");
+    fleet.team.on_member_status(&sim2, &context("again"));
+    let line = fleet
+        .team
+        .status()
+        .tasks
+        .into_iter()
+        .find(|t| t.task_id == "SIM-2/line-01")
+        .expect("SIM-2's line 1");
+    assert_eq!(
+        line.state,
+        wire::MissionTaskState::Done as i32,
+        "the re-flight's verdict stands"
+    );
 }
 
 #[test]
