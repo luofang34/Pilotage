@@ -82,8 +82,9 @@ pub struct Offered {
     pub abort: bool,
 }
 
-/// One client's view of one mission lane.
-#[derive(Debug, Clone)]
+/// One client's view of one mission lane. The default desk has no name;
+/// a client that sends intents builds its desk with [`MissionDesk::new`].
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct MissionDesk {
     subject: String,
     prefix: String,
