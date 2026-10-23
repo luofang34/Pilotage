@@ -160,7 +160,7 @@ pub(super) fn team_status(team: &TeamLane) -> wire::MissionStatus {
             .unwrap_or_default(),
         proposal_digest: proposal.map(|p| p.digest.clone()).unwrap_or_default(),
         plan_digest: Vec::new(),
-        run_id: String::new(),
+        run_id: team.run_id.clone().unwrap_or_default(),
         tasks: team.book.statuses(),
         active_task: active,
         recovery_policy: team.config.recovery_policy.clone(),

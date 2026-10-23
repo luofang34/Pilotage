@@ -105,6 +105,8 @@ pub struct TeamLane {
     book: TaskBook,
     pending: BTreeMap<String, Pending>,
     operator_request: Option<String>,
+    /// The team's run, once started; a parent team follows it by this id.
+    run_id: Option<String>,
     reflies: Vec<Refly>,
     requests: u64,
     detail: String,
@@ -130,6 +132,7 @@ impl TeamLane {
             book: TaskBook::default(),
             pending: BTreeMap::new(),
             operator_request: None,
+            run_id: None,
             reflies: Vec::new(),
             requests: 0,
             detail: "waiting for an objective".to_owned(),
@@ -151,7 +154,7 @@ impl TeamLane {
         let result = match intent.action.as_ref() {
             Some(Action::Propose(objective)) => self.propose(objective, context),
             Some(Action::Approve(approval)) => self.approve(approval, context),
-            Some(Action::Start(start)) => self.start(start),
+            Some(Action::Start(start)) => self.start(start, context),
             Some(Action::Hold(_)) => self.steer(
                 &[Phase::Running],
                 Phase::Held,

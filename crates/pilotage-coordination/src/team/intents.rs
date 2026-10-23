@@ -139,6 +139,7 @@ impl TeamLane {
     pub(super) fn start(
         &mut self,
         start: &wire::MissionStart,
+        context: &IntentContext,
     ) -> Result<(Vec<MemberIntent>, bool), String> {
         if self.phase != Phase::Admitted {
             return Err(format!(
@@ -157,6 +158,7 @@ impl TeamLane {
             intents.push(self.request(&member, Op::Start, None, action));
         }
         self.phase = Phase::Starting;
+        self.run_id = Some(context.fresh_id.clone());
         self.detail = "starting the members".to_owned();
         Ok((intents, true))
     }

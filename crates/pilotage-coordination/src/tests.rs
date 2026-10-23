@@ -320,6 +320,7 @@ fn a_team_survey_is_proposed_approved_flown_and_adapted_inside_its_envelope() {
     );
     assert!(status.detail.contains("1 flown again"), "{}", status.detail);
     assert_eq!(status.members.len(), 3);
+    assert!(!status.run_id.is_empty(), "a parent team follows this run");
 }
 
 #[test]
