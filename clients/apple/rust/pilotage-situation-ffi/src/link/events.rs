@@ -297,7 +297,9 @@ impl Link {
                 });
             }
             // The situation display shows no mission lane yet.
-            ModuleEvent::Pong(_) | ModuleEvent::MissionStatus(_) | ModuleEvent::MissionReceipt(_) => {}
+            ModuleEvent::Pong(_)
+            | ModuleEvent::MissionStatus(_)
+            | ModuleEvent::MissionReceipt(_) => {}
         }
     }
 
