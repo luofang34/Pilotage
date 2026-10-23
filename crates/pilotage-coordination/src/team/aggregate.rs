@@ -165,12 +165,21 @@ pub(super) fn team_status(team: &TeamLane) -> wire::MissionStatus {
         active_task: active,
         recovery_policy: team.config.recovery_policy.clone(),
         estimates: proposal.and_then(|p| p.estimates),
-        simulated: proposal
-            .and_then(|p| p.assumptions.as_ref())
-            .is_some_and(|a| a.simulated),
+        simulated: simulated(team),
         detail: team.detail.clone(),
         members: team.statuses.values().cloned().collect(),
         sequence: team.sequence,
         area,
+    }
+}
+
+/// Whether the team flies simulated vehicles only: the proposal's
+/// assumption once there is one, before that every member's own report.
+/// A team with a member that is not simulated, or with no report yet, is
+/// real.
+fn simulated(team: &TeamLane) -> bool {
+    match team.proposal.as_ref().and_then(|p| p.assumptions.as_ref()) {
+        Some(assumptions) => assumptions.simulated,
+        None => !team.statuses.is_empty() && team.statuses.values().all(|s| s.simulated),
     }
 }

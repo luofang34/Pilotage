@@ -374,3 +374,17 @@ fn without_a_revise_permission_a_bad_line_stays_incomplete() {
         .expect("line");
     assert_eq!(line.state, wire::MissionTaskState::Incomplete as i32);
 }
+
+#[test]
+fn an_idle_team_of_simulated_members_reports_simulated() {
+    let mut fleet = Fleet::new();
+    assert!(!fleet.team.status().simulated, "no member report yet");
+    for (name, lane) in &fleet.members {
+        let status = lane.status();
+        assert!(status.simulated, "{name}");
+        fleet.team.on_member_status(&status, &context("idle"));
+    }
+    let status = fleet.team.status();
+    assert_eq!(status.state, wire::MissionLaneState::Idle as i32);
+    assert!(status.simulated, "every member is simulated");
+}
