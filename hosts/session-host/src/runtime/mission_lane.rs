@@ -143,7 +143,7 @@ impl LaneTask {
                     }
                 },
                 _ = ticker.tick() => {
-                    self.on_progress();
+                    self.on_progress().await;
                     if !self.publish(false).await {
                         break;
                     }
@@ -210,7 +210,7 @@ impl LaneTask {
                 self.runs = self.runs.wrapping_add(1);
                 let client = ClientKey::new(RUN_CLIENT_BASE.wrapping_sub(self.runs));
                 let (controls, receiver) = mpsc::channel(4);
-                let plan = MissionPlan::survey(order.request, order.config);
+                let plan = MissionPlan::of_lane(order.plan, order.config);
                 let (handle, status) = automation::spawn_mission_run(
                     &self.engine,
                     self.start,
@@ -237,13 +237,20 @@ impl LaneTask {
         }
     }
 
-    fn on_progress(&mut self) {
+    async fn on_progress(&mut self) {
         let Some(run) = self.run.as_mut() else {
             return;
         };
         let status = run.status.borrow().clone();
         let finished = run.handle.is_finished();
-        self.lane.on_progress(&run_progress(&status, finished));
+        if let Some(effect) = self.lane.on_progress(&run_progress(&status, finished)) {
+            // A revision's checkpoint: its run replaces this one.
+            self.apply(effect).await;
+            return;
+        }
+        let Some(run) = self.run.as_mut() else {
+            return;
+        };
         // A run whose lane ended stops the vehicle in place and releases
         // it, so the next run of this lane can take the motion lease.
         let ended = !matches!(

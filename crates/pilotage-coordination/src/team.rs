@@ -4,6 +4,7 @@
 mod aggregate;
 mod intents;
 mod refly;
+mod revision;
 
 use std::collections::BTreeMap;
 
@@ -78,6 +79,7 @@ enum Op {
     Propose,
     Approve,
     Start,
+    Revise,
 }
 
 /// A member intent awaiting its receipt.
@@ -87,6 +89,8 @@ struct Pending {
     op: Op,
     /// The re-flight it belongs to, or `None` for the team's own step.
     refly: Option<usize>,
+    /// It is a member's share of a revision.
+    revision: bool,
 }
 
 /// The coordinator's lane.
@@ -96,6 +100,9 @@ pub struct TeamLane {
     phase: Phase,
     objective: Option<wire::MissionObjective>,
     sweep: Option<Sweep>,
+    /// The survey every member objective starts from: the team's height,
+    /// sweep and spacing.
+    member_survey: Option<wire::SurveyObjective>,
     height_m: f64,
     assignments: Vec<Assignment>,
     member_proposals: BTreeMap<String, wire::MissionProposal>,
@@ -108,6 +115,7 @@ pub struct TeamLane {
     /// The team's run, once started; a parent team follows it by this id.
     run_id: Option<String>,
     reflies: Vec<Refly>,
+    revision: Option<revision::Revision>,
     requests: u64,
     detail: String,
     sequence: u64,
@@ -123,6 +131,7 @@ impl TeamLane {
             phase: Phase::Idle,
             objective: None,
             sweep: None,
+            member_survey: None,
             height_m: 0.0,
             assignments: Vec::new(),
             member_proposals: BTreeMap::new(),
@@ -134,6 +143,7 @@ impl TeamLane {
             operator_request: None,
             run_id: None,
             reflies: Vec::new(),
+            revision: None,
             requests: 0,
             detail: "waiting for an objective".to_owned(),
             sequence: 0,
@@ -170,8 +180,9 @@ impl TeamLane {
                 Phase::Aborted,
                 Action::Abort(wire::MissionAbort {}),
             ),
+            Some(Action::Revise(revise)) => return self.on_revise(id, revise, context),
             Some(Action::Skip(_)) => {
-                Err("a team skips a task through a successor; not supported yet".to_owned())
+                Err("a team skips a task through a revision; draft one instead".to_owned())
             }
             None => Err("the intent names no action".to_owned()),
         };
@@ -209,6 +220,12 @@ impl TeamLane {
         };
         self.changed = true;
         let accepted = receipt.outcome == wire::MissionReceiptOutcome::Accepted as i32;
+        if pending.revision {
+            return TeamReply {
+                receipt: None,
+                intents: self.on_revision_receipt(member, pending.op, accepted, receipt),
+            };
+        }
         if let Some(index) = pending.refly {
             let intents = self.on_refly_receipt(index, pending.op, accepted, receipt, context);
             return TeamReply {
@@ -225,7 +242,7 @@ impl TeamLane {
                     self.member_proposals.insert(member.to_owned(), proposal);
                 }
             }
-            Op::Approve | Op::Start => {}
+            Op::Approve | Op::Start | Op::Revise => {}
         }
         if self
             .pending
@@ -252,7 +269,7 @@ impl TeamLane {
                 "approved by every member; waiting for start".to_owned(),
                 None,
             ),
-            Op::Start => (Phase::Running, "running".to_owned(), None),
+            Op::Start | Op::Revise => (Phase::Running, "running".to_owned(), None),
         };
         self.phase = phase;
         self.detail = detail;
@@ -268,7 +285,7 @@ impl TeamLane {
         let (phase, what) = match op {
             Op::Propose => (Phase::Idle, "proposal"),
             Op::Approve => (Phase::Proposed, "approval"),
-            Op::Start => (Phase::Failed, "start"),
+            Op::Start | Op::Revise => (Phase::Failed, "start"),
         };
         self.phase = phase;
         self.detail = format!("{member} refused the {what}: {reason}");
@@ -330,6 +347,8 @@ impl TeamLane {
             }),
             members,
             objective: self.objective.clone(),
+            predecessor_digest: Vec::new(),
+            summary: String::new(),
         };
         proposal.digest = proposal_digest(&proposal).to_vec();
         self.book.plan(&self.member_proposals);
@@ -407,6 +426,7 @@ impl TeamLane {
                 member: member.to_owned(),
                 op,
                 refly,
+                revision: false,
             },
         );
         MemberIntent {
@@ -430,6 +450,7 @@ impl TeamLane {
         self.book = TaskBook::default();
         self.pending.clear();
         self.reflies.clear();
+        self.revision = None;
     }
 
     fn receipt(

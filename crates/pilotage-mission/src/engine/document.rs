@@ -27,6 +27,8 @@ const PLAN_DIGEST_DOMAIN: &[u8] = b"pilotage.flight-plan.v1\0";
 pub(super) const ROUTE_REVISION_PREFIX: &str = "operational-route-v1";
 /// Revision prefix of a mission built from an area survey request.
 pub(super) const SURVEY_REVISION_PREFIX: &str = "operational-survey-v1";
+/// Revision prefix of a mission that flies home.
+pub(super) const HOME_REVISION_PREFIX: &str = "operational-home-v1";
 
 pub(super) fn build_document(
     plan: &FlightPlan,

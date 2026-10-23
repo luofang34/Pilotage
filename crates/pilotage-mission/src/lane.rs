@@ -11,6 +11,7 @@ mod compile;
 mod digest;
 mod run;
 mod steering;
+mod successor;
 
 #[cfg(test)]
 mod tests;
@@ -61,14 +62,23 @@ pub struct IntentContext {
     pub fresh_id: String,
 }
 
-/// A run the host must start: the survey and the config its mission
-/// engine is built from.
+/// What a run flies.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RunPlan {
+    /// The lines of an area survey, then home when the request says so.
+    Survey(SurveyRequest),
+    /// Home from wherever the vehicle is: a successor that ends the work.
+    Home,
+}
+
+/// A run the host must start: the plan and the config its mission engine
+/// is built from.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunOrder {
     /// The run's identifier.
     pub run_id: String,
-    /// The survey request.
-    pub request: SurveyRequest,
+    /// What the run flies.
+    pub plan: RunPlan,
     /// The mission config.
     pub config: MissionConfig,
 }
@@ -103,6 +113,12 @@ pub struct Lane {
     proposal: Option<Compiled>,
     approval: Option<wire::MissionApproval>,
     run: Option<RunTracker>,
+    /// A revision of the plan in progress.
+    successor: Option<successor::Successor>,
+    /// Revisions drafted so far; numbers each successor's tasks.
+    revisions: u32,
+    /// The tasks of runs a successor replaced, as they ended.
+    history: Vec<wire::MissionTaskStatus>,
     detail: String,
     sequence: u64,
     changed: bool,
@@ -118,6 +134,9 @@ impl Lane {
             proposal: None,
             approval: None,
             run: None,
+            successor: None,
+            revisions: 0,
+            history: Vec::new(),
             detail: "waiting for an objective".to_owned(),
             sequence: 0,
             changed: true,
@@ -152,6 +171,7 @@ impl Lane {
                 LaneEffect::Resume,
             ),
             Some(Action::Abort(_)) => self.abort(),
+            Some(Action::Revise(revise)) => self.revise(revise, context),
             Some(Action::Skip(_)) => Err(
                 "skipping a task needs a successor plan, which this lane does not compile yet"
                     .to_owned(),
@@ -186,13 +206,16 @@ impl Lane {
         context: &IntentContext,
     ) -> Result<(Option<LaneEffect>, Option<wire::MissionProposal>), String> {
         if self.is_flying() {
-            return Err("a run is in progress; a new objective needs a successor plan".to_owned());
+            return Err("a run is in progress; revise it instead".to_owned());
         }
         let compiled = compile::compile(objective, &self.config, context.fresh_id.clone())?;
         let proposal = compiled.proposal.clone();
         self.proposal = Some(compiled);
         self.approval = None;
         self.run = None;
+        self.successor = None;
+        self.revisions = 0;
+        self.history.clear();
         self.state = wire::MissionLaneState::Proposed;
         self.detail = "proposed; waiting for an approval".to_owned();
         Ok((None, Some(proposal)))
@@ -203,6 +226,9 @@ impl Lane {
         approval: &wire::MissionApproval,
         context: &IntentContext,
     ) -> Result<(Option<LaneEffect>, Option<wire::MissionProposal>), String> {
+        if self.is_flying() {
+            return self.approve_successor(approval, context);
+        }
         if self.state != wire::MissionLaneState::Proposed {
             return Err(format!(
                 "an approval needs a proposal; the lane is {:?}",
@@ -241,7 +267,7 @@ impl Lane {
         Ok((
             Some(LaneEffect::Start(Box::new(RunOrder {
                 run_id,
-                request: compiled.request.clone(),
+                plan: compiled.plan.clone(),
                 config: compiled.config.clone(),
             }))),
             None,
@@ -253,6 +279,7 @@ impl Lane {
             return Err(format!("nothing to abort; the lane is {:?}", self.state));
         }
         self.state = wire::MissionLaneState::Aborted;
+        self.successor = None;
         self.detail = "aborted by intent; the vehicle stops in place".to_owned();
         if let Some(run) = self.run.as_mut() {
             run.close();
@@ -283,15 +310,19 @@ impl Lane {
         )
     }
 
-    /// Folds the run's progress in. A plan that completes ends the run.
-    pub fn on_progress(&mut self, progress: &RunProgress) {
+    /// Folds the run's progress in. A plan that completes ends the run,
+    /// unless an admitted successor takes over: then the host starts the
+    /// successor's run, the effect returned.
+    pub fn on_progress(&mut self, progress: &RunProgress) -> Option<LaneEffect> {
         let flying = self.is_flying();
-        let Some(run) = self.run.as_mut() else {
-            return;
-        };
+        let run = self.run.as_mut()?;
         if run.on_progress(progress) {
             self.changed = true;
         }
+        if flying && let Some(effect) = self.at_checkpoint(progress.plan_complete) {
+            return Some(effect);
+        }
+        let run = self.run.as_mut()?;
         if progress.plan_complete && flying {
             run.close();
             self.state = wire::MissionLaneState::Complete;
@@ -303,6 +334,7 @@ impl Lane {
             self.detail = "the run ended before its plan completed".to_owned();
             self.changed = true;
         }
+        None
     }
 
     /// Counts a captured picture against the active survey line. Returns
@@ -347,11 +379,16 @@ impl Lane {
                 .as_ref()
                 .map(RunTracker::run_id)
                 .unwrap_or_default(),
-            tasks: match (self.run.as_ref(), proposal) {
-                (Some(run), _) => run.task_statuses(),
-                (None, Some(p)) => run::planned_statuses(&p.tasks),
-                (None, None) => Vec::new(),
-            },
+            tasks: self
+                .history
+                .iter()
+                .cloned()
+                .chain(match (self.run.as_ref(), proposal) {
+                    (Some(run), _) => run.task_statuses(),
+                    (None, Some(p)) => run::planned_statuses(&p.tasks),
+                    (None, None) => Vec::new(),
+                })
+                .collect(),
             active_task: self
                 .run
                 .as_ref()
@@ -365,6 +402,7 @@ impl Lane {
             sequence: self.sequence,
             area: survey.map(|s| s.area.clone()).unwrap_or_default(),
             height_m: survey.map_or(0.0, |s| s.height_m),
+            successor: self.successor_status(),
         }
     }
 

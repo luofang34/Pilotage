@@ -130,6 +130,10 @@ message MissionProposal {
   repeated MemberProposal members = 7;
   // The objective the proposal was compiled from.
   MissionObjective objective = 8;
+  // The proposal this one succeeds; empty for a first plan.
+  bytes predecessor_digest = 9;
+  // What a successor changes, in words, for review.
+  string summary = 10;
 }
 
 // The limits inside which a lane may adapt an approved plan without a new
@@ -170,6 +174,44 @@ message MissionResume {}
 
 message MissionAbort {}
 
+// A planned change to an approved or running plan: a successor
+// (ADR-0052). The lane compiles it into a draft that the receipt and the
+// status show for review. An approval of the draft's digest admits it; a
+// change inside the active approval's envelope is admitted at once when
+// `within_envelope` is set. A running lane switches at its next
+// checkpoint, the end of the task in progress, or at once while held. A
+// lane never splices a running task.
+message MissionRevise {
+  // The proposal the change continues; the lane refuses a stale one.
+  bytes base_digest = 1;
+  // The run the change continues; empty before a start.
+  string run_id = 2;
+  // Admit at once when the change stays inside the active envelope.
+  bool within_envelope = 3;
+  // Who drafted the change; the host writes the admitted session.
+  RecordOrigin drafted_by = 4;
+  oneof change {
+    // A new revision of the objective. A vehicle lane flies it from the
+    // checkpoint; a team takes only a strip on its own line grid.
+    MissionObjective objective = 10;
+    // A team moves part of one member's unflown lines to another member.
+    MissionReassign reassign = 11;
+    // End after the task in progress and return to the launch point.
+    MissionFinish finish = 12;
+  }
+}
+
+// Part of one member's unflown survey lines, flown by another member.
+message MissionReassign {
+  string from_member = 1;
+  string to_member = 2;
+  // The fraction of the unflown lines that moves, in (0, 1]. The lines
+  // move from the end of the band nearest the receiving member.
+  double fraction = 3;
+}
+
+message MissionFinish {}
+
 message MissionSkip {
   string task_id = 1;
 }
@@ -186,6 +228,7 @@ message MissionIntent {
     MissionResume resume = 14;
     MissionAbort abort = 15;
     MissionSkip skip = 16;
+    MissionRevise revise = 17;
   }
 }
 
@@ -283,4 +326,28 @@ message MissionStatus {
   // states none. Any client sizes an approval's height ceiling from it,
   // also for a proposal another client made.
   double height_m = 16;
+  // A successor drafted, admitted or applied to the plan in progress.
+  MissionSuccessor successor = 17;
+}
+
+enum MissionSuccessorState {
+  MISSION_SUCCESSOR_STATE_UNSPECIFIED = 0;
+  // Waiting for review: an approval of its digest admits it.
+  MISSION_SUCCESSOR_STATE_DRAFTED = 1;
+  // Admitted; the lane switches at its next checkpoint.
+  MISSION_SUCCESSOR_STATE_ADMITTED = 2;
+  // The lane flies it.
+  MISSION_SUCCESSOR_STATE_APPLIED = 3;
+}
+
+// A successor as a lane's status reports it.
+message MissionSuccessor {
+  bytes digest = 1;
+  // What it changes, in words.
+  string summary = 2;
+  MissionSuccessorState state = 3;
+  // The checkpoint it waits for, such as the task in progress.
+  string applies_after = 4;
+  // The session that drafted it.
+  string drafted_by = 5;
 }

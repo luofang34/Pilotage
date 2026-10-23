@@ -15,6 +15,9 @@ pub(super) struct TaskBook {
     paths: BTreeMap<String, Vec<wire::GeoPoint>>,
     /// Each member's run of the team plan; later runs are re-flights.
     original_run: BTreeMap<String, String>,
+    /// Runs of lines a revision moved to a member, with the prefix their
+    /// tasks take in the book.
+    adopted: BTreeMap<String, (String, String)>,
 }
 
 fn key(member: &str, task: &str) -> String {
@@ -27,6 +30,7 @@ impl TaskBook {
         self.tasks.clear();
         self.paths.clear();
         self.original_run.clear();
+        self.adopted.clear();
         for (member, proposal) in proposals {
             for task in &proposal.tasks {
                 let id = key(member, &task.task_id);
@@ -62,18 +66,65 @@ impl TaskBook {
             self.original_run
                 .insert(member.to_owned(), status.run_id.clone());
         }
-        if self.original_run.get(member) != Some(&status.run_id) {
+        let Some(prefix) = self.prefix_of(member, &status.run_id) else {
             return;
-        }
+        };
         for task in &status.tasks {
-            if let Some(entry) = self.tasks.get_mut(&key(member, &task.task_id)) {
-                entry.state = task.state;
-                entry.evidence.clone_from(&task.evidence);
-                entry.progress = task.progress;
-                // A member team reports the lines it flew again itself.
-                entry.reflown = entry.reflown.max(task.reflown);
-            }
+            let id = key(member, &format!("{prefix}{}", task.task_id));
+            // A revision's tasks, and the tasks of moved lines, are new.
+            let entry = self
+                .tasks
+                .entry(id.clone())
+                .or_insert_with(|| wire::MissionTaskStatus {
+                    task_id: id.clone(),
+                    member: member.to_owned(),
+                    ..task.clone()
+                });
+            entry.state = task.state;
+            entry.evidence.clone_from(&task.evidence);
+            entry.progress = task.progress;
+            // A member team reports the lines it flew again itself.
+            entry.reflown = entry.reflown.max(task.reflown);
+            self.paths.entry(id).or_insert_with(|| task.path.clone());
         }
+    }
+
+    /// The prefix the tasks of `member`'s run `run_id` take in the book:
+    /// none for the member's run of the team plan and the runs its own
+    /// revisions replaced it with, the adopted prefix for moved lines.
+    fn prefix_of(&self, member: &str, run_id: &str) -> Option<String> {
+        if let Some((owner, prefix)) = self.adopted.get(run_id) {
+            return (owner == member).then(|| prefix.clone());
+        }
+        let original = self.original_run.get(member)?;
+        let lineage = run_id == original || run_id.starts_with(&format!("{original}-rev"));
+        lineage.then(String::new)
+    }
+
+    /// Follows `member`'s run `run_id` of moved lines under `prefix`.
+    pub(super) fn adopt(&mut self, member: &str, run_id: &str, prefix: &str) {
+        self.adopted
+            .insert(run_id.to_owned(), (member.to_owned(), prefix.to_owned()));
+    }
+
+    /// The member's survey lines not yet flown, nor in flight, with their
+    /// book identifiers and paths.
+    pub(super) fn unflown_lines(&self, member: &str) -> Vec<(String, Vec<wire::GeoPoint>)> {
+        self.tasks
+            .values()
+            .filter(|t| t.member == member && t.kind == wire::MissionTaskKind::SurveyLine as i32)
+            .filter(|t| t.state == wire::MissionTaskState::Pending as i32)
+            .filter_map(|t| Some((t.task_id.clone(), self.paths.get(&t.task_id)?.clone())))
+            .collect()
+    }
+
+    /// The paths of the member's survey lines, flown or not.
+    pub(super) fn line_paths(&self, member: &str) -> Vec<Vec<wire::GeoPoint>> {
+        self.tasks
+            .values()
+            .filter(|t| t.member == member && t.kind == wire::MissionTaskKind::SurveyLine as i32)
+            .filter_map(|t| self.paths.get(&t.task_id).cloned())
+            .collect()
     }
 
     /// The member's lines flown without evidence, with their paths.
@@ -172,6 +223,7 @@ pub(super) fn team_status(team: &TeamLane) -> wire::MissionStatus {
         sequence: team.sequence,
         area: survey.map(|s| s.area.clone()).unwrap_or_default(),
         height_m: survey.map_or(0.0, |s| s.height_m),
+        successor: team.revision_status(),
     }
 }
 

@@ -7,15 +7,10 @@
 
 use pilotage_client_session::mission::{ApprovalPolicy, MissionCommand, SurveyFile};
 use pilotage_protocol::wire::MissionLaneState as Lane;
-use serde_json::json;
 use tokio::time::Instant;
 
-use super::{Session, emit, terminal};
+use super::{Session, terminal};
 use crate::cli::OperatorError;
-
-fn note(text: &str) {
-    emit(&json!({"event": "agent", "note": text}));
-}
 
 impl Session {
     pub(super) async fn survey_agent(
@@ -23,21 +18,23 @@ impl Session {
         objective: SurveyFile,
         deadline: Instant,
     ) -> Result<bool, OperatorError> {
-        note("proposing the survey");
+        self.output.note("proposing the survey");
         let proposed = self.ask(&MissionCommand::Propose { objective }).await?;
         if !proposed.is_some_and(|r| r.accepted()) {
-            note("the lane refused the proposal; stopping");
+            self.output.note("the lane refused the proposal; stopping");
             return Ok(false);
         }
-        note("asking to approve my own proposal; only an approver may");
+        self.output
+            .note("asking to approve my own proposal; only an approver may");
         let own = MissionCommand::Approve {
             digest: None,
             policy: ApprovalPolicy::default(),
         };
         if self.ask(&own).await?.is_some_and(|r| r.accepted()) {
-            note("the host let me approve: it has no approver secret");
+            self.output
+                .note("the host let me approve: it has no approver secret");
         } else {
-            note("waiting for a person to approve");
+            self.output.note("waiting for a person to approve");
         }
         while self.desk.state() != Lane::Admitted {
             if let Some(ended) = terminal(self.desk.state()) {
@@ -45,13 +42,13 @@ impl Session {
             }
             self.step(deadline).await?;
         }
-        note("approved; starting the run");
+        self.output.note("approved; starting the run");
         if !self
             .ask(&MissionCommand::Start { digest: None })
             .await?
             .is_some_and(|r| r.accepted())
         {
-            note("the lane refused the start; stopping");
+            self.output.note("the lane refused the start; stopping");
             return Ok(false);
         }
         self.follow_run(deadline).await
@@ -64,17 +61,18 @@ impl Session {
             match self.desk.state() {
                 Lane::Held if !asked_for_this_hold => {
                     asked_for_this_hold = true;
-                    note("the run is held; asking to resume it");
+                    self.output.note("the run is held; asking to resume it");
                     let resumed = self.ask(&MissionCommand::Resume {}).await?;
                     if !resumed.is_some_and(|r| r.accepted()) {
-                        note("not mine to resume; waiting for the person who held it");
+                        self.output
+                            .note("not mine to resume; waiting for the person who held it");
                     }
                 }
                 Lane::Held => {}
                 state => {
                     asked_for_this_hold = false;
                     if let Some(ended) = terminal(state) {
-                        note(if ended {
+                        self.output.note(if ended {
                             "the survey is complete"
                         } else {
                             "the run ended without completing"

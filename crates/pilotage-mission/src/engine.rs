@@ -3,6 +3,7 @@
 //! or performs I/O.
 
 mod document;
+mod home;
 mod nav_guidance;
 mod output;
 mod tick;

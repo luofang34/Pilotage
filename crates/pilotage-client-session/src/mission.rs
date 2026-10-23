@@ -17,10 +17,13 @@ mod survey_file;
 mod view;
 
 pub use approval::{ApprovalPolicy, approval, approved_height_m};
-pub use command::{IntentKind, MissionCommand};
+pub use command::{IntentKind, MissionCommand, Reassign};
 pub use desk::{DeskRefusal, FiledReceipt, MissionDesk, Offered};
 pub use survey_file::SurveyFile;
-pub use view::{MemberView, MissionView, ProposalView, ReceiptView, TaskView, hex};
+pub use view::{
+    MemberSummary, MemberView, MissionSummary, MissionView, ProposalView, ReceiptView,
+    SuccessorView, TaskView, hex,
+};
 
 #[cfg(test)]
 mod tests;

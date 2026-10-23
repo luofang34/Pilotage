@@ -1,14 +1,18 @@
-//! Adaptation within the team's envelope: a line a member flew without
-//! enough usable pictures is flown again as its own small objective, under
-//! the member approval the team's envelope allows, without a new operator
+//! Extra flights a member flies after its plan, each as its own small
+//! objective under the member approval the team's envelope allows.
+//!
+//! A re-flight is adaptation within the envelope: a line a member flew
+//! without enough usable pictures is flown again, without a new operator
 //! approval. Each line is flown again at most once, and the envelope's
-//! `max_refly_lines` bounds the total.
+//! `max_refly_lines` bounds the total. Lines a revision moved to a member
+//! wait in a queue until the member completes its own plan; they never
+//! splice into a plan in progress.
 
 use pilotage_mission::IntentContext;
 use pilotage_protocol::wire;
 
 use super::{MemberIntent, Op, Phase, TeamLane, delegate};
-use crate::allocation::line_strip;
+use crate::allocation::{Across, line_strip};
 use crate::geometry::Local;
 
 /// Margin around a member's band and launch point, metres.
@@ -16,6 +20,8 @@ const BOUND_MARGIN_M: f64 = 80.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ReflyState {
+    /// Moved lines waiting for the member to complete its plan.
+    Queued,
     Proposing,
     Approving,
     Starting,
@@ -34,6 +40,8 @@ pub(super) struct Refly {
     pub proposal: Option<wire::MissionProposal>,
     /// The member's run the re-flight is, once it started.
     pub run_id: Option<String>,
+    /// The paths of lines moved to the member; empty for a re-flight.
+    pub moved: Vec<Vec<wire::GeoPoint>>,
 }
 
 impl Refly {
@@ -56,6 +64,18 @@ impl TeamLane {
         {
             return Vec::new();
         }
+        if let Some(index) =
+            self.reflies
+                .iter()
+                .position(|r| r.member == member && r.state == ReflyState::Queued)
+                .filter(|_| {
+                    !self.reflies.iter().any(|r| {
+                        r.member == member && r.in_progress() && r.state != ReflyState::Queued
+                    })
+                })
+        {
+            return self.start_moved(index, context);
+        }
         if self
             .reflies
             .iter()
@@ -66,7 +86,8 @@ impl TeamLane {
         let Some(envelope) = self.approval.as_ref().and_then(|a| a.envelope.clone()) else {
             return Vec::new();
         };
-        let used = u32::try_from(self.reflies.len()).unwrap_or(u32::MAX);
+        let flown_again = self.reflies.iter().filter(|r| r.moved.is_empty()).count();
+        let used = u32::try_from(flown_again).unwrap_or(u32::MAX);
         if !envelope.permit_revise || used >= envelope.max_refly_lines {
             return Vec::new();
         }
@@ -94,6 +115,7 @@ impl TeamLane {
             state: ReflyState::Proposing,
             proposal: None,
             run_id: None,
+            moved: Vec::new(),
         });
         self.detail = format!(
             "{member} {line} had too few usable pictures; flying it again inside the approved envelope"
@@ -115,32 +137,91 @@ impl TeamLane {
         path: &[wire::GeoPoint],
         context: &IntentContext,
     ) -> Option<wire::MissionObjective> {
-        let (sweep, launch) = (self.sweep?, self.member(member)?);
-        let strip = line_strip(path, sweep.spacing_m)?;
-        let Some(wire::mission_objective::Kind::Survey(team_survey)) =
-            self.objective.as_ref().and_then(|o| o.kind.clone())
-        else {
-            return None;
-        };
+        let strip = line_strip(path, self.sweep?.spacing_m)?;
         let local = Local::around(path);
         let (a, b) = (local.project(path.first()?), local.project(path.last()?));
-        let survey = wire::SurveyObjective {
-            area: strip,
-            launch: Some(launch.launch),
-            launch_altitude_m: launch.launch_altitude_m,
-            height_m: self.height_m,
-            line_bearing_deg: Some((b[1] - a[1]).atan2(b[0] - a[0]).to_degrees()),
-            return_to_launch: true,
-            ..team_survey
+        let mut objective = self.member_objective(
+            member,
+            strip,
+            format!("{}/refly/{member}/{line}", context.fresh_id),
+            format!("fly {member} {line} again"),
+        )?;
+        if let Some(wire::mission_objective::Kind::Survey(survey)) = objective.kind.as_mut() {
+            survey.line_bearing_deg = Some((b[1] - a[1]).atan2(b[0] - a[0]).to_degrees());
+        }
+        Some(objective)
+    }
+
+    /// Queues lines a revision moved to `member`; they start at once when
+    /// the member already completed its plan.
+    pub(super) fn queue_moved(
+        &mut self,
+        member: &str,
+        from: &str,
+        moved: Vec<Vec<wire::GeoPoint>>,
+        context: &IntentContext,
+    ) -> Vec<MemberIntent> {
+        let index = self.reflies.len();
+        self.reflies.push(Refly {
+            member: member.to_owned(),
+            line: format!("{} lines from {from}", moved.len()),
+            state: ReflyState::Queued,
+            proposal: None,
+            run_id: None,
+            moved,
+        });
+        let complete = self
+            .statuses
+            .get(member)
+            .is_some_and(|s| s.state == wire::MissionLaneState::Complete as i32);
+        if complete {
+            self.start_moved(index, context)
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Proposes the moved lines of `index` to its member: the team's area
+    /// clipped to those lines' swaths.
+    fn start_moved(&mut self, index: usize, context: &IntentContext) -> Vec<MemberIntent> {
+        let Some(extra) = self.reflies.get(index).cloned() else {
+            return Vec::new();
         };
-        Some(wire::MissionObjective {
-            objective_id: format!("{}/refly/{member}/{line}", context.fresh_id),
-            origin: self.objective.as_ref().and_then(|o| o.origin.clone()),
-            revision: 1,
-            previous_digest: Vec::new(),
-            title: format!("fly {member} {line} again"),
-            kind: Some(wire::mission_objective::Kind::Survey(survey)),
-        })
+        let (Some(sweep), Some(area)) = (
+            self.sweep,
+            self.objective.as_ref().and_then(|o| {
+                o.kind
+                    .as_ref()
+                    .map(|wire::mission_objective::Kind::Survey(s)| s.area.clone())
+            }),
+        ) else {
+            return Vec::new();
+        };
+        let across = Across::new(&area, sweep.bearing_deg);
+        let positions: Vec<f64> = extra
+            .moved
+            .iter()
+            .filter_map(|p| across.of_path(p))
+            .collect();
+        let strip = across.strip(&area, &positions, sweep.footprint_m);
+        let Some(objective) = self.member_objective(
+            &extra.member,
+            strip,
+            format!("{}/moved/{}/{index}", context.fresh_id, extra.member),
+            format!("{}: {}", extra.member, extra.line),
+        ) else {
+            return Vec::new();
+        };
+        if let Some(entry) = self.reflies.get_mut(index) {
+            entry.state = ReflyState::Proposing;
+        }
+        self.detail = format!("{} flies {} after its own lines", extra.member, extra.line);
+        vec![self.request(
+            &extra.member,
+            Op::Propose,
+            Some(index),
+            wire::mission_intent::Action::Propose(objective),
+        )]
     }
 
     pub(super) fn on_refly_receipt(
@@ -208,16 +289,18 @@ impl TeamLane {
                 refly.state = ReflyState::Flying;
                 Vec::new()
             }
+            Op::Revise => Vec::new(),
         }
     }
 
     /// Follows a flying re-flight in its member's status; when it ends, the
     /// original line takes the re-flight's verdict.
     pub(super) fn refly_progress(&mut self, member: &str, status: &wire::MissionStatus) {
-        let Some(refly) = self
+        let Some((index, refly)) = self
             .reflies
             .iter_mut()
-            .find(|r| r.member == member && r.state == ReflyState::Flying)
+            .enumerate()
+            .find(|(_, r)| r.member == member && r.state == ReflyState::Flying)
         else {
             return;
         };
@@ -226,6 +309,12 @@ impl TeamLane {
             && status.state == wire::MissionLaneState::Running as i32
         {
             refly.run_id = Some(status.run_id.clone());
+            if !refly.moved.is_empty() {
+                // Moved lines are new work: the book follows their run.
+                self.book
+                    .adopt(member, &status.run_id, &format!("moved{index}-"));
+                self.book.record(status, &[]);
+            }
         }
         if refly.run_id.as_deref() != Some(status.run_id.as_str()) {
             return;
@@ -236,7 +325,7 @@ impl TeamLane {
             .find(|t| t.kind == wire::MissionTaskKind::SurveyLine as i32);
         if status.state == wire::MissionLaneState::Complete as i32 {
             refly.state = ReflyState::Done;
-            if let Some(line_status) = line_status {
+            if let (Some(line_status), true) = (line_status, refly.moved.is_empty()) {
                 self.book.apply_refly(member, &refly.line, line_status);
             }
         } else if matches!(
