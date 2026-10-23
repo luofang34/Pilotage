@@ -196,6 +196,17 @@ pub struct VelocityIntent {
     pub yaw_rate: f32,
 }
 
+impl VelocityIntent {
+    /// Every component is zero: the intent asks for no motion. A vehicle
+    /// that cannot move yet, such as one on the ground and disarmed, can
+    /// take it without doing anything; a new holder sends one to clear a
+    /// link-loss latch.
+    #[must_use]
+    pub fn is_still(&self) -> bool {
+        self.vx == 0.0 && self.vy == 0.0 && self.vz == 0.0 && self.yaw_rate == 0.0
+    }
+}
+
 /// A held position offset (metres in `frame`) and heading (radians).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PositionHoldIntent {

@@ -276,6 +276,24 @@ fn climb_input_on_the_ground_does_not_start_a_takeoff() {
 }
 
 #[test]
+fn a_disarmed_vehicle_takes_a_still_frame_and_refuses_motion() {
+    let mut harness = Harness::new();
+    harness.estimate(0.0, false);
+    let still = harness
+        .adapter
+        .apply_control(&frame(velocity(0.0, 0.0, 0.0), vec![]));
+    assert_eq!(still.disposition, Disposition::Accepted);
+    assert!(!harness.velocity.has_changed().expect("lane open"));
+    let moving = harness
+        .adapter
+        .apply_control(&frame(velocity(1.0, 0.0, 0.0), vec![]));
+    assert_eq!(
+        moving.disposition,
+        Disposition::Rejected(RejectReason::UplinkIdle)
+    );
+}
+
+#[test]
 fn link_loss_zeroes_the_setpoint_and_rejects_until_cleared() {
     let mut harness = Harness::new();
     harness.estimate(0.0, true);

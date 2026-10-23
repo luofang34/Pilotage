@@ -324,6 +324,10 @@ fn multicopter_intent(
             uplink.enter_velocity(yaw_rad, vel_ned_mps);
             let (sticks, constrained) = sticks_from_velocity(&velocity);
             return match uplink.send_stick_frame(sticks[0], sticks[1], sticks[2], sticks[3]) {
+                // A still frame asks for no motion, so a disarmed vehicle
+                // takes it without a setpoint: it is how a new holder
+                // clears a link-loss latch before it arms.
+                StickFrameDisposition::UplinkIdle if velocity.is_still() => Disposition::Accepted,
                 StickFrameDisposition::UplinkIdle => {
                     Disposition::Rejected(RejectReason::UplinkIdle)
                 }

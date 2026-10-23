@@ -87,14 +87,10 @@ impl SimMulticopterAdapter {
         if velocity.frame != ReferenceFrame::BodyFrd {
             return other("vehicle.motion accepts the BODY-FRD frame only");
         }
-        let neutral = velocity.vx == 0.0
-            && velocity.vy == 0.0
-            && velocity.vz == 0.0
-            && velocity.yaw_rate == 0.0;
         if let Err(detail) = self.phase.admits_velocity() {
-            // A neutral command asks for no motion, so every phase takes
+            // A still command asks for no motion, so every phase takes
             // it: it is how a new holder clears a link-loss latch.
-            return if neutral {
+            return if velocity.is_still() {
                 Disposition::Accepted
             } else {
                 other(detail)
