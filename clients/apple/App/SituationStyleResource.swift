@@ -43,11 +43,12 @@ enum SituationStyleResource {
               let data = try? Data(contentsOf: url),
               let style = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let sources = style["sources"] as? [String: Any] else { return [] }
-        return sources.values
+        // Sources reading one archive carry its one notice; it is listed once.
+        let notices = sources.values
             .compactMap { ($0 as? [String: Any])?["attribution"] as? String }
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-            .sorted()
+        return Set(notices).sorted()
     }
 
     static func load(bundle: Bundle = .main) throws -> String {

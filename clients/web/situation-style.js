@@ -1,31 +1,20 @@
-// Situation style resolution for the web renderer.
-//
-// One style file drives the Apple renderer and the web renderer
-// (clients/apple/Resources/SituationStyle.json, exported verbatim by
-// scripts/build-web-situation-assets.sh). This module substitutes the
-// style's __PILOTAGE_*__ URL tokens for the exported asset URLs,
-// mirroring the Apple client's SituationStyleResource: an invalid template
-// is a typed error, a missing font set costs the labels and never the map,
-// and the closest zoom derives from the terrain manifest rather than a
-// second hand-written number.
+// Resolve the shared Apple/web style's archive tokens to exported URLs.
+// Invalid templates fail explicitly; missing fonts remove labels only.
+// Zoom limits come from the terrain manifest, as in SituationStyleResource.
 
 export const GLYPHS_TOKEN = "__PILOTAGE_GLYPHS_URL__";
 export const COASTLINE_TOKEN = "__PILOTAGE_COASTLINE_MBTILES_URL__";
 export const TERRAIN_TOKEN = "__PILOTAGE_TERRAIN_MBTILES_URL__";
 
-/** Which archive token each style source carries. A source is resolved
- *  against the export named here, so a source added to the style without
- *  an export is a typed refusal rather than a silent empty layer. */
-const SOURCE_TOKENS = Object.freeze({
-  "pilotage-coastline": COASTLINE_TOKEN,
-  "pilotage-terrain": TERRAIN_TOKEN,
+/** Several sources can read one archive at different zoom ranges.
+ *  Resolve their tokens so every source uses its exported archive. */
+const ARCHIVE_EXPORTS = Object.freeze({
+  [COASTLINE_TOKEN]: "pilotage-coastline",
+  [TERRAIN_TOKEN]: "pilotage-terrain",
 });
 
-/** Zoom levels the camera may go past the deepest terrain tile. A
- *  raster-dem source draws past its deepest tile by stretching the one it
- *  has, and far past it the picture is invention. The value matches the
- *  Apple client's overzoomSteps, so both renderers stop at the same
- *  closest zoom. */
+/** Limit stretching of the deepest terrain tile. Match the Apple client's
+ *  overzoomSteps so both renderers stop at the same closest zoom. */
 export const OVERZOOM_STEPS = 2;
 
 /** The style shown when the situation style cannot be resolved. Matches the
@@ -75,10 +64,10 @@ export function deriveMaximumZoom(manifest) {
   return deepest + OVERZOOM_STEPS;
 }
 
-/** Converts one exported TileJSON document into an inline tile list for a
- *  style source. Inline tile URLs avoid renderer-specific rules about how a
- *  TileJSON's own relative URLs resolve. */
-function inlineTileSource(source, tileJson, assetsBase) {
+/** Inline URLs avoid renderer-specific relative URL resolution. Preserve
+ *  each source's zoom cap so global coverage does not request sparse
+ *  deeper tiles. The declared range must stay within the archive's. */
+function inlineTileSource(source, declared, tileJson, assetsBase) {
   const tiles = tileJson?.tiles;
   if (
     !Array.isArray(tiles) ||
@@ -94,8 +83,8 @@ function inlineTileSource(source, tileJson, assetsBase) {
   }
   return {
     tiles: tiles.map((template) => assetsBase + template),
-    minzoom: tileJson.minzoom,
-    maxzoom: tileJson.maxzoom,
+    minzoom: Math.max(declared.minzoom ?? tileJson.minzoom, tileJson.minzoom),
+    maxzoom: Math.min(declared.maxzoom ?? tileJson.maxzoom, tileJson.maxzoom),
   };
 }
 
@@ -119,19 +108,31 @@ export function resolveSituationStyle({
 }) {
   const style = structuredClone(template);
   const sources = style?.sources;
-  for (const [name, token] of Object.entries(SOURCE_TOKENS)) {
-    const source = sources?.[name];
-    if (source?.url !== token) {
+  const resolvedTokens = new Set();
+  for (const [name, source] of Object.entries(sources ?? {})) {
+    const token = source?.url;
+    if (typeof token !== "string" || !/^__PILOTAGE_.*__$/.test(token)) continue;
+    const archive = ARCHIVE_EXPORTS[token];
+    if (archive === undefined) {
       throw new SituationStyleError(
         STYLE_REASON.INVALID_TEMPLATE,
-        `the style template does not carry the archive URL token for ${name}`,
+        `the style source ${name} carries ${token}, which names no exported archive`,
       );
     }
     delete source.url;
     Object.assign(
       source,
-      inlineTileSource(name, tileJsonBySource?.[name], assetsBase),
+      inlineTileSource(name, source, tileJsonBySource?.[archive], assetsBase),
     );
+    resolvedTokens.add(token);
+  }
+  for (const token of Object.keys(ARCHIVE_EXPORTS)) {
+    if (!resolvedTokens.has(token)) {
+      throw new SituationStyleError(
+        STYLE_REASON.INVALID_TEMPLATE,
+        `the style template does not carry the archive URL token ${token}`,
+      );
+    }
   }
   // Without a glyph source the renderer draws no text at all. A missing font
   // set costs the labels, not the map: the glyphs key is dropped rather than
@@ -148,7 +149,8 @@ export function resolveSituationStyle({
 
 /** The notice each source in the style asks to be shown, read from the style
  *  document so a source added without its notice cannot appear silently.
- *  Mirrors the Apple client's attributions(bundle:). */
+ *  Sources reading one archive carry one notice, listed once. Mirrors the
+ *  Apple client's attributions(bundle:). */
 export function sourceAttributions(style) {
   const sources = style?.sources;
   if (typeof sources !== "object" || sources === null) return [];
@@ -157,5 +159,6 @@ export function sourceAttributions(style) {
     .filter((attribution) => typeof attribution === "string")
     .map((attribution) => attribution.trim())
     .filter((attribution) => attribution.length > 0)
+    .filter((attribution, index, all) => all.indexOf(attribution) === index)
     .sort();
 }
