@@ -190,3 +190,29 @@ fn before_a_start_a_revised_objective_replaces_the_draft() {
         lane.on_intent(&revise(&lane.status(), finish(), false), &context("p3"));
     assert!(!accepted(&finish_before_start));
 }
+
+#[test]
+fn between_lines_a_revision_applies_at_once() {
+    let (mut lane, _) = running_lane();
+    // Toward the start of line 1: no line is in progress.
+    lane.on_progress(&progress(0));
+    let status = lane.status();
+    let draft = lane
+        .on_intent(&revise(&status, finish(), false), &context("rev-1"))
+        .receipt
+        .proposal
+        .expect("the draft");
+    let admitted = lane.on_intent(
+        &intent(Action::Approve(approval(&draft.digest, 120.0))),
+        &context("approve-rev"),
+    );
+    assert!(
+        matches!(admitted.effect, Some(LaneEffect::Start(_))),
+        "a transit is cut short, so line 1 is not flown on the way"
+    );
+    let status = lane.status();
+    assert_eq!(
+        task_state(&status, "line-01"),
+        Some(wire::MissionTaskState::Skipped)
+    );
+}

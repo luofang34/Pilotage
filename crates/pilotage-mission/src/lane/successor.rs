@@ -2,8 +2,10 @@
 //! into a successor that the receipt and the status show for review. An
 //! approval of its digest admits it, or the lane admits it at once when
 //! the sender asked and the change stays inside the active envelope. A
-//! running lane switches at its next checkpoint, the end of the line in
-//! progress, or at once while held. A running line is never cut short.
+//! running lane switches at its next checkpoint: the end of the line in
+//! progress, or at once while held or flying between lines. A line in
+//! progress is never cut short; a transit to the next line is, so a line
+//! the revision gives away is not flown on the way.
 
 use pilotage_protocol::wire;
 use wire::MissionLaneState as State;
@@ -188,7 +190,11 @@ impl Lane {
         if let Some(successor) = self.successor.as_mut() {
             successor.stage = Stage::Admitted;
         }
-        if self.state == State::Held {
+        let on_line = self
+            .run
+            .as_ref()
+            .is_some_and(super::run::RunTracker::on_line);
+        if self.state == State::Held || !on_line {
             return self.switch();
         }
         self.detail = "revision admitted; it applies at the end of the line in progress".to_owned();
@@ -203,8 +209,10 @@ impl Lane {
             .as_ref()
             .filter(|s| s.stage == Stage::Admitted)?;
         let run = self.run.as_ref()?;
-        let reached =
-            plan_complete || run.flying_home() || run.flown_lines() > successor.flown_at_draft;
+        let reached = plan_complete
+            || run.flying_home()
+            || !run.on_line()
+            || run.flown_lines() > successor.flown_at_draft;
         if reached { self.switch() } else { None }
     }
 

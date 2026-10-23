@@ -169,6 +169,13 @@ impl RunTracker {
             .count()
     }
 
+    /// The vehicle flies along a survey line, not toward one.
+    pub(super) fn on_line(&self) -> bool {
+        self.active
+            .and_then(|index| self.tasks.get(index))
+            .is_some_and(|task| is_line(&task.plan))
+    }
+
     /// Every line is flown and the run flies home.
     pub(super) fn flying_home(&self) -> bool {
         self.active
