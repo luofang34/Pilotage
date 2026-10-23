@@ -118,7 +118,7 @@ impl TeamLane {
         let low = edges.iter().copied().fold(f64::INFINITY, f64::min) - 1.0;
         let high = edges.iter().copied().fold(f64::NEG_INFINITY, f64::max) + 1.0;
         let mut keep = Vec::new();
-        let mut dropped = 0;
+        let mut dropped = 0_usize;
         for member in self.member_proposals.keys().filter(|m| self.running(m)) {
             let unflown = self.book.unflown_lines(member);
             let kept: Vec<Vec<wire::GeoPoint>> = unflown

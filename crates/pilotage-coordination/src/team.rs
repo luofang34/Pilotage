@@ -451,6 +451,9 @@ impl TeamLane {
         self.pending.clear();
         self.reflies.clear();
         self.revision = None;
+        // A new plan has no run until it starts: a parent following the
+        // old run must not read the new plan's tasks as that run's.
+        self.run_id = None;
     }
 
     fn receipt(

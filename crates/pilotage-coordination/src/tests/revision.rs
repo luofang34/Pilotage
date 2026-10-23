@@ -181,3 +181,30 @@ fn inside_the_envelope_a_reassignment_applies_at_once() {
         wire::MissionSuccessorState::Admitted as i32
     );
 }
+
+#[test]
+fn a_new_proposal_after_a_run_names_no_run_until_it_starts() {
+    let (mut fleet, _) = running_fleet(false);
+    let ran = fleet.team.status().run_id;
+    assert!(!ran.is_empty());
+    let last = fleet.fly(&[]);
+    fleet.route(last);
+    assert_eq!(
+        fleet.team.status().state,
+        wire::MissionLaneState::Complete as i32
+    );
+    let reply = fleet.team.on_intent(
+        &wire::MissionIntent {
+            request_id: "op-2".to_owned(),
+            action: Some(Action::Propose(objective())),
+        },
+        &context("second-proposal"),
+    );
+    fleet.route(reply.intents);
+    let status = fleet.team.status();
+    assert_eq!(status.state, wire::MissionLaneState::Proposed as i32);
+    assert!(
+        status.run_id.is_empty(),
+        "the new plan's tasks must not pass for run {ran}"
+    );
+}
