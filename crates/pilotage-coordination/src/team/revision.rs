@@ -318,8 +318,12 @@ impl TeamLane {
 
     /// A member's link is gone: its state is unknown, and its work stays
     /// reserved to it until a person reassigns that work, which releases
-    /// the member.
+    /// the member. A released member stays released however often its
+    /// host is found gone again.
     pub fn on_member_lost(&mut self, member: &str) {
+        if self.lost.get(member) == Some(&true) {
+            return;
+        }
         if let Some(status) = self.statuses.get_mut(member) {
             status.detail = "link lost; state unknown, work stays reserved".to_owned();
             self.changed = true;
