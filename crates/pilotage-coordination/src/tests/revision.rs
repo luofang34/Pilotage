@@ -279,6 +279,13 @@ fn a_person_releases_a_lost_member_and_the_team_completes_without_it() {
         "{}",
         fleet.team.status().detail
     );
+    let sim3 = fleet
+        .team
+        .status()
+        .members
+        .into_iter()
+        .find(|m| m.lane == "SIM-3");
+    assert!(sim3.is_some_and(|m| m.detail.contains("released")));
     fleet.route(intents);
     let follow = fleet.fly(&[]);
     fleet.route(follow);

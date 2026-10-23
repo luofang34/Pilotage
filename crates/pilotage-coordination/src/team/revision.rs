@@ -215,6 +215,9 @@ impl TeamLane {
                     // here, and the team no longer waits for it.
                     self.book.skip_paths(&from, &moved);
                     self.lost.insert(from.clone(), true);
+                    if let Some(status) = self.statuses.get_mut(&from) {
+                        status.detail = format!("link lost; released, {to} flies its lines");
+                    }
                     self.detail = format!(
                         "{from} released: its link is lost and its state unknown; {to} flies its {} unfinished lines",
                         moved.len()
