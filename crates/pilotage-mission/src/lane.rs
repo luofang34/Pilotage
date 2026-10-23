@@ -316,10 +316,10 @@ impl Lane {
 
     /// Records a judgment of a picture captured on `task_id`.
     pub fn on_assessment(&mut self, task_id: &str, assessment: FrameAssessment) {
-        if let Some(run) = self.run.as_mut() {
-            if run.on_assessment(task_id, assessment) {
-                self.changed = true;
-            }
+        if let Some(run) = self.run.as_mut()
+            && run.on_assessment(task_id, assessment)
+        {
+            self.changed = true;
         }
     }
 
@@ -329,10 +329,8 @@ impl Lane {
         let proposal = self.proposal.as_ref().map(|compiled| &compiled.proposal);
         let survey_area = proposal
             .and_then(|p| p.objective.as_ref())
-            .and_then(|o| match o.kind.as_ref() {
-                Some(wire::mission_objective::Kind::Survey(survey)) => Some(survey.area.clone()),
-                None => None,
-            })
+            .and_then(|o| o.kind.as_ref())
+            .map(|wire::mission_objective::Kind::Survey(survey)| survey.area.clone())
             .unwrap_or_default();
         wire::MissionStatus {
             lane: self.config.name.clone(),

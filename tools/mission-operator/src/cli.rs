@@ -109,7 +109,7 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, OperatorError> {
 
 fn hex_bytes(text: &str) -> Option<Vec<u8>> {
     let text = text.trim();
-    if text.len() % 2 != 0 {
+    if !text.len().is_multiple_of(2) {
         return None;
     }
     (0..text.len() / 2)

@@ -51,13 +51,13 @@ impl<A: VehicleAdapter> EngineActor<A> {
         match to {
             None => self.broadcast(message, MessageClass::AuthorityBroadcast),
             Some(client) => {
-                if let Some(sender) = self.clients.sender(client) {
-                    if sender.try_send(message).is_err() {
-                        warn!(
-                            client = client.as_u64(),
-                            "mission receipt not queued for its client"
-                        );
-                    }
+                if let Some(sender) = self.clients.sender(client)
+                    && sender.try_send(message).is_err()
+                {
+                    warn!(
+                        client = client.as_u64(),
+                        "mission receipt not queued for its client"
+                    );
                 }
             }
         }

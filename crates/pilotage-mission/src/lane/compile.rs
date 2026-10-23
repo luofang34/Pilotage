@@ -168,18 +168,17 @@ fn tasks_of(plan: &SurveyPlan, return_home: bool) -> Vec<wire::MissionTaskPlan> 
             })
         })
         .collect();
-    if return_home {
-        if let (Some(from), Some(home)) =
+    if return_home
+        && let (Some(from), Some(home)) =
             (point(2 * plan.line_count - 1), point(2 * plan.line_count))
-        {
-            tasks.push(wire::MissionTaskPlan {
-                task_id: "home".to_owned(),
-                kind: wire::MissionTaskKind::ReturnHome as i32,
-                length_m: distance_m(&from, &home),
-                path: vec![from, home],
-                member: String::new(),
-            });
-        }
+    {
+        tasks.push(wire::MissionTaskPlan {
+            task_id: "home".to_owned(),
+            kind: wire::MissionTaskKind::ReturnHome as i32,
+            length_m: distance_m(&from, &home),
+            path: vec![from, home],
+            member: String::new(),
+        });
     }
     tasks
 }

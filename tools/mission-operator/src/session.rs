@@ -167,12 +167,10 @@ impl Session {
             if Instant::now() >= deadline {
                 return Ok(false);
             }
-            if let Some(ModuleEvent::MissionStatus(_)) = self.step(deadline).await? {
-                if let Some(state) = self.last_status.as_ref().map(|s| s.state) {
-                    if let Some(done) = terminal(state) {
-                        return Ok(done);
-                    }
-                }
+            if let Some(ModuleEvent::MissionStatus(_)) = self.step(deadline).await?
+                && let Some(done) = self.last_status.as_ref().and_then(|s| terminal(s.state))
+            {
+                return Ok(done);
             }
         }
     }

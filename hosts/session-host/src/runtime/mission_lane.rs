@@ -54,6 +54,8 @@ struct ActiveRun {
     handle: JoinHandle<()>,
     status: watch::Receiver<AutomationStatus>,
     controls: mpsc::Sender<RunControl>,
+    /// The run was told to stop and release the vehicle.
+    stopping: bool,
 }
 
 /// Spawns the lane and registers it with the engine actor. Returns the
@@ -173,6 +175,13 @@ impl LaneTask {
     async fn apply(&mut self, effect: LaneEffect) {
         let control = match effect {
             LaneEffect::Start(order) => {
+                if let Some(previous) = self.run.take() {
+                    // The previous run released the vehicle or is releasing
+                    // it; waiting for it keeps two principals from asking
+                    // for the same lease.
+                    previous.controls.send(RunControl::Abort).await.ok();
+                    previous.handle.await.ok();
+                }
                 self.runs = self.runs.wrapping_add(1);
                 let client = ClientKey::new(RUN_CLIENT_BASE.wrapping_sub(self.runs));
                 let (controls, receiver) = mpsc::channel(4);
@@ -190,6 +199,7 @@ impl LaneTask {
                     handle,
                     status,
                     controls,
+                    stopping: false,
                 });
                 return;
             }
@@ -203,7 +213,7 @@ impl LaneTask {
     }
 
     fn on_progress(&mut self) {
-        let Some(run) = self.run.as_ref() else {
+        let Some(run) = self.run.as_mut() else {
             return;
         };
         let status = run.status.borrow().clone();
@@ -213,16 +223,27 @@ impl LaneTask {
             plan_complete: status.plan_complete,
             ended: finished || status.fenced || status.closed,
         });
+        // A run whose lane ended stops the vehicle in place and releases
+        // it, so the next run of this lane can take the motion lease.
+        let ended = !matches!(
+            self.lane.state(),
+            wire::MissionLaneState::Running
+                | wire::MissionLaneState::Held
+                | wire::MissionLaneState::Uncertain
+        );
+        if ended && !run.stopping && !finished {
+            run.stopping = run.controls.try_send(RunControl::Abort).is_ok();
+        }
         if finished {
             self.run = None;
         }
     }
 
     fn on_frame(&mut self, frame: Arc<RawVideoFrame>) {
-        if let Some(task) = self.lane.on_frame() {
-            if let Some(judge) = self.judge.as_mut() {
-                judge.offer(task, frame);
-            }
+        if let Some(task) = self.lane.on_frame()
+            && let Some(judge) = self.judge.as_mut()
+        {
+            judge.offer(task, frame);
         }
     }
 

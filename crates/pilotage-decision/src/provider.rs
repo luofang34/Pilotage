@@ -126,14 +126,14 @@ impl Provider {
         let mut response = DecisionResponse::from_system_one(body, &asked)?;
         if let Some(floor) = self.yes_no_floor {
             for answer in response.answers.values_mut() {
-                if let Answer::YesNo { probability } = answer {
-                    if probability.max(1.0 - *probability) < floor {
-                        *probability = if *probability >= 0.5 {
-                            floor
-                        } else {
-                            1.0 - floor
-                        };
-                    }
+                if let Answer::YesNo { probability } = answer
+                    && probability.max(1.0 - *probability) < floor
+                {
+                    *probability = if *probability >= 0.5 {
+                        floor
+                    } else {
+                        1.0 - floor
+                    };
                 }
             }
         }

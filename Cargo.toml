@@ -56,6 +56,7 @@ members = [
     "tools/flight-tune-aviate",
     "tools/intent-pilot",
     "tools/mission-operator",
+    "tools/decision-eval",
     "tools/loopback-probe",
     "tools/xtask",
     "hosts/session-host",

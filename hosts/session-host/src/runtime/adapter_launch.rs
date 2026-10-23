@@ -42,18 +42,31 @@ struct SessionVideo {
     producer: Option<(&'static str, JoinHandle<()>)>,
 }
 
+/// The engine actor's command channel and the host's shutdown signal.
+pub(super) struct EngineChannels {
+    /// Commands to the engine actor.
+    pub engine_tx: mpsc::Sender<ToEngine>,
+    /// The engine actor's receiver.
+    pub engine_rx: mpsc::Receiver<ToEngine>,
+    /// Fires when the host shuts down.
+    pub shutdown_rx: oneshot::Receiver<()>,
+}
+
 /// Builds the chosen adapter and spawns the per-adapter
 /// `run_until_shutdown` task.
 pub(super) async fn spawn_adapter_runtime(
     adapter: AdapterKind,
     mut options: RuntimeOptions,
     endpoint: Endpoint<wtransport::endpoint::endpoint_side::Server>,
-    engine_tx: mpsc::Sender<ToEngine>,
-    engine_rx: mpsc::Receiver<ToEngine>,
-    shutdown_rx: oneshot::Receiver<()>,
+    engine: EngineChannels,
     start: tokio::time::Instant,
     lane_frames: Option<mpsc::Sender<super::mission_lane::LaneInbound>>,
 ) -> Result<JoinHandle<()>, HostError> {
+    let EngineChannels {
+        engine_tx,
+        engine_rx,
+        shutdown_rx,
+    } = engine;
     let sim_camera_port = options.sim_camera_port.take();
     let host = HostSide {
         join_token: options.network.join_token.clone(),

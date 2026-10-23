@@ -275,9 +275,11 @@ async fn spawn_host_runtime(
         adapter,
         options,
         endpoint,
-        engine_tx,
-        engine_rx,
-        shutdown_rx,
+        adapter_launch::EngineChannels {
+            engine_tx,
+            engine_rx,
+            shutdown_rx,
+        },
         start,
         lane.as_ref().map(|(sender, _)| sender.clone()),
     )

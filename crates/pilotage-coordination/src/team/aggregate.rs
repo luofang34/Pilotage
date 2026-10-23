@@ -138,10 +138,8 @@ pub(super) fn team_status(team: &TeamLane) -> wire::MissionStatus {
     let area = team
         .objective
         .as_ref()
-        .and_then(|o| match o.kind.as_ref() {
-            Some(wire::mission_objective::Kind::Survey(survey)) => Some(survey.area.clone()),
-            None => None,
-        })
+        .and_then(|o| o.kind.as_ref())
+        .map(|wire::mission_objective::Kind::Survey(survey)| survey.area.clone())
         .unwrap_or_default();
     let active = team
         .book
