@@ -21,7 +21,7 @@ use crate::runtime::automation::ownship::estimate_from_wire;
 const HEIGHT_M: f64 = 12.0;
 
 /// One telemetry sample carrying only `avionics`.
-fn one_vehicle_sample(avionics: AvionicsSample) -> TelemetrySample {
+pub(super) fn one_vehicle_sample(avionics: AvionicsSample) -> TelemetrySample {
     TelemetrySample {
         flight_procedure: None,
         payload: None,
@@ -39,7 +39,7 @@ fn one_vehicle_sample(avionics: AvionicsSample) -> TelemetrySample {
 
 /// A canonical attitude at `yaw` and a local-relative fix under one
 /// estimate stamp, as the DJI airframe publishes them.
-fn dji_shaped(yaw: f32) -> AvionicsSample {
+pub(super) fn dji_shaped(yaw: f32) -> AvionicsSample {
     let estimate = MeasurementStamp {
         role: SourceRole::OperationalEstimate,
         integrity: SourceIntegrity::ChecksummedOnly,

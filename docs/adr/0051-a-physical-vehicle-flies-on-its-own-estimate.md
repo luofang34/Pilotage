@@ -69,7 +69,11 @@ velocity without one. An adapter whose device reports only Euler angles
 publishes them as an authorized attitude only when the operator declares
 the north reference they verified for that device, and it advertises that
 reference; the declaration is the operator's, recorded in the host's
-configuration, not a measurement.
+configuration, not a measurement. When the declared reference is magnetic
+and the vehicle states no variation of its own, the host turns the
+attitude to true north by the shared geomagnetic model's declination at
+the vehicle's fix and states the variation it applied in the same sample.
+The estimate and every client then read a true heading.
 
 ### Limits
 
