@@ -96,7 +96,7 @@ impl TeamLane {
             run_id: None,
         });
         self.detail = format!(
-            "{member} {line} had no usable pictures; flying it again inside the approved envelope"
+            "{member} {line} had too few usable pictures; flying it again inside the approved envelope"
         );
         vec![self.request(
             member,

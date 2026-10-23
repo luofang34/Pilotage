@@ -70,6 +70,8 @@ impl TaskBook {
                 entry.state = task.state;
                 entry.evidence.clone_from(&task.evidence);
                 entry.progress = task.progress;
+                // A member team reports the lines it flew again itself.
+                entry.reflown = entry.reflown.max(task.reflown);
             }
         }
     }
