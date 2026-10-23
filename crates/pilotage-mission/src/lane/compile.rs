@@ -10,10 +10,6 @@ use crate::config::MissionConfig;
 use crate::engine::MissionEngine;
 use crate::survey::{SurveyPlan, SurveyRequest, plan_survey};
 
-/// The time at cruise speed that the capture radius of a line end
-/// spans, seconds.
-const CAPTURE_SECONDS: f64 = 2.0;
-
 /// The values an objective's zero fields take.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SurveyDefaults {
@@ -150,9 +146,7 @@ fn survey_request(
     };
     request.return_to_launch = survey.return_to_launch;
     request.line_bearing_rad = survey.line_bearing_deg.map(f64::to_radians);
-    // A fast vehicle that lags its setpoint needs a wider capture circle
-    // to sequence a line end on the first pass.
-    request.capture_radius_m = request.capture_radius_m.max(CAPTURE_SECONDS * cruise_mps);
+    request.fit_to_cruise(cruise_mps);
     request
 }
 

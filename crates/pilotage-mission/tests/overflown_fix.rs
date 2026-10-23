@@ -1,7 +1,8 @@
 #![cfg(test)]
 
-//! A line end the vehicle passes outside the capture radius: guidance turns
-//! back to it instead of following the leg's course away from the area.
+//! A line end the vehicle passes too far to the side to sequence it:
+//! guidance turns back to it instead of following the leg's course away
+//! from the area.
 
 use navigate_contract::{ClockDomainId, GeodeticPosition, MonotonicNanos};
 use navigate_geodesy::{LocalTangentPlane, NedOffset};
@@ -17,7 +18,7 @@ const STEP_S: f64 = 0.05;
 const HEIGHT_M: f64 = 15.0;
 const CRUISE_MPS: f64 = 12.0;
 /// How far the gust pushes the vehicle across the line, metres.
-const GUST_M: f64 = 20.0;
+const GUST_M: f64 = 40.0;
 
 fn anchor() -> GeodeticPosition {
     GeodeticPosition::new(47.0_f64.to_radians(), 8.0_f64.to_radians(), 500.0)

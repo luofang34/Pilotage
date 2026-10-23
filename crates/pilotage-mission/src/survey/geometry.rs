@@ -62,9 +62,11 @@ pub(super) fn direction_from_bearing(bearing_rad: f64) -> Planar {
 }
 
 /// The across-track offsets of the sweep lines that cover the polygon's
-/// width: the first swath edge sits on one side of the polygon, each line
-/// steps by `spacing_m`, and the last line is pulled back so its swath edge
-/// sits on the far side. A polygon narrower than the footprint gets one
+/// width: the first swath edge sits on one side of the polygon, the last
+/// on the far side, and the lines between are spread evenly at no more
+/// than `spacing_m`. Even spacing keeps every gap between two lines wide
+/// enough to turn in; pulling only the last line back could leave a gap
+/// too narrow for the turn. A polygon narrower than the footprint gets one
 /// line through its middle. Returns `None` when more than `max_lines`
 /// would be needed.
 pub(super) fn sweep_offsets(
@@ -78,17 +80,16 @@ pub(super) fn sweep_offsets(
         return Some(vec![width_m / 2.0]);
     }
     let span = width_m - footprint_m;
-    let steps = (span / spacing_m).ceil();
+    let steps = (span / spacing_m).ceil().max(1.0);
     if !steps.is_finite() || steps >= max_lines as f64 {
         return None;
     }
-    let last = width_m - half;
-    let mut offsets: Vec<_> = (0..steps as usize)
-        .map(|index| half + index as f64 * spacing_m)
-        .filter(|offset| *offset < last)
-        .collect();
-    offsets.push(last);
-    Some(offsets)
+    let step = span / steps;
+    Some(
+        (0..=steps as usize)
+            .map(|index| half + index as f64 * step)
+            .collect(),
+    )
 }
 
 /// The along-track span of the polygon on the line at `across`, as the
