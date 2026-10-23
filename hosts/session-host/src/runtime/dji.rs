@@ -20,6 +20,7 @@ const CONTROL_MODE: &str = "PILOTAGE_DJI_CONTROL_MODE";
 const FFMPEG: &str = "PILOTAGE_DJI_FFMPEG";
 const VIRTUAL_STICK: &str = "PILOTAGE_DJI_VIRTUAL_STICK";
 const HEADING_REFERENCE: &str = "PILOTAGE_DJI_HEADING_REFERENCE";
+const GIMBAL_YAW_FRAME: &str = "PILOTAGE_DJI_GIMBAL_YAW_FRAME";
 const EXPERIMENTAL_FLIGHT: &str = "PILOTAGE_DJI_EXPERIMENTAL_FLIGHT";
 
 mod attachment;
@@ -44,6 +45,12 @@ pub enum DjiHostError {
     /// The verified heading reference was not recognized.
     #[error("{HEADING_REFERENCE} must be absent, true or magnetic, got {value:?}")]
     HeadingReference {
+        /// The rejected setting.
+        value: OsString,
+    },
+    /// The verified gimbal yaw frame was not recognized.
+    #[error("{GIMBAL_YAW_FRAME} must be absent, earth or vehicle, got {value:?}")]
+    GimbalYawFrame {
         /// The rejected setting.
         value: OsString,
     },
@@ -161,6 +168,8 @@ struct DjiHostConfig {
     usb_ground_recovery: bool,
     /// The north reference the operator verified for the reported heading.
     heading_reference: Option<pilotage_protocol::HeadingReference>,
+    /// The frame the operator verified for the reported gimbal yaw.
+    gimbal_yaw_frame: Option<pilotage_protocol::GimbalYawFrame>,
 }
 
 pub(super) fn start_blocking(
@@ -182,6 +191,7 @@ pub(super) fn start_blocking(
         Some(value) => return Err(DjiHostError::GroundRecovery { value }),
     };
     config.heading_reference = parse_heading_reference(std::env::var_os(HEADING_REFERENCE))?;
+    config.gimbal_yaw_frame = parse_gimbal_yaw_frame(std::env::var_os(GIMBAL_YAW_FRAME))?;
     let virtual_stick = parse_virtual_stick(std::env::var_os(VIRTUAL_STICK))?;
     let (streams, updates) = mpsc::channel(2);
     let (frames, producer) = dji_video::supervise(config.ffmpeg.clone(), updates);
@@ -223,6 +233,7 @@ fn config_from_values(
         experimental_flight: parse_experimental_flight(experimental_flight)?,
         usb_ground_recovery: false,
         heading_reference: None,
+        gimbal_yaw_frame: None,
     })
 }
 
@@ -238,6 +249,20 @@ fn parse_heading_reference(
             Ok(Some(pilotage_protocol::HeadingReference::Magnetic))
         }
         Some(value) => Err(DjiHostError::HeadingReference { value }),
+    }
+}
+
+/// The frame the operator verified the reported gimbal yaw against:
+/// `earth` or `vehicle`. Anything else, including an empty value, is
+/// refused.
+fn parse_gimbal_yaw_frame(
+    value: Option<OsString>,
+) -> Result<Option<pilotage_protocol::GimbalYawFrame>, DjiHostError> {
+    match value {
+        None => Ok(None),
+        Some(value) if value == "earth" => Ok(Some(pilotage_protocol::GimbalYawFrame::Earth)),
+        Some(value) if value == "vehicle" => Ok(Some(pilotage_protocol::GimbalYawFrame::Vehicle)),
+        Some(value) => Err(DjiHostError::GimbalYawFrame { value }),
     }
 }
 

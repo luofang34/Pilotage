@@ -5,6 +5,7 @@ mod battery;
 mod bench;
 mod contract;
 mod flight;
+mod gimbal_attitude;
 mod harness;
 mod keyframe;
 mod mapping;

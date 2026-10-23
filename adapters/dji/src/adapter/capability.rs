@@ -167,4 +167,15 @@ impl super::DjiAdapter {
         self.observations.set_heading_reference(reference);
         self
     }
+
+    /// Declares the frame the operator verified for the gimbal's reported
+    /// yaw. The gimbal attitude is then published under it.
+    #[must_use]
+    pub fn with_gimbal_yaw_frame(
+        mut self,
+        frame: Option<pilotage_protocol::GimbalYawFrame>,
+    ) -> Self {
+        self.observations.set_gimbal_yaw_frame(frame);
+        self
+    }
 }

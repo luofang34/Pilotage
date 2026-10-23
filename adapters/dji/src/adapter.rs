@@ -134,7 +134,9 @@ impl DjiAdapter {
         adapter.experimental_virtual_stick = config.experimental_virtual_stick;
         adapter.experimental_virtual_stick_diagnostic =
             config.experimental_virtual_stick_diagnostic;
-        Ok(adapter.with_heading_reference(config.heading_reference))
+        Ok(adapter
+            .with_heading_reference(config.heading_reference)
+            .with_gimbal_yaw_frame(config.gimbal_yaw_frame))
     }
 
     /// Open an attachment on the session host's monotonic time origin.

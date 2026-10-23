@@ -71,6 +71,11 @@ the north reference they verified for that device, and it advertises that
 reference; the declaration is the operator's, recorded in the host's
 configuration, not a measurement.
 
+The same rule applies to the gimbal. The adapter publishes the gimbal
+attitude only under the yaw frame the operator declares for the device's
+reported gimbal yaw. Without the declaration, the gimbal angles stay a
+payload-device report with no frame.
+
 ### Limits
 
 The host tightens the mission ceilings to the velocity envelope the vehicle

@@ -178,6 +178,13 @@ DJI Fly app, then set `PILOTAGE_DJI_HEADING_REFERENCE=true` or `magnetic`
 for the reference you verified; the adapter then publishes the attitude as
 an authorized attitude under that reference and advertises it. Unset, the
 mission receives no heading and commands no velocity.
+The gimbal angles reach the wire as a gimbal attitude only when you set
+`PILOTAGE_DJI_GIMBAL_YAW_FRAME=earth` or `vehicle` for the frame you
+verified the reported gimbal yaw against; a client's live survey needs that
+attitude to place each picture. Verify the frame on the ground: with the
+gimbal in follow mode, turn the aircraft by hand. A gimbal yaw that follows
+the aircraft heading is `earth`; a gimbal yaw that stays near zero is
+`vehicle`.
 Keep the propellers removed for bench tests.
 The default `observed` control mode requires fresh gimbal observations before
 it sends a pitch command. Observed pitch targets use the Mini 3 range of
