@@ -69,7 +69,7 @@ pub(super) fn direction_from_bearing(bearing_rad: f64) -> Planar {
 /// too narrow for the turn. A polygon narrower than the footprint gets one
 /// line through its middle. Returns `None` when more than `max_lines`
 /// would be needed.
-pub(super) fn sweep_offsets(
+pub fn sweep_offsets(
     width_m: f64,
     footprint_m: f64,
     spacing_m: f64,

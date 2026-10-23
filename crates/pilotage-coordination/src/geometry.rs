@@ -101,20 +101,12 @@ fn clip_half_plane(vertices: &[[f64; 2]], inside: impl Fn([f64; 2]) -> f64) -> V
     out
 }
 
-/// The across-track offsets of the lines that cover `width_m`, as the
-/// survey planner lays them: the first swath edge on one side, a fixed
-/// spacing, the last line pulled back to the far side.
+/// The across-track offsets of the lines that cover `width_m`, exactly as
+/// the survey planner lays them, so a member plans the team's lines.
 pub(crate) fn sweep_offsets(width_m: f64, footprint_m: f64, spacing_m: f64) -> Vec<f64> {
-    let half = footprint_m / 2.0;
-    if width_m <= footprint_m || spacing_m <= 0.0 {
+    if spacing_m <= 0.0 {
         return vec![width_m / 2.0];
     }
-    let last = width_m - half;
-    let steps = ((width_m - footprint_m) / spacing_m).ceil().max(0.0) as usize;
-    let mut offsets: Vec<f64> = (0..steps)
-        .map(|index| half + index as f64 * spacing_m)
-        .filter(|offset| *offset < last)
-        .collect();
-    offsets.push(last);
-    offsets
+    pilotage_mission::survey::sweep_offsets(width_m, footprint_m, spacing_m, usize::MAX)
+        .unwrap_or_else(|| vec![width_m / 2.0])
 }
