@@ -84,6 +84,28 @@ async fn launch_adapter(
                 session_video("gazebo", Some(frames), sim_camera_port, &host.engine_tx).await?;
             Ok(spawn_runtime(engine, adapter, video, host))
         }
+        #[cfg(feature = "sim")]
+        AdapterKind::SimMulticopter => {
+            let config = super::sim_multicopter::config_from_env()?;
+            tracing::info!(
+                name = %config.display_name(),
+                lat_deg = config.launch.lat_deg,
+                lon_deg = config.launch.lon_deg,
+                alt_m = config.launch.alt_m,
+                "simulated multicopter on the DJI control path"
+            );
+            let mut adapter =
+                pilotage_adapter_sim_multicopter::SimMulticopterAdapter::new(HOST_VEHICLE, config);
+            let engine = build_engine(&adapter, options);
+            let frames = adapter.subscribe_frames();
+            let video =
+                session_video("sim-multicopter", frames, sim_camera_port, &host.engine_tx).await?;
+            Ok(spawn_runtime(engine, adapter, video, host))
+        }
+        #[cfg(not(feature = "sim"))]
+        AdapterKind::SimMulticopter => Err(HostError::AdapterNotInBuild {
+            adapter: "sim-multicopter",
+        }),
         #[cfg(not(feature = "sim"))]
         AdapterKind::Reference => Err(HostError::AdapterNotInBuild {
             adapter: "reference",

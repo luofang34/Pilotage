@@ -25,6 +25,9 @@ pub enum AdapterKind {
     Betaflight,
     /// The DJI USB bench adapter. Flight and positioning are not implemented.
     Dji,
+    /// The simulated multicopter on the DJI control path, with an
+    /// aerial-imagery gimbal camera.
+    SimMulticopter,
 }
 
 /// Parsed command-line configuration.
@@ -66,7 +69,7 @@ pub enum CliError {
     MissingAdapterValue,
     /// `--adapter` was given a value outside the known adapter set.
     #[error(
-        "invalid --adapter value {0:?} (expected reference, gazebo, aviate, px4, ardupilot, betaflight, or dji)"
+        "invalid --adapter value {0:?} (expected reference, gazebo, aviate, px4, ardupilot, betaflight, dji, or sim-multicopter)"
     )]
     InvalidAdapter(String),
     /// An argument was not recognized.
@@ -116,6 +119,7 @@ pub fn parse_args(args: &[String]) -> Result<CliArgs, CliError> {
                     "ardupilot" => AdapterKind::ArduPilot,
                     "betaflight" => AdapterKind::Betaflight,
                     "dji" => AdapterKind::Dji,
+                    "sim-multicopter" => AdapterKind::SimMulticopter,
                     other => return Err(CliError::InvalidAdapter(other.to_owned())),
                 };
             }

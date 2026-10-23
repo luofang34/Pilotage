@@ -105,6 +105,13 @@ fn dji_adapter_parses() {
 }
 
 #[test]
+fn sim_multicopter_adapter_parses() {
+    let args = vec!["--adapter".to_owned(), "sim-multicopter".to_owned()];
+    let parsed = parse_args(&args);
+    assert!(matches!(parsed, Ok(value) if value.adapter == AdapterKind::SimMulticopter));
+}
+
+#[test]
 fn explicit_remote_network_flags_parse_without_embedding_a_secret() {
     let args = [
         "--bind",

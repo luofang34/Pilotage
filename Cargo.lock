@@ -2511,6 +2511,7 @@ dependencies = [
  "pilotage-adapter-gazebo",
  "pilotage-adapter-px4",
  "pilotage-adapter-reference",
+ "pilotage-adapter-sim-multicopter",
  "pilotage-authority",
  "pilotage-client-session",
  "pilotage-control-feel",

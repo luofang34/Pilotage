@@ -24,6 +24,8 @@ mod registry;
 mod shutdown;
 #[cfg(feature = "sim")]
 mod sim_camera;
+#[cfg(feature = "sim")]
+pub(crate) mod sim_multicopter;
 mod stream_tag;
 mod video_lifecycle;
 mod wire_codec;
@@ -31,7 +33,9 @@ mod wire_codec;
 // same actor/principal wiring the runtime uses, without a transport.
 pub use automation::{AutomationStatus, MissionRig, Participant, TelemetryObserver};
 #[cfg(feature = "sim")]
-pub use automation::{spawn_reference_mission_rig, spawn_reference_survey_rig};
+pub use automation::{
+    spawn_reference_mission_rig, spawn_reference_survey_rig, spawn_sim_multicopter_rig,
+};
 pub use options::{
     DEFAULT_MISSION_ANCHOR, MissionNavdataSource, MissionOptions, MissionPlanRequest,
     RuntimeOptions, SURVEY_DEFAULT_HEIGHT_M,
