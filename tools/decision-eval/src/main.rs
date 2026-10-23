@@ -71,7 +71,8 @@ fn run_blocking(args: &[String]) -> Result<(), EvalError> {
         height_m: 110.0,
         nadir: true,
     };
-    let (mut correct, mut brier, mut answered, mut failures) = (0_usize, 0.0, 0_usize, Vec::new());
+    let (mut correct, mut squared, mut answered, mut failures) =
+        (0_usize, Vec::new(), 0_usize, Vec::new());
     let mut latencies = Vec::new();
     for entry in &entries {
         let request = frame_request(read(&directory.join(&entry.image))?, &context);
@@ -82,7 +83,7 @@ fn run_blocking(args: &[String]) -> Result<(), EvalError> {
             Some(judgment) => {
                 answered = answered.wrapping_add(1);
                 let truth = if entry.usable { 1.0 } else { 0.0 };
-                brier = brier + (judgment.usable - truth).powi(2);
+                squared.push((judgment.usable - truth).powi(2));
                 if (judgment.usable >= 0.5) == entry.usable {
                     correct = correct.wrapping_add(1);
                 } else {
@@ -104,7 +105,7 @@ fn run_blocking(args: &[String]) -> Result<(), EvalError> {
         "pictures": entries.len(),
         "answered": answered,
         "accuracy": if answered > 0 { correct as f64 / answered as f64 } else { 0.0 },
-        "brier": if answered > 0 { brier / answered as f64 } else { 0.0 },
+        "brier": if answered > 0 { squared.iter().sum::<f64>() / answered as f64 } else { 0.0 },
         "latency_ms": {"p50": percentile(0.5), "p90": percentile(0.9), "max": percentile(1.0)},
         "failures": failures,
     });
