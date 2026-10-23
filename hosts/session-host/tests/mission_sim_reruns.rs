@@ -55,6 +55,7 @@ fn survey_options() -> MissionOptions {
 }
 
 /// Drains broadcasts until the run ends; returns its final status.
+#[cfg(test)]
 async fn finish(
     observer: &mut TelemetryObserver,
     status: &watch::Receiver<AutomationStatus>,

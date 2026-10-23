@@ -439,12 +439,20 @@ fn a_parent_team_counts_the_lines_its_member_team_flew_again() {
         .expect("the parent proposal");
     let approve = Action::Approve(approval(&proposal.digest, 2));
     let reply = parent.on_intent(&intent("a", approve), &context("a"));
-    assert!(relay(&mut parent, &mut fleet, reply.intents).first().is_some_and(accepted));
+    assert!(
+        relay(&mut parent, &mut fleet, reply.intents)
+            .first()
+            .is_some_and(accepted)
+    );
     let start = Action::Start(wire::MissionStart {
         proposal_digest: proposal.digest.clone(),
     });
     let reply = parent.on_intent(&intent("s", start), &context("s"));
-    assert!(relay(&mut parent, &mut fleet, reply.intents).first().is_some_and(accepted));
+    assert!(
+        relay(&mut parent, &mut fleet, reply.intents)
+            .first()
+            .is_some_and(accepted)
+    );
     for bad in [&[("SIM-2", "line-01")][..], &[]] {
         let refly = fleet.fly(bad);
         fleet.route(refly);
