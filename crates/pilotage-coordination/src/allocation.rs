@@ -87,7 +87,7 @@ pub fn allocate(
             band: band.iter().map(|p| local.unproject(*p)).collect(),
             lines: (next + 1..=next + take).collect(),
         });
-        next += take;
+        next = next.saturating_add(take);
     }
     assignments
 }

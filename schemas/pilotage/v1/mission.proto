@@ -253,6 +253,8 @@ message MissionTaskStatus {
   string member = 6;
   // Times the task was flown again.
   uint32 reflown = 7;
+  // The task's path, so any client draws the task without the proposal.
+  repeated GeoPoint path = 8;
 }
 
 // One lane's state, published on the reliable stream when it changes and

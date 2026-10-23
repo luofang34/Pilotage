@@ -7,6 +7,8 @@ mod fencing;
 mod nav_guidance;
 mod run_control;
 mod session_flow;
+#[cfg(test)]
+mod test_support;
 
 pub(crate) use run_control::RunControl;
 
@@ -141,44 +143,6 @@ impl MissionTask {
             nav_guidance: None,
             planar_pose_is_truth,
             ownship_source,
-            held: false,
-            neutral_frames: 0,
-            awaiting_launch: false,
-            lease_due: false,
-            lease_wanted: false,
-            lease_retry_at: None,
-            client: MISSION_CLIENT,
-            controls: None,
-            operator_hold: false,
-            stopping: None,
-        }
-    }
-
-    /// A task with no plan, for unit tests of session/fencing behavior
-    /// that is independent of mission content.
-    #[cfg(test)]
-    pub(super) fn without_plan(
-        engine: mpsc::WeakSender<ToEngine>,
-        start: Instant,
-        status: watch::Sender<AutomationStatus>,
-    ) -> Self {
-        Self {
-            real_vehicle: false,
-            engine,
-            start,
-            plan: None,
-            status,
-            session: None,
-            principal: None,
-            generation: None,
-            fenced: false,
-            mission: None,
-            sequence: 0,
-            next_action_id: 0,
-            pending_actions: HashMap::new(),
-            nav_guidance: None,
-            planar_pose_is_truth: true,
-            ownship_source: OwnshipSource::SimulationTruth,
             held: false,
             neutral_frames: 0,
             awaiting_launch: false,

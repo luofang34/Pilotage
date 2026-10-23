@@ -132,6 +132,27 @@ impl Fleet {
         decided
     }
 
+    /// Approves the team proposal and starts it; both must be accepted.
+    fn approve_and_start(&mut self, approval: wire::MissionApproval) {
+        use wire::mission_intent::Action;
+        let digest = approval.proposal_digest.clone();
+        let intents = [
+            Action::Approve(approval),
+            Action::Start(wire::MissionStart {
+                proposal_digest: digest,
+            }),
+        ];
+        for (index, action) in intents.into_iter().enumerate() {
+            let intent = wire::MissionIntent {
+                request_id: format!("operator-{index}"),
+                action: Some(action),
+            };
+            let reply = self.team.on_intent(&intent, &context("operator"));
+            let decided = self.route(reply.intents);
+            assert!(decided.first().is_some_and(accepted), "{decided:?}");
+        }
+    }
+
     /// Flies every running member's plan: each survey line gets three
     /// pictures, judged usable unless the line is in `bad`.
     fn fly(&mut self, bad: &[(&str, &str)]) -> Vec<MemberIntent> {
@@ -263,26 +284,7 @@ fn a_team_survey_is_proposed_approved_flown_and_adapted_inside_its_envelope() {
         .count();
     assert!(team_lines >= 3);
 
-    let approve = wire::MissionIntent {
-        request_id: "op-2".to_owned(),
-        action: Some(Action::Approve(approval(&proposal.digest, 2))),
-    };
-    let reply = fleet.team.on_intent(&approve, &context("x"));
-    let decided = fleet.route(reply.intents);
-    assert!(
-        decided.first().is_some_and(accepted),
-        "every member admitted its delegated approval"
-    );
-
-    let start = wire::MissionIntent {
-        request_id: "op-3".to_owned(),
-        action: Some(Action::Start(wire::MissionStart {
-            proposal_digest: proposal.digest.clone(),
-        })),
-    };
-    let reply = fleet.team.on_intent(&start, &context("x"));
-    let decided = fleet.route(reply.intents);
-    assert!(decided.first().is_some_and(accepted));
+    fleet.approve_and_start(approval(&proposal.digest, 2));
     assert_eq!(
         fleet.team.status().state,
         wire::MissionLaneState::Running as i32

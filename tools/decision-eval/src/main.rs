@@ -80,11 +80,11 @@ fn run_blocking(args: &[String]) -> Result<(), EvalError> {
         latencies.push(started.elapsed().as_secs_f64() * 1000.0);
         match outcome.ok().as_ref().and_then(read_frame) {
             Some(judgment) => {
-                answered += 1;
+                answered = answered.wrapping_add(1);
                 let truth = if entry.usable { 1.0 } else { 0.0 };
-                brier += (judgment.usable - truth).powi(2);
+                brier = brier + (judgment.usable - truth).powi(2);
                 if (judgment.usable >= 0.5) == entry.usable {
-                    correct += 1;
+                    correct = correct.wrapping_add(1);
                 } else {
                     failures.push(json!({"image": entry.image, "usable": judgment.usable}));
                 }

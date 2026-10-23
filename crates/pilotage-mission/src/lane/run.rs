@@ -173,6 +173,7 @@ impl RunTracker {
                 },
                 member: task.plan.member.clone(),
                 reflown: 0,
+                path: task.plan.path.clone(),
             })
             .collect()
     }
@@ -203,6 +204,7 @@ pub(super) fn planned_statuses(tasks: &[wire::MissionTaskPlan]) -> Vec<wire::Mis
             progress: 0.0,
             member: plan.member.clone(),
             reflown: 0,
+            path: plan.path.clone(),
         })
         .collect()
 }

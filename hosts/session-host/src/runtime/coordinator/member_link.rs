@@ -93,40 +93,14 @@ async fn drive(
     // Intents wait for the member host's admission.
     let mut waiting: Vec<wire::MissionIntent> = Vec::new();
     loop {
-        let mut admitted = false;
-        for action in std::mem::take(&mut actions) {
-            match action {
-                ClientAction::Emit(ModuleEvent::Admitted(_)) => admitted = true,
-                ClientAction::SendBootstrap(bytes) => {
-                    if link.send_bootstrap(&bytes).await.is_err() {
-                        link.shutdown().await;
-                        return false;
-                    }
-                }
-                ClientAction::Emit(ModuleEvent::MissionReceipt(receipt)) => {
-                    if events
-                        .send(MemberEvent::Receipt {
-                            member: host.name.clone(),
-                            receipt,
-                        })
-                        .await
-                        .is_err()
-                    {
-                        return true;
-                    }
-                }
-                ClientAction::Emit(ModuleEvent::MissionStatus(status)) => {
-                    if events.send(MemberEvent::Status { status }).await.is_err() {
-                        return true;
-                    }
-                }
-                ClientAction::ScheduleReconnect { .. } | ClientAction::Stop(_) => {
-                    link.shutdown().await;
-                    return false;
-                }
-                ClientAction::SendDatagram(_) | ClientAction::Emit(_) => {}
+        let admitted = match perform(host, &mut link, std::mem::take(&mut actions), events).await {
+            Flow::Continue(admitted) => admitted,
+            Flow::Reconnect => {
+                link.shutdown().await;
+                return false;
             }
-        }
+            Flow::Exit => return true,
+        };
         if admitted {
             for intent in waiting.drain(..) {
                 actions.extend(engine.mission_intent(intent));
@@ -157,4 +131,56 @@ async fn drive(
             },
         }
     }
+}
+
+/// What one batch of client actions leaves the link to do.
+enum Flow {
+    /// Keep going; whether the batch admitted the session.
+    Continue(bool),
+    /// The connection is gone; connect again.
+    Reconnect,
+    /// The coordinator is gone.
+    Exit,
+}
+
+async fn perform(
+    host: &MemberHost,
+    link: &mut Link,
+    actions: Vec<ClientAction>,
+    events: &mpsc::Sender<MemberEvent>,
+) -> Flow {
+    let mut admitted = false;
+    for action in actions {
+        let event = match action {
+            ClientAction::Emit(ModuleEvent::Admitted(_)) => {
+                admitted = true;
+                None
+            }
+            ClientAction::SendBootstrap(bytes) => {
+                if link.send_bootstrap(&bytes).await.is_err() {
+                    return Flow::Reconnect;
+                }
+                None
+            }
+            ClientAction::Emit(ModuleEvent::MissionReceipt(receipt)) => {
+                Some(MemberEvent::Receipt {
+                    member: host.name.clone(),
+                    receipt,
+                })
+            }
+            ClientAction::Emit(ModuleEvent::MissionStatus(status)) => {
+                Some(MemberEvent::Status { status })
+            }
+            ClientAction::ScheduleReconnect { .. } | ClientAction::Stop(_) => {
+                return Flow::Reconnect;
+            }
+            ClientAction::SendDatagram(_) | ClientAction::Emit(_) => None,
+        };
+        if let Some(event) = event
+            && events.send(event).await.is_err()
+        {
+            return Flow::Exit;
+        }
+    }
+    Flow::Continue(admitted)
 }

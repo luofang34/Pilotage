@@ -41,6 +41,7 @@ impl TaskBook {
                         progress: 0.0,
                         member: member.clone(),
                         reflown: 0,
+                        path: task.path.clone(),
                     },
                 );
             }

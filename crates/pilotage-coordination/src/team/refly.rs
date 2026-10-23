@@ -84,42 +84,8 @@ impl TeamLane {
         else {
             return Vec::new();
         };
-        let (Some(sweep), Some(launch)) = (self.sweep, self.member(member)) else {
+        let Some(objective) = self.refly_objective(member, &line, &path, context) else {
             return Vec::new();
-        };
-        let Some(strip) = line_strip(&path, sweep.spacing_m) else {
-            return Vec::new();
-        };
-        let Some(wire::mission_objective::Kind::Survey(team_survey)) =
-            self.objective.as_ref().and_then(|o| o.kind.clone())
-        else {
-            return Vec::new();
-        };
-        let bearing = Local::around(&path);
-        let (a, b) = (
-            path.first().map(|p| bearing.project(p)),
-            path.last().map(|p| bearing.project(p)),
-        );
-        let line_bearing = match (a, b) {
-            (Some(a), Some(b)) => (b[1] - a[1]).atan2(b[0] - a[0]).to_degrees(),
-            _ => sweep.bearing_deg,
-        };
-        let survey = wire::SurveyObjective {
-            area: strip,
-            launch: Some(launch.launch),
-            launch_altitude_m: launch.launch_altitude_m,
-            height_m: self.height_m,
-            line_bearing_deg: Some(line_bearing),
-            return_to_launch: true,
-            ..team_survey
-        };
-        let objective = wire::MissionObjective {
-            objective_id: format!("{}/refly/{member}/{line}", context.fresh_id),
-            origin: self.objective.as_ref().and_then(|o| o.origin.clone()),
-            revision: 1,
-            previous_digest: Vec::new(),
-            title: format!("fly {member} {line} again"),
-            kind: Some(wire::mission_objective::Kind::Survey(survey)),
         };
         let index = self.reflies.len();
         self.reflies.push(Refly {
@@ -138,6 +104,43 @@ impl TeamLane {
             Some(index),
             wire::mission_intent::Action::Propose(objective),
         )]
+    }
+
+    /// A small objective covering one line: a thin strip around it, flown
+    /// along the line from the member's launch point.
+    fn refly_objective(
+        &self,
+        member: &str,
+        line: &str,
+        path: &[wire::GeoPoint],
+        context: &IntentContext,
+    ) -> Option<wire::MissionObjective> {
+        let (sweep, launch) = (self.sweep?, self.member(member)?);
+        let strip = line_strip(path, sweep.spacing_m)?;
+        let Some(wire::mission_objective::Kind::Survey(team_survey)) =
+            self.objective.as_ref().and_then(|o| o.kind.clone())
+        else {
+            return None;
+        };
+        let local = Local::around(path);
+        let (a, b) = (local.project(path.first()?), local.project(path.last()?));
+        let survey = wire::SurveyObjective {
+            area: strip,
+            launch: Some(launch.launch),
+            launch_altitude_m: launch.launch_altitude_m,
+            height_m: self.height_m,
+            line_bearing_deg: Some((b[1] - a[1]).atan2(b[0] - a[0]).to_degrees()),
+            return_to_launch: true,
+            ..team_survey
+        };
+        Some(wire::MissionObjective {
+            objective_id: format!("{}/refly/{member}/{line}", context.fresh_id),
+            origin: self.objective.as_ref().and_then(|o| o.origin.clone()),
+            revision: 1,
+            previous_digest: Vec::new(),
+            title: format!("fly {member} {line} again"),
+            kind: Some(wire::mission_objective::Kind::Survey(survey)),
+        })
     }
 
     pub(super) fn on_refly_receipt(
