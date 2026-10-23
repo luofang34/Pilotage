@@ -118,6 +118,28 @@ impl TaskBook {
             .collect()
     }
 
+    /// The member's survey lines not yet flown, the one in flight included.
+    pub(super) fn unfinished_lines(&self, member: &str) -> Vec<(String, Vec<wire::GeoPoint>)> {
+        self.tasks
+            .values()
+            .filter(|t| t.member == member && t.kind == wire::MissionTaskKind::SurveyLine as i32)
+            .filter(|t| {
+                t.state == wire::MissionTaskState::Pending as i32
+                    || t.state == wire::MissionTaskState::Active as i32
+            })
+            .filter_map(|t| Some((t.task_id.clone(), self.paths.get(&t.task_id)?.clone())))
+            .collect()
+    }
+
+    /// Skips the member's lines on `paths`: another member flies them.
+    pub(super) fn skip_paths(&mut self, member: &str, paths: &[Vec<wire::GeoPoint>]) {
+        for (id, task) in &mut self.tasks {
+            if task.member == member && self.paths.get(id).is_some_and(|p| paths.contains(p)) {
+                task.state = wire::MissionTaskState::Skipped as i32;
+            }
+        }
+    }
+
     /// The paths of the member's survey lines, flown or not.
     pub(super) fn line_paths(&self, member: &str) -> Vec<Vec<wire::GeoPoint>> {
         self.tasks

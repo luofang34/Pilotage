@@ -210,7 +210,18 @@ impl TeamLane {
                 kept,
                 moved,
             } => {
-                intents.extend(self.member_revision(&from, &kept, context));
+                if self.lost.contains_key(&from) {
+                    // A lost member hears nothing: its lines are skipped
+                    // here, and the team no longer waits for it.
+                    self.book.skip_paths(&from, &moved);
+                    self.lost.insert(from.clone(), true);
+                    self.detail = format!(
+                        "{from} released: its link is lost and its state unknown; {to} flies its {} unfinished lines",
+                        moved.len()
+                    );
+                } else {
+                    intents.extend(self.member_revision(&from, &kept, context));
+                }
                 intents.extend(self.queue_moved(&to, &from, moved, context));
             }
             Change::Keep(keep) => {
@@ -300,6 +311,28 @@ impl TeamLane {
             Op::Approve,
             wire::mission_intent::Action::Approve(approval),
         )]
+    }
+
+    /// A member's link is gone: its state is unknown, and its work stays
+    /// reserved to it until a person reassigns that work, which releases
+    /// the member.
+    pub fn on_member_lost(&mut self, member: &str) {
+        if let Some(status) = self.statuses.get_mut(member) {
+            status.detail = "link lost; state unknown, work stays reserved".to_owned();
+            self.changed = true;
+        }
+        self.lost.entry(member.to_owned()).or_insert(false);
+    }
+
+    /// Whether the team takes `member`'s report: a member that reports
+    /// again is no longer lost, unless a person released it, whose lines
+    /// others now fly.
+    pub(super) fn reporting(&mut self, member: &str) -> bool {
+        if self.lost.get(member) == Some(&true) {
+            return false;
+        }
+        self.lost.remove(member);
+        true
     }
 
     /// The revision as the team's status reports it.

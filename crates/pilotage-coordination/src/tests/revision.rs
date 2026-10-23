@@ -257,3 +257,54 @@ fn a_parents_strip_keeps_exactly_the_lines_inside_it() {
     let draft = receipt.proposal.expect("the draft");
     assert_eq!(draft.tasks.len(), 3, "{}", draft.summary);
 }
+
+#[test]
+fn a_person_releases_a_lost_member_and_the_team_completes_without_it() {
+    let (mut fleet, planned) = running_fleet(false);
+    // SIM-3's host is gone mid-line: the team keeps its work reserved.
+    fleet.team.on_member_lost("SIM-3");
+    fleet.members.remove("SIM-3");
+    let give = reassign(&fleet, "SIM-3", "SIM-1", 1.0, false);
+    let (receipt, intents) = team_intent(&mut fleet, give);
+    let draft = receipt.expect("answered").proposal.expect("a draft");
+    assert!(intents.is_empty());
+    let (receipt, intents) = team_intent(&mut fleet, Action::Approve(approval(&draft.digest, 0)));
+    assert!(receipt.is_some_and(|r| accepted(&r)));
+    assert!(
+        intents.iter().all(|i| i.member != "SIM-3"),
+        "nothing goes to a member that cannot hear it"
+    );
+    assert!(
+        fleet.team.status().detail.contains("SIM-3 released"),
+        "{}",
+        fleet.team.status().detail
+    );
+    fleet.route(intents);
+    let follow = fleet.fly(&[]);
+    fleet.route(follow);
+    let last = fleet.fly(&[]);
+    fleet.route(last);
+
+    let team = fleet.team.status();
+    assert_eq!(
+        team.state,
+        wire::MissionLaneState::Complete as i32,
+        "{}",
+        team.detail
+    );
+    let sim3: Vec<_> = team
+        .tasks
+        .iter()
+        .filter(|t| t.member == "SIM-3" && t.kind == wire::MissionTaskKind::SurveyLine as i32)
+        .collect();
+    assert!(
+        sim3.iter()
+            .all(|t| t.state == wire::MissionTaskState::Skipped as i32),
+        "the line in flight moved too"
+    );
+    assert_eq!(
+        lines_of(&team, wire::MissionTaskState::Done),
+        planned,
+        "every line flown once"
+    );
+}
