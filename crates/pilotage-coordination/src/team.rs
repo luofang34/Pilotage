@@ -116,6 +116,9 @@ pub struct TeamLane {
     run_id: Option<String>,
     reflies: Vec<Refly>,
     revision: Option<revision::Revision>,
+    /// Members whose link is lost, and whether a person released one:
+    /// its lines went to others and the team no longer waits for it.
+    lost: BTreeMap<String, bool>,
     requests: u64,
     detail: String,
     sequence: u64,
@@ -144,6 +147,7 @@ impl TeamLane {
             run_id: None,
             reflies: Vec::new(),
             revision: None,
+            lost: BTreeMap::new(),
             requests: 0,
             detail: "waiting for an objective".to_owned(),
             sequence: 0,
@@ -365,21 +369,15 @@ impl TeamLane {
     ) -> Vec<MemberIntent> {
         self.changed = true;
         let member = status.lane.clone();
+        if !self.reporting(&member) {
+            return Vec::new();
+        }
         self.book.record(status, &self.reflies);
         self.statuses.insert(member.clone(), status.clone());
         self.refly_progress(&member, status);
-        let intents = self.adapt(&member, status, context);
+        let intents = self.adapt(context);
         self.settle();
         intents
-    }
-
-    /// A member's link is gone: its state is unknown, and its work stays
-    /// reserved to it.
-    pub fn on_member_lost(&mut self, member: &str) {
-        if let Some(status) = self.statuses.get_mut(member) {
-            status.detail = "link lost; state unknown, work stays reserved".to_owned();
-            self.changed = true;
-        }
     }
 
     fn settle(&mut self) {
@@ -391,10 +389,12 @@ impl TeamLane {
         let states: Vec<i32> = self
             .member_proposals
             .keys()
+            .filter(|m| self.lost.get(*m) != Some(&true))
             .filter_map(|m| self.statuses.get(m))
             .map(|s| s.state)
             .collect();
-        if states.len() < self.member_proposals.len() {
+        let released = self.lost.values().filter(|r| **r).count();
+        if states.len() + released < self.member_proposals.len() {
             return;
         }
         let complete = wire::MissionLaneState::Complete as i32;
