@@ -36,7 +36,7 @@ use crate::runtime::engine_actor::{ENGINE_QUEUE_CAPACITY, EngineActor};
 use crate::runtime::registry::OUTBOUND_QUEUE_CAPACITY;
 use crate::runtime::{MissionOptions, MissionPlanRequest};
 #[cfg(feature = "sim")]
-pub use sim_multicopter_rig::spawn_sim_multicopter_rig;
+pub use sim_multicopter_rig::{SurveyRuns, spawn_sim_multicopter_rig, spawn_sim_multicopter_runs};
 
 /// The mission principal's driver-assigned client key. The accept loop
 /// allocates keys from zero with a `fetch_add`, so `u64::MAX` can only

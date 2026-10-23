@@ -341,3 +341,16 @@ fn foreign_vehicles_scopes_and_payload_frames_are_refused() {
     let outcome = adapter.apply_control(&frame(GIMBAL_SCOPE, None, vec![ControlAction::Arm]));
     assert!(!outcome.action_results[0].accepted);
 }
+
+#[test]
+fn a_grounded_vehicle_takes_a_neutral_frame_and_refuses_motion() {
+    let mut adapter = adapter();
+    let neutral = adapter.apply_control(&frame(MOTION_SCOPE, velocity(0.0, 0.0, 0.0), vec![]));
+    assert_eq!(neutral.disposition, Disposition::Accepted);
+    let motion = adapter.apply_control(&frame(MOTION_SCOPE, velocity(1.0, 0.0, 0.0), vec![]));
+    assert!(
+        matches!(motion.disposition, Disposition::Rejected(_)),
+        "{:?}",
+        motion.disposition
+    );
+}

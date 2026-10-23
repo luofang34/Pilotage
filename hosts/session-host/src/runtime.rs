@@ -36,7 +36,8 @@ mod wire_codec;
 pub use automation::{AutomationStatus, MissionRig, Participant, TelemetryObserver};
 #[cfg(feature = "sim")]
 pub use automation::{
-    spawn_reference_mission_rig, spawn_reference_survey_rig, spawn_sim_multicopter_rig,
+    SurveyRuns, spawn_reference_mission_rig, spawn_reference_survey_rig, spawn_sim_multicopter_rig,
+    spawn_sim_multicopter_runs,
 };
 pub use options::{
     DEFAULT_MISSION_ANCHOR, MissionNavdataSource, MissionOptions, MissionPlanRequest,

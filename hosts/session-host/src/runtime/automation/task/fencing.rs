@@ -164,9 +164,12 @@ impl MissionTask {
     /// lease admits.
     pub(super) fn take_generation(&mut self, generation: Generation) {
         self.generation = Some(generation);
+        // Every new generation follows a release or a lost holder, which
+        // latches link loss on the vehicle: the first frame demonstrates
+        // neutral so the latch clears before any action or motion.
+        self.neutral_frames = 1;
         if self.held {
             self.held = false;
-            self.neutral_frames = 1;
             let now = self.mission_now();
             let held = self
                 .mission

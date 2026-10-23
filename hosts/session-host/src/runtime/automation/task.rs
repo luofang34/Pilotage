@@ -275,6 +275,14 @@ impl MissionTask {
         if !self.publish_nav_guidance(guidance.as_ref(), nanos).await {
             return false;
         }
+        if output.action.is_some()
+            && self.neutral_frames > 0
+            && !self
+                .send_intent(neutral_intent(), MonoTimestamp::from_nanos(nanos))
+                .await
+        {
+            return false;
+        }
         if let Some(action) = output.action
             && !self.send_action(action).await
         {
@@ -326,13 +334,7 @@ impl MissionTask {
         };
         let intent = if self.neutral_frames > 0 {
             self.neutral_frames = self.neutral_frames.saturating_sub(1);
-            ControlIntent::Velocity(VelocityIntent {
-                frame: ReferenceFrame::BodyFrd,
-                vx: 0.0,
-                vy: 0.0,
-                vz: 0.0,
-                yaw_rate: 0.0,
-            })
+            neutral_intent()
         } else {
             intent
         };
@@ -464,4 +466,15 @@ impl MissionTask {
     fn update(&self, apply: impl FnOnce(&mut AutomationStatus)) {
         self.status.send_modify(apply);
     }
+}
+
+/// Zero velocity: the frame that demonstrates neutral to the session.
+fn neutral_intent() -> ControlIntent {
+    ControlIntent::Velocity(VelocityIntent {
+        frame: ReferenceFrame::BodyFrd,
+        vx: 0.0,
+        vy: 0.0,
+        vz: 0.0,
+        yaw_rate: 0.0,
+    })
 }
