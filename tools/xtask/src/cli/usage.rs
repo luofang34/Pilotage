@@ -70,7 +70,9 @@ commands:
       mission approver only with target/xtask-mission/approver.token.
       Places the file's camera fault on the aircraft's planned line,
       writes target/xtask-mission/fleet.json for the App, prints the App
-      and agent commands, and tears every host down on ctrl-c.
+      and agent commands, and tears every host down on ctrl-c. An
+      aircraft host that stops is reported and its lead keeps the
+      mission; a lead that stops ends the fleet.
 
       --plan <path>        fleet file (default:
                            sim/missions/princeton-landmarks.json)

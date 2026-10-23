@@ -124,6 +124,12 @@ impl ManagedChild {
         all[start..].join("\n")
     }
 
+    /// Waits for the process to exit.
+    #[cfg(test)]
+    pub(crate) fn wait_blocking(&mut self) {
+        self.child.wait().ok();
+    }
+
     /// Terminates the stage's whole process group: TERM, a bounded
     /// grace wait, then an unconditional group KILL, then reap. The
     /// leader exiting only ends the grace wait early — descendants

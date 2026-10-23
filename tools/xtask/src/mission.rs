@@ -429,7 +429,7 @@ fn announce(fleet: &Fleet, file: &MissionFile, hosts: &[Host]) {
 
 /// Watches every host until ctrl-c or the first host that stops.
 async fn supervise(
-    hosts: &mut [Host],
+    hosts: &mut Vec<Host>,
     cancel: &mut tokio::sync::watch::Receiver<bool>,
 ) -> Result<(), XtaskError> {
     loop {
@@ -440,15 +440,37 @@ async fn supervise(
                 return Ok(());
             }
             () = tokio::time::sleep(SUPERVISE_INTERVAL) => {
-                for host in hosts.iter_mut() {
-                    host.child.check_running().map_err(|error| XtaskError::MissionHost {
-                        lane: host.lane.clone(),
-                        source: Box::new(error),
-                    })?;
-                }
+                check_hosts(hosts)?;
             }
         }
     }
+}
+
+/// Checks every host once. An aircraft that stopped is reported and left out: its link
+/// to its lead is lost, and the lead keeps the mission, as a lost aircraft in the field
+/// would leave it. A lead that stopped ends the fleet.
+fn check_hosts(hosts: &mut Vec<Host>) -> Result<(), XtaskError> {
+    let mut stopped = Vec::new();
+    for host in hosts.iter_mut() {
+        match host.child.check_running() {
+            Ok(()) => {}
+            Err(error) if host.adapter != "coordinator" => {
+                print_line(&format!(
+                    "aircraft {} stopped; its lead keeps the mission: {error}",
+                    host.lane
+                ));
+                stopped.push(host.lane.clone());
+            }
+            Err(error) => {
+                return Err(XtaskError::MissionHost {
+                    lane: host.lane.clone(),
+                    source: Box::new(error),
+                });
+            }
+        }
+    }
+    hosts.retain(|host| !stopped.contains(&host.lane));
+    Ok(())
 }
 
 /// Stops every host, leads first.
