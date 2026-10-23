@@ -208,3 +208,52 @@ fn a_new_proposal_after_a_run_names_no_run_until_it_starts() {
         "the new plan's tasks must not pass for run {ran}"
     );
 }
+
+#[test]
+fn a_parents_strip_keeps_exactly_the_lines_inside_it() {
+    use crate::allocation::{Across, sweep_of};
+    let (mut fleet, _) = running_fleet(false);
+    let status = fleet.team.status();
+    let Some(wire::mission_objective::Kind::Survey(survey)) = objective().kind else {
+        panic!("a survey");
+    };
+    let d = defaults();
+    let sweep = sweep_of(&survey, d.height_m, d.across_track_fov_deg, d.sidelap);
+    let across = Across::new(&survey.area, sweep.bearing_deg);
+    let mut unflown: Vec<f64> = status
+        .tasks
+        .iter()
+        .filter(|t| {
+            t.kind == wire::MissionTaskKind::SurveyLine as i32
+                && t.state == wire::MissionTaskState::Pending as i32
+        })
+        .filter_map(|t| across.of_path(&t.path))
+        .collect();
+    unflown.sort_by(f64::total_cmp);
+    assert!(unflown.len() >= 4);
+    // The parent keeps the first three unflown lines across the area.
+    let kept = &unflown[..3];
+    let strip = across.strip(&survey.area, kept, sweep.footprint_m);
+    let objective = wire::MissionObjective {
+        kind: Some(wire::mission_objective::Kind::Survey(
+            wire::SurveyObjective {
+                area: strip,
+                height_m: d.height_m,
+                ..survey.clone()
+            },
+        )),
+        ..objective()
+    };
+    let revise = Action::Revise(wire::MissionRevise {
+        base_digest: status.proposal_digest.clone(),
+        run_id: status.run_id.clone(),
+        within_envelope: false,
+        drafted_by: None,
+        change: Some(wire::mission_revise::Change::Objective(objective)),
+    });
+    let (receipt, _) = team_intent(&mut fleet, revise);
+    let receipt = receipt.expect("answered");
+    assert!(accepted(&receipt), "{}", receipt.reason);
+    let draft = receipt.proposal.expect("the draft");
+    assert_eq!(draft.tasks.len(), 3, "{}", draft.summary);
+}

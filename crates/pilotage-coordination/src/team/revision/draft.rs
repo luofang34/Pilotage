@@ -5,7 +5,7 @@ use pilotage_mission::IntentContext;
 use pilotage_protocol::wire;
 
 use super::Change;
-use crate::allocation::Across;
+use crate::allocation::{Across, team_step};
 use crate::team::TeamLane;
 
 impl TeamLane {
@@ -110,13 +110,19 @@ impl TeamLane {
             return Err("a running team keeps its height and line bearing; propose a new objective for other ones".to_owned());
         }
         let across = self.across().ok_or("the team has no sweep")?;
+        let area = self.area().ok_or("the team has no area")?;
+        let step = team_step(&area, &sweep);
         let edges: Vec<f64> = survey
             .area
             .iter()
             .map(|p| across.of_path(std::slice::from_ref(p)).unwrap_or(f64::NAN))
             .collect();
-        let low = edges.iter().copied().fold(f64::INFINITY, f64::min) - 1.0;
-        let high = edges.iter().copied().fold(f64::NEG_INFINITY, f64::max) + 1.0;
+        // The strip's edges are swath edges, half a footprint outside its
+        // outer lines; a line belongs to it when it lies within half a
+        // spacing of those lines, never the neighbour beyond.
+        let half = sweep.footprint_m / 2.0;
+        let low = edges.iter().copied().fold(f64::INFINITY, f64::min) + half - step / 2.0;
+        let high = edges.iter().copied().fold(f64::NEG_INFINITY, f64::max) - half + step / 2.0;
         let mut keep = Vec::new();
         let mut dropped = 0_usize;
         for member in self.member_proposals.keys().filter(|m| self.running(m)) {
@@ -150,6 +156,12 @@ impl TeamLane {
                 Ok(wire::MissionLaneState::Running | wire::MissionLaneState::Held)
             )
         })
+    }
+
+    pub(super) fn area(&self) -> Option<Vec<wire::GeoPoint>> {
+        match self.objective.as_ref()?.kind.as_ref()? {
+            wire::mission_objective::Kind::Survey(s) => Some(s.area.clone()),
+        }
     }
 
     pub(super) fn across(&self) -> Option<Across> {
