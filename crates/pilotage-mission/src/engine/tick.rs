@@ -25,6 +25,7 @@ use super::{MissionAction, MissionEngine, MissionEvent, MissionOutput, MissionSt
 const YAW_COURSE_FLOOR_MPS: f64 = 0.05;
 
 mod outputs;
+mod overflight;
 
 use outputs::{failed_output, terminal_output, zero_velocity_intent};
 
@@ -415,6 +416,13 @@ impl MissionEngine {
             let leg = self.execution.active_leg()?;
             (leg.from.map(|waypoint| waypoint.position), leg.to.clone())
         };
+        let leg_from = leg_from.filter(|from| {
+            let past = overflight::overflown(&solution.position, from, &leg_to.position);
+            if past {
+                self.counters.fix_overflown = self.counters.fix_overflown.wrapping_add(1);
+            }
+            !past
+        });
         let guided = guide_velocity(
             solution,
             leg_from.as_ref(),

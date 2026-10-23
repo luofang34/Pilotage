@@ -10,6 +10,10 @@ use crate::config::MissionConfig;
 use crate::engine::MissionEngine;
 use crate::survey::{SurveyPlan, SurveyRequest, plan_survey};
 
+/// The time at cruise speed that the capture radius of a line end
+/// spans, seconds.
+const CAPTURE_SECONDS: f64 = 2.0;
+
 /// The values an objective's zero fields take.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SurveyDefaults {
@@ -66,7 +70,7 @@ pub(super) fn compile(
     let defaults = lane.defaults;
     let height_m = pick(survey.height_m, defaults.height_m);
     let cruise_mps = pick(survey.cruise_mps, defaults.cruise_mps);
-    let request = survey_request(survey, &defaults);
+    let request = survey_request(survey, &defaults, cruise_mps);
     let mut config = lane.template.clone();
     config.anchor = GeodeticPosition::new(
         launch.latitude_deg.to_radians(),
@@ -125,7 +129,11 @@ fn pick(value: f64, default: f64) -> f64 {
 }
 
 /// The planner's request for `survey`, its zero fields at `defaults`.
-fn survey_request(survey: &wire::SurveyObjective, defaults: &SurveyDefaults) -> SurveyRequest {
+fn survey_request(
+    survey: &wire::SurveyObjective,
+    defaults: &SurveyDefaults,
+    cruise_mps: f64,
+) -> SurveyRequest {
     let mut request = SurveyRequest::new(
         survey
             .area
@@ -142,6 +150,9 @@ fn survey_request(survey: &wire::SurveyObjective, defaults: &SurveyDefaults) -> 
     };
     request.return_to_launch = survey.return_to_launch;
     request.line_bearing_rad = survey.line_bearing_deg.map(f64::to_radians);
+    // A fast vehicle that lags its setpoint needs a wider capture circle
+    // to sequence a line end on the first pass.
+    request.capture_radius_m = request.capture_radius_m.max(CAPTURE_SECONDS * cruise_mps);
     request
 }
 
