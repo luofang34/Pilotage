@@ -155,6 +155,49 @@ impl RunTracker {
         self.active = None;
     }
 
+    /// Survey lines flown so far, with or without their evidence.
+    pub(super) fn flown_lines(&self) -> usize {
+        self.tasks
+            .iter()
+            .filter(|t| is_line(&t.plan))
+            .filter(|t| {
+                matches!(
+                    t.state,
+                    wire::MissionTaskState::Done | wire::MissionTaskState::Incomplete
+                )
+            })
+            .count()
+    }
+
+    /// The vehicle flies along a survey line, not toward one.
+    pub(super) fn on_line(&self) -> bool {
+        self.active
+            .and_then(|index| self.tasks.get(index))
+            .is_some_and(|task| is_line(&task.plan))
+    }
+
+    /// Every line is flown and the run flies home.
+    pub(super) fn flying_home(&self) -> bool {
+        self.active
+            .and_then(|index| self.tasks.get(index))
+            .is_some_and(|task| !is_line(&task.plan))
+    }
+
+    /// The statuses a successor leaves behind: what was flown keeps its
+    /// verdict, and every task not flown is skipped, superseded.
+    pub(super) fn superseded_statuses(&self) -> Vec<wire::MissionTaskStatus> {
+        let mut statuses = self.task_statuses();
+        for status in &mut statuses {
+            if matches!(
+                wire::MissionTaskState::try_from(status.state),
+                Ok(wire::MissionTaskState::Pending | wire::MissionTaskState::Active)
+            ) {
+                status.state = wire::MissionTaskState::Skipped as i32;
+            }
+        }
+        statuses
+    }
+
     pub(super) fn active_task(&self) -> Option<String> {
         self.tasks.get(self.active?).map(|t| t.plan.task_id.clone())
     }

@@ -22,6 +22,7 @@ use navigate_geodesy::{GeodesyError, LocalTangentPlane, NedOffset};
 use pilotage_mission_core::{Digest, MissionIdentity};
 use sha2::{Digest as _, Sha256};
 
+pub use geometry::sweep_offsets;
 use geometry::{Line, Planar};
 
 /// Upper bound on the waypoints one survey plan may hold.

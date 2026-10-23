@@ -24,6 +24,8 @@ pub struct MissionView {
     pub detail: String,
     /// The proposal the desk holds, when it is the lane's.
     pub proposal: Option<ProposalView>,
+    /// A revision drafted, admitted or applied to the plan in progress.
+    pub successor: Option<SuccessorView>,
     /// The commands the lane's state offers.
     pub offered: Vec<IntentKind>,
     /// The lane's tasks.
@@ -32,11 +34,112 @@ pub struct MissionView {
     pub members: Vec<MemberView>,
 }
 
+/// The lane in a few fields, for a log line or an agent's step: what
+/// changed is worth a line, the paths and evidence of every task are not.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct MissionSummary {
+    /// The lane's name.
+    pub lane: String,
+    /// The lane's state.
+    pub state: String,
+    /// The lane flies a simulation.
+    pub simulated: bool,
+    /// Survey lines in the plan, flown or not.
+    pub lines: usize,
+    /// Lines flown with their evidence.
+    pub done: usize,
+    /// Lines flown without enough usable pictures.
+    pub incomplete: usize,
+    /// Lines a revision or a skip took out.
+    pub skipped: usize,
+    /// Times lines were flown again.
+    pub reflown: u32,
+    /// The tasks in progress.
+    pub active: Vec<String>,
+    /// Each member lane's state and task in progress.
+    pub members: Vec<MemberSummary>,
+    /// A revision drafted, admitted or applied.
+    pub successor: Option<SuccessorView>,
+    /// The commands the lane's state offers.
+    pub offered: Vec<IntentKind>,
+    /// The lane's words for what it does.
+    pub detail: String,
+}
+
+/// One member lane in a summary.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct MemberSummary {
+    /// The member lane's name.
+    pub lane: String,
+    /// Its state.
+    pub state: String,
+    /// Its task in progress.
+    pub active: String,
+}
+
+impl MissionView {
+    /// The view in a few fields.
+    #[must_use]
+    pub fn summary(&self) -> MissionSummary {
+        let lines: Vec<&TaskView> = self
+            .tasks
+            .iter()
+            .filter(|t| t.kind == "survey_line")
+            .collect();
+        let count = |state: &str| lines.iter().filter(|t| t.state == state).count();
+        MissionSummary {
+            lane: self.lane.clone(),
+            state: self.state.clone(),
+            simulated: self.simulated,
+            lines: lines.len(),
+            done: count("done"),
+            incomplete: count("incomplete"),
+            skipped: count("skipped"),
+            reflown: self.tasks.iter().map(|t| t.reflown).sum(),
+            active: self
+                .tasks
+                .iter()
+                .filter(|t| t.state == "active")
+                .map(|t| t.task.clone())
+                .collect(),
+            members: self
+                .members
+                .iter()
+                .map(|m| MemberSummary {
+                    lane: m.lane.clone(),
+                    state: m.state.clone(),
+                    active: m.active.clone(),
+                })
+                .collect(),
+            successor: self.successor.clone(),
+            offered: self.offered.clone(),
+            detail: self.detail.clone(),
+        }
+    }
+}
+
+/// A revision of the plan in progress.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct SuccessorView {
+    /// The digest an approval of the draft names.
+    pub digest: String,
+    /// What it changes, in words.
+    pub summary: String,
+    /// `drafted`, `admitted` or `applied`.
+    pub state: String,
+    /// The task whose end it waits for.
+    pub applies_after: String,
+    /// The session that drafted it.
+    pub drafted_by: String,
+}
+
 /// One task and its evidence.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct TaskView {
     /// The task's identifier.
     pub task: String,
+    /// The kind of task, such as `survey_line` or `return_home`.
+    pub kind: String,
     /// The task's state, such as `done`.
     pub state: String,
     /// Pictures captured.
@@ -112,6 +215,7 @@ impl MissionDesk {
             (offered.hold, IntentKind::Hold),
             (offered.resume, IntentKind::Resume),
             (offered.abort, IntentKind::Abort),
+            (offered.revise, IntentKind::Revise),
         ]
         .into_iter()
         .filter_map(|(on, kind)| on.then_some(kind))
@@ -124,6 +228,16 @@ impl MissionDesk {
             active: status.active_task.clone(),
             detail: status.detail.clone(),
             proposal: self.current_proposal().map(ProposalView::of),
+            successor: status.successor.as_ref().map(|s| SuccessorView {
+                digest: hex(&s.digest),
+                summary: s.summary.clone(),
+                state: wire::MissionSuccessorState::try_from(s.state).map_or_else(
+                    |_| s.state.to_string(),
+                    |state| format!("{state:?}").to_lowercase(),
+                ),
+                applies_after: s.applies_after.clone(),
+                drafted_by: s.drafted_by.clone(),
+            }),
             offered,
             tasks: status.tasks.iter().map(TaskView::of).collect(),
             members: status.members.iter().map(MemberView::of).collect(),
@@ -136,6 +250,14 @@ impl TaskView {
         let evidence = task.evidence.clone().unwrap_or_default();
         Self {
             task: task.task_id.clone(),
+            kind: wire::MissionTaskKind::try_from(task.kind).map_or_else(
+                |_| task.kind.to_string(),
+                |kind| {
+                    kind.as_str_name()
+                        .trim_start_matches("MISSION_TASK_KIND_")
+                        .to_lowercase()
+                },
+            ),
             state: wire::MissionTaskState::try_from(task.state).map_or_else(
                 |_| task.state.to_string(),
                 |s| format!("{s:?}").to_lowercase(),

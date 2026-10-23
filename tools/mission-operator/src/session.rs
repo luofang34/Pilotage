@@ -1,8 +1,7 @@
 //! One operator session with a host: admission, commands, receipts and the
-//! lane's status, each written as one JSON line. The desk that resolves
+//! lane's status, printed by [`output::Output`]. The desk that resolves
 //! commands into intents is the one every client uses.
 
-use std::io::Write as _;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use pilotage_client_link::Link;
@@ -14,16 +13,22 @@ use pilotage_client_session::{
     ClientAction, ClientConfig, ClientEngine, ModuleEvent, ReconnectPolicy, TransportEvent,
 };
 use pilotage_protocol::wire;
-use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
 use crate::cli::{Action, Command, OperatorError};
 
 mod agent;
+mod output;
+mod survey_agent;
+
+use output::Output;
 
 /// How long a receipt may take: a team answers after its members do.
 const RECEIPT_TIMEOUT: Duration = Duration::from_secs(60);
+/// How long a new session waits for the lane's first status; lanes
+/// publish at least every two seconds.
+const FIRST_STATUS: Duration = Duration::from_secs(5);
 
 struct Session {
     link: Link,
@@ -32,9 +37,7 @@ struct Session {
     desk: MissionDesk,
     policy: ApprovalPolicy,
     started: Instant,
-    /// Status lines go out on every status, or only on a change.
-    every_status: bool,
-    last_shown: Option<(Value, Instant)>,
+    output: Output,
     last_telemetry: Option<Instant>,
 }
 
@@ -48,10 +51,8 @@ pub(crate) async fn execute(command: Command) -> Result<bool, OperatorError> {
             .map(|r| r.is_some_and(|r| r.accepted())),
         Action::Watch => session.watch(deadline).await,
         Action::Run(objective) => session.run(objective, deadline).await,
-        Action::Agent => {
-            session.every_status = false;
-            session.agent().await
-        }
+        Action::Agent => session.agent().await,
+        Action::SurveyAgent(objective) => session.survey_agent(objective, deadline).await,
     };
     session.link.shutdown().await;
     outcome
@@ -80,8 +81,7 @@ impl Session {
             desk: MissionDesk::new(&command.name, now_ms()),
             policy: command.policy,
             started: Instant::now(),
-            every_status: true,
-            last_shown: None,
+            output: Output::new(command.human),
             last_telemetry: None,
         };
         let actions = session.engine.handle(TransportEvent::Connected, 0);
@@ -90,7 +90,20 @@ impl Session {
         while session.engine.admission().is_none() {
             session.step(deadline).await?;
         }
-        emit(&json!({"event": "admitted", "as": command.name}));
+        session.output.admitted(&command.name);
+        // A command resolves against the lane's state, so the first status
+        // comes first; a host without a lane publishes none and its refusal
+        // says so.
+        let first = Instant::now() + FIRST_STATUS;
+        while session.desk.status().is_none() && Instant::now() < first {
+            match tokio::time::timeout_at(first, session.transport.recv()).await {
+                Ok(Some(event)) => {
+                    session.on_transport(event).await?;
+                }
+                Ok(None) => return Err(OperatorError::Host("the link closed".to_owned())),
+                Err(_) => break,
+            }
+        }
         Ok(session)
     }
 
@@ -107,7 +120,7 @@ impl Session {
                 Ok(Some(request_id))
             }
             Err(refusal) => {
-                emit(&json!({"event": "refused", "by": "desk", "reason": refusal.to_string()}));
+                self.output.refused("desk", &refusal.to_string());
                 Ok(None)
             }
         }
@@ -236,34 +249,17 @@ impl Session {
         let Some(filed) = self.desk.on_receipt(receipt) else {
             return;
         };
-        let mut line = json!({"event": "receipt"});
-        merge(&mut line, &ReceiptView::of(filed));
-        if let Some(proposal) = proposal.filter(|_| filed.accepted()) {
-            line["proposal"] = json!(proposal);
-        }
-        emit(&line);
+        let accepted = filed.accepted();
+        let view = ReceiptView::of(filed);
+        self.output
+            .receipt(&view, proposal.as_ref().filter(|_| accepted));
     }
 
-    /// Writes the lane's status: every one, or in agent mode only a change
-    /// of what the lane does, and at least every ten seconds.
+    /// Prints the lane's summary when it changed.
     fn show_status(&mut self) {
-        let Some(view) = self.desk.view(true, &self.policy) else {
-            return;
-        };
-        let mut line = json!({"event": "status"});
-        merge(&mut line, &view);
-        let mut gist = line.clone();
-        gist["sequence"] = Value::Null;
-        if !self.every_status
-            && self
-                .last_shown
-                .as_ref()
-                .is_some_and(|(shown, at)| *shown == gist && at.elapsed() < Duration::from_secs(10))
-        {
-            return;
+        if let Some(view) = self.desk.view(true, &self.policy) {
+            self.output.status(&view);
         }
-        self.last_shown = Some((gist, Instant::now()));
-        emit(&line);
     }
 
     /// With `PILOTAGE_OPERATOR_TELEMETRY=1`, one line a second with the
@@ -284,8 +280,11 @@ impl Session {
         }
         self.last_telemetry = Some(Instant::now());
         let speed = avionics.vel_n_mps.hypot(avionics.vel_e_mps);
-        emit(
-            &json!({"event": "telemetry", "lat": fix.latitude_deg, "lon": fix.longitude_deg, "height_m": -avionics.pos_d_m, "speed_mps": speed}),
+        self.output.telemetry(
+            fix.latitude_deg,
+            fix.longitude_deg,
+            -f64::from(avionics.pos_d_m),
+            f64::from(speed),
         );
     }
 }
@@ -297,17 +296,4 @@ fn terminal(state: wire::MissionLaneState) -> Option<bool> {
         wire::MissionLaneState::Failed | wire::MissionLaneState::Aborted => Some(false),
         _ => None,
     }
-}
-
-/// Adds the fields of `value` to the object `line`.
-fn merge(line: &mut Value, value: &impl serde::Serialize) {
-    if let (Some(line), Ok(Value::Object(fields))) =
-        (line.as_object_mut(), serde_json::to_value(value))
-    {
-        line.extend(fields);
-    }
-}
-
-fn emit(value: &Value) {
-    writeln!(std::io::stdout().lock(), "{value}").ok();
 }

@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use navigate_contract::{ClockDomainId, GeodeticPosition};
 use pilotage_mission::{
     ExecutionTarget, FrameAssessment, IntentContext, Lane, LaneConfig, LaneEffect, MissionConfig,
-    OwnshipSource, RunProgress, SurveyDefaults,
+    OwnshipSource, RunPlan, RunProgress, SurveyDefaults,
 };
 use pilotage_protocol::wire;
 
@@ -63,8 +63,8 @@ fn context(id: &str) -> IntentContext {
     }
 }
 
-fn team() -> TeamLane {
-    let members = [
+fn members() -> Vec<Member> {
+    [
         ("SIM-1", point(40.3328, -74.6722)),
         ("SIM-2", point(40.3368, -74.6648)),
         ("SIM-3", point(40.3348, -74.6722)),
@@ -75,10 +75,13 @@ fn team() -> TeamLane {
         launch,
         launch_altitude_m: 0.0,
     })
-    .collect();
+    .collect()
+}
+
+fn team() -> TeamLane {
     TeamLane::new(TeamConfig {
         name: "TEAM".to_owned(),
-        members,
+        members: members(),
         defaults: defaults(),
         recovery_policy: "hold".to_owned(),
     })
@@ -119,7 +122,10 @@ impl Fleet {
             };
             let reply = lane.on_intent(&intent, &ctx);
             if let Some(LaneEffect::Start(order)) = reply.effect.as_ref() {
-                let line_count = order.request.polygon_deg.len().max(1);
+                let line_count = match &order.plan {
+                    RunPlan::Survey(request) => request.polygon_deg.len().max(1),
+                    RunPlan::Home => 0,
+                };
                 self.runs.insert(member.clone(), line_count);
             }
             let team_reply = self.team.on_member_receipt(&member, &reply.receipt, &ctx);
@@ -475,3 +481,6 @@ fn a_parent_team_counts_the_lines_its_member_team_flew_again() {
     assert_eq!(line.reflown, 1);
     assert!(status.detail.contains("1 flown again"), "{}", status.detail);
 }
+
+mod lines;
+mod revision;

@@ -3,20 +3,25 @@
 //! every client sends, through the same mission desk as the App.
 //!
 //! ```text
-//! mission-operator --host URL --cert HEX [--token-file PATH] [--name NAME] COMMAND
+//! mission-operator --host URL --cert HEX [--token-file PATH] [--name NAME] [--json | --human] COMMAND
 //!   propose OBJECTIVE.json
 //!   approve [DIGEST] [--max-height M] [--expires-min N] [--refly N] [--no-revise] [--reserve F]
 //!   start [DIGEST] | hold | resume | abort
 //!   watch [--seconds N]
 //!   run OBJECTIVE.json --approve [policy options] [--seconds N]
 //!   agent
+//!   survey-agent OBJECTIVE.json
 //! ```
 //!
 //! `run` proposes, approves under the stated policy, starts and watches
 //! until the lane ends; `--approve` states the operator's approval
 //! explicitly. `agent` reads commands from standard input, one JSON object
-//! per line such as `{"command": "hold"}`, for an automated agent. Every
-//! receipt and status goes to standard output as one JSON object per line.
+//! per line such as `{"command": "hold"}`, for an automated agent.
+//! `survey-agent` is such an agent, scripted: it proposes, waits for a
+//! person to approve, starts, and resumes only the holds it may. Every
+//! receipt and status change goes to standard output: one short line for a
+//! person on a terminal, one JSON object per line otherwise (`--json` and
+//! `--human` choose).
 //! The host decides what the client may do from the secret in
 //! `--token-file`: only its approver secret lets a client approve.
 

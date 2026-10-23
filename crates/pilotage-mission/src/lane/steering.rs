@@ -2,8 +2,9 @@
 //! without the approver grant; the grant comes from the admission secret
 //! the client presented, not from the records it sends.
 //!
-//! Any admitted client may propose, start an approved proposal, hold and
-//! abort: a stop must never wait for a particular client. Only an approver
+//! Any admitted client may propose, draft a revision, start an approved
+//! proposal, hold and abort: a stop must never wait for a particular
+//! client. Only an approver
 //! may approve, because the approval sets the envelope the lanes adapt
 //! inside. A hold that an approver set stays until an approver resumes, so
 //! an automated client cannot undo a human's stop.
@@ -51,6 +52,15 @@ impl Steering {
                     ));
                 }
                 approval.approver = Some(wire::RecordOrigin {
+                    issuer: HOST_ISSUER.to_owned(),
+                    subject: requester.subject.clone(),
+                    organization: String::new(),
+                });
+                Ok(())
+            }
+            Some(Action::Revise(revise)) => {
+                // Anyone may draft; the record names the session that did.
+                revise.drafted_by = Some(wire::RecordOrigin {
                     issuer: HOST_ISSUER.to_owned(),
                     subject: requester.subject.clone(),
                     organization: String::new(),

@@ -4,8 +4,8 @@
 use navigate_contract::GeodeticPosition;
 use pilotage_protocol::wire;
 
-use super::LaneConfig;
 use super::digest::proposal_digest;
+use super::{LaneConfig, RunPlan};
 use crate::config::MissionConfig;
 use crate::engine::MissionEngine;
 use crate::survey::{SurveyPlan, SurveyRequest, plan_survey};
@@ -38,7 +38,7 @@ impl Default for SurveyDefaults {
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct Compiled {
     pub proposal: wire::MissionProposal,
-    pub request: SurveyRequest,
+    pub plan: RunPlan,
     pub config: MissionConfig,
     pub height_m: f64,
     pub min_usable_per_line: u32,
@@ -109,15 +109,65 @@ pub(super) fn compile(
         assumptions: Some(assumptions),
         members: Vec::new(),
         objective: Some(objective.clone()),
+        predecessor_digest: Vec::new(),
+        summary: String::new(),
     };
     proposal.digest = proposal_digest(&proposal).to_vec();
     Ok(Compiled {
         proposal,
-        request,
+        plan: RunPlan::Survey(request),
         config,
         height_m,
         min_usable_per_line: survey.min_usable_frames_per_line.max(1),
     })
+}
+
+/// A plan that ends the work of `base` and flies home from wherever the
+/// vehicle is, at the same height and speed.
+pub(super) fn home(base: &Compiled, proposal_id: String) -> Compiled {
+    let anchor = &base.config.anchor;
+    let home = wire::GeoPoint {
+        latitude_deg: anchor.latitude_rad.to_degrees(),
+        longitude_deg: anchor.longitude_rad.to_degrees(),
+    };
+    let mut proposal = wire::MissionProposal {
+        proposal_id,
+        objective_id: base.proposal.objective_id.clone(),
+        digest: Vec::new(),
+        tasks: vec![wire::MissionTaskPlan {
+            task_id: "home".to_owned(),
+            kind: wire::MissionTaskKind::ReturnHome as i32,
+            path: vec![home],
+            length_m: 0.0,
+            member: String::new(),
+        }],
+        estimates: Some(wire::MissionEstimates::default()),
+        assumptions: base.proposal.assumptions.clone(),
+        members: Vec::new(),
+        objective: base.proposal.objective.clone(),
+        predecessor_digest: Vec::new(),
+        summary: String::new(),
+    };
+    proposal.digest = proposal_digest(&proposal).to_vec();
+    Compiled {
+        proposal,
+        plan: RunPlan::Home,
+        config: base.config.clone(),
+        height_m: base.height_m,
+        min_usable_per_line: base.min_usable_per_line,
+    }
+}
+
+/// Makes `compiled` the successor of `predecessor`: its tasks take the
+/// revision's number so they never share an identifier with a task
+/// already flown, and its digest binds the predecessor and the summary.
+pub(super) fn succeed(compiled: &mut Compiled, number: u32, predecessor: &[u8], summary: String) {
+    for task in &mut compiled.proposal.tasks {
+        task.task_id = format!("rev{number}-{}", task.task_id);
+    }
+    compiled.proposal.predecessor_digest = predecessor.to_vec();
+    compiled.proposal.summary = summary;
+    compiled.proposal.digest = proposal_digest(&compiled.proposal).to_vec();
 }
 
 fn pick(value: f64, default: f64) -> f64 {

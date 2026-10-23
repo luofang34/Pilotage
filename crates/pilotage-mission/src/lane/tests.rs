@@ -2,7 +2,8 @@ use navigate_contract::{ClockDomainId, GeodeticPosition};
 use pilotage_protocol::wire;
 
 use super::{
-    FrameAssessment, IntentContext, Lane, LaneConfig, LaneEffect, RunProgress, SurveyDefaults,
+    FrameAssessment, IntentContext, Lane, LaneConfig, LaneEffect, RunPlan, RunProgress,
+    SurveyDefaults,
 };
 use crate::config::{MissionConfig, OwnshipSource};
 use crate::lane::proposal_digest;
@@ -291,3 +292,5 @@ fn hold_resume_and_abort_follow_the_lifecycle() {
     let status = lane.take_changed().expect("changed");
     assert!(status.sequence > 0 && lane.take_changed().is_none());
 }
+
+mod successor;

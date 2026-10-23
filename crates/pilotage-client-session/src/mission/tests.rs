@@ -167,9 +167,15 @@ fn start_names_the_lanes_proposal_and_offers_follow_the_state() {
     desk.on_status(status(wire::MissionLaneState::Running, b"\x01"));
     let view = desk.view(true, &policy).unwrap();
     assert_eq!(view.state, "running");
-    assert_eq!(view.offered, vec![IntentKind::Hold, IntentKind::Abort]);
+    assert_eq!(
+        view.offered,
+        vec![IntentKind::Hold, IntentKind::Abort, IntentKind::Revise]
+    );
     let json = serde_json::to_value(&view).unwrap();
-    assert_eq!(json["offered"], serde_json::json!(["hold", "abort"]));
+    assert_eq!(
+        json["offered"],
+        serde_json::json!(["hold", "abort", "revise"])
+    );
     assert_eq!(json["proposal"]["digest"], "01");
 }
 
@@ -209,4 +215,51 @@ fn a_proposal_another_client_made_is_approved_from_the_lanes_status() {
     unbounded.height_m = 0.0;
     desk.on_status(unbounded);
     assert_eq!(desk.resolve(&command, 0), Err(DeskRefusal::NoHeight));
+}
+
+#[test]
+fn a_revision_continues_the_lanes_plan_and_its_draft_is_what_approve_names() {
+    let mut desk = MissionDesk::new("agent", 7);
+    let mut running = status(wire::MissionLaneState::Running, b"\x01");
+    running.run_id = "run-1".to_owned();
+    running.height_m = 110.0;
+    desk.on_status(running.clone());
+    let line = r#"{"command": "revise", "reassign": {"from": "CAMPUS", "to": "BATTLEFIELD", "fraction": 0.5}}"#;
+    let command: MissionCommand = serde_json::from_str(line).unwrap();
+    let Ok(Action::Revise(revise)) = desk.resolve(&command, 0) else {
+        panic!("a revision");
+    };
+    assert_eq!(revise.base_digest, b"\x01");
+    assert_eq!(revise.run_id, "run-1");
+    assert!(!revise.within_envelope);
+    let Some(wire::mission_revise::Change::Reassign(reassign)) = revise.change else {
+        panic!("a reassignment");
+    };
+    assert_eq!(
+        (reassign.from_member.as_str(), reassign.fraction),
+        ("CAMPUS", 0.5)
+    );
+    let both = r#"{"command": "revise", "finish": true, "reassign": {"from": "a", "to": "b", "fraction": 1}}"#;
+    let both: MissionCommand = serde_json::from_str(both).unwrap();
+    assert_eq!(desk.resolve(&both, 0), Err(DeskRefusal::RevisionShape));
+
+    // A drafted revision is what an approval names, sized by the lane.
+    running.successor = Some(wire::MissionSuccessor {
+        digest: b"\x02".to_vec(),
+        state: wire::MissionSuccessorState::Drafted as i32,
+        ..wire::MissionSuccessor::default()
+    });
+    desk.on_status(running);
+    assert_eq!(
+        desk.offered(true, &ApprovalPolicy::default()).approve,
+        Some(120.0)
+    );
+    let approve = MissionCommand::Approve {
+        digest: None,
+        policy: ApprovalPolicy::default(),
+    };
+    let Ok(Action::Approve(approval)) = desk.resolve(&approve, 0) else {
+        panic!("an approval");
+    };
+    assert_eq!(approval.proposal_digest, b"\x02");
 }

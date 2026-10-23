@@ -5,7 +5,7 @@ use pilotage_mission::IntentContext;
 use pilotage_protocol::wire;
 
 use super::{MemberIntent, Op, Phase, TeamLane, refly};
-use crate::allocation::{allocate, sweep_of};
+use crate::allocation::{allocate, sidelap_for, sweep_of, team_step};
 
 impl TeamLane {
     pub(super) fn propose(
@@ -51,27 +51,24 @@ impl TeamLane {
             return Err("no member could take a band of the area".to_owned());
         }
         self.reset_plan();
+        self.objective = Some(objective.clone());
+        self.member_survey = Some(wire::SurveyObjective {
+            height_m: self.height_m,
+            across_track_fov_deg: fov,
+            sidelap: sidelap_for(team_step(&survey.area, &sweep), sweep.footprint_m),
+            line_bearing_deg: Some(sweep.bearing_deg),
+            return_to_launch: true,
+            ..survey.clone()
+        });
         let mut intents = Vec::new();
         for assignment in &assignments {
-            let Some(member) = self.member(&assignment.member) else {
+            let Some(member_objective) = self.member_objective(
+                &assignment.member,
+                assignment.band.clone(),
+                format!("{}/{}", context.fresh_id, assignment.member),
+                format!("{}: lines {:?}", objective.title, assignment.lines),
+            ) else {
                 continue;
-            };
-            let mut member_survey = survey.clone();
-            member_survey.area.clone_from(&assignment.band);
-            member_survey.launch = Some(member.launch);
-            member_survey.launch_altitude_m = member.launch_altitude_m;
-            member_survey.height_m = self.height_m;
-            member_survey.across_track_fov_deg = fov;
-            member_survey.sidelap = sidelap;
-            member_survey.line_bearing_deg = Some(sweep.bearing_deg);
-            member_survey.return_to_launch = true;
-            let member_objective = wire::MissionObjective {
-                objective_id: format!("{}/{}", context.fresh_id, member.name),
-                origin: objective.origin.clone(),
-                revision: 1,
-                previous_digest: Vec::new(),
-                title: format!("{}: lines {:?}", objective.title, assignment.lines),
-                kind: Some(wire::mission_objective::Kind::Survey(member_survey)),
             };
             intents.push(self.request(
                 &assignment.member,
@@ -80,7 +77,6 @@ impl TeamLane {
                 wire::mission_intent::Action::Propose(member_objective),
             ));
         }
-        self.objective = Some(objective.clone());
         self.sweep = Some(sweep);
         self.assignments = assignments;
         self.phase = Phase::Proposing;
@@ -88,11 +84,42 @@ impl TeamLane {
         Ok((intents, true))
     }
 
+    /// The objective `member` flies over `area`: the team's survey from
+    /// the member's launch point, at the team's height, sweep and spacing.
+    pub(super) fn member_objective(
+        &self,
+        member: &str,
+        area: Vec<wire::GeoPoint>,
+        objective_id: String,
+        title: String,
+    ) -> Option<wire::MissionObjective> {
+        let member = self.member(member)?;
+        let survey = wire::SurveyObjective {
+            area,
+            launch: Some(member.launch),
+            launch_altitude_m: member.launch_altitude_m,
+            ..self.member_survey.clone()?
+        };
+        Some(wire::MissionObjective {
+            objective_id,
+            origin: self.objective.as_ref().and_then(|o| o.origin.clone()),
+            revision: 1,
+            previous_digest: Vec::new(),
+            title,
+            kind: Some(wire::mission_objective::Kind::Survey(survey)),
+        })
+    }
+
     pub(super) fn approve(
         &mut self,
         approval: &wire::MissionApproval,
         context: &IntentContext,
     ) -> Result<(Vec<MemberIntent>, bool), String> {
+        if matches!(self.phase, Phase::Running | Phase::Held) {
+            return self
+                .approve_revision(approval, context)
+                .map(|intents| (intents, false));
+        }
         if self.phase != Phase::Proposed {
             return Err(format!(
                 "an approval needs a team proposal; the team is {:?}",

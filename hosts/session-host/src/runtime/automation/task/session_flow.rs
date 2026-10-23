@@ -153,6 +153,7 @@ impl MissionTask {
                     engine
                 })
             }
+            PlanSource::Home => MissionEngine::home(config),
         };
         match built {
             Ok(engine) => {

@@ -109,6 +109,8 @@ pub(crate) enum PlanSource {
     Navdata(LoadedNavdata),
     /// The survey request the plan is derived from.
     Survey(SurveyRequest),
+    /// Home from wherever the vehicle is, at the cruise height.
+    Home,
 }
 
 /// A validated mission: the plan source and the config the flight engine
@@ -125,12 +127,13 @@ impl MissionPlan {
         self.config.clone()
     }
 
-    /// A survey plan over an explicit config: a run a mission lane admitted.
-    pub(crate) fn survey(request: SurveyRequest, config: MissionConfig) -> Self {
-        Self {
-            source: PlanSource::Survey(request),
-            config,
-        }
+    /// The plan of a run a mission lane admitted, over its config.
+    pub(crate) fn of_lane(plan: pilotage_mission::RunPlan, config: MissionConfig) -> Self {
+        let source = match plan {
+            pilotage_mission::RunPlan::Survey(request) => PlanSource::Survey(request),
+            pilotage_mission::RunPlan::Home => PlanSource::Home,
+        };
+        Self { source, config }
     }
 
     /// The config every lane proposal starts from; compilation sets the

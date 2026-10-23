@@ -37,6 +37,12 @@ pub enum DeskRefusal {
     /// No proposal is named to start.
     #[error("no approved proposal to start")]
     NothingToStart,
+    /// The lane names no plan to revise.
+    #[error("no plan to revise: propose first")]
+    NothingToRevise,
+    /// A revision must name exactly one change.
+    #[error("a revision names exactly one change: objective, reassign or finish")]
+    RevisionShape,
 }
 
 /// The lane's answer to one of this client's intents.
@@ -80,6 +86,8 @@ pub struct Offered {
     pub resume: bool,
     /// The plan may be aborted.
     pub abort: bool,
+    /// A change to the plan may be drafted.
+    pub revise: bool,
 }
 
 /// One client's view of one mission lane. The default desk has no name;
@@ -151,21 +159,40 @@ impl MissionDesk {
         (named.is_empty() || named == proposal.digest.as_slice()).then_some(proposal)
     }
 
-    /// The proposal an approval names: the one this client holds, else the
-    /// one the lane's status names, which another client made. The status
-    /// carries the objective's height, so the approval's ceiling is sized
-    /// the same either way.
+    /// The revision the lane's status shows waiting for review.
+    #[must_use]
+    pub fn drafted_successor(&self) -> Option<&wire::MissionSuccessor> {
+        self.status
+            .as_ref()?
+            .successor
+            .as_ref()
+            .filter(|s| s.state == wire::MissionSuccessorState::Drafted as i32)
+    }
+
+    /// The proposal an approval names: a drafted revision first, else the
+    /// plan the lane proposed. It is the record this client holds when it
+    /// drafted or proposed it, else one sized from the lane's status, which
+    /// carries the objective's height, for a draft another client made.
     #[must_use]
     pub fn approvable(&self) -> Option<wire::MissionProposal> {
-        if let Some(held) = self.current_proposal() {
-            return Some(held.clone());
-        }
         let status = self.status.as_ref()?;
-        if status.proposal_digest.is_empty() {
+        let digest = match self.drafted_successor() {
+            Some(successor) => successor.digest.clone(),
+            None => {
+                if let Some(held) = self.current_proposal() {
+                    return Some(held.clone());
+                }
+                status.proposal_digest.clone()
+            }
+        };
+        if digest.is_empty() {
             return None;
         }
+        if let Some(held) = self.proposal.as_deref().filter(|p| p.digest == digest) {
+            return Some(held.clone());
+        }
         Some(wire::MissionProposal {
-            digest: status.proposal_digest.clone(),
+            digest,
             objective: Some(wire::MissionObjective {
                 kind: Some(wire::mission_objective::Kind::Survey(
                     wire::SurveyObjective {
@@ -187,7 +214,8 @@ impl MissionDesk {
             return Offered::default();
         }
         let state = self.state();
-        let proposal = self.approvable().filter(|_| state == Lane::Proposed);
+        let reviewing = state == Lane::Proposed || self.drafted_successor().is_some();
+        let proposal = self.approvable().filter(|_| reviewing);
         let height = proposal
             .as_ref()
             .and_then(|proposal| approved_height_m(proposal, policy));
@@ -213,6 +241,10 @@ impl MissionDesk {
             abort: matches!(
                 state,
                 Lane::Admitted | Lane::Running | Lane::Held | Lane::Uncertain
+            ),
+            revise: matches!(
+                state,
+                Lane::Proposed | Lane::Admitted | Lane::Running | Lane::Held
             ),
         }
     }
@@ -265,6 +297,18 @@ impl MissionDesk {
                 };
                 Ok(Action::Start(wire::MissionStart { proposal_digest }))
             }
+            MissionCommand::Revise {
+                objective,
+                reassign,
+                finish,
+                within_envelope,
+            } => self.revision(
+                objective.as_ref(),
+                reassign.as_ref(),
+                *finish,
+                *within_envelope,
+                now_ms,
+            ),
             MissionCommand::Hold {} => Ok(Action::Hold(wire::MissionHold {})),
             MissionCommand::Resume {} => Ok(Action::Resume(wire::MissionResume {})),
             MissionCommand::Abort {} => Ok(Action::Abort(wire::MissionAbort {})),
@@ -318,7 +362,7 @@ impl MissionDesk {
             reason: receipt.reason,
             lane: receipt.lane,
         };
-        if kind == IntentKind::Propose && filed.accepted() {
+        if matches!(kind, IntentKind::Propose | IntentKind::Revise) && filed.accepted() {
             self.proposal = receipt.proposal.map(Box::new);
         }
         self.receipt = Some(filed);
@@ -328,6 +372,44 @@ impl MissionDesk {
     /// Takes the lane's newest status.
     pub fn on_status(&mut self, status: Box<wire::MissionStatus>) {
         self.status = Some(status);
+    }
+}
+
+impl MissionDesk {
+    /// The revise intent for exactly one change, continuing the plan and
+    /// run the lane's status names.
+    fn revision(
+        &self,
+        objective: Option<&super::SurveyFile>,
+        reassign: Option<&super::Reassign>,
+        finish: bool,
+        within_envelope: bool,
+        now_ms: u64,
+    ) -> Result<wire::mission_intent::Action, DeskRefusal> {
+        use wire::mission_revise::Change;
+        let status = self.status.as_ref().ok_or(DeskRefusal::NothingToRevise)?;
+        if status.proposal_digest.is_empty() {
+            return Err(DeskRefusal::NothingToRevise);
+        }
+        let change = match (objective, reassign, finish) {
+            (Some(objective), None, false) => {
+                Change::Objective(objective.objective(&self.subject, now_ms))
+            }
+            (None, Some(reassign), false) => Change::Reassign(wire::MissionReassign {
+                from_member: reassign.from.clone(),
+                to_member: reassign.to.clone(),
+                fraction: reassign.fraction,
+            }),
+            (None, None, true) => Change::Finish(wire::MissionFinish {}),
+            _ => return Err(DeskRefusal::RevisionShape),
+        };
+        Ok(wire::mission_intent::Action::Revise(wire::MissionRevise {
+            base_digest: status.proposal_digest.clone(),
+            run_id: status.run_id.clone(),
+            within_envelope,
+            drafted_by: None,
+            change: Some(change),
+        }))
     }
 }
 

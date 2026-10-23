@@ -7,6 +7,14 @@ use pilotage_protocol::wire;
 
 use crate::geometry::{Local, clip_to_strip, dot, longest_edge_bearing, sweep_offsets};
 
+/// How far inside its outer swath edges a band or a strip is cut, metres.
+/// A member measures the band in a tangent plane at its own launch point,
+/// where the band's edges can stand a little wider than in the team's
+/// frame: over kilometres of lines, enough to fit one line more. Cut this
+/// much inside, the member lays exactly the team's lines, each shifted
+/// inward by no more than this.
+const EDGE_INSET_M: f64 = 2.0;
+
 /// One member's share of a survey.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Assignment {
@@ -80,8 +88,8 @@ pub fn allocate(
         let (Some(first), Some(last)) = (offsets.get(next), offsets.get(next + take - 1)) else {
             break;
         };
-        let half = footprint_m / 2.0;
-        let band = clip_to_strip(&vertices, axis, low + first - half, low + last + half);
+        let edge = footprint_m / 2.0 - EDGE_INSET_M;
+        let band = clip_to_strip(&vertices, axis, low + first - edge, low + last + edge);
         assignments.push(Assignment {
             member: member.clone(),
             band: band.iter().map(|p| local.unproject(*p)).collect(),
@@ -111,4 +119,77 @@ pub(crate) fn line_strip(path: &[wire::GeoPoint], spacing_m: f64) -> Option<Vec<
         [a[0] + side[0], a[1] + side[1]],
     ];
     Some(corners.iter().map(|c| local.unproject(*c)).collect())
+}
+
+/// Where lines lie across a team's sweep: the frame of the team's area and
+/// the axis across its lines.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Across {
+    local: Local,
+    axis: [f64; 2],
+}
+
+impl Across {
+    pub(crate) fn new(area: &[wire::GeoPoint], bearing_deg: f64) -> Self {
+        let bearing = bearing_deg.to_radians();
+        Self {
+            local: Local::around(area),
+            axis: [-bearing.sin(), bearing.cos()],
+        }
+    }
+
+    /// Where a line lies across the sweep, metres: every point of a line
+    /// lies at the same place across it.
+    pub(crate) fn of_path(&self, path: &[wire::GeoPoint]) -> Option<f64> {
+        path.first().map(|p| dot(self.local.project(p), self.axis))
+    }
+
+    /// The area clipped to the swaths of the lines at `positions`, one
+    /// footprint wide around each less the edge inset: a member's planner
+    /// lays those lines in it, given the team's spacing.
+    pub(crate) fn strip(
+        &self,
+        area: &[wire::GeoPoint],
+        positions: &[f64],
+        footprint_m: f64,
+    ) -> Vec<wire::GeoPoint> {
+        let low = positions.iter().copied().fold(f64::INFINITY, f64::min);
+        let high = positions.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        if !(low.is_finite() && high.is_finite()) {
+            return Vec::new();
+        }
+        let vertices: Vec<[f64; 2]> = area.iter().map(|p| self.local.project(p)).collect();
+        let edge = footprint_m / 2.0 - EDGE_INSET_M;
+        clip_to_strip(&vertices, self.axis, low - edge, high + edge)
+            .iter()
+            .map(|p| self.local.unproject(*p))
+            .collect()
+    }
+}
+
+/// The sidelap that makes a member's planner space its lines exactly as
+/// the team spread them, `step_m` apart. The team spreads its lines evenly
+/// at no more than the nominal spacing, so a member left at the nominal
+/// sidelap could lay one line fewer in a band. The factor keeps rounding
+/// from adding one.
+pub(crate) fn sidelap_for(step_m: f64, footprint_m: f64) -> f64 {
+    if step_m <= 0.0 || footprint_m <= 0.0 {
+        return 0.0;
+    }
+    (1.0 - step_m / footprint_m * (1.0 + 1e-9)).clamp(0.0, 0.95)
+}
+
+/// The spacing the team's lines are spread at over `area`.
+pub(crate) fn team_step(area: &[wire::GeoPoint], sweep: &Sweep) -> f64 {
+    let across = Across::new(area, sweep.bearing_deg);
+    let positions: Vec<f64> = area
+        .iter()
+        .map(|p| dot(across.local.project(p), across.axis))
+        .collect();
+    let low = positions.iter().copied().fold(f64::INFINITY, f64::min);
+    let high = positions.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    match sweep_offsets(high - low, sweep.footprint_m, sweep.spacing_m).as_slice() {
+        [first, second, ..] => second - first,
+        _ => sweep.spacing_m,
+    }
 }

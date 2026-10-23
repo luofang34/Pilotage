@@ -6,7 +6,16 @@
 //! {"command": "approve", "policy": {"max_refly_lines": 2}}
 //! {"command": "start"}
 //! {"command": "hold"}
+//! {"command": "revise", "reassign": {"from": "CAMPUS", "to": "BATTLEFIELD", "fraction": 0.5}}
+//! {"command": "revise", "finish": true, "within_envelope": true}
 //! ```
+//!
+//! `revise` drafts a change to the plan in progress for review: a new
+//! objective, a team's reassignment of unflown lines, or the end of the
+//! work after the line in progress. The lane switches at its next
+//! checkpoint once an approval admits the draft, or at once when
+//! `within_envelope` asks and the change stays inside the approved
+//! envelope.
 //!
 //! `approve` and `start` name the proposal by its hexadecimal digest, or
 //! take the one the desk holds when the digest is absent. A field the
@@ -41,12 +50,39 @@ pub enum MissionCommand {
         #[serde(default)]
         digest: Option<String>,
     },
+    /// Draft a change to the plan in progress; exactly one change.
+    Revise {
+        /// A revised objective.
+        #[serde(default)]
+        objective: Option<SurveyFile>,
+        /// A team moves unflown lines from one member to another.
+        #[serde(default)]
+        reassign: Option<Reassign>,
+        /// End after the line in progress and return to launch.
+        #[serde(default)]
+        finish: bool,
+        /// Admit at once when the change stays inside the envelope.
+        #[serde(default)]
+        within_envelope: bool,
+    },
     /// Stop in place and keep the plan.
     Hold {},
     /// Continue a held plan.
     Resume {},
-    /// End the plan; each vehicle returns.
+    /// End the plan; each vehicle stops in place for its pilot to take it home.
     Abort {},
+}
+
+/// Part of one member's unflown lines, flown by another member.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Reassign {
+    /// The member that gives lines away.
+    pub from: String,
+    /// The member that flies them.
+    pub to: String,
+    /// The fraction of the unflown lines that moves, in (0, 1].
+    pub fraction: f64,
 }
 
 /// What an intent asks of the lane.
@@ -67,6 +103,8 @@ pub enum IntentKind {
     Abort,
     /// Skip a task.
     Skip,
+    /// Draft a change to the plan in progress.
+    Revise,
 }
 
 impl IntentKind {
@@ -82,6 +120,7 @@ impl IntentKind {
             Action::Resume(_) => Self::Resume,
             Action::Abort(_) => Self::Abort,
             Action::Skip(_) => Self::Skip,
+            Action::Revise(_) => Self::Revise,
         }
     }
 
@@ -96,6 +135,7 @@ impl IntentKind {
             Self::Resume => "Resume",
             Self::Abort => "Abort",
             Self::Skip => "Skip",
+            Self::Revise => "Revise",
         }
     }
 }
