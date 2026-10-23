@@ -24,6 +24,7 @@ fn default_bind_is_local_and_remote_bind_requires_credentials_before_startup() {
                 network: NetworkOptions {
                     bind_ip: Ipv4Addr::UNSPECIFIED.into(),
                     join_token: None,
+                    approver_token: None,
                 },
                 ..RuntimeOptions::default()
             },

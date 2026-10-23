@@ -612,6 +612,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
 
 [[package]]
+name = "decision-eval"
+version = "0.1.0"
+dependencies = [
+ "pilotage-decision",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "der"
 version = "0.7.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1254,7 +1264,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tower-service",
- "webpki-roots",
+ "webpki-roots 1.0.11",
 ]
 
 [[package]]
@@ -1546,6 +1556,7 @@ version = "0.2.0"
 dependencies = [
  "httparse",
  "pilotage-agent",
+ "pilotage-client-link",
  "pilotage-client-session",
  "pilotage-input",
  "pilotage-protocol",
@@ -1749,6 +1760,21 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "mission-operator"
+version = "0.1.0"
+dependencies = [
+ "pilotage-client-link",
+ "pilotage-client-session",
+ "pilotage-protocol",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -2194,6 +2220,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-client-link"
+version = "0.1.0"
+dependencies = [
+ "pilotage-client-session",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "wtransport",
+]
+
+[[package]]
 name = "pilotage-client-session"
 version = "0.1.0"
 dependencies = [
@@ -2248,6 +2285,27 @@ dependencies = [
  "pilotage-control",
  "pilotage-input",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "pilotage-coordination"
+version = "0.1.0"
+dependencies = [
+ "navigate-contract",
+ "pilotage-mission",
+ "pilotage-protocol",
+]
+
+[[package]]
+name = "pilotage-decision"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "unicode-normalization",
+ "ureq",
 ]
 
 [[package]]
@@ -2398,6 +2456,7 @@ dependencies = [
  "navigate-guidance",
  "pilotage-mission-core",
  "pilotage-protocol",
+ "prost",
  "sha2 0.10.9",
  "thiserror",
 ]
@@ -2513,8 +2572,11 @@ dependencies = [
  "pilotage-adapter-reference",
  "pilotage-adapter-sim-multicopter",
  "pilotage-authority",
+ "pilotage-client-link",
  "pilotage-client-session",
  "pilotage-control-feel",
+ "pilotage-coordination",
+ "pilotage-decision",
  "pilotage-dji-usb",
  "pilotage-geo",
  "pilotage-mavlink",
@@ -2525,6 +2587,7 @@ dependencies = [
  "pilotage-timing",
  "pilotage-world",
  "prost",
+ "serde",
  "serde_json",
  "tempfile",
  "thiserror",
@@ -3079,7 +3142,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
- "webpki-roots",
+ "webpki-roots 1.0.11",
 ]
 
 [[package]]
@@ -3152,6 +3215,7 @@ version = "0.23.41"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6b92b125634d9b795e7beca796cc790df15a7fb38323bf3196fda83292d06b1f"
 dependencies = [
+ "log",
  "once_cell",
  "ring",
  "rustls-pki-types",
@@ -3933,6 +3997,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
 
 [[package]]
+name = "unicode-normalization"
+version = "0.1.26"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75cd3fb03d5288b3ba9a1ee103ac7e9cbb59f0b03d64f8ddfcc04dd42758a85d"
+dependencies = [
+ "tinyvec",
+]
+
+[[package]]
 name = "uniffi"
 version = "0.32.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4058,6 +4131,21 @@ name = "untrusted"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
+
+[[package]]
+name = "ureq"
+version = "2.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02d1a66277ed75f640d608235660df48c8e3c19f3b4edb6a263315626cc3c01d"
+dependencies = [
+ "base64 0.22.1",
+ "log",
+ "once_cell",
+ "rustls",
+ "rustls-pki-types",
+ "url",
+ "webpki-roots 0.26.11",
+]
 
 [[package]]
 name = "url"
@@ -4211,6 +4299,15 @@ checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "webpki-roots"
+version = "0.26.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
+dependencies = [
+ "webpki-roots 1.0.11",
 ]
 
 [[package]]

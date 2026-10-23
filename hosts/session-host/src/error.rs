@@ -324,6 +324,22 @@ pub enum HostError {
         /// The rejected value.
         value: String,
     },
+    /// The coordinator's member list cannot be read.
+    #[error("cannot read the coordinator members {path:?}: {reason}")]
+    CoordinatorMembers {
+        /// The member file.
+        path: std::path::PathBuf,
+        /// What is wrong.
+        reason: String,
+    },
+    /// A mission lane variable did not parse or is outside its range.
+    #[error("invalid mission lane setting {variable}={value:?}")]
+    LaneConfig {
+        /// The environment variable being parsed.
+        variable: &'static str,
+        /// The rejected value, or why it was rejected.
+        value: String,
+    },
     /// A survey parameter variable did not parse or is outside its range.
     #[error("invalid {variable} value {value:?}: {reason}")]
     MissionSurveyParameter {

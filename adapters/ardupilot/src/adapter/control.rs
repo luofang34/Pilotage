@@ -226,7 +226,13 @@ impl ArduPilotAdapter {
             (FLIGHT_SCOPE, Some(ControlIntent::Velocity(velocity))) => match pose {
                 Some(_) => {
                     let (demand, constrained) = clamp_to_envelope(&velocity);
-                    disposition(uplink.apply_velocity(demand, constrained, armed))
+                    match uplink.apply_velocity(demand, constrained, armed) {
+                        // A still frame asks for no motion, so a disarmed
+                        // vehicle takes it: it is how a new holder clears a
+                        // link-loss latch before it arms.
+                        VelocityOutcome::NotArmed if velocity.is_still() => Disposition::Accepted,
+                        outcome => disposition(outcome),
+                    }
                 }
                 None => Disposition::Rejected(RejectReason::MeasurementUnavailable),
             },

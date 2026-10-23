@@ -96,14 +96,15 @@ pub async fn run_connection(
     start: Instant,
     to_engine: mpsc::Sender<ToEngine>,
     media: Option<MediaHandle>,
-    join_token: Option<pilotage_protocol::JoinToken>,
+    admission: crate::runtime::Admission,
 ) {
     let Some(admission::AdmittedBootstrap {
         send,
         recv,
         hello,
         pending,
-    }) = admission::admit(&connection, join_token.as_ref()).await
+        may_approve,
+    }) = admission::admit(&connection, &admission).await
     else {
         return;
     };
@@ -144,7 +145,9 @@ pub async fn run_connection(
         }
         return;
     }
-    forward(&to_engine, client, DomainEnvelope::Hello(hello), start).await;
+    if !admission::introduce(&to_engine, client, hello, may_approve, start).await {
+        return;
+    }
 
     tokio::select! {
         () = run_reader(&connection, recv, pending, client, start, &to_engine, media.as_ref()) => {}
@@ -429,6 +432,12 @@ async fn drain_bootstrap_frames(
                     return Ok(ControlFlow::Break(()));
                 }
                 forward(to_engine, client, *message, start).await;
+            }
+            Ok((InboundBootstrap::Mission(intent), _rest)) => {
+                let command = ToEngine::MissionIntent { client, intent };
+                if to_engine.send(command).await.is_err() {
+                    return Ok(ControlFlow::Break(()));
+                }
             }
             Ok((InboundBootstrap::MediaAttach, _rest)) => {
                 if let Some(media) = media {

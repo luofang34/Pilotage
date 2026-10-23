@@ -325,7 +325,7 @@ fn parse_survey_sidelap(value: &str) -> Result<f64, HostError> {
 }
 
 /// Parses `PILOTAGE_MISSION_OWNSHIP`; an unknown word fails startup.
-fn parse_ownship_source(value: &str) -> Result<OwnshipSource, HostError> {
+pub(super) fn parse_ownship_source(value: &str) -> Result<OwnshipSource, HostError> {
     match value {
         "simulation-truth" => Ok(OwnshipSource::SimulationTruth),
         "vehicle-estimate" => Ok(OwnshipSource::vehicle_estimate()),
@@ -336,7 +336,7 @@ fn parse_ownship_source(value: &str) -> Result<OwnshipSource, HostError> {
 }
 
 /// Parses `PILOTAGE_MISSION_TARGET`; an unknown word fails startup.
-fn parse_execution_target(value: &str) -> Result<ExecutionTarget, HostError> {
+pub(super) fn parse_execution_target(value: &str) -> Result<ExecutionTarget, HostError> {
     match value {
         "simulator" => Ok(ExecutionTarget::Simulator),
         "real-vehicle" => Ok(ExecutionTarget::RealVehicle),
@@ -376,7 +376,7 @@ fn parse_cruise_height(value: &str) -> Result<f64, HostError> {
 
 /// Reads one host environment variable, treating "unset" as `None` and
 /// a non-UTF-8 value as a startup error rather than a silent fallback.
-fn env_var(variable: &'static str) -> Result<Option<String>, HostError> {
+pub(super) fn env_var(variable: &'static str) -> Result<Option<String>, HostError> {
     match std::env::var(variable) {
         Ok(value) => Ok(Some(value)),
         Err(std::env::VarError::NotPresent) => Ok(None),

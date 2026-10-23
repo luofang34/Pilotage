@@ -142,6 +142,15 @@ protected host.
 
 The host checks the first client message before it sends capabilities,
 telemetry, or video. A missing or invalid secret closes the connection.
+
+To keep mission approval with a person, also supply
+`--approver-token-file` with a second secret of the same format. A client
+that presents the approver secret can approve a mission proposal and set
+the limits the mission lanes adapt inside. A client that presents only the
+join secret, such as an automated agent, can propose, start an approved
+proposal, hold, and abort. It cannot approve, and it cannot resume a
+mission that an approver held. Without the approver secret, every admitted
+client can approve.
 The client stops automatic connection attempts after admission is rejected.
 Admission does not grant a control lease. Connection recovery restores
 observation only; the operator must request control again. Network delay
@@ -291,6 +300,44 @@ Before each restart, confirm that the camera is horizontal again.
 The capture contains received and transmitted bytes with host monotonic times.
 A lost connection or a capture failure stops control. Restart the host to open
 a new connection and capture. The adapter does not reconnect automatically.
+
+## Mission lanes and coordinators
+
+A host that starts without a `PILOTAGE_MISSION_*` mission runs a mission
+lane (ADR-0052). A client sends the lane an objective, an approval and a
+start, and the lane publishes its status on the session-events stream. The
+lane flies each approved plan as its own mission principal. It counts the
+pictures that each survey line acquires. When a judgment service is set,
+the lane also asks the service whether sampled pictures are usable. A line
+without enough usable pictures is incomplete. The lane reads these
+variables:
+
+- `PILOTAGE_LANE_NAME`: the lane name in the status.
+- `PILOTAGE_LANE_SIMULATED`: `1` or `0`. The default follows the adapter.
+  The status and the proposal show which value applies.
+- `PILOTAGE_MISSION_OWNSHIP`, `PILOTAGE_MISSION_TARGET`: as for an
+  environment mission.
+- `PILOTAGE_LANE_ENERGY_WH`, `PILOTAGE_LANE_CRUISE_POWER_W`: the energy model
+  that admission uses to check the approved reserve.
+- `PILOTAGE_DECISION`: a System One judgment endpoint, for example
+  `http://127.0.0.1:8761/v1/systemone`. Options follow a `;`: `floor=0.801`
+  sets a yes/no floor, `bearer=TOKEN` adds authorization, `nfc=off` sends
+  text as it is.
+- `PILOTAGE_DECISION_EVERY_S`: the time between two judgments; default 6 s.
+
+A coordinator is a host with `--adapter coordinator`. It has no vehicle.
+Its lane is a team lane that uses its member hosts as an ordinary client.
+`PILOTAGE_COORDINATOR_MEMBERS` names a JSON file that lists each member:
+its lane name, its URL, its certificate hash and its launch point. The
+team divides a survey area into one band of lines for each member and makes
+its proposal from the member proposals. An approval gives each member an
+approval inside the team envelope. While the envelope permits revision,
+the team flies an incomplete line again without a new approval. A member
+can be another coordinator.
+
+`tools/mission-operator` is a headless operator: it proposes, approves,
+starts, holds, resumes, aborts and watches a lane. `tools/decision-eval`
+scores a judgment endpoint on labelled pictures.
 
 ## What the architecture protects
 

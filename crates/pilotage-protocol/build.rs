@@ -29,6 +29,7 @@ fn main() -> ExitCode {
         "telemetry.proto",
         "capability.proto",
         "session.proto",
+        "mission.proto",
         "envelope.proto",
     ]
     .map(|name| schemas_dir.join(name));

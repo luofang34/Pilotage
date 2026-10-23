@@ -25,12 +25,14 @@ use super::{MAX_CONTROL_AGE, build_reference, gazebo_launch};
 /// The host side of a session runtime: what every adapter path hands to
 /// [`spawn_runtime`] besides the adapter itself.
 struct HostSide {
-    join_token: Option<pilotage_protocol::JoinToken>,
+    admission: super::Admission,
     endpoint: Endpoint<wtransport::endpoint::endpoint_side::Server>,
     engine_tx: mpsc::Sender<ToEngine>,
     engine_rx: mpsc::Receiver<ToEngine>,
     shutdown_rx: oneshot::Receiver<()>,
     start: tokio::time::Instant,
+    /// The mission lane's frame sampling, when the host runs a lane.
+    lane_frames: Option<mpsc::Sender<super::mission_lane::LaneInbound>>,
 }
 
 /// The session's video: a frame source for the media task, and the task
@@ -40,25 +42,40 @@ struct SessionVideo {
     producer: Option<(&'static str, JoinHandle<()>)>,
 }
 
+/// The engine actor's command channel and the host's shutdown signal.
+pub(super) struct EngineChannels {
+    /// Commands to the engine actor.
+    pub engine_tx: mpsc::Sender<ToEngine>,
+    /// The engine actor's receiver.
+    pub engine_rx: mpsc::Receiver<ToEngine>,
+    /// Fires when the host shuts down.
+    pub shutdown_rx: oneshot::Receiver<()>,
+}
+
 /// Builds the chosen adapter and spawns the per-adapter
 /// `run_until_shutdown` task.
 pub(super) async fn spawn_adapter_runtime(
     adapter: AdapterKind,
     mut options: RuntimeOptions,
     endpoint: Endpoint<wtransport::endpoint::endpoint_side::Server>,
-    engine_tx: mpsc::Sender<ToEngine>,
-    engine_rx: mpsc::Receiver<ToEngine>,
-    shutdown_rx: oneshot::Receiver<()>,
+    engine: EngineChannels,
     start: tokio::time::Instant,
+    lane_frames: Option<mpsc::Sender<super::mission_lane::LaneInbound>>,
 ) -> Result<JoinHandle<()>, HostError> {
+    let EngineChannels {
+        engine_tx,
+        engine_rx,
+        shutdown_rx,
+    } = engine;
     let sim_camera_port = options.sim_camera_port.take();
     let host = HostSide {
-        join_token: options.network.join_token.clone(),
+        admission: options.network.admission(),
         endpoint,
         engine_tx,
         engine_rx,
         shutdown_rx,
         start,
+        lane_frames,
     };
     launch_adapter(adapter, options, sim_camera_port, host).await
 }
@@ -87,15 +104,11 @@ async fn launch_adapter(
         #[cfg(feature = "sim")]
         AdapterKind::SimMulticopter => launch_sim_multicopter(options, sim_camera_port, host).await,
         #[cfg(not(feature = "sim"))]
-        AdapterKind::SimMulticopter => Err(HostError::AdapterNotInBuild {
-            adapter: "sim-multicopter",
-        }),
-        #[cfg(not(feature = "sim"))]
-        AdapterKind::Reference => Err(HostError::AdapterNotInBuild {
-            adapter: "reference",
-        }),
-        #[cfg(not(feature = "sim"))]
-        AdapterKind::Gazebo => Err(HostError::AdapterNotInBuild { adapter: "gazebo" }),
+        AdapterKind::SimMulticopter | AdapterKind::Reference | AdapterKind::Gazebo => {
+            Err(HostError::AdapterNotInBuild {
+                adapter: adapter.name(),
+            })
+        }
         AdapterKind::Aviate => {
             let mut adapter = start_aviate().await?;
             let engine = build_engine(&adapter, options);
@@ -130,6 +143,13 @@ async fn launch_adapter(
                 pilotage_adapter_betaflight::BetaflightAdapter::start(HOST_VEHICLE, config);
             let engine = build_engine(&adapter, options);
             let video = session_video("betaflight", None, sim_camera_port, &host.engine_tx).await?;
+            Ok(spawn_runtime(engine, adapter, video, host))
+        }
+        AdapterKind::Coordinator => {
+            let adapter = super::coordinator::CoordinatorAdapter;
+            let engine = build_engine(&adapter, options);
+            let video =
+                session_video("coordinator", None, sim_camera_port, &host.engine_tx).await?;
             Ok(spawn_runtime(engine, adapter, video, host))
         }
         #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -240,12 +260,13 @@ where
     A: VehicleAdapter + Send + 'static,
 {
     let HostSide {
-        join_token,
+        admission,
         endpoint,
         engine_tx,
         engine_rx,
         shutdown_rx,
         start,
+        lane_frames,
     } = host;
     let Some(frames) = video.frames else {
         return tokio::spawn(run_until_shutdown(
@@ -257,9 +278,10 @@ where
             engine_rx,
             shutdown_rx,
             start,
-            join_token,
+            admission,
         ));
     };
+    let frames = super::mission_lane::tap(frames, lane_frames);
     let (media, media_task) = media::spawn_media_task(frames, start);
     // Own the tasks before spawning the future so cancellation before its
     // first poll also stops the decoder and media tasks.
@@ -274,7 +296,7 @@ where
         engine_rx,
         shutdown_rx,
         start,
-        join_token,
+        admission,
     ))
 }
 

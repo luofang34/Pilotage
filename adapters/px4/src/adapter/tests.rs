@@ -302,13 +302,20 @@ fn sticks_report_uplink_idle_until_an_arm_sequence_starts() {
 }
 
 #[test]
-fn a_velocity_frame_after_neutralize_is_rejected_as_uplink_idle() {
+fn after_neutralize_a_still_frame_is_taken_and_a_moving_one_is_idle() {
     let (_fc, addr) = fake_fc();
     let mut adapter =
         Px4Adapter::from_state(VehicleId::new(1), live_state()).with_uplink(uplink_to(addr));
     adapter.uplink.as_mut().expect("uplink").neutralize();
 
+    // A still frame asks for nothing, so the disarmed vehicle takes it
+    // without reviving the setpoint stream.
     let outcome = adapter.apply_control(&neutral());
+    assert_eq!(outcome.disposition, Disposition::Accepted);
+    assert!(!adapter.uplink.as_ref().expect("uplink").streaming());
+
+    let moving = frame(vec![(LogicalAxisId::new(super::PITCH_AXIS), 0.5)], vec![]);
+    let outcome = adapter.apply_control(&moving);
     assert_eq!(
         outcome.disposition,
         Disposition::Rejected(RejectReason::UplinkIdle)
@@ -438,8 +445,12 @@ fn fresh_epoch_and_neutral_input_clear_the_reset_latch() {
     let outcome = adapter.apply_control(&neutral());
     assert_eq!(
         outcome.disposition,
-        Disposition::Rejected(RejectReason::UplinkIdle),
-        "the neutral frame clears the reset latch but cannot revive an idle uplink"
+        Disposition::Accepted,
+        "the neutral frame clears the reset latch"
+    );
+    assert!(
+        !adapter.uplink.as_ref().expect("uplink").streaming(),
+        "the neutral frame cannot revive an idle uplink"
     );
     let outcome = adapter.apply_control(&press(ARM_BUTTON));
     assert_eq!(

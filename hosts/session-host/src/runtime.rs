@@ -10,6 +10,7 @@ mod automation;
 mod aviate_profile;
 mod betaflight_config;
 mod connection;
+mod coordinator;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) mod dji;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -18,6 +19,7 @@ mod engine_actor;
 #[cfg(feature = "sim")]
 mod gazebo_launch;
 mod media;
+mod mission_lane;
 mod options;
 mod px4_config;
 mod registry;
@@ -34,14 +36,15 @@ mod wire_codec;
 pub use automation::{AutomationStatus, MissionRig, Participant, TelemetryObserver};
 #[cfg(feature = "sim")]
 pub use automation::{
-    spawn_reference_mission_rig, spawn_reference_survey_rig, spawn_sim_multicopter_rig,
+    SurveyRuns, spawn_reference_mission_rig, spawn_reference_survey_rig, spawn_sim_multicopter_rig,
+    spawn_sim_multicopter_runs,
 };
 pub use options::{
     DEFAULT_MISSION_ANCHOR, MissionNavdataSource, MissionOptions, MissionPlanRequest,
     RuntimeOptions, SURVEY_DEFAULT_HEIGHT_M,
 };
 mod network;
-pub use network::{NetworkError, NetworkOptions};
+pub use network::{Admission, NetworkError, NetworkOptions};
 // The envelope encoder is exported for the wire-fixture test: the committed
 // browser fixture must be THIS host's bytes, not a hand-maintained copy.
 pub use wire_codec::encode_envelope_message;
@@ -255,24 +258,48 @@ async fn spawn_host_runtime(
         }
         None => None,
     };
+    // Without an environment mission the host runs a mission lane that
+    // clients issue missions to (ADR-0052).
+    let lane = match mission {
+        Some(_) => None,
+        None if adapter == AdapterKind::Coordinator => {
+            let config = coordinator::CoordinatorConfig::from_env_blocking()?;
+            let (sender, _) = tokio::sync::mpsc::channel(1);
+            Some((sender, coordinator::spawn(&engine_tx, config).await))
+        }
+        None => {
+            let config = mission_lane::LaneRuntimeConfig::from_env(
+                adapter.name(),
+                adapter.is_simulator(),
+                matches!(adapter, AdapterKind::Reference),
+            )?;
+            Some(mission_lane::spawn(&engine_tx, start, config).await)
+        }
+    };
     let runtime = adapter_launch::spawn_adapter_runtime(
         adapter,
         options,
         endpoint,
-        engine_tx,
-        engine_rx,
-        shutdown_rx,
+        adapter_launch::EngineChannels {
+            engine_tx,
+            engine_rx,
+            shutdown_rx,
+        },
         start,
+        lane.as_ref().map(|(sender, _)| sender.clone()),
     )
     .await?;
-    Ok(match mission {
+    let principal = mission
+        .map(|(task, _status)| task)
+        .or(lane.map(|(_, task)| task));
+    Ok(match principal {
         None => runtime,
-        Some((mission_task, _status)) => tokio::spawn(async move {
+        Some(principal) => tokio::spawn(async move {
             runtime.await.ok();
             // The principal holds only a weak engine handle, so it drains
             // out once the engine actor is gone; joining it here keeps
             // teardown complete before the host reports shutdown.
-            mission_task.await.ok();
+            principal.await.ok();
         }),
     })
 }
@@ -291,7 +318,7 @@ async fn run_until_shutdown<A>(
     engine_rx: mpsc::Receiver<ToEngine>,
     shutdown_rx: oneshot::Receiver<()>,
     start: tokio::time::Instant,
-    join_token: Option<pilotage_protocol::JoinToken>,
+    admission: Admission,
 ) where
     A: VehicleAdapter + Send + 'static,
 {
@@ -308,7 +335,7 @@ async fn run_until_shutdown<A>(
     ));
 
     tokio::select! {
-        () = accept_loop(&endpoint, &engine_tx, &mut tasks, start, media.clone(), join_token) => {}
+        () = accept_loop(&endpoint, &engine_tx, &mut tasks, start, media.clone(), admission) => {}
         result = shutdown_rx => {
             // A dropped sender (host caller gone without an explicit
             // shutdown) is treated the same as an explicit signal, so
@@ -341,7 +368,7 @@ async fn run_with_media_until_shutdown<A>(
     engine_rx: mpsc::Receiver<ToEngine>,
     shutdown_rx: oneshot::Receiver<()>,
     start: tokio::time::Instant,
-    join_token: Option<pilotage_protocol::JoinToken>,
+    admission: Admission,
 ) where
     A: VehicleAdapter + Send + 'static,
 {
@@ -354,7 +381,7 @@ async fn run_with_media_until_shutdown<A>(
         engine_rx,
         shutdown_rx,
         start,
-        join_token,
+        admission,
     )
     .await;
     // The adapter is gone. Give the producer and media writers one shared
@@ -388,7 +415,7 @@ async fn accept_loop(
     tasks: &mut JoinSet<()>,
     start: tokio::time::Instant,
     media: Option<MediaHandle>,
-    join_token: Option<pilotage_protocol::JoinToken>,
+    admission: Admission,
 ) {
     let next_client = AtomicU64::new(0);
     loop {
@@ -415,7 +442,7 @@ async fn accept_loop(
                 start,
                 engine_tx,
                 media.clone(),
-                join_token.clone(),
+                admission.clone(),
             ),
         ));
     }
@@ -430,7 +457,7 @@ async fn accept_and_run(
     start: tokio::time::Instant,
     engine_tx: mpsc::Sender<ToEngine>,
     media: Option<MediaHandle>,
-    join_token: Option<pilotage_protocol::JoinToken>,
+    admission: Admission,
 ) {
     let session_request = match incoming.await {
         Ok(request) => request,
@@ -446,7 +473,7 @@ async fn accept_and_run(
             return;
         }
     };
-    connection::run_connection(connection, client, start, engine_tx, media, join_token).await;
+    connection::run_connection(connection, client, start, engine_tx, media, admission).await;
 }
 
 /// Wraps a future so its exit is logged by name (ADR-0015: critical tasks

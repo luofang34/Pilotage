@@ -25,9 +25,38 @@ pub enum AdapterKind {
     Betaflight,
     /// The DJI USB bench adapter. Flight and positioning are not implemented.
     Dji,
+    /// No vehicle: a coordinator whose mission lane works through member
+    /// hosts (ADR-0028, ADR-0052).
+    Coordinator,
     /// The simulated multicopter on the DJI control path, with an
     /// aerial-imagery gimbal camera.
     SimMulticopter,
+}
+
+impl AdapterKind {
+    /// The adapter's name on the command line.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Reference => "reference",
+            Self::Gazebo => "gazebo",
+            Self::Aviate => "aviate",
+            Self::Px4 => "px4",
+            Self::ArduPilot => "ardupilot",
+            Self::Betaflight => "betaflight",
+            Self::Dji => "dji",
+            Self::Coordinator => "coordinator",
+            Self::SimMulticopter => "sim-multicopter",
+        }
+    }
+
+    /// Whether the adapter drives a simulation by its nature. Adapters that
+    /// can drive either a simulation or a physical vehicle report `false`;
+    /// a lane then takes `PILOTAGE_LANE_SIMULATED`.
+    #[must_use]
+    pub const fn is_simulator(self) -> bool {
+        matches!(self, Self::Reference | Self::Gazebo | Self::SimMulticopter)
+    }
 }
 
 /// Parsed command-line configuration.
@@ -39,6 +68,8 @@ pub struct CliArgs {
     pub bind_ip: IpAddr,
     /// Absolute path to a hexadecimal admission secret.
     pub join_token_file: Option<PathBuf>,
+    /// Absolute path to the secret that admits a mission approver.
+    pub approver_token_file: Option<PathBuf>,
     /// Which vehicle adapter to embed.
     pub adapter: AdapterKind,
 }
@@ -87,6 +118,7 @@ pub fn parse_args(args: &[String]) -> Result<CliArgs, CliError> {
     let mut adapter = AdapterKind::default();
     let mut bind_ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
     let mut join_token_file = None;
+    let mut approver_token_file = None;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
@@ -101,6 +133,12 @@ pub fn parse_args(args: &[String]) -> Result<CliArgs, CliError> {
                     .next()
                     .ok_or_else(|| CliError::MissingNetworkValue(arg.clone()))?;
                 join_token_file = Some(PathBuf::from(value));
+            }
+            "--approver-token-file" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| CliError::MissingNetworkValue(arg.clone()))?;
+                approver_token_file = Some(PathBuf::from(value));
             }
             "--port" => {
                 let value = iter.next().ok_or(CliError::MissingPortValue)?;
@@ -119,6 +157,7 @@ pub fn parse_args(args: &[String]) -> Result<CliArgs, CliError> {
                     "ardupilot" => AdapterKind::ArduPilot,
                     "betaflight" => AdapterKind::Betaflight,
                     "dji" => AdapterKind::Dji,
+                    "coordinator" => AdapterKind::Coordinator,
                     "sim-multicopter" => AdapterKind::SimMulticopter,
                     other => return Err(CliError::InvalidAdapter(other.to_owned())),
                 };
@@ -130,6 +169,7 @@ pub fn parse_args(args: &[String]) -> Result<CliArgs, CliError> {
         port,
         bind_ip,
         join_token_file,
+        approver_token_file,
         adapter,
     })
 }

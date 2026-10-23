@@ -4,7 +4,7 @@
 //! The planner is sans-IO and deterministic. It projects the polygon onto
 //! the tangent plane at the mission anchor, sweeps parallel lines across
 //! the polygon at the spacing the footprint and sidelap give, and returns
-//! the line ends as fly-over waypoints in boustrophedon order. A concave
+//! the line ends as fly-by waypoints in boustrophedon order. A concave
 //! polygon is covered by the full span of each sweep line through it; the
 //! planner does not split a line at a concavity.
 
@@ -17,6 +17,7 @@ use core::f64::consts::PI;
 use navigate_contract::{
     AltitudeConstraint, FlightPlan, GeodeticPosition, PlanRole, TurnType, Waypoint,
 };
+use navigate_fpl::{ExecutionConfig, turn_radius_m};
 use navigate_geodesy::{GeodesyError, LocalTangentPlane, NedOffset};
 use pilotage_mission_core::{Digest, MissionIdentity};
 use sha2::{Digest as _, Sha256};
@@ -32,6 +33,8 @@ const MIN_SPACING_M: f64 = 1.0;
 /// Largest sidelap fraction the planner accepts.
 const MAX_SIDELAP: f64 = 0.95;
 const DIGEST_DOMAIN: &[u8] = b"pilotage.survey-request.v1\0";
+/// Seconds of cruise a line end's capture radius spans.
+const CAPTURE_SECONDS: f64 = 2.0;
 
 /// What to survey and how the camera sees the ground.
 #[derive(Debug, Clone, PartialEq)]
@@ -82,6 +85,21 @@ impl SurveyRequest {
         }
     }
 
+    /// Sizes the capture radius and the overshoot for a vehicle that
+    /// cruises at `cruise_mps`. A fast vehicle that lags its setpoint needs
+    /// a wider capture circle to sequence a line end on the first pass. A
+    /// fly-by line end starts its turn up to one turn radius before the
+    /// end, so the line extends that far past the area: the turn stays
+    /// outside, and the camera stays on the line across the area.
+    pub fn fit_to_cruise(&mut self, cruise_mps: f64) {
+        if !(cruise_mps.is_finite() && cruise_mps > 0.0) {
+            return;
+        }
+        self.capture_radius_m = self.capture_radius_m.max(CAPTURE_SECONDS * cruise_mps);
+        let bank = ExecutionConfig::default().bank_limit_rad;
+        self.overshoot_m = self.overshoot_m.max(turn_radius_m(cruise_mps, bank));
+    }
+
     /// The content digest of the request: what the plan was derived from.
     #[must_use]
     pub fn digest(&self) -> Digest {
@@ -108,7 +126,8 @@ impl SurveyRequest {
 /// A planned survey: the plan and the figures an operator checks.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SurveyPlan {
-    /// The waypoints in fly order, two per line, fly-over turns.
+    /// The waypoints in fly order, two fly-by turns per line, then home
+    /// as a fly-over.
     pub plan: FlightPlan,
     /// The content digest of the request the plan came from.
     pub digest: Digest,
@@ -237,6 +256,12 @@ pub fn plan_survey(
         MAX_SURVEY_WAYPOINTS / 2,
     )
     .ok_or(SurveyError::TooManyWaypoints)?;
+    // The lines are spread evenly, so they may sit closer than the
+    // sidelap asks; the plan reports the spacing it flies.
+    let line_spacing_m = match offsets.as_slice() {
+        [first, second, ..] => second - first,
+        _ => line_spacing_m,
+    };
     let lines = geometry::sweep_lines(
         &vertices,
         direction,
@@ -370,8 +395,10 @@ fn project(
         .collect()
 }
 
-/// Two fly-over waypoints per line, `L01A`, `L01B`, `L02A`, ... in fly
-/// order, all at the survey altitude.
+/// Two fly-by waypoints per line, `L01A`, `L01B`, `L02A`, ... in fly
+/// order, all at the survey altitude. A fly-by line end turns onto the
+/// next leg before the end instead of past it; the overshoot keeps that
+/// turn outside the area. Home is flown over.
 fn waypoints(
     lines: &[Line],
     home: Option<Planar>,
@@ -396,7 +423,7 @@ fn waypoints(
                 .map(move |(end, point)| {
                     Waypoint::new(format!("L{:02}{end}", index + 1), place(point))
                         .with_altitude(AltitudeConstraint::At(altitude_m))
-                        .with_turn(TurnType::FlyOver)
+                        .with_turn(TurnType::FlyBy)
                 })
         })
         .chain(home.map(|point| {

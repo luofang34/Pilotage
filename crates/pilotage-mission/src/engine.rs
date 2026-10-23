@@ -76,6 +76,8 @@ pub struct MissionEngine {
     /// zero would silently rotate every command to due north.
     last_yaw_rad: Option<f64>,
     last_refusal: Option<Discriminant<GuidanceRefusal>>,
+    /// The fix last reported as overflown, so each miss reports once.
+    overflown_fix: Option<usize>,
     /// The latest admitted sample under the vehicle-estimate source.
     estimate: VehicleEstimate,
     /// When the current hold began, while a human holds the motion scope.
@@ -234,6 +236,7 @@ impl MissionEngine {
             last_solution: None,
             last_yaw_rad: None,
             last_refusal: None,
+            overflown_fix: None,
             estimate: VehicleEstimate::default(),
             hold_started: None,
             held_total_ns: 0,

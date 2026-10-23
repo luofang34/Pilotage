@@ -15,6 +15,7 @@ pub mod config;
 pub mod engine;
 pub mod error;
 pub mod fixture;
+pub mod lane;
 pub mod ownship;
 pub mod policy;
 pub mod provenance;
@@ -28,6 +29,10 @@ pub use engine::{
     NavGuidance, NavQuality,
 };
 pub use error::MissionBuildError;
+pub use lane::{
+    FrameAssessment, HOST_ISSUER, IntentContext, Lane, LaneConfig, LaneEffect, LaneReply,
+    Requester, RunOrder, RunProgress, Steering, SurveyDefaults, proposal_digest,
+};
 pub use ownship::{OwnshipAltitude, OwnshipSample, TruthRole};
 pub use pilotage_mission_core::ExecutionTarget;
 pub use provenance::{MissionPlanRecord, SnapshotProvenance, decode_snapshot};

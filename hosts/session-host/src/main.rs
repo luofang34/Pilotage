@@ -32,7 +32,8 @@ fn run(args: &[String]) -> Result<(), HostError> {
     let network = runtime::NetworkOptions::from_token_file_blocking(
         cli_args.bind_ip,
         cli_args.join_token_file.as_deref(),
-    )?;
+    )?
+    .with_approver_token_file_blocking(cli_args.approver_token_file.as_deref())?;
     let runtime = tokio::runtime::Runtime::new().map_err(HostError::Runtime)?;
     runtime.block_on(async move {
         let host = runtime::start_with_network(cli_args.port, cli_args.adapter, network).await?;

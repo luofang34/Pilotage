@@ -99,6 +99,8 @@ pub enum InboundBootstrap {
     Engine(Box<DomainEnvelope>),
     /// An idempotent request to register the live connection for media.
     MediaAttach,
+    /// An intent for the host's mission lane (ADR-0052).
+    Mission(Box<wire::MissionIntent>),
 }
 
 impl InboundBootstrap {
@@ -174,6 +176,9 @@ pub fn decode_bootstrap_message(
             ))
         }
         Some(wire::envelope::Payload::MediaAttachRequest(_)) => InboundBootstrap::MediaAttach,
+        Some(wire::envelope::Payload::MissionIntent(intent)) => {
+            InboundBootstrap::Mission(Box::new(intent))
+        }
         _ => return Err(BootstrapDecodeError::UnexpectedPayload),
     };
     Ok((message, rest))
@@ -274,6 +279,17 @@ pub fn encode_telemetry_datagram(sample: wire::TelemetrySample) -> Vec<u8> {
         payload: Some(wire::envelope::Payload::TelemetrySample(sample)),
     };
     envelope.encode_to_vec()
+}
+
+/// Encodes a mission receipt or status for the reliable session-events
+/// stream.
+#[must_use]
+pub fn encode_mission_payload(payload: wire::envelope::Payload) -> Vec<u8> {
+    let envelope = wire::Envelope {
+        schema_version: SCHEMA_VERSION,
+        payload: Some(payload),
+    };
+    encode_envelope_length_delimited(&envelope)
 }
 
 /// Encodes a video-delivery snapshot for the reliable session-events stream.

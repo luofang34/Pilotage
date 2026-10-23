@@ -149,7 +149,9 @@ fn rectangle_lines_follow_the_long_edge_and_cover_the_width() {
     let survey = plan_survey(&request, &anchor(), HEIGHT_M).expect("plans");
     let footprint = footprint(request.across_track_fov_rad);
     assert!((survey.footprint_width_m - footprint).abs() < 1e-9);
-    assert!((survey.line_spacing_m - footprint * 0.4).abs() < 1e-9);
+    // Four lines spread evenly, no wider apart than the sidelap allows.
+    assert!(survey.line_spacing_m <= footprint * 0.4 + 1e-9);
+    assert!(survey.line_spacing_m > footprint * 0.3);
     assert_eq!(survey.line_count, 4);
     assert_eq!(survey.plan.waypoints.len(), 9, "eight line ends and home");
     let idents: Vec<&str> = survey
@@ -165,7 +167,12 @@ fn rectangle_lines_follow_the_long_edge_and_cover_the_width() {
         ]
     );
     for waypoint in &survey.plan.waypoints {
-        assert_eq!(waypoint.turn, TurnType::FlyOver);
+        let turn = if waypoint.ident == "HOME" {
+            TurnType::FlyOver
+        } else {
+            TurnType::FlyBy
+        };
+        assert_eq!(waypoint.turn, turn, "{}", waypoint.ident);
         assert_eq!(waypoint.altitude, Some(AltitudeConstraint::At(610.0)));
         assert!((waypoint.position.altitude_m - 610.0).abs() < 1e-6);
     }
@@ -347,17 +354,17 @@ fn a_measured_footprint_replaces_the_derived_one_and_allows_a_planar_height() {
     request.footprint_width_m = Some(12.0);
     let survey = plan_survey(&request, &anchor(), 0.0).expect("plans at zero height");
     assert!((survey.footprint_width_m - 12.0).abs() < 1e-9);
-    assert!((survey.line_spacing_m - 4.8).abs() < 1e-9);
+    assert!((survey.line_spacing_m - 4.5).abs() < 1e-9);
     assert_eq!(survey.line_count, 5);
     for waypoint in &survey.plan.waypoints {
         assert_eq!(waypoint.altitude, Some(AltitudeConstraint::At(500.0)));
     }
     let planar = [[0.0, 0.0], [40.0, 0.0], [40.0, 30.0], [0.0, 30.0]];
     assert_covered_at(&survey, &planar, 6.0, 1.0);
-    // The gaps between lines are shorter than the 5 m request: 4.8 m
-    // steps, then 3.6 m to the last line pulled back onto the far side.
-    // The plan is flown with half the shortest leg.
-    assert!((survey.capture_radius_m - 1.8).abs() < 1e-9);
+    // The 18 m between the first and last line take four even 4.5 m
+    // steps, shorter than the 5 m request; the plan is flown with half
+    // the shortest leg.
+    assert!((survey.capture_radius_m - 2.25).abs() < 1e-9);
     let wide = plan_survey(
         &SurveyRequest::new(rectangle(400.0, 300.0)),
         &anchor(),

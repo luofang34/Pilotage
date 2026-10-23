@@ -1,0 +1,20 @@
+[package]
+name = "mission-operator"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+description = "A headless operator for mission lanes: propose, approve, start, steer and watch"
+
+[lints]
+workspace = true
+
+[dependencies]
+pilotage-client-link = { workspace = true }
+pilotage-client-session = { workspace = true }
+pilotage-protocol = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "time", "sync", "io-std", "io-util", "macros"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

@@ -61,6 +61,10 @@ pub enum ModuleEvent {
     ActionResult(wire::ControlActionResult),
     /// The host echoed a ping.
     Pong(wire::Pong),
+    /// A mission lane's status from the session-events stream (ADR-0052).
+    MissionStatus(Box<wire::MissionStatus>),
+    /// A mission lane's receipt for one of this client's intents.
+    MissionReceipt(Box<wire::MissionReceipt>),
     /// One video frame body (the v2 capture layout) from a per-source
     /// media stream. Decode and display are the platform port's.
     VideoFrame(Vec<u8>),

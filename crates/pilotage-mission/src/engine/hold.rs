@@ -35,6 +35,15 @@ impl MissionEngine {
         Some(held)
     }
 
+    /// The plan's progress: the index of the waypoint the plan flies
+    /// toward, and whether its last waypoint is captured.
+    #[must_use]
+    pub fn plan_progress(&self) -> (usize, bool) {
+        let total = self.execution.plan().waypoints.len();
+        let remaining = self.execution.remaining_waypoints().len();
+        (total.saturating_sub(remaining), self.plan_complete)
+    }
+
     /// Whether a human holds the motion scope and the mission waits.
     #[must_use]
     pub fn is_held(&self) -> bool {

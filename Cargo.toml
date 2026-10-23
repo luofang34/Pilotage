@@ -3,6 +3,9 @@ resolver = "3"
 members = [
     "crates/pilotage-navdata-cycle",
     "crates/pilotage-protocol",
+    "crates/pilotage-decision",
+    "crates/pilotage-client-link",
+    "crates/pilotage-coordination",
     "crates/pilotage-agent",
     "crates/pilotage-authority",
     "crates/pilotage-session",
@@ -52,6 +55,8 @@ members = [
     "tools/flight-tune-xplane",
     "tools/flight-tune-aviate",
     "tools/intent-pilot",
+    "tools/mission-operator",
+    "tools/decision-eval",
     "tools/loopback-probe",
     "tools/xtask",
     "hosts/session-host",
@@ -168,6 +173,9 @@ pilotage-adapter-dji = { path = "adapters/dji" }
 pilotage-dji-usb = { path = "adapters/dji-usb" }
 pilotage-session = { path = "crates/pilotage-session" }
 pilotage-mission = { path = "crates/pilotage-mission" }
+pilotage-decision = { path = "crates/pilotage-decision" }
+pilotage-client-link = { path = "crates/pilotage-client-link" }
+pilotage-coordination = { path = "crates/pilotage-coordination" }
 pilotage-instrument-runtime = { path = "crates/pilotage-instrument-runtime" }
 pilotage-presentation = { path = "crates/pilotage-presentation" }
 pilotage-trial = { path = "crates/pilotage-trial" }

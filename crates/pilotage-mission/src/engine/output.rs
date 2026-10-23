@@ -99,6 +99,12 @@ pub enum MissionEvent {
         /// The typed refusal.
         reason: GuidanceRefusal,
     },
+    /// The vehicle passed the active fix outside its capture radius, and
+    /// guidance now flies direct back to it. Emitted once per fix.
+    FixOverflown {
+        /// Index of the missed `to` waypoint in fly order.
+        to_index: usize,
+    },
 }
 
 /// What one call to [`crate::MissionEngine::tick`] produced.
@@ -135,4 +141,7 @@ pub struct MissionCounters {
     /// Ticks under the vehicle-estimate source on which the latest
     /// sample was too old to fly, so no solution was published.
     pub estimate_stale: u64,
+    /// Ticks flown direct back to a fix the vehicle passed without
+    /// capturing it.
+    pub fix_overflown: u64,
 }

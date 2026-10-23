@@ -1,0 +1,100 @@
+//! Who may steer a lane (ADR-0052). The host admits each client with or
+//! without the approver grant; the grant comes from the admission secret
+//! the client presented, not from the records it sends.
+//!
+//! Any admitted client may propose, start an approved proposal, hold and
+//! abort: a stop must never wait for a particular client. Only an approver
+//! may approve, because the approval sets the envelope the lanes adapt
+//! inside. A hold that an approver set stays until an approver resumes, so
+//! an automated client cannot undo a human's stop.
+
+use pilotage_protocol::wire;
+
+/// The admitted client that sent an intent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Requester {
+    /// The name the client gave at admission.
+    pub subject: String,
+    /// The client presented the approver secret, or the host has none.
+    pub may_approve: bool,
+}
+
+/// The lane's record of who stopped it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Steering {
+    held_by_approver: bool,
+}
+
+/// Issuer of the approver origin the host writes into an approval.
+pub const HOST_ISSUER: &str = "session-host";
+
+impl Steering {
+    /// Refuses an intent `requester` may not send, with the reason. An
+    /// accepted approval gets the requester as its approver, so the record
+    /// names the session that approved, not what that session claimed.
+    ///
+    /// # Errors
+    ///
+    /// Returns the refusal reason.
+    pub fn admit(
+        &self,
+        intent: &mut wire::MissionIntent,
+        requester: &Requester,
+    ) -> Result<(), String> {
+        use wire::mission_intent::Action;
+        match intent.action.as_mut() {
+            Some(Action::Approve(approval)) => {
+                if !requester.may_approve {
+                    return Err(format!(
+                        "{} may not approve: approval needs the approver secret",
+                        requester.subject
+                    ));
+                }
+                approval.approver = Some(wire::RecordOrigin {
+                    issuer: HOST_ISSUER.to_owned(),
+                    subject: requester.subject.clone(),
+                    organization: String::new(),
+                });
+                Ok(())
+            }
+            Some(Action::Resume(_)) if self.held_by_approver && !requester.may_approve => {
+                Err(format!(
+                    "{} may not resume: an approver held the mission",
+                    requester.subject
+                ))
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// The receipt that refuses `intent` for `reason`.
+    #[must_use]
+    pub fn refusal(
+        intent: &wire::MissionIntent,
+        lane: &str,
+        reason: String,
+    ) -> wire::MissionReceipt {
+        wire::MissionReceipt {
+            request_id: intent.request_id.clone(),
+            outcome: wire::MissionReceiptOutcome::Refused as i32,
+            reason,
+            proposal: None,
+            lane: lane.to_owned(),
+        }
+    }
+
+    /// Notes an intent the lane accepted.
+    pub fn accepted(&mut self, intent: &wire::MissionIntent, requester: &Requester) {
+        use wire::mission_intent::Action;
+        match intent.action.as_ref() {
+            Some(Action::Hold(_)) => self.held_by_approver = requester.may_approve,
+            Some(Action::Resume(_) | Action::Abort(_) | Action::Start(_)) => {
+                self.held_by_approver = false;
+            }
+            _ => {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;

@@ -1,0 +1,16 @@
+[package]
+name = "pilotage-coordination"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+description = "The coordinator role: a team lane that decomposes an objective over member lanes, binds their approvals and adapts within the delegated envelope"
+
+[lints]
+workspace = true
+
+[dependencies]
+pilotage-mission = { workspace = true }
+pilotage-protocol = { workspace = true }
+
+[dev-dependencies]
+navigate-contract = { workspace = true }
