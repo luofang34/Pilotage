@@ -6,8 +6,8 @@
 use navigate_contract::{ClockDomainId, GeodeticPosition, MonotonicNanos};
 use navigate_geodesy::{LocalTangentPlane, NedOffset};
 use pilotage_mission::{
-    ExecutionTarget, MissionConfig, MissionEngine, MissionState, OwnshipSample, OwnshipSource,
-    SurveyRequest, TruthRole, plan_survey,
+    ExecutionTarget, MissionConfig, MissionEngine, MissionEvent, MissionState, OwnshipSample,
+    OwnshipSource, SurveyRequest, TruthRole, plan_survey,
 };
 use pilotage_protocol::{ControlAction, ControlIntent};
 
@@ -62,6 +62,7 @@ fn a_line_end_passed_outside_the_capture_radius_is_flown_back_to() {
     let (mut ned, mut velocity, mut yaw) = ([0.0_f64; 3], [0.0_f64; 3], 0.0_f64);
     let mut now = MonotonicNanos::from_nanos(1_000_000_000);
     let (mut gusted, mut farthest, mut completed) = (false, 0.0_f64, false);
+    let mut reports = Vec::new();
     for sequence in 0..40_000_u32 {
         now = MonotonicNanos::from_nanos(now.as_nanos() + STEP_NANOS);
         let sample = OwnshipSample {
@@ -95,6 +96,10 @@ fn a_line_end_passed_outside_the_capture_radius_is_flown_back_to() {
             gusted = true;
         }
         farthest = farthest.max(ned[0] - end[0]);
+        reports.extend(output.events.iter().filter_map(|event| match event {
+            MissionEvent::FixOverflown { to_index } => Some(*to_index),
+            _ => None,
+        }));
         if output.state == MissionState::Complete {
             completed = true;
             break;
@@ -109,6 +114,11 @@ fn a_line_end_passed_outside_the_capture_radius_is_flown_back_to() {
     assert!(
         farthest < 2.0 * GUST_M,
         "the vehicle went {farthest} m past the line end"
+    );
+    assert!(!reports.is_empty(), "the miss is reported");
+    assert!(
+        reports.windows(2).all(|pair| pair[0] < pair[1]),
+        "each missed fix reports once, in fly order: {reports:?}"
     );
     assert!(record.capture_radius_m < GUST_M);
 }

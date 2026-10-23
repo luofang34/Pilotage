@@ -416,13 +416,7 @@ impl MissionEngine {
             let leg = self.execution.active_leg()?;
             (leg.from.map(|waypoint| waypoint.position), leg.to.clone())
         };
-        let leg_from = leg_from.filter(|from| {
-            let past = overflight::overflown(&solution.position, from, &leg_to.position);
-            if past {
-                self.counters.fix_overflown = self.counters.fix_overflown.wrapping_add(1);
-            }
-            !past
-        });
+        let leg_from = self.track_start(&solution.position, leg_from, &leg_to, events);
         let guided = guide_velocity(
             solution,
             leg_from.as_ref(),
