@@ -47,6 +47,8 @@ pub struct TaskView {
     pub usable: u32,
     /// Times the task was flown again.
     pub reflown: u32,
+    /// The task's path over the ground, latitude and longitude in degrees.
+    pub path: Vec<[f64; 2]>,
 }
 
 /// One member lane of a team.
@@ -142,6 +144,11 @@ impl TaskView {
             assessed: evidence.assessed,
             usable: evidence.usable,
             reflown: task.reflown,
+            path: task
+                .path
+                .iter()
+                .map(|point| [point.latitude_deg, point.longitude_deg])
+                .collect(),
         }
     }
 }
