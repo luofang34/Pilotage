@@ -11,6 +11,8 @@
 //! drains out behind the actor.
 
 pub(crate) mod ownship;
+#[cfg(feature = "sim")]
+mod sim_multicopter_rig;
 mod task;
 
 pub(crate) use task::RunControl;
@@ -33,6 +35,8 @@ use crate::runtime::engine_actor::ToEngine;
 use crate::runtime::engine_actor::{ENGINE_QUEUE_CAPACITY, EngineActor};
 use crate::runtime::registry::OUTBOUND_QUEUE_CAPACITY;
 use crate::runtime::{MissionOptions, MissionPlanRequest};
+#[cfg(feature = "sim")]
+pub use sim_multicopter_rig::spawn_sim_multicopter_rig;
 
 /// The mission principal's driver-assigned client key. The accept loop
 /// allocates keys from zero with a `fetch_add`, so `u64::MAX` can only
@@ -46,6 +50,9 @@ const OBSERVER_CLIENT: ClientKey = ClientKey::new(u64::MAX - 1);
 
 /// The single clock domain every mission `now`, ownship stamp, and fusion
 /// judgment lives on: the host's shared monotonic origin (ADR-0009).
+/// The climb rate a lane's plans ask for, metres per second.
+const LANE_CLIMB_RATE_MPS: f64 = 3.0;
+
 const MISSION_CLOCK: ClockDomainId = ClockDomainId::new(1);
 
 /// Observable progress of the in-process mission principal, published on
@@ -140,6 +147,10 @@ impl MissionPlan {
         );
         config.ownship_source = ownship_source;
         config.execution_target = execution_target;
+        // A lane's plans climb to a survey height of a hundred metres or
+        // more; the vehicle's advertised envelope still tightens both.
+        config.climb_rate_mps = LANE_CLIMB_RATE_MPS;
+        config.limits.max_vertical_mps = LANE_CLIMB_RATE_MPS;
         config
     }
 

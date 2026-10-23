@@ -72,6 +72,49 @@ is 2.5 m above the measured starting altitude. A climb input does not start
 takeoff. The `flight_procedure` telemetry field reports progress separately
 from action acceptance. A timeout does not confirm that vehicle motion stopped.
 
+## Run a simulated multicopter
+
+The `sim-multicopter` adapter is a simulated aircraft on the DJI Mini 3
+control path. It has the same flight and gimbal scopes, intents, actions, and
+telemetry groups as the DJI adapter, and it also accepts `Arm` and `Disarm`.
+Its capabilities state `physically_embodied: false`, its display name starts
+with `SIM`, and it publishes a simulation-truth group. The gimbal camera makes
+its frames from aerial imagery. One session host runs one simulated vehicle.
+
+```sh
+PILOTAGE_SIM_LAUNCH=40.3317,-74.6745,40 \
+cargo run --release -p pilotage-session-host -- --adapter sim-multicopter --port 4433
+```
+
+- `PILOTAGE_SIM_LAUNCH` (required): the launch point as `lat_deg,lon_deg,alt_m`.
+  The simulated ground is flat at this altitude. The fix height is relative to
+  this point.
+- `PILOTAGE_SIM_NAME`: the name after `SIM` in the display name.
+- `PILOTAGE_SIM_TILES_URL`: an `http` or `https` tile URL template with `{z}`,
+  `{x}`, and `{y}`. The default is Esri World Imagery. The value `procedural`
+  selects a texture that needs no network.
+- `PILOTAGE_SIM_TILE_CACHE`: the tile cache directory. Many hosts can use the
+  same directory. The default is `pilotage-sim-tiles` in the system temporary
+  directory.
+- `PILOTAGE_SIM_CAMERA_FPS`: frames per second of simulation time, 1 to 30.
+  The default is 5.
+- `PILOTAGE_SIM_CAMERA_FAULT`: injected image faults, separated by `;`. Each
+  fault is `KIND@WINDOW`. `KIND` is `dark`, `blur`, or `overexposed`. `WINDOW`
+  is `T0-T1s` in seconds from the start, or `LAT0,LON0,LAT1,LON1`, a box that
+  contains the vehicle. Example: `dark@30-45s;blur@40.330,-74.670,40.335,-74.665`.
+- `PILOTAGE_SIM_BATTERY_WH`: the battery energy in watt-hours. The default is
+  18.1.
+- `PILOTAGE_SIM_SEED`: the seed of the procedural texture.
+- `PILOTAGE_SIM_GIMBAL_PITCH`: the initial gimbal pitch, -90 to 60 degrees.
+  The default is -90 (straight down).
+- `PILOTAGE_SIM_FRAME_DUMP`: a directory. The host writes every 25th frame to
+  it as a PNG file.
+
+To fly an area survey, set the `PILOTAGE_MISSION_*` variables with
+`PILOTAGE_MISSION_TARGET=simulator` and
+`PILOTAGE_MISSION_OWNSHIP=vehicle-estimate`. Set `PILOTAGE_MISSION_ANCHOR` to
+the launch point.
+
 ## Remote session access
 
 The session host listens on `127.0.0.1` by default for all adapters.

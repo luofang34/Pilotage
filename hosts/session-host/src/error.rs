@@ -223,6 +223,10 @@ pub enum HostError {
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[error("DJI adapter: {0}")]
     Dji(#[from] crate::runtime::dji::DjiHostError),
+    /// The simulated multicopter's environment configuration is invalid.
+    #[cfg(feature = "sim")]
+    #[error("simulated multicopter: {0}")]
+    SimMulticopter(#[from] crate::runtime::sim_multicopter::SimMulticopterHostError),
     /// A host environment variable could not be decoded as UTF-8.
     #[error("{variable} is not valid UTF-8: {source}")]
     MissionVarEncoding {

@@ -28,6 +28,9 @@ pub enum AdapterKind {
     /// No vehicle: a coordinator whose mission lane works through member
     /// hosts (ADR-0028, ADR-0052).
     Coordinator,
+    /// The simulated multicopter on the DJI control path, with an
+    /// aerial-imagery gimbal camera.
+    SimMulticopter,
 }
 
 impl AdapterKind {
@@ -43,6 +46,7 @@ impl AdapterKind {
             Self::Betaflight => "betaflight",
             Self::Dji => "dji",
             Self::Coordinator => "coordinator",
+            Self::SimMulticopter => "sim-multicopter",
         }
     }
 
@@ -51,7 +55,7 @@ impl AdapterKind {
     /// a lane then takes `PILOTAGE_LANE_SIMULATED`.
     #[must_use]
     pub const fn is_simulator(self) -> bool {
-        matches!(self, Self::Reference | Self::Gazebo)
+        matches!(self, Self::Reference | Self::Gazebo | Self::SimMulticopter)
     }
 }
 
@@ -94,7 +98,7 @@ pub enum CliError {
     MissingAdapterValue,
     /// `--adapter` was given a value outside the known adapter set.
     #[error(
-        "invalid --adapter value {0:?} (expected reference, gazebo, aviate, px4, ardupilot, betaflight, or dji)"
+        "invalid --adapter value {0:?} (expected reference, gazebo, aviate, px4, ardupilot, betaflight, dji, or sim-multicopter)"
     )]
     InvalidAdapter(String),
     /// An argument was not recognized.
@@ -145,6 +149,7 @@ pub fn parse_args(args: &[String]) -> Result<CliArgs, CliError> {
                     "betaflight" => AdapterKind::Betaflight,
                     "dji" => AdapterKind::Dji,
                     "coordinator" => AdapterKind::Coordinator,
+                    "sim-multicopter" => AdapterKind::SimMulticopter,
                     other => return Err(CliError::InvalidAdapter(other.to_owned())),
                 };
             }

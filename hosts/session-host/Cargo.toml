@@ -21,6 +21,7 @@ pilotage-control-feel = { workspace = true }
 pilotage-adapter-reference = { workspace = true, optional = true }
 pilotage-adapter-gazebo = { workspace = true, optional = true }
 pilotage-sim-video = { workspace = true, optional = true }
+pilotage-adapter-sim-multicopter = { workspace = true, optional = true }
 pilotage-mavlink = { workspace = true, optional = true }
 pilotage-world = { workspace = true }
 pilotage-adapter-aviate = { workspace = true }
@@ -64,6 +65,7 @@ sim = [
     "dep:pilotage-adapter-reference",
     "dep:pilotage-adapter-gazebo",
     "dep:pilotage-sim-video",
+    "dep:pilotage-adapter-sim-multicopter",
     "dep:pilotage-mavlink",
     "pilotage-adapter-aviate/sim",
     "pilotage-adapter-px4/sim",
@@ -71,6 +73,7 @@ sim = [
 
 [dev-dependencies]
 pilotage-adapter-reference.workspace = true
+pilotage-adapter-sim-multicopter.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 wtransport = { workspace = true, features = ["dangerous-configuration", "quinn"] }
 
