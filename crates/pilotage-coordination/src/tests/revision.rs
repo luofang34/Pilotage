@@ -41,7 +41,7 @@ fn lines_of(status: &wire::MissionStatus, state: wire::MissionTaskState) -> usiz
 
 /// A team proposed, approved under `permit_allocate` or not, started,
 /// and every member on its line 1; the number of lines planned.
-fn running_fleet(permit_allocate: bool) -> (Fleet, usize) {
+pub(super) fn running_fleet(permit_allocate: bool) -> (Fleet, usize) {
     let mut fleet = Fleet::new();
     let reply = fleet.team.on_intent(
         &wire::MissionIntent {
@@ -59,7 +59,7 @@ fn running_fleet(permit_allocate: bool) -> (Fleet, usize) {
         .iter()
         .filter(|t| t.kind == wire::MissionTaskKind::SurveyLine as i32)
         .count();
-    let mut team_approval = approval(&proposal.digest, 0);
+    let mut team_approval = approval(&proposal.digest, 2);
     if let Some(envelope) = team_approval.envelope.as_mut() {
         envelope.permit_allocate = permit_allocate;
     }

@@ -139,6 +139,43 @@ impl TaskBook {
             .collect()
     }
 
+    /// Whether the verdict on the member's `line` has settled: judgments
+    /// of its pictures can arrive after the line ends, so a verdict counts
+    /// once the member flew the next line of its plan, or completed or
+    /// flies home.
+    pub(super) fn settled(
+        &self,
+        member: &str,
+        line: &str,
+        status: Option<&wire::MissionStatus>,
+    ) -> bool {
+        let ended = status.is_some_and(|s| {
+            s.state == wire::MissionLaneState::Complete as i32
+                || s.tasks.iter().any(|t| {
+                    t.kind == wire::MissionTaskKind::ReturnHome as i32
+                        && t.state == wire::MissionTaskState::Active as i32
+                })
+        });
+        if ended {
+            return true;
+        }
+        let Some((stem, number)) = line.rsplit_once('-') else {
+            return false;
+        };
+        let Ok(number) = number.parse::<u32>() else {
+            return false;
+        };
+        let next = key(member, &format!("{stem}-{:02}", number.wrapping_add(1)));
+        self.tasks.get(&next).is_some_and(|t| {
+            matches!(
+                wire::MissionTaskState::try_from(t.state),
+                Ok(wire::MissionTaskState::Done
+                    | wire::MissionTaskState::Incomplete
+                    | wire::MissionTaskState::Skipped)
+            )
+        })
+    }
+
     /// The original line takes the re-flight's verdict and evidence.
     pub(super) fn apply_refly(
         &mut self,

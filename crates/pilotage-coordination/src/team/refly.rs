@@ -1,10 +1,14 @@
 //! Extra flights a member flies after its plan, each as its own small
 //! objective under the member approval the team's envelope allows.
 //!
-//! A re-flight is adaptation within the envelope: a line a member flew
-//! without enough usable pictures is flown again, without a new operator
-//! approval. Each line is flown again at most once, and the envelope's
-//! `max_refly_lines` bounds the total. Lines a revision moved to a member
+//! A re-flight is adaptation within the envelope, decided mid-run from the
+//! judge's verdicts: a line a member flew without enough usable pictures
+//! is flown again, without a new operator approval, once the verdict has
+//! settled (the member flew past the next line, or completed). A member
+//! that already completed flies it at once; otherwise the line's own
+//! member flies it after its plan. Each line is flown again at most once,
+//! the envelope's `max_refly_lines` bounds the total, and only the team
+//! spends that budget. Lines a revision moved to a member
 //! wait in a queue until the member completes its own plan; they never
 //! splice into a plan in progress.
 
@@ -33,7 +37,12 @@ pub(super) enum ReflyState {
 /// One line flown again.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct Refly {
+    /// The member that flies it.
     pub member: String,
+    /// The member whose line it is; the line takes the re-flight's verdict.
+    pub owner: String,
+    /// The line's path, for a re-flight.
+    pub path: Vec<wire::GeoPoint>,
     /// The original task, such as `line-03`.
     pub line: String,
     pub state: ReflyState,
@@ -51,77 +60,147 @@ impl Refly {
 }
 
 impl TeamLane {
-    /// Starts the next re-flight for `member` when its lane completed with
-    /// a line flown without evidence and the envelope allows another.
-    pub(super) fn adapt(
-        &mut self,
-        member: &str,
-        status: &wire::MissionStatus,
-        context: &IntentContext,
-    ) -> Vec<MemberIntent> {
-        if !matches!(self.phase, Phase::Running)
-            || status.state != wire::MissionLaneState::Complete as i32
-        {
+    /// Decides re-flights from the settled verdicts and starts the extra
+    /// flights of members that are free to fly them.
+    pub(super) fn adapt(&mut self, context: &IntentContext) -> Vec<MemberIntent> {
+        if !matches!(self.phase, Phase::Running) {
             return Vec::new();
         }
-        if let Some(index) =
-            self.reflies
+        self.decide_reflights();
+        self.dispatch(context)
+    }
+
+    /// Queues a re-flight for each settled line without enough usable
+    /// pictures, while the envelope allows another.
+    fn decide_reflights(&mut self) {
+        let Some(envelope) = self.approval.as_ref().and_then(|a| a.envelope.clone()) else {
+            return;
+        };
+        if !envelope.permit_revise {
+            return;
+        }
+        // A member team decides the re-flights of its own lines.
+        let members: Vec<String> = self
+            .member_proposals
+            .keys()
+            .filter(|m| self.statuses.get(*m).is_none_or(|s| s.members.is_empty()))
+            .cloned()
+            .collect();
+        for owner in members {
+            for (line, path) in self.book.incomplete_lines(&owner) {
+                let flown_again = self.reflies.iter().filter(|r| r.moved.is_empty()).count();
+                if u32::try_from(flown_again).unwrap_or(u32::MAX) >= envelope.max_refly_lines {
+                    return;
+                }
+                let tried = self
+                    .reflies
+                    .iter()
+                    .any(|r| r.owner == owner && r.line == line);
+                if tried || !self.book.settled(&owner, &line, self.statuses.get(&owner)) {
+                    continue;
+                }
+                // The line's own member when it is free, else one that
+                // finished, else the owner after its plan.
+                let flyer = if self.idle(&owner) {
+                    owner.clone()
+                } else {
+                    self.idle_member().unwrap_or_else(|| owner.clone())
+                };
+                self.detail = if flyer == owner {
+                    format!(
+                        "judge: {owner} {line} had too few usable pictures; {owner} flies it again after its lines, inside the approved envelope"
+                    )
+                } else {
+                    format!(
+                        "judge: {owner} {line} had too few usable pictures; {flyer} has finished and flies it again now, inside the approved envelope"
+                    )
+                };
+                self.reflies.push(Refly {
+                    member: flyer,
+                    owner: owner.clone(),
+                    path,
+                    line,
+                    state: ReflyState::Queued,
+                    proposal: None,
+                    run_id: None,
+                    moved: Vec::new(),
+                });
+            }
+        }
+    }
+
+    /// The member completed its plan and has no extra flight.
+    fn idle(&self, member: &str) -> bool {
+        self.statuses
+            .get(member)
+            .is_some_and(|s| s.state == wire::MissionLaneState::Complete as i32)
+            && !self
+                .reflies
+                .iter()
+                .any(|r| r.member == member && r.in_progress())
+    }
+
+    /// A member that is idle.
+    fn idle_member(&self) -> Option<String> {
+        self.member_proposals.keys().find(|m| self.idle(m)).cloned()
+    }
+
+    /// Starts the first queued extra flight of each member that completed
+    /// its plan and flies nothing else. A re-flight whose line has since
+    /// been judged usable is dropped.
+    fn dispatch(&mut self, context: &IntentContext) -> Vec<MemberIntent> {
+        let mut intents = Vec::new();
+        let members: Vec<String> = self.member_proposals.keys().cloned().collect();
+        for member in members {
+            let complete = self
+                .statuses
+                .get(&member)
+                .is_some_and(|s| s.state == wire::MissionLaneState::Complete as i32);
+            let busy = self
+                .reflies
+                .iter()
+                .any(|r| r.member == member && r.in_progress() && r.state != ReflyState::Queued);
+            if !complete || busy {
+                continue;
+            }
+            let Some(index) = self
+                .reflies
                 .iter()
                 .position(|r| r.member == member && r.state == ReflyState::Queued)
-                .filter(|_| {
-                    !self.reflies.iter().any(|r| {
-                        r.member == member && r.in_progress() && r.state != ReflyState::Queued
-                    })
-                })
-        {
+            else {
+                continue;
+            };
+            intents.extend(self.start_extra(index, context));
+        }
+        intents
+    }
+
+    fn start_extra(&mut self, index: usize, context: &IntentContext) -> Vec<MemberIntent> {
+        let Some(extra) = self.reflies.get(index).cloned() else {
+            return Vec::new();
+        };
+        if !extra.moved.is_empty() {
             return self.start_moved(index, context);
         }
-        if self
-            .reflies
-            .iter()
-            .any(|r| r.member == member && r.in_progress())
-        {
-            return Vec::new();
-        }
-        let Some(envelope) = self.approval.as_ref().and_then(|a| a.envelope.clone()) else {
-            return Vec::new();
-        };
-        let flown_again = self.reflies.iter().filter(|r| r.moved.is_empty()).count();
-        let used = u32::try_from(flown_again).unwrap_or(u32::MAX);
-        if !envelope.permit_revise || used >= envelope.max_refly_lines {
-            return Vec::new();
-        }
-        let tried: Vec<&str> = self
-            .reflies
-            .iter()
-            .filter(|r| r.member == member)
-            .map(|r| r.line.as_str())
-            .collect();
-        let Some((line, path)) = self
+        let still_bad = self
             .book
-            .incomplete_lines(member)
-            .into_iter()
-            .find(|(line, _)| !tried.contains(&line.as_str()))
-        else {
+            .incomplete_lines(&extra.owner)
+            .iter()
+            .any(|(line, _)| *line == extra.line);
+        let objective = still_bad
+            .then(|| self.refly_objective(&extra.member, &extra.line, &extra.path, context))
+            .flatten();
+        let Some(objective) = objective else {
+            if let Some(entry) = self.reflies.get_mut(index) {
+                entry.state = ReflyState::Done;
+            }
             return Vec::new();
         };
-        let Some(objective) = self.refly_objective(member, &line, &path, context) else {
-            return Vec::new();
-        };
-        let index = self.reflies.len();
-        self.reflies.push(Refly {
-            member: member.to_owned(),
-            line: line.clone(),
-            state: ReflyState::Proposing,
-            proposal: None,
-            run_id: None,
-            moved: Vec::new(),
-        });
-        self.detail = format!(
-            "{member} {line} had too few usable pictures; flying it again inside the approved envelope"
-        );
+        if let Some(entry) = self.reflies.get_mut(index) {
+            entry.state = ReflyState::Proposing;
+        }
         vec![self.request(
-            member,
+            &extra.member,
             Op::Propose,
             Some(index),
             wire::mission_intent::Action::Propose(objective),
@@ -164,6 +243,8 @@ impl TeamLane {
         let index = self.reflies.len();
         self.reflies.push(Refly {
             member: member.to_owned(),
+            owner: from.to_owned(),
+            path: Vec::new(),
             line: format!("{} lines from {from}", moved.len()),
             state: ReflyState::Queued,
             proposal: None,
@@ -326,7 +407,8 @@ impl TeamLane {
         if status.state == wire::MissionLaneState::Complete as i32 {
             refly.state = ReflyState::Done;
             if let (Some(line_status), true) = (line_status, refly.moved.is_empty()) {
-                self.book.apply_refly(member, &refly.line, line_status);
+                self.book
+                    .apply_refly(&refly.owner, &refly.line, line_status);
             }
         } else if matches!(
             wire::MissionLaneState::try_from(status.state),

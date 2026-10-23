@@ -482,5 +482,6 @@ fn a_parent_team_counts_the_lines_its_member_team_flew_again() {
     assert!(status.detail.contains("1 flown again"), "{}", status.detail);
 }
 
+mod judge;
 mod lines;
 mod revision;

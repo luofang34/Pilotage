@@ -368,7 +368,7 @@ impl TeamLane {
         self.book.record(status, &self.reflies);
         self.statuses.insert(member.clone(), status.clone());
         self.refly_progress(&member, status);
-        let intents = self.adapt(&member, status, context);
+        let intents = self.adapt(context);
         self.settle();
         intents
     }
