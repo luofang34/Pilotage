@@ -10,12 +10,15 @@
 //!   watch [--seconds N]
 //!   run OBJECTIVE.json --approve [policy options] [--seconds N]
 //!   agent
+//!   survey-agent OBJECTIVE.json
 //! ```
 //!
 //! `run` proposes, approves under the stated policy, starts and watches
 //! until the lane ends; `--approve` states the operator's approval
 //! explicitly. `agent` reads commands from standard input, one JSON object
-//! per line such as `{"command": "hold"}`, for an automated agent. Every
+//! per line such as `{"command": "hold"}`, for an automated agent.
+//! `survey-agent` is such an agent, scripted: it proposes, waits for a
+//! person to approve, starts, and resumes only the holds it may. Every
 //! receipt and status goes to standard output as one JSON object per line.
 //! The host decides what the client may do from the secret in
 //! `--token-file`: only its approver secret lets a client approve.

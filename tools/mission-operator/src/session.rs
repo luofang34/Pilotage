@@ -21,9 +21,13 @@ use tokio::time::Instant;
 use crate::cli::{Action, Command, OperatorError};
 
 mod agent;
+mod survey_agent;
 
 /// How long a receipt may take: a team answers after its members do.
 const RECEIPT_TIMEOUT: Duration = Duration::from_secs(60);
+/// How long a new session waits for the lane's first status; lanes
+/// publish at least every two seconds.
+const FIRST_STATUS: Duration = Duration::from_secs(5);
 
 struct Session {
     link: Link,
@@ -51,6 +55,10 @@ pub(crate) async fn execute(command: Command) -> Result<bool, OperatorError> {
         Action::Agent => {
             session.every_status = false;
             session.agent().await
+        }
+        Action::SurveyAgent(objective) => {
+            session.every_status = false;
+            session.survey_agent(objective, deadline).await
         }
     };
     session.link.shutdown().await;
@@ -91,6 +99,19 @@ impl Session {
             session.step(deadline).await?;
         }
         emit(&json!({"event": "admitted", "as": command.name}));
+        // A command resolves against the lane's state, so the first status
+        // comes first; a host without a lane publishes none and its refusal
+        // says so.
+        let first = Instant::now() + FIRST_STATUS;
+        while session.desk.status().is_none() && Instant::now() < first {
+            match tokio::time::timeout_at(first, session.transport.recv()).await {
+                Ok(Some(event)) => {
+                    session.on_transport(event).await?;
+                }
+                Ok(None) => return Err(OperatorError::Host("the link closed".to_owned())),
+                Err(_) => break,
+            }
+        }
         Ok(session)
     }
 

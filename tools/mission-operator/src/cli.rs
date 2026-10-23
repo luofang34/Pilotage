@@ -33,6 +33,8 @@ pub(crate) enum Action {
     /// Read commands from standard input, one JSON object per line, and
     /// print every receipt and status change.
     Agent,
+    /// Propose a survey and steer it to its end as a scripted agent.
+    SurveyAgent(SurveyFile),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -51,7 +53,7 @@ pub(crate) struct Command {
     pub seconds: u64,
 }
 
-const USAGE: &str = "mission-operator --host URL --cert HEX [--token-file PATH] [--name NAME] (propose FILE | approve [DIGEST] [policy] | start [DIGEST] | hold | resume | abort | watch | run FILE --approve [policy] | agent) [--seconds N]; policy: --max-height M --expires-min N --refly N --no-revise --reserve F";
+const USAGE: &str = "mission-operator --host URL --cert HEX [--token-file PATH] [--name NAME] (propose FILE | approve [DIGEST] [policy] | start [DIGEST] | hold | resume | abort | watch | run FILE --approve [policy] | agent | survey-agent FILE) [--seconds N]; policy: --max-height M --expires-min N --refly N --no-revise --reserve F";
 
 pub(crate) fn parse(args: &[String]) -> Result<Command, OperatorError> {
     let usage = || OperatorError::Usage(USAGE.to_owned());
@@ -96,6 +98,7 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, OperatorError> {
         Some("abort") => Action::Send(MissionCommand::Abort {}),
         Some("watch") => Action::Watch,
         Some("agent") => Action::Agent,
+        Some("survey-agent") => Action::SurveyAgent(file(1)?),
         Some("run") if approve => Action::Run(file(1)?),
         _ => return Err(usage()),
     };
@@ -142,3 +145,6 @@ fn hex32(text: &str) -> Option<[u8; 32]> {
     }
     Some(out)
 }
+
+#[cfg(test)]
+mod tests;
