@@ -205,3 +205,76 @@ fn tasks_named_in_other_words_change_nothing_the_team_decides() {
     assert!(!renamed.0.is_empty(), "the team flies the bad line again");
     assert_eq!(renamed, outcome(false));
 }
+
+/// `member`'s status after it flew its lines `1..=to`, reported to nobody, with
+/// `line-01`'s display state replaced by `shown`.
+fn reported_with_display(
+    fleet: &mut Fleet,
+    member: &str,
+    to: usize,
+    bad: &[usize],
+    shown: wire::MissionTaskState,
+) -> wire::MissionStatus {
+    let lane = fleet.members.get_mut(member).expect("member");
+    for line in 1..=to {
+        lane.on_progress(&toward(lane, 2 * line - 1));
+        for _ in 0..3 {
+            if let Some(ticket) = lane.on_frame() {
+                lane.on_sent(&ticket);
+                let usable = !bad.contains(&line);
+                lane.on_assessment(
+                    &ticket,
+                    Some(FrameAssessment {
+                        usable,
+                        hazard: false,
+                    }),
+                )
+                .unwrap();
+            }
+        }
+    }
+    lane.on_progress(&toward(lane, 2 * to + 1));
+    let mut status = lane.status();
+    for task in &mut status.tasks {
+        if task.name == "line-01" {
+            task.state = shown as i32;
+        }
+    }
+    status
+}
+
+#[test]
+fn a_re_flight_follows_the_judgment_not_the_display_state() {
+    let fleet_with_one_finished = || {
+        let (mut fleet, _) = super::revision::running_fleet(false);
+        let finished = fly_lines(&mut fleet, "SIM-1", (1, 99), &[]);
+        fleet.route(finished);
+        fleet
+    };
+    // A met line shown as incomplete is not flown again.
+    let mut fleet = fleet_with_one_finished();
+    let shown_incomplete = reported_with_display(
+        &mut fleet,
+        "SIM-2",
+        2,
+        &[],
+        wire::MissionTaskState::Incomplete,
+    );
+    let none = fleet
+        .team
+        .on_member_status(&shown_incomplete, &context("shown"));
+    assert!(none.is_empty(), "{}", fleet.team.status().detail);
+
+    // A line that is not met, shown as done, is flown again.
+    let mut fleet = fleet_with_one_finished();
+    let shown_done =
+        reported_with_display(&mut fleet, "SIM-2", 2, &[1], wire::MissionTaskState::Done);
+    let line = shown_done
+        .tasks
+        .iter()
+        .find(|t| t.name == "line-01")
+        .expect("line 1");
+    assert_eq!(line.judgment, wire::MissionTaskJudgment::NotMet as i32);
+    let refly = fleet.team.on_member_status(&shown_done, &context("shown"));
+    assert_eq!(refly.len(), 1, "{}", fleet.team.status().detail);
+}

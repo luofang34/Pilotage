@@ -12,6 +12,7 @@ mod digest;
 mod evidence;
 mod expiry;
 mod run;
+mod settle;
 mod status;
 mod steering;
 mod successor;
@@ -32,6 +33,9 @@ pub use steering::{HOST_ISSUER, Requester, Steering};
 use compile::Compiled;
 pub use evidence::{FrameTicket, VerdictRefused};
 use run::RunTracker;
+
+/// Replaced runs that may wait for answers at one time.
+const MAX_SETTLING_RUNS: usize = 4;
 
 /// What a lane is configured with for every proposal it compiles.
 #[derive(Debug, Clone, PartialEq)]
@@ -57,6 +61,10 @@ pub struct LaneConfig {
     /// A judgment service judges the run's pictures, so a survey line is
     /// done only with enough pictures judged usable.
     pub judged: bool,
+    /// How long a task whose execution ended still takes the answers to its
+    /// pictures, milliseconds on the host's monotonic clock. The clock does
+    /// not stop while the run holds.
+    pub evidence_window_ms: u64,
 }
 
 /// What the host supplies with an intent: the civil time and a fresh,
@@ -124,8 +132,9 @@ pub struct Lane {
     successor: Option<successor::Successor>,
     /// Revisions drafted so far; numbers each successor's tasks.
     revisions: u32,
-    /// The tasks of runs a successor replaced, as they ended.
-    history: Vec<wire::MissionTaskStatus>,
+    /// The runs a successor replaced, oldest first. Each keeps the answers
+    /// still due inside its tasks' evidence windows.
+    past: Vec<RunTracker>,
     detail: String,
     sequence: u64,
     changed: bool,
@@ -135,6 +144,8 @@ pub struct Lane {
     expired: bool,
     /// What the run does now, as the host last said.
     execution: Option<RunExecution>,
+    /// The latest time on the host's monotonic clock, milliseconds.
+    host_ms: u64,
 }
 
 impl Lane {
@@ -149,13 +160,14 @@ impl Lane {
             run: None,
             successor: None,
             revisions: 0,
-            history: Vec::new(),
+            past: Vec::new(),
             detail: "waiting for an objective".to_owned(),
             sequence: 0,
             changed: true,
             clock_unix_ms: 0,
             expired: false,
             execution: None,
+            host_ms: 0,
         }
     }
 
@@ -232,7 +244,7 @@ impl Lane {
         self.run = None;
         self.successor = None;
         self.revisions = 0;
-        self.history.clear();
+        self.past.clear();
         self.state = wire::MissionLaneState::Proposed;
         self.detail = "proposed; waiting for an approval".to_owned();
         Ok((None, Some(proposal)))
@@ -324,7 +336,7 @@ impl Lane {
         self.successor = None;
         self.detail = "aborted by intent; the vehicle stops in place".to_owned();
         if let Some(run) = self.run.as_mut() {
-            run.close_aborted();
+            run.close(wire::MissionTaskExecution::Cancelled, self.host_ms);
         }
         Ok((Some(LaneEffect::Abort), None))
     }
@@ -379,8 +391,9 @@ impl Lane {
             self.execution = progress.execution;
             self.changed = true;
         }
+        let now_ms = self.host_ms;
         let run = self.run.as_mut()?;
-        if run.on_progress(progress) {
+        if run.on_progress(progress, now_ms) {
             self.changed = true;
         }
         if self.state == wire::MissionLaneState::HoldRequested && progress.holding {
@@ -393,12 +406,12 @@ impl Lane {
         }
         let run = self.run.as_mut()?;
         if progress.plan_complete && flying {
-            run.close();
+            run.close(wire::MissionTaskExecution::Completed, now_ms);
             self.state = wire::MissionLaneState::Complete;
             self.detail = run.summary();
             self.changed = true;
         } else if progress.ended && flying {
-            run.close();
+            run.close(wire::MissionTaskExecution::Failed, now_ms);
             self.state = wire::MissionLaneState::Failed;
             self.detail = progress
                 .ended_because
@@ -407,60 +420,6 @@ impl Lane {
             self.changed = true;
         }
         None
-    }
-
-    /// Counts a captured picture against the active survey line. Returns
-    /// its ticket, for a judgment, when a line is active.
-    pub fn on_frame(&mut self) -> Option<FrameTicket> {
-        if !self.is_flying() {
-            return None;
-        }
-        let ticket = self.run.as_mut()?.on_frame()?;
-        self.changed = true;
-        Some(ticket)
-    }
-
-    /// Whether the line `ticket` names still needs pictures sent for
-    /// judgment to meet its evidence: the host sends such a picture without
-    /// waiting for its sampling period, so a short line is judged too.
-    #[must_use]
-    pub fn wants_judgment(&self, ticket: &FrameTicket) -> bool {
-        self.run
-            .as_ref()
-            .is_some_and(|run| run.wants_judgment(ticket))
-    }
-
-    /// Notes the picture `ticket` names as sent for judgment: the line's
-    /// evidence is pending until its verdict or the news that it was not
-    /// judged.
-    pub fn on_sent(&mut self, ticket: &FrameTicket) {
-        if let Some(run) = self.run.as_mut()
-            && run.on_sent(ticket)
-        {
-            self.changed = true;
-        }
-    }
-
-    /// Records the judgment of the picture `ticket` names; `None` when the
-    /// service did not judge it.
-    ///
-    /// # Errors
-    ///
-    /// [`VerdictRefused`] for a verdict of another run, of a picture never
-    /// sent, or a second verdict of one picture; the lane changes nothing.
-    pub fn on_assessment(
-        &mut self,
-        ticket: &FrameTicket,
-        assessment: Option<FrameAssessment>,
-    ) -> Result<(), VerdictRefused> {
-        let run = self.run.as_mut().ok_or_else(|| VerdictRefused::OtherRun {
-            run_id: ticket.run_id.clone(),
-            task_id: ticket.task_id.clone(),
-        })?;
-        if run.on_assessment(ticket, assessment)? {
-            self.changed = true;
-        }
-        Ok(())
     }
 
     /// The status when it changed since the last call, with a new

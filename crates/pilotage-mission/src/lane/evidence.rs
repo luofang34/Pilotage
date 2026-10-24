@@ -48,6 +48,17 @@ pub enum VerdictRefused {
         /// The verdict's picture.
         frame: u32,
     },
+    /// The verdict arrived after the task's evidence window closed: it is
+    /// counted as late and changes nothing else.
+    #[error(
+        "the verdict for picture {frame} of {task_id} arrived after its evidence window closed"
+    )]
+    Late {
+        /// The verdict's task.
+        task_id: String,
+        /// The verdict's picture.
+        frame: u32,
+    },
     /// The picture already has a verdict.
     #[error("picture {frame} of {task_id} already has a verdict")]
     Duplicate {

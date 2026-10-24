@@ -243,7 +243,7 @@ impl Lane {
             self.revisions
         );
         if let Some(run) = previous {
-            self.history.extend(run.superseded_statuses());
+            self.retire(run);
         }
         let mut run = super::run::RunTracker::new(run_id.clone(), &compiled, self.config.judged);
         run.predecessor = predecessor;
