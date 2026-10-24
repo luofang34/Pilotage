@@ -74,9 +74,15 @@ only when one data set applies to all of the document.
 The action vocabulary uses nested enums. `MissionAction::Flight(FlightAction)`
 contains operational flight actions. `MissionAction::Trial(TrialAction)`
 contains calibration actions. `MissionAction::Bound(BoundAction)` names a host
-executor, an operation, and its parameters, for a task that is not flight,
-such as a wait for a person or a reading. A host that does not have the
-executor refuses the action. `FlightAction::FollowSegment` flies part of one
+executor, an operation, its version, and its parameters, for a task that is
+not flight, such as a wait for a person or a reading. A host registers each
+operation that it can do, with its version, its typed parameters and results,
+the capabilities that it needs, how a cancel ends it, whether a repeat with
+the same action identity is harmless, and whether the host can tell after a
+restart that it occurred. The engine admits a document only when each bound
+action names a registered operation in its version, with parameters of the
+declared types. Thus a host refuses an action that it cannot do before the
+run starts, not while the run continues. `FlightAction::FollowSegment` flies part of one
 plan, so that a survey compiles into one phase for each task: toward a line,
 along the line, and home. The vehicle flies the one plan continuously. The
 acquisition requirement of a line stays with the mission lane, which reads it

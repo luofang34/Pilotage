@@ -24,6 +24,7 @@ pub use outcome::{
 };
 
 use crate::MissionDocument;
+use crate::executor::ExecutorRegistry;
 use runtime::{PhaseProgress, RunState, TickCollector, TickContext};
 
 /// One deterministic mission sequencing core.
@@ -43,13 +44,40 @@ pub struct MissionEngine {
 }
 
 impl MissionEngine {
-    /// Validates a mission for the host and starts one run.
+    /// Validates a mission for a host with no executor and starts one run:
+    /// a document with a bound action is refused.
     ///
     /// # Errors
     ///
     /// Returns an error if admission, identity, or wall-deadline validation
     /// fails.
     pub fn start(document: MissionDocument, start: EngineStart) -> Result<Self, EngineStartError> {
+        Self::start_with_executors(document, start, ExecutorRegistry::NONE)
+    }
+
+    /// Validates a mission for a host whose executors `executors` registers,
+    /// and starts one run. Every bound action must name a registered
+    /// operation in its version, with parameters of the declared types.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if admission, executor admission, identity, or
+    /// wall-deadline validation fails.
+    pub fn start_with_executors(
+        document: MissionDocument,
+        start: EngineStart,
+        executors: ExecutorRegistry,
+    ) -> Result<Self, EngineStartError> {
+        for phase in &document.phases {
+            if let crate::MissionAction::Bound(action) = &phase.action {
+                executors
+                    .admit(action)
+                    .map_err(|source| EngineStartError::Executor {
+                        phase: phase.id.clone(),
+                        source,
+                    })?;
+            }
+        }
         document
             .validate_for_target(start.host_target)
             .map_err(|source| EngineStartError::Admission { source })?;
