@@ -150,3 +150,35 @@ fn without_a_judge_a_line_reads_as_not_judged() {
         .unwrap();
     assert_eq!(line.evidence.as_ref().map(|e| e.usable), Some(0));
 }
+
+#[test]
+fn a_line_wants_judgments_until_its_need_is_sent() {
+    let (mut lane, _) = running_lane();
+    along(&mut lane, 1);
+    let first = lane.on_frame().expect("line 1");
+    assert!(lane.wants_judgment(&first));
+    lane.on_sent(&first);
+    let second = lane.on_frame().expect("line 1");
+    assert!(
+        lane.wants_judgment(&second),
+        "the plan needs two usable pictures"
+    );
+    lane.on_sent(&second);
+    let third = lane.on_frame().expect("line 1");
+    assert!(!lane.wants_judgment(&third), "two answers are awaited");
+    // One comes back unusable: the line needs another picture judged.
+    lane.on_assessment(
+        &first,
+        Some(FrameAssessment {
+            usable: false,
+            hazard: false,
+        }),
+    )
+    .unwrap();
+    assert!(lane.wants_judgment(&third));
+    lane.on_sent(&third);
+    lane.on_assessment(&second, usable()).unwrap();
+    lane.on_assessment(&third, usable()).unwrap();
+    let fourth = lane.on_frame().expect("line 1");
+    assert!(!lane.wants_judgment(&fourth), "the period paces the rest");
+}
