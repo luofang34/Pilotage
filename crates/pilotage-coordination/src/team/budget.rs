@@ -3,8 +3,10 @@
 //! part of the budget; the first member teams by name get one more line
 //! each until the remainder is gone. When the team also has vehicle members,
 //! it keeps one part for their lines. A vehicle member decides no re-flight,
-//! so it gets none. Delegation only divides the budget: the parts never add
-//! up to more than the team's own approval allows.
+//! so it gets none. An extra flight the team pays for, a re-flight or moved
+//! lines, goes down with no budget, so no part is spent twice. Delegation
+//! only divides the budget: the parts never add up to more than the team's
+//! own approval allows.
 
 use pilotage_protocol::wire;
 
@@ -59,8 +61,8 @@ impl TeamLane {
         self.refly_budget().saturating_sub(given)
     }
 
-    /// `approval`, passed down to `member`, with the member's part of the
-    /// re-flight budget.
+    /// `approval`, passed down to `member` for its plan, with the member's
+    /// part of the re-flight budget.
     pub(super) fn with_share(
         &self,
         member: &str,
@@ -71,4 +73,13 @@ impl TeamLane {
         }
         approval
     }
+}
+
+/// `approval`, passed down for an extra flight the team pays for itself: a
+/// re-flight or moved lines. The member decides no re-flight inside it.
+pub(super) fn without_budget(mut approval: wire::MissionApproval) -> wire::MissionApproval {
+    if let Some(envelope) = approval.envelope.as_mut() {
+        envelope.max_refly_lines = 0;
+    }
+    approval
 }

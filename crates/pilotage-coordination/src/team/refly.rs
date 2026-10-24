@@ -317,7 +317,9 @@ impl TeamLane {
                     launch,
                     &self.config.name,
                 );
-                let approval = self.with_share(&member, approval);
+                // The team pays for this flight: the member decides no
+                // re-flight inside it, so it spends no part twice.
+                let approval = super::budget::without_budget(approval);
                 vec![self.request(
                     &member,
                     Op::Approve,
