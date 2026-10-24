@@ -103,6 +103,16 @@ pub struct AutomationStatus {
     /// The vehicle disarmed or landed on its own during a flown phase, and
     /// the run ended for that reason.
     pub ended_by_vehicle: Option<&'static str>,
+    /// An operator's hold or an abort holds the vehicle, and the vehicle
+    /// reports that it is still.
+    pub holding: bool,
+    /// The principal that holds the motion lease when another one does, as
+    /// the welcome or an authority event named it.
+    pub lease_holder: Option<u64>,
+    /// The task the run flies now, as the mission core names its phase.
+    pub active_task: Option<String>,
+    /// The tasks the run finished, in order.
+    pub finished_tasks: Vec<String>,
 }
 
 /// Where the plan comes from: a navdata snapshot the route expands
@@ -251,9 +261,7 @@ fn prepare_route(options: &MissionOptions) -> Result<MissionPlan, HostError> {
         mission_revision = %record.mission_identity.revision_id,
         mission_schema = record.mission_identity.schema_version,
         mission_digest = %record.mission_identity.content_digest,
-        navdata_cycle = %record.mission_identity.navigation_data_identity.cycle,
-        navdata_snapshot = %record.mission_identity.navigation_data_identity.snapshot_id,
-        navdata_digest = %record.mission_identity.navigation_data_identity.snapshot_digest,
+        navdata = ?record.mission_identity.navigation_data_identity,
         "mission packed for flight"
     );
     Ok(plan)

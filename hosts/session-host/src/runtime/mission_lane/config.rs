@@ -98,6 +98,7 @@ impl LaneRuntimeConfig {
                 usable_energy_wh: positive("PILOTAGE_LANE_ENERGY_WH")?,
                 cruise_power_w: positive("PILOTAGE_LANE_CRUISE_POWER_W")?,
                 recovery_policy: "hold in place; the operator lands".to_owned(),
+                judged: decision.is_some(),
             },
             decision,
             assess_every: Duration::from_secs_f64(

@@ -265,6 +265,7 @@ fn project_vehicle_directive(
                 FlightAction::Disarm {} => AviateVehicleAction::Disarm,
                 FlightAction::Climb { .. }
                 | FlightAction::FollowPlan { .. }
+                | FlightAction::FollowSegment { .. }
                 | FlightAction::MaintainTarget {}
                 | FlightAction::Heading { .. }
                 | FlightAction::Speed { .. }
@@ -272,6 +273,9 @@ fn project_vehicle_directive(
                 | FlightAction::Land {} => return Err(refused("unsupported operational action")),
             };
             (directive.context.clone(), action)
+        }
+        MissionDirective::Bound(_) => {
+            return Err(refused("the Aviate vehicle port has no executors"));
         }
         MissionDirective::Trial(directive) => {
             let action = match &directive.action {

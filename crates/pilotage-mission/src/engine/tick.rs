@@ -8,12 +8,12 @@ use navigate_contract::{
 use navigate_fpl::SequenceEvent;
 use navigate_guidance::guide_velocity;
 use pilotage_mission_core::{
-    DirectiveReceipt, EngineEvent as CoreEvent, EngineStart, FlightAction as CoreFlightAction,
-    MissionDirective, MissionEngine as CoreMissionEngine, MissionObservation as CoreObservation,
-    MissionTerminal as CoreTerminal, NavigationObservation, ReceiptResult, TickInput,
+    EngineEvent as CoreEvent, EngineStart, FlightAction as CoreFlightAction,
+    MissionEngine as CoreMissionEngine, MissionObservation as CoreObservation,
+    MissionTerminal as CoreTerminal, NavigationObservation, TickInput,
     TickOutput as CoreTickOutput, VehicleObservation, WallDeadline,
 };
-use pilotage_protocol::{ControlAction, ControlIntent, ReferenceFrame, VelocityIntent};
+use pilotage_protocol::{ControlIntent, ReferenceFrame, VelocityIntent};
 
 use crate::body_frame::{bearing_rad, cap_horizontal, clamp_symmetric, ned_to_body, wrap_to_pi};
 use crate::policy::OPERATIONAL_WALL_DEADLINE_NS;
@@ -24,6 +24,7 @@ use super::{MissionAction, MissionEngine, MissionEvent, MissionOutput, MissionSt
 /// Commanded horizontal speed below which course has no useful direction.
 const YAW_COURSE_FLOOR_MPS: f64 = 0.05;
 
+mod directives;
 mod outputs;
 mod overflight;
 
@@ -107,7 +108,9 @@ impl MissionEngine {
             return None;
         }
         let input = TickInput {
-            simulator_time_ns: self.sequencing_time(now).as_nanos(),
+            mission_time_ns: self.sequencing_time(now).as_nanos(),
+            // An operational mission runs on its own clock; no simulator supplies one.
+            simulator_time_ns: None,
             wall_time_ns: now.as_nanos(),
             observation,
             receipts: self.pending_receipt.take().into_iter().collect(),
@@ -127,7 +130,8 @@ impl MissionEngine {
         let expires_at_ns = now_ns.saturating_add(OPERATIONAL_WALL_DEADLINE_NS);
         let start = EngineStart {
             host_target: self.config.execution_target,
-            simulator_time_ns: self.sequencing_time(now).as_nanos(),
+            mission_time_ns: self.sequencing_time(now).as_nanos(),
+            simulator_time_ns: None,
             wall_time_ns: now_ns,
             wall_deadline: WallDeadline {
                 mission_content_digest: self.document.identity.content_digest,
@@ -158,6 +162,7 @@ impl MissionEngine {
             navigation: NavigationObservation {
                 guidance_valid: Some(solution.is_some()),
                 plan_complete: Some(self.plan_complete),
+                waypoints_captured: u32::try_from(self.waypoints_captured()).ok(),
                 altitude_m: solution.map(|value| value.position.altitude_m),
             },
             vehicle: VehicleObservation::default(),
@@ -173,7 +178,17 @@ impl MissionEngine {
         let mut action = None;
         for event in &output.events {
             match event {
-                CoreEvent::PhaseCompleted { .. } => self.active_action = None,
+                CoreEvent::PhaseEntered { phase_id, .. } => {
+                    events.push(MissionEvent::TaskStarted {
+                        task: phase_id.clone(),
+                    })
+                }
+                CoreEvent::PhaseCompleted { phase_id, .. } => {
+                    self.active_action = None;
+                    events.push(MissionEvent::TaskFinished {
+                        task: phase_id.clone(),
+                    });
+                }
                 CoreEvent::ReceiptAccepted {
                     context, result, ..
                 } if context.phase_id == ARM_PHASE_ID => {
@@ -198,77 +213,6 @@ impl MissionEngine {
             }
         }
         action
-    }
-
-    fn arm_receipt_event(
-        &self,
-        action_id: u32,
-        result: &ReceiptResult,
-        events: &mut Vec<MissionEvent>,
-    ) {
-        let action_id = u64::from(action_id);
-        match result {
-            ReceiptResult::Succeeded {} => events.push(MissionEvent::ArmAccepted { action_id }),
-            ReceiptResult::Retryable { .. } => events.push(MissionEvent::ArmRejected { action_id }),
-            ReceiptResult::Refused { .. } | ReceiptResult::Failed { .. } => {}
-        }
-    }
-
-    fn interpret_directive(
-        &mut self,
-        directive: &MissionDirective,
-        events: &mut Vec<MissionEvent>,
-    ) -> Option<MissionAction> {
-        let MissionDirective::Flight(directive) = directive else {
-            self.queue_receipt(
-                directive.context().action_id,
-                ReceiptResult::Refused {
-                    detail: "the operational host does not execute trial directives".to_owned(),
-                },
-            );
-            return None;
-        };
-        match &directive.action {
-            CoreFlightAction::Arm {} => {
-                let action_id = directive.context.action_id;
-                self.active_action = Some(directive.action.clone());
-                self.outstanding_arm = Some(action_id);
-                events.push(MissionEvent::ArmRequested {
-                    action_id: u64::from(action_id.get()),
-                });
-                Some(MissionAction {
-                    action: ControlAction::Arm,
-                    action_id: u64::from(action_id.get()),
-                })
-            }
-            CoreFlightAction::Climb { .. } => {
-                self.active_action = Some(directive.action.clone());
-                self.queue_receipt(directive.context.action_id, ReceiptResult::Succeeded {});
-                if self.config.cruise_height_m > 0.0 {
-                    events.push(MissionEvent::ClimbStarted);
-                }
-                None
-            }
-            CoreFlightAction::FollowPlan { plan } if *plan == self.plan_reference => {
-                self.active_action = Some(directive.action.clone());
-                self.queue_receipt(directive.context.action_id, ReceiptResult::Succeeded {});
-                events.push(MissionEvent::EnrouteStarted);
-                None
-            }
-            action => {
-                self.queue_receipt(
-                    directive.context.action_id,
-                    ReceiptResult::Refused {
-                        detail: format!("the operational host cannot execute {action:?}"),
-                    },
-                );
-                None
-            }
-        }
-    }
-
-    fn queue_receipt(&mut self, action_id: pilotage_mission_core::ActionId, result: ReceiptResult) {
-        self.pending_receipt = Some(DirectiveReceipt { action_id, result });
     }
 
     fn intent_for_state(
@@ -341,10 +285,7 @@ impl MissionEngine {
         events: &mut Vec<MissionEvent>,
     ) -> Option<ControlIntent> {
         let solution = solution?;
-        if !matches!(
-            self.active_action,
-            Some(CoreFlightAction::FollowPlan { .. })
-        ) {
+        if !self.following() {
             return None;
         }
         if self.plan_complete {
@@ -361,10 +302,7 @@ impl MissionEngine {
         let Some(solution) = solution else {
             return false;
         };
-        if !matches!(
-            self.active_action,
-            Some(CoreFlightAction::FollowPlan { .. })
-        ) {
+        if !self.following() {
             return false;
         }
         self.advance_plan(solution, events);

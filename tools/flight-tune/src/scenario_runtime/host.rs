@@ -296,7 +296,8 @@ impl CampaignMissionRuntime {
     ) -> Result<TickOutput, ScenarioRuntimeError> {
         self.ensure_engine(frame, wall_time_ns)?
             .tick(TickInput {
-                simulator_time_ns: frame.trial_time_ns,
+                mission_time_ns: frame.trial_time_ns,
+                simulator_time_ns: Some(frame.trial_time_ns),
                 wall_time_ns,
                 observation: frame.mission_observation()?,
                 receipts,
@@ -314,7 +315,8 @@ impl CampaignMissionRuntime {
                 self.document.clone(),
                 EngineStart {
                     host_target: pilotage_mission_core::ExecutionTarget::Simulator,
-                    simulator_time_ns: frame.trial_time_ns,
+                    mission_time_ns: frame.trial_time_ns,
+                    simulator_time_ns: Some(frame.trial_time_ns),
                     wall_time_ns,
                     wall_deadline: pilotage_mission_core::WallDeadline {
                         mission_content_digest: self.document.identity.content_digest,

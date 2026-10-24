@@ -125,7 +125,7 @@ fn phase_and_wall_deadlines_have_distinct_typed_classes() {
     assert!(matches!(
         terminal(&phase_output),
         MissionTerminal::DeadlineExceeded {
-            deadline: DeadlineClass::PhaseSimulatorTime { .. },
+            deadline: DeadlineClass::Phase { .. },
             ..
         }
     ));
@@ -176,7 +176,7 @@ fn entry_wait_is_part_of_the_phase_deadline() {
     assert!(matches!(
         terminal(&deadline),
         MissionTerminal::DeadlineExceeded {
-            deadline: DeadlineClass::PhaseSimulatorTime { .. },
+            deadline: DeadlineClass::Phase { .. },
             ..
         }
     ));

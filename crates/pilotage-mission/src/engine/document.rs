@@ -4,7 +4,7 @@ use navigate_contract::{AltitudeConstraint, FlightPlan, PlanRole, TurnType, Wayp
 use pilotage_mission_core::{
     Comparison, Digest, ExecutionPolicy, ExecutionTarget, FlightAction, FlightPlanReference,
     MissionAction, MissionCapability, MissionCondition, MissionDocument, MissionPhase,
-    NavigationCondition, NavigationDataIdentity,
+    NavigationCondition, NavigationDataIdentity, PhaseClock, PhaseDeadline,
 };
 use sha2::{Digest as _, Sha256};
 
@@ -30,11 +30,64 @@ pub(super) const SURVEY_REVISION_PREFIX: &str = "operational-survey-v1";
 /// Revision prefix of a mission that flies home.
 pub(super) const HOME_REVISION_PREFIX: &str = "operational-home-v1";
 
+/// One task of a plan flown in segments: its phase identifier and the waypoints, by
+/// index, it flies toward.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct Segment {
+    pub id: String,
+    pub first: u32,
+    pub last: u32,
+}
+
+/// The segments of a survey of `lines` lines over `waypoints` waypoints: toward each
+/// line's start, along the line, and home over the rest. Each line and the way home take
+/// the identity `task_ids` gives them in that order, else their names; a transit takes
+/// its line's identity, marked as the way to it.
+pub(super) fn survey_segments(lines: usize, waypoints: usize, task_ids: &[String]) -> Vec<Segment> {
+    let index = |i: usize| u32::try_from(i).unwrap_or(u32::MAX);
+    let id = |position: usize, name: String| task_ids.get(position).cloned().unwrap_or(name);
+    let mut segments = Vec::with_capacity(2 * lines + 1);
+    for line in 0..lines {
+        let line_id = id(line, format!("line-{:02}", line.wrapping_add(1)));
+        segments.push(Segment {
+            id: format!("transit:{line_id}"),
+            first: index(2 * line),
+            last: index(2 * line),
+        });
+        segments.push(Segment {
+            id: line_id,
+            first: index(2 * line + 1),
+            last: index(2 * line + 1),
+        });
+    }
+    if waypoints > 2 * lines {
+        segments.push(Segment {
+            id: id(lines, "home".to_owned()),
+            first: index(2 * lines),
+            last: index(waypoints.saturating_sub(1)),
+        });
+    }
+    segments
+}
+
+/// The one segment of a plan home, under the identity of the way-home task.
+pub(super) fn home_segments(waypoints: usize, task_ids: &[String]) -> Vec<Segment> {
+    match task_ids.first() {
+        Some(id) if waypoints > 0 => vec![Segment {
+            id: id.clone(),
+            first: 0,
+            last: u32::try_from(waypoints - 1).unwrap_or(u32::MAX),
+        }],
+        _ => Vec::new(),
+    }
+}
+
 pub(super) fn build_document(
     plan: &FlightPlan,
     config: &MissionConfig,
     navigation_data_identity: NavigationDataIdentity,
     revision_prefix: &str,
+    segments: &[Segment],
 ) -> Result<(MissionDocument, FlightPlanReference), MissionBuildError> {
     let plan_content_digest = plan_digest(plan)?;
     let plan_reference = FlightPlanReference {
@@ -45,13 +98,13 @@ pub(super) fn build_document(
     let revision_id = format!("{revision_prefix}:{plan_content_digest}");
     let document = MissionDocument::new(
         revision_id,
-        navigation_data_identity,
+        Some(navigation_data_identity),
         ExecutionPolicy {
             target: config.execution_target,
             retry_limit: OPERATIONAL_RETRY_LIMIT,
             receipt_timeout_ns: OPERATIONAL_RECEIPT_TIMEOUT_NS,
         },
-        phases(config, plan_reference.clone()),
+        phases(config, plan_reference.clone(), segments),
     )?;
     Ok((document, plan_reference))
 }
@@ -59,23 +112,59 @@ pub(super) fn build_document(
 /// The phases the mission flies. A simulator's vehicle is armed by the
 /// mission; a real vehicle is armed and launched by its pilot, so its
 /// mission starts from the hover with the climb (ADR-0051).
-fn phases(config: &MissionConfig, plan: FlightPlanReference) -> Vec<MissionPhase> {
-    let mut phases = Vec::with_capacity(3);
+fn phases(
+    config: &MissionConfig,
+    plan: FlightPlanReference,
+    segments: &[Segment],
+) -> Vec<MissionPhase> {
+    let mut phases = Vec::with_capacity(segments.len().max(1).saturating_add(2));
     if config.execution_target == ExecutionTarget::Simulator {
         phases.push(arm_phase());
     }
     // The first phase waits for a valid solution; later phases follow on.
     let first = phases.is_empty();
     phases.push(climb_phase(config, first));
-    phases.push(follow_plan_phase(plan));
+    if segments.is_empty() {
+        phases.push(follow_plan_phase(plan));
+    } else {
+        phases.extend(segments.iter().map(|segment| segment_phase(&plan, segment)));
+    }
     phases
+}
+
+/// One task of the plan: toward its waypoints, done once the last is captured.
+fn segment_phase(plan: &FlightPlanReference, segment: &Segment) -> MissionPhase {
+    MissionPhase {
+        id: segment.id.clone(),
+        required_capabilities: vec![
+            MissionCapability::FlightPlan,
+            MissionCapability::NavigationState,
+        ],
+        entry_conditions: vec![MissionCondition::Always {}],
+        action: MissionAction::Flight(FlightAction::FollowSegment {
+            plan: plan.clone(),
+            first_waypoint: segment.first,
+            last_waypoint: segment.last,
+        }),
+        cleanup_actions: Vec::new(),
+        completion_conditions: vec![MissionCondition::Navigation(
+            NavigationCondition::WaypointCaptured {
+                index: segment.last,
+            },
+        )],
+        abort_conditions: Vec::new(),
+        depends_on: Vec::new(),
+        deadline: Some(PhaseDeadline {
+            clock: PhaseClock::Mission,
+            duration_ns: FOLLOW_PLAN_PHASE_DEADLINE_NS,
+        }),
+    }
 }
 
 fn arm_phase() -> MissionPhase {
     MissionPhase {
         id: ARM_PHASE_ID.to_owned(),
         required_capabilities: vec![
-            MissionCapability::SimulatorTime,
             MissionCapability::ArmDisarm,
             MissionCapability::NavigationState,
         ],
@@ -86,7 +175,11 @@ fn arm_phase() -> MissionPhase {
         cleanup_actions: Vec::new(),
         completion_conditions: vec![MissionCondition::Always {}],
         abort_conditions: Vec::new(),
-        simulator_time_deadline_ns: ARM_PHASE_DEADLINE_NS,
+        depends_on: Vec::new(),
+        deadline: Some(PhaseDeadline {
+            clock: PhaseClock::Mission,
+            duration_ns: ARM_PHASE_DEADLINE_NS,
+        }),
     }
 }
 
@@ -100,7 +193,6 @@ fn climb_phase(config: &MissionConfig, first: bool) -> MissionPhase {
     MissionPhase {
         id: CLIMB_PHASE_ID.to_owned(),
         required_capabilities: vec![
-            MissionCapability::SimulatorTime,
             MissionCapability::FlightControl,
             MissionCapability::NavigationState,
         ],
@@ -114,7 +206,11 @@ fn climb_phase(config: &MissionConfig, first: bool) -> MissionPhase {
             },
         )],
         abort_conditions: Vec::new(),
-        simulator_time_deadline_ns: CLIMB_PHASE_DEADLINE_NS,
+        depends_on: Vec::new(),
+        deadline: Some(PhaseDeadline {
+            clock: PhaseClock::Mission,
+            duration_ns: CLIMB_PHASE_DEADLINE_NS,
+        }),
     }
 }
 
@@ -122,7 +218,6 @@ fn follow_plan_phase(plan: FlightPlanReference) -> MissionPhase {
     MissionPhase {
         id: FOLLOW_PLAN_PHASE_ID.to_owned(),
         required_capabilities: vec![
-            MissionCapability::SimulatorTime,
             MissionCapability::FlightPlan,
             MissionCapability::NavigationState,
         ],
@@ -133,7 +228,11 @@ fn follow_plan_phase(plan: FlightPlanReference) -> MissionPhase {
             NavigationCondition::PlanComplete { expected: true },
         )],
         abort_conditions: Vec::new(),
-        simulator_time_deadline_ns: FOLLOW_PLAN_PHASE_DEADLINE_NS,
+        depends_on: Vec::new(),
+        deadline: Some(PhaseDeadline {
+            clock: PhaseClock::Mission,
+            duration_ns: FOLLOW_PLAN_PHASE_DEADLINE_NS,
+        }),
     }
 }
 

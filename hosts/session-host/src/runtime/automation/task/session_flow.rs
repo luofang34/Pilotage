@@ -21,6 +21,10 @@ use super::{
     PROFILE_REVISION, RunControl, ownship,
 };
 
+/// Speed below which a held vehicle counts as holding in place, metres per
+/// second.
+const HOLDING_SPEED_MPS: f64 = 0.3;
+
 /// Height above the launch point, metres, from which a real vehicle counts
 /// as launched. A DJI native takeoff hovers at about 1.2 m; below this the
 /// vehicle is on the ground and refuses velocity control.
@@ -93,7 +97,18 @@ impl MissionTask {
         self.session = Some(welcome.session);
         self.principal = Some(welcome.principal);
         self.nav_guidance = Some(NavGuidancePublisher::for_session(welcome.session));
-        self.update(|status| status.session = Some(welcome.session.as_u64()));
+        let ours = welcome.principal.as_u64();
+        let holder = welcome
+            .scope_holders
+            .iter()
+            .find(|h| h.vehicle == HOST_VEHICLE && h.scope.as_str() == MISSION_SCOPE)
+            .and_then(|h| h.holder)
+            .map(|h| h.as_u64())
+            .filter(|h| *h != ours);
+        self.update(|status| {
+            status.session = Some(welcome.session.as_u64());
+            status.lease_holder = holder;
+        });
         self.try_start(&welcome.host_capabilities).await
     }
 
@@ -376,6 +391,16 @@ impl MissionTask {
             return;
         };
         mission.on_ownship(&ownship, now);
+        let speed = ownship
+            .ned_velocity
+            .iter()
+            .map(|v| v * v)
+            .sum::<f64>()
+            .sqrt();
+        let holding = (self.operator_hold || self.stopping.is_some()) && speed < HOLDING_SPEED_MPS;
+        if holding != self.status.borrow().holding {
+            self.update(|status| status.holding = holding);
+        }
         let height_m = -ownship.ned[2];
         if self.awaiting_launch && height_m >= AIRBORNE_HEIGHT_M {
             self.on_airborne(height_m);

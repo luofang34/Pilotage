@@ -26,8 +26,9 @@ pub struct MissionIdentity {
     pub schema_version: u16,
     /// The mission content digest.
     pub content_digest: Digest,
-    /// The navigation data that applies to the mission.
-    pub navigation_data_identity: NavigationDataIdentity,
+    /// The navigation data that applies to the whole mission, when one data set does; a
+    /// flight plan names its own, and a phase without one needs none.
+    pub navigation_data_identity: Option<NavigationDataIdentity>,
 }
 
 /// A reference to one immutable flight plan.
@@ -71,8 +72,10 @@ impl MissionIdentity {
     pub(crate) fn validate_content_fields(&self) -> Result<(), ValidationError> {
         validation::text("mission.identity.revision_id", &self.revision_id)?;
         validation::schema(self.schema_version)?;
-        self.navigation_data_identity
-            .validate("mission.identity.navigation_data_identity")
+        match &self.navigation_data_identity {
+            Some(identity) => identity.validate("mission.identity.navigation_data_identity"),
+            None => Ok(()),
+        }
     }
 }
 

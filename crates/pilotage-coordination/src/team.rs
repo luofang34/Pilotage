@@ -116,9 +116,10 @@ pub struct TeamLane {
     run_id: Option<String>,
     reflies: Vec<Refly>,
     revision: Option<revision::Revision>,
-    /// Members whose link is lost, and whether a person stated one down:
-    /// its lines may go to others and the team no longer waits for it.
-    lost: BTreeMap<String, bool>,
+    /// Members whose link is lost, stated down or released; a member
+    /// missing here reports. One stated down may give its lines to others,
+    /// and the team no longer waits for it.
+    lost: BTreeMap<String, wire::MemberLink>,
     requests: u64,
     detail: String,
     sequence: u64,
@@ -186,6 +187,7 @@ impl TeamLane {
             ),
             Some(Action::Revise(revise)) => return self.on_revise(id, revise, context),
             Some(Action::MemberDown(down)) => self.member_down(&down.member),
+            Some(Action::Fetch(fetch)) => return self.on_fetch(id, &fetch.digest),
             Some(Action::Skip(_)) => {
                 Err("a team skips a task through a revision; draft one instead".to_owned())
             }
@@ -323,6 +325,7 @@ impl TeamLane {
             for task in &proposal.tasks {
                 let mut task = task.clone();
                 task.task_id = format!("{member}/{}", task.task_id);
+                task.name = format!("{member}/{}", task.name);
                 task.member.clone_from(member);
                 tasks.push(task);
             }
@@ -390,11 +393,11 @@ impl TeamLane {
         let states: Vec<i32> = self
             .member_proposals
             .keys()
-            .filter(|m| self.lost.get(*m) != Some(&true))
+            .filter(|m| !self.stated_down(m))
             .filter_map(|m| self.statuses.get(m))
             .map(|s| s.state)
             .collect();
-        let released = self.lost.values().filter(|r| **r).count();
+        let released = self.lost.keys().filter(|m| self.stated_down(m)).count();
         if states.len() + released < self.member_proposals.len() {
             return;
         }

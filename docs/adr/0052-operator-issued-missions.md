@@ -62,6 +62,10 @@ the digest of its predecessor, validity, and releasability.
   during a run, the lane applies that recovery one time. Then the run does
   not resume, and an admitted revision does not apply, until a new
   approval of the plan replaces the expired approval.
+  revise, to allocate work, and to change the objective. A client approves
+  only a proposal that it holds in full. The lane's status names a
+  proposal only by its digest and a summary, so a client that did not
+  make the proposal fetches it from the lane before it approves it.
 - **Plan.** The executable `MissionDocument`
   ([ADR-0041](0041-one-mission-sequencing-core.md)): immutable,
   digest-identified, bound to a verified execution strategy and its
@@ -82,8 +86,12 @@ Mini 3 that endpoint is the host attached to its remote controller, not
 software inside the aircraft. A flight controller or a companion computer
 may host the deterministic executor when its platform exposes a verified
 command interface and its resources permit; it need not host a model. The
-lane has a lifecycle: `Idle`, `Admitted`, `Running`, `Held`, `Uncertain`,
-`Complete`, `Aborted`. The environment variables remain a bootstrap source
+lane has a lifecycle: `Idle`, `Admitted`, `Running`, `HoldRequested`,
+`Held`, `Uncertain`, `Complete`, `Aborted`. An accepted hold makes the lane
+`HoldRequested`; the lane becomes `Held` only when the vehicle reports that
+it holds in place. An abort keeps each task that did not finish as
+unfinished: the task in progress becomes `Incomplete`, and a pending task
+stays pending. The environment variables remain a bootstrap source
 that issues the first plan into an `Idle` lane; an issued plan supersedes
 them.
 
@@ -91,11 +99,23 @@ them.
 
 A node is a bounded task with its preconditions, its outcomes, its
 deadline, its resource claims, and its cancellation behaviour. One survey
-line with its acquisition is one task. A route leg is not a task: Navigate
+line with its acquisition is one task. A task has an opaque identity that
+is unique in its proposal, and a name for display. No behaviour follows the
+name or the position of a task in a list. The mission core runs each task
+as a phase with the identity of the task, and the lane follows the task
+events of the core. A run that a revision starts names the run that it
+continues, so a team follows the work of a member through its revisions
+without the use of the names of runs or tasks. A route leg is not a task: Navigate
 keeps the sequencing of legs inside the task, and flight and camera
 acquisition run together under it. A task is complete only when its
 completion evidence exists; for a survey line, the acquired pictures with
-their placements. A display may show progress inside a task from the
+their placements. Each picture that a lane sends for judgment carries its
+run, its task, the attempt and the picture number. The lane refuses a
+verdict for another run, for a picture that it did not send, or a second
+verdict for one picture. The evidence of a task is `Pending` until each
+sent picture has an answer, then `Met` or `Missing`; it is `NotJudged`
+when no judgment service judged it. On a lane with a judgment service, a
+survey line is complete only with `Met`. A display may show progress inside a task from the
 remaining waypoints, and that view is not a second execution truth. The
 first delivery uses a sequence of tasks per vehicle. A team task graph and
 concurrent tasks within a bound come later; a linear list is not promised
@@ -215,8 +235,12 @@ it had stopped; reassignment needs a release acknowledgement, a valid
 expiry with fencing, or work preallocated as disjoint. A team lane keeps
 the work of a member with a lost link, and its line in progress, reserved
 to that member until the member reports again or an approver states, as a
-separate act, that the member is down. Loss of progress is preferred to
-conflicting control. Deadlines bind to a host's boot and
+separate act, that the member is down. The team reports each member's
+link as a typed state (`Reporting`, `Lost`, `Down` or `Released`), and a
+vehicle's lane reports what its run does now: flying, waiting for a
+launch, waiting for a lease that another principal holds, holding, or
+stopped. Clients act on these states; the detail text is for display
+only. Loss of progress is preferred to conflicting control. Deadlines bind to a host's boot and
 clock identity, and schedules across vehicles record their synchronization
 uncertainty. A host restart reconciles state; it does not replay commands.
 When an endpoint dies or loses its aircraft link, its adapter reports the

@@ -249,7 +249,12 @@ impl TaskView {
     fn of(task: &wire::MissionTaskStatus) -> Self {
         let evidence = task.evidence.clone().unwrap_or_default();
         Self {
-            task: task.task_id.clone(),
+            // A person reads the task's name; its identity is opaque.
+            task: if task.name.is_empty() {
+                task.task_id.clone()
+            } else {
+                task.name.clone()
+            },
             kind: wire::MissionTaskKind::try_from(task.kind).map_or_else(
                 |_| task.kind.to_string(),
                 |kind| {

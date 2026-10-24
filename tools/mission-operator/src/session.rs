@@ -133,11 +133,21 @@ impl Session {
         }
     }
 
-    /// Sends `command` and waits for its receipt.
+    /// Sends `command` and waits for its receipt. An approval of a proposal
+    /// this client has not seen fetches it first, so a person approves only
+    /// a plan they can read in full.
     async fn ask(
         &mut self,
         command: &MissionCommand,
     ) -> Result<Option<FiledReceipt>, OperatorError> {
+        if matches!(command, MissionCommand::Approve { .. })
+            && self.desk.unseen_approvable().is_some()
+        {
+            let fetched = Box::pin(self.ask(&MissionCommand::Fetch {})).await?;
+            if !fetched.as_ref().is_some_and(FiledReceipt::accepted) {
+                return Ok(fetched);
+            }
+        }
         let Some(request_id) = self.submit(command).await? else {
             return Ok(None);
         };

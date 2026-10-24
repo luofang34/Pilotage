@@ -45,11 +45,8 @@ fn running_under(policy: wire::MissionExpiryPolicy) -> Lane {
     lane
 }
 
-fn progress(target: usize) -> RunProgress {
-    RunProgress {
-        target_waypoint: Some(target),
-        ..RunProgress::default()
-    }
+fn progress(lane: &Lane, target: usize) -> RunProgress {
+    toward(lane, target)
 }
 
 #[test]
@@ -57,7 +54,7 @@ fn a_run_holds_when_its_approval_expires_and_resumes_only_when_renewed() {
     let (mut lane, _) = running_lane();
     assert_eq!(lane.on_clock(EXPIRY - 1), None);
     assert_eq!(lane.on_clock(EXPIRY), Some(LaneEffect::Hold));
-    assert_eq!(lane.state(), wire::MissionLaneState::Held);
+    assert_eq!(lane.state(), wire::MissionLaneState::HoldRequested);
     assert_eq!(lane.on_clock(EXPIRY + 1), None, "the recovery applies once");
     let resume = || intent(Action::Resume(wire::MissionResume {}));
     let refused = lane.on_intent(&resume(), &at(EXPIRY + 2, "x"));
@@ -89,13 +86,13 @@ fn a_held_run_whose_approval_expired_does_not_resume() {
         &at(EXPIRY, "x"),
     );
     assert!(!accepted(&refused));
-    assert_eq!(lane.state(), wire::MissionLaneState::Held);
+    assert_eq!(lane.state(), wire::MissionLaneState::HoldRequested);
 }
 
 #[test]
 fn a_return_home_policy_flies_home_instead_of_stopping() {
     let mut lane = running_under(wire::MissionExpiryPolicy::ReturnHome);
-    lane.on_progress(&progress(0));
+    lane.on_progress(&progress(&lane, 0));
     let Some(LaneEffect::Start(order)) = lane.on_clock(EXPIRY) else {
         panic!("between lines the way home starts at once");
     };
@@ -112,7 +109,7 @@ fn a_return_home_policy_flies_home_instead_of_stopping() {
 fn a_waiting_revision_does_not_apply_under_an_expired_approval() {
     let (mut lane, lines) = running_lane();
     assert!(lines >= 2);
-    lane.on_progress(&progress(1));
+    lane.on_progress(&progress(&lane, 1));
     let status = lane.status();
     let revise = intent(Action::Revise(wire::MissionRevise {
         base_digest: status.proposal_digest.clone(),
@@ -126,6 +123,6 @@ fn a_waiting_revision_does_not_apply_under_an_expired_approval() {
     assert_eq!(drafted.effect, None, "it waits for the line in progress");
     assert_eq!(lane.on_clock(EXPIRY), Some(LaneEffect::Hold));
     // The line ends, but the revision waits for a new approval.
-    assert_eq!(lane.on_progress(&progress(3)), None);
-    assert_eq!(lane.state(), wire::MissionLaneState::Held);
+    assert_eq!(lane.on_progress(&progress(&lane, 3)), None);
+    assert_eq!(lane.state(), wire::MissionLaneState::HoldRequested);
 }

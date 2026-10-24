@@ -21,10 +21,7 @@ fn every_aircraft_of_the_landmark_fleet_plans_lines() {
             .get(&aircraft.lane())
             .unwrap_or_else(|| panic!("{} proposed nothing", aircraft.lane()));
         assert!(
-            proposal
-                .tasks
-                .iter()
-                .any(|t| t.task_id.starts_with("line-")),
+            proposal.tasks.iter().any(|t| t.name.starts_with("line-")),
             "{} plans no line",
             aircraft.lane()
         );

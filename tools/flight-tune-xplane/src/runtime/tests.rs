@@ -415,7 +415,8 @@ fn context() -> RunExecutionContext {
 fn start(document: &pilotage_mission_core::MissionDocument) -> EngineStart {
     EngineStart {
         host_target: ExecutionTarget::Simulator,
-        simulator_time_ns: 0,
+        mission_time_ns: 0,
+        simulator_time_ns: Some(0),
         wall_time_ns: 0,
         wall_deadline: WallDeadline {
             mission_content_digest: document.identity.content_digest,

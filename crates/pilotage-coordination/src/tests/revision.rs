@@ -10,10 +10,7 @@ use super::*;
 /// Every member flies toward its line 1: the line in progress.
 fn on_line_one(fleet: &mut Fleet) {
     for lane in fleet.members.values_mut() {
-        lane.on_progress(&RunProgress {
-            target_waypoint: Some(1),
-            ..RunProgress::default()
-        });
+        lane.on_progress(&RunProgress { ..toward(lane, 1) });
     }
 }
 
@@ -88,10 +85,7 @@ fn reassign(fleet: &Fleet, from: &str, to: &str, fraction: f64, within: bool) ->
 /// SIM-1 ends its line 1 and switches to its revision.
 fn switch_sim1(fleet: &mut Fleet) {
     let lane = fleet.members.get_mut("SIM-1").expect("SIM-1");
-    let effect = lane.on_progress(&RunProgress {
-        target_waypoint: Some(2),
-        ..RunProgress::default()
-    });
+    let effect = lane.on_progress(&RunProgress { ..toward(lane, 2) });
     assert!(
         matches!(effect, Some(LaneEffect::Start(_))),
         "the switch at the line end"
@@ -105,6 +99,14 @@ fn switch_sim1(fleet: &mut Fleet) {
 #[test]
 fn half_of_a_members_unflown_lines_move_and_are_flown_once() {
     let (mut fleet, planned) = running_fleet(false);
+    let planned_sim2: Vec<String> = fleet
+        .team
+        .status()
+        .tasks
+        .iter()
+        .filter(|t| t.member == "SIM-2")
+        .map(|t| t.task_id.clone())
+        .collect();
     let reassign = reassign(&fleet, "SIM-1", "SIM-2", 0.5, false);
     let (receipt, intents) = team_intent(&mut fleet, reassign);
     let receipt = receipt.expect("answered at once");
@@ -158,7 +160,12 @@ fn half_of_a_members_unflown_lines_move_and_are_flown_once() {
         "every planned line flown once: {}",
         team.detail
     );
-    assert!(team.tasks.iter().any(|t| t.task_id.contains("SIM-2/moved")));
+    // The moved lines are tasks of SIM-2's own later run, which the team follows.
+    assert!(team.tasks.iter().any(|t| {
+        t.member == "SIM-2"
+            && t.state == wire::MissionTaskState::Done as i32
+            && !planned_sim2.contains(&t.task_id)
+    }));
 }
 
 #[test]
@@ -258,6 +265,18 @@ fn a_parents_strip_keeps_exactly_the_lines_inside_it() {
     assert_eq!(draft.tasks.len(), 3, "{}", draft.summary);
 }
 
+/// How the team reports `member`'s link.
+fn link_of(fleet: &Fleet, member: &str) -> wire::MemberLink {
+    fleet
+        .team
+        .status()
+        .members
+        .iter()
+        .find(|m| m.lane == member)
+        .and_then(|m| wire::MemberLink::try_from(m.member_link).ok())
+        .unwrap_or(wire::MemberLink::Unspecified)
+}
+
 fn member_down(member: &str) -> Action {
     Action::MemberDown(wire::MissionMemberDown {
         member: member.to_owned(),
@@ -267,8 +286,10 @@ fn member_down(member: &str) -> Action {
 #[test]
 fn a_lost_member_keeps_its_work_until_it_reports_or_a_person_states_it_down() {
     let (mut fleet, _) = running_fleet(false);
+    assert_eq!(link_of(&fleet, "SIM-3"), wire::MemberLink::Reporting);
     // SIM-3 is only partitioned: it keeps flying its line 1.
     fleet.team.on_member_lost("SIM-3");
+    assert_eq!(link_of(&fleet, "SIM-3"), wire::MemberLink::Lost);
     let give = reassign(&fleet, "SIM-3", "SIM-1", 1.0, false);
     let (receipt, intents) = team_intent(&mut fleet, give);
     let receipt = receipt.expect("answered");
@@ -319,6 +340,7 @@ fn a_person_states_a_lost_member_down_and_the_team_completes_without_it() {
     fleet.members.remove("SIM-3");
     let (receipt, _) = team_intent(&mut fleet, member_down("SIM-3"));
     assert!(receipt.is_some_and(|r| accepted(&r)));
+    assert_eq!(link_of(&fleet, "SIM-3"), wire::MemberLink::Down);
     let give = reassign(&fleet, "SIM-3", "SIM-1", 1.0, false);
     let (receipt, intents) = team_intent(&mut fleet, give);
     let draft = receipt.expect("answered").proposal.expect("a draft");
@@ -329,6 +351,7 @@ fn a_person_states_a_lost_member_down_and_the_team_completes_without_it() {
         intents.iter().all(|i| i.member != "SIM-3"),
         "nothing goes to a member that cannot hear it"
     );
+    assert_eq!(link_of(&fleet, "SIM-3"), wire::MemberLink::Released);
     assert!(
         fleet.team.status().detail.contains("SIM-3 is down"),
         "{}",
@@ -377,5 +400,27 @@ fn a_person_states_a_lost_member_down_and_the_team_completes_without_it() {
         lines_of(&team, wire::MissionTaskState::Done),
         planned,
         "every line flown once"
+    );
+}
+
+#[test]
+fn a_fetch_returns_the_team_plan_or_its_drafted_revision() {
+    let (mut fleet, _) = running_fleet(false);
+    let plan = fleet.team.status().proposal_digest;
+    let fetch = |digest: &[u8]| {
+        Action::Fetch(wire::MissionFetch {
+            digest: digest.to_vec(),
+        })
+    };
+    let (receipt, _) = team_intent(&mut fleet, fetch(&plan));
+    let fetched = receipt.expect("answered").proposal.expect("the plan");
+    assert_eq!(fetched.digest, plan);
+    let give = reassign(&fleet, "SIM-2", "SIM-1", 0.5, false);
+    let (receipt, _) = team_intent(&mut fleet, give);
+    let draft = receipt.expect("answered").proposal.expect("a draft");
+    let (receipt, _) = team_intent(&mut fleet, fetch(&draft.digest));
+    assert_eq!(
+        receipt.expect("answered").proposal.map(|p| p.digest),
+        Some(draft.digest)
     );
 }

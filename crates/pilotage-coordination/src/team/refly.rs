@@ -4,7 +4,7 @@
 //! A re-flight is adaptation within the envelope, decided mid-run from the
 //! judge's verdicts: a line a member flew without enough usable pictures
 //! is flown again, without a new operator approval, once the verdict has
-//! settled (the member flew past the next line, or completed). A member
+//! settled (every picture sent for its judgment has an answer). A member
 //! that already completed flies it at once; otherwise the line's own
 //! member flies it after its plan. Each line is flown again at most once,
 //! the envelope's `max_refly_lines` bounds the total, and only the team
@@ -96,7 +96,7 @@ impl TeamLane {
                     .reflies
                     .iter()
                     .any(|r| r.owner == owner && r.line == line);
-                if tried || !self.book.settled(&owner, &line, self.statuses.get(&owner)) {
+                if tried || !self.book.settled(&owner, &line) {
                     continue;
                 }
                 // Another member flies it, so the second look does not come
@@ -197,7 +197,7 @@ impl TeamLane {
         }
         let others_flying = self.member_proposals.keys().any(|m| {
             m != member
-                && self.lost.get(m) != Some(&true)
+                && !self.stated_down(m)
                 && self
                     .statuses
                     .get(m)
@@ -413,11 +413,10 @@ impl TeamLane {
     /// Follows a flying re-flight in its member's status; when it ends, the
     /// original line takes the re-flight's verdict.
     pub(super) fn refly_progress(&mut self, member: &str, status: &wire::MissionStatus) {
-        let Some((index, refly)) = self
+        let Some(refly) = self
             .reflies
             .iter_mut()
-            .enumerate()
-            .find(|(_, r)| r.member == member && r.state == ReflyState::Flying)
+            .find(|r| r.member == member && r.state == ReflyState::Flying)
         else {
             return;
         };
@@ -428,8 +427,7 @@ impl TeamLane {
             refly.run_id = Some(status.run_id.clone());
             if !refly.moved.is_empty() {
                 // Moved lines are new work: the book follows their run.
-                self.book
-                    .adopt(member, &status.run_id, &format!("moved{index}-"));
+                self.book.adopt(member, &status.run_id);
                 self.book.record(status, &[]);
             }
         }

@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use pilotage_client_link::Link;
 use pilotage_client_session::mission::{
-    ApprovalPolicy, FiledReceipt, MissionCommand, MissionDesk, SurveyFile,
+    ApprovalPolicy, DeskRefusal, FiledReceipt, MissionCommand, MissionDesk, SurveyFile,
 };
 use pilotage_client_session::{
     ClientAction, ClientConfig, ClientEngine, ModuleEvent, ReconnectPolicy, TransportEvent,
@@ -90,6 +90,35 @@ impl Client {
     }
 }
 
+/// A reference host that admits `join` and lets `approver` approve; the host, its port
+/// and its certificate digest.
+async fn approver_host(
+    join: &JoinToken,
+    approver: &JoinToken,
+) -> (runtime::RunningHost, u16, [u8; 32]) {
+    let host = runtime::start_with_options(
+        0,
+        AdapterKind::Reference,
+        RuntimeOptions {
+            network: NetworkOptions {
+                join_token: Some(join.clone()),
+                approver_token: Some(approver.clone()),
+                ..NetworkOptions::default()
+            },
+            ..RuntimeOptions::default()
+        },
+    )
+    .await
+    .unwrap();
+    let cert: [u8; 32] = (0..32)
+        .map(|i| u8::from_str_radix(&host.cert_hash_hex[2 * i..2 * i + 2], 16).unwrap())
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap();
+    let port = host.local_addr.port();
+    (host, port, cert)
+}
+
 #[test]
 fn only_the_approver_secret_approves_a_proposal() {
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -99,26 +128,7 @@ fn only_the_approver_secret_approves_a_proposal() {
     runtime.block_on(async {
         let join = JoinToken::from_hex(&"ab".repeat(32)).unwrap();
         let approver = JoinToken::from_hex(&"cd".repeat(32)).unwrap();
-        let host = runtime::start_with_options(
-            0,
-            AdapterKind::Reference,
-            RuntimeOptions {
-                network: NetworkOptions {
-                    join_token: Some(join.clone()),
-                    approver_token: Some(approver.clone()),
-                    ..NetworkOptions::default()
-                },
-                ..RuntimeOptions::default()
-            },
-        )
-        .await
-        .unwrap();
-        let cert: [u8; 32] = (0..32)
-            .map(|i| u8::from_str_radix(&host.cert_hash_hex[2 * i..2 * i + 2], 16).unwrap())
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap();
-        let port = host.local_addr.port();
+        let (host, port, cert) = approver_host(&join, &approver).await;
         let mut agent = Client::connect(port, cert, "mission-agent", join).await;
         let mut person = Client::connect(port, cert, "sokoly-app", approver).await;
 
@@ -141,7 +151,7 @@ fn only_the_approver_secret_approves_a_proposal() {
         );
 
         // The person approves the agent's proposal as the App's button does:
-        // no digest and the default policy, sized from the lane's status.
+        // no digest and the default policy, once it holds the full proposal.
         while person
             .desk
             .status()
@@ -149,6 +159,22 @@ fn only_the_approver_secret_approves_a_proposal() {
         {
             person.step().await;
         }
+        let approve = MissionCommand::Approve {
+            digest: None,
+            policy: ApprovalPolicy::default(),
+        };
+        assert_eq!(
+            person.desk.resolve(&approve, 0),
+            Err(DeskRefusal::NotHeld),
+            "the lane's summary does not stand for the plan"
+        );
+        let fetched = person.ask(MissionCommand::Fetch {}).await;
+        assert!(fetched.accepted(), "{}", fetched.reason);
+        assert_eq!(
+            person.desk.approvable().map(|p| p.tasks.len()),
+            agent.desk.current_proposal().map(|p| p.tasks.len()),
+            "the person holds the plan the agent proposed"
+        );
         let approved = person
             .ask(MissionCommand::Approve {
                 digest: None,

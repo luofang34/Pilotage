@@ -33,12 +33,12 @@ impl TeamLane {
         // reports again or a person states that it is down. A member that is
         // down cannot finish its line in progress either.
         let lines = match self.lost.get(from) {
-            Some(false) => {
+            Some(wire::MemberLink::Lost) => {
                 return Err(format!(
                     "{from}'s link is lost and its state is unknown; its work stays reserved until it reports again or a person states that it is down"
                 ));
             }
-            Some(true) => self.book.unfinished_lines(from),
+            Some(_) => self.book.unfinished_lines(from),
             None => self.book.unflown_lines(from),
         };
         let mut unflown: Vec<(f64, Vec<wire::GeoPoint>)> = lines
@@ -163,7 +163,9 @@ impl TeamLane {
         self.statuses.get(member).is_some_and(|s| {
             matches!(
                 wire::MissionLaneState::try_from(s.state),
-                Ok(wire::MissionLaneState::Running | wire::MissionLaneState::Held)
+                Ok(wire::MissionLaneState::Running
+                    | wire::MissionLaneState::HoldRequested
+                    | wire::MissionLaneState::Held)
             )
         })
     }
@@ -191,7 +193,8 @@ impl TeamLane {
     ) -> wire::MissionProposal {
         let mut tasks = Vec::new();
         let line = |member: &str, index: usize, path: &Vec<wire::GeoPoint>| wire::MissionTaskPlan {
-            task_id: format!("{member}/unflown-{:02}", index + 1),
+            task_id: format!("{}#{member}-{index}", context.fresh_id),
+            name: format!("{member}/unflown-{:02}", index + 1),
             kind: wire::MissionTaskKind::SurveyLine as i32,
             path: path.clone(),
             length_m: 0.0,

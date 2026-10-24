@@ -76,6 +76,8 @@ enum MissionTaskKind {
 
 // One bounded task of a plan.
 message MissionTaskPlan {
+  // The task's identity: opaque, unique in its proposal, and never derived
+  // from its name or its position. Behaviour follows it.
   string task_id = 1;
   MissionTaskKind kind = 2;
   // The task's path, in fly order.
@@ -84,6 +86,8 @@ message MissionTaskPlan {
   // The lane that executes the task, for a team proposal; empty for a
   // vehicle's own proposal.
   string member = 5;
+  // The task's name, for display only, such as "line-03".
+  string name = 6;
 }
 
 message MissionEstimates {
@@ -236,6 +240,13 @@ message MissionMemberDown {
   string member = 1;
 }
 
+// A request for the full proposal that `digest` names: the lane's plan or
+// a drafted revision; empty names the lane's plan. The receipt carries it.
+// A client approves only a proposal that it holds in full.
+message MissionFetch {
+  bytes digest = 1;
+}
+
 // A request from a principal to a lane. Every intent gets one receipt.
 message MissionIntent {
   // Chosen by the sender; the receipt echoes it.
@@ -250,6 +261,7 @@ message MissionIntent {
     MissionSkip skip = 16;
     MissionRevise revise = 17;
     MissionMemberDown member_down = 18;
+    MissionFetch fetch = 19;
   }
 }
 
@@ -265,7 +277,8 @@ message MissionReceipt {
   string request_id = 1;
   MissionReceiptOutcome outcome = 2;
   string reason = 3;
-  // The proposal a `propose` intent compiled.
+  // The proposal a `propose` or `revise` intent compiled, or the one a
+  // `fetch` intent names.
   MissionProposal proposal = 4;
   string lane = 5;
 }
@@ -281,6 +294,9 @@ enum MissionLaneState {
   MISSION_LANE_STATE_COMPLETE = 7;
   MISSION_LANE_STATE_ABORTED = 8;
   MISSION_LANE_STATE_FAILED = 9;
+  // A hold was accepted; the vehicle has not yet reported that it holds
+  // in place.
+  MISSION_LANE_STATE_HOLD_REQUESTED = 10;
 }
 
 enum MissionTaskState {
@@ -288,7 +304,8 @@ enum MissionTaskState {
   MISSION_TASK_STATE_PENDING = 1;
   MISSION_TASK_STATE_ACTIVE = 2;
   MISSION_TASK_STATE_DONE = 3;
-  // Flown, without the completion evidence the objective needs.
+  // Begun or flown, without the completion the objective needs: flown
+  // without enough evidence, or cut short by an abort.
   MISSION_TASK_STATE_INCOMPLETE = 4;
   MISSION_TASK_STATE_SKIPPED = 5;
 }
@@ -304,6 +321,22 @@ message MissionTaskEvidence {
   // Assessed pictures that showed a possible hazard.
   uint32 hazards = 4;
   string note = 5;
+  // Whether the task's completion evidence is settled.
+  MissionEvidenceState state = 6;
+}
+
+// Where a task's completion evidence stands. A task that needs a judgment
+// is done only with MET.
+enum MissionEvidenceState {
+  MISSION_EVIDENCE_STATE_UNSPECIFIED = 0;
+  // Pictures sent for a judgment have no answer yet.
+  MISSION_EVIDENCE_STATE_PENDING = 1;
+  // Enough pictures were judged usable.
+  MISSION_EVIDENCE_STATE_MET = 2;
+  // Every judgment is in, and too few pictures were judged usable.
+  MISSION_EVIDENCE_STATE_MISSING = 3;
+  // No judgment service judged the task's pictures.
+  MISSION_EVIDENCE_STATE_NOT_JUDGED = 4;
 }
 
 message MissionTaskStatus {
@@ -319,6 +352,8 @@ message MissionTaskStatus {
   uint32 reflown = 7;
   // The task's path, so any client draws the task without the proposal.
   repeated GeoPoint path = 8;
+  // The task's name, for display only.
+  string name = 9;
 }
 
 // One lane's state, published on the reliable stream when it changes and
@@ -331,6 +366,7 @@ message MissionStatus {
   bytes plan_digest = 5;
   string run_id = 6;
   repeated MissionTaskStatus tasks = 7;
+  // The name of the task in progress, for display.
   string active_task = 8;
   // The recovery the lane applies when it cannot continue.
   string recovery_policy = 9;
@@ -343,12 +379,56 @@ message MissionStatus {
   uint64 sequence = 14;
   // The objective's area, for display.
   repeated GeoPoint area = 15;
-  // The objective's height above the launch point, metres; zero when it
-  // states none. Any client sizes an approval's height ceiling from it,
-  // also for a proposal another client made.
+  // The objective's height above the launch point, metres, for display;
+  // zero when it states none. An approval is sized from the full proposal.
   double height_m = 16;
   // A successor drafted, admitted or applied to the plan in progress.
   MissionSuccessor successor = 17;
+  // On a team's member entry: how the team sees the member's link and
+  // whether the member's work is still its own. A client acts on this,
+  // never on `detail`, which is for display only.
+  MemberLink member_link = 18;
+  // How a vehicle's run executes now; absent without a run.
+  MissionExecution execution = 19;
+  // The run this run continues, when a revision replaced it; empty for a
+  // run of a first plan.
+  string predecessor_run_id = 20;
+}
+
+// How a team sees one member.
+enum MemberLink {
+  MEMBER_LINK_UNSPECIFIED = 0;
+  // The member reports.
+  MEMBER_LINK_REPORTING = 1;
+  // The link is lost and the member's state is unknown: it may still fly,
+  // so its work and its line in progress stay reserved to it.
+  MEMBER_LINK_LOST = 2;
+  // A person stated that the member is down: its work may move.
+  MEMBER_LINK_DOWN = 3;
+  // The member is down and its work moved to other members.
+  MEMBER_LINK_RELEASED = 4;
+}
+
+// What a vehicle's run does now, beside the lane's state.
+message MissionExecution {
+  MissionExecutionState state = 1;
+  // The principal that holds the motion lease the run waits for, when the
+  // run knows it.
+  uint64 lease_holder = 2;
+}
+
+enum MissionExecutionState {
+  MISSION_EXECUTION_STATE_UNSPECIFIED = 0;
+  // The run flies its plan.
+  MISSION_EXECUTION_STATE_FLYING = 1;
+  // A real vehicle's run waits for its pilot to launch it.
+  MISSION_EXECUTION_STATE_AWAITING_LAUNCH = 2;
+  // Another principal holds the motion lease; the run waits to get it back.
+  MISSION_EXECUTION_STATE_LEASE_HELD_ELSEWHERE = 3;
+  // The run holds the vehicle in place.
+  MISSION_EXECUTION_STATE_HOLDING = 4;
+  // The run stopped and released the vehicle.
+  MISSION_EXECUTION_STATE_STOPPED = 5;
 }
 
 enum MissionSuccessorState {

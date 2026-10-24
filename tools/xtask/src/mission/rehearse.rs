@@ -57,8 +57,9 @@ pub(crate) fn fault_spec(file: &MissionFile, fault: &Fault) -> Result<String, Xt
             reason: format!("{lane} proposed no plan in the rehearsal"),
         });
     };
-    let Some(line) = proposal.tasks.iter().find(|t| t.task_id == fault.line) else {
-        let lines: Vec<&str> = proposal.tasks.iter().map(|t| t.task_id.as_str()).collect();
+    // The fleet file names the line as a person reads it.
+    let Some(line) = proposal.tasks.iter().find(|t| t.name == fault.line) else {
+        let lines: Vec<&str> = proposal.tasks.iter().map(|t| t.name.as_str()).collect();
         return Err(XtaskError::MissionFault {
             reason: format!(
                 "{lane} plans no {} (it plans {})",
@@ -221,5 +222,6 @@ fn vehicle(name: &str, airframe: Airframe) -> Lane {
         usable_energy_wh: Some(airframe.energy_wh),
         cruise_power_w: Some(airframe.cruise_power_w),
         recovery_policy: "hold".to_owned(),
+        judged: false,
     })
 }

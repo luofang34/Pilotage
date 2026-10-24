@@ -34,6 +34,22 @@ pub enum MissionAction {
     Flight(FlightAction),
     /// A simulator-only calibration action.
     Trial(TrialAction),
+    /// An action a host executor the mission names carries out, such as waiting for a
+    /// person or taking a reading. The core sequences it like any other; a host without
+    /// that executor refuses it.
+    Bound(BoundAction),
+}
+
+/// One operation of a named host executor, with its parameters.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BoundAction {
+    /// The executor that carries the operation out.
+    pub executor: String,
+    /// The operation.
+    pub operation: String,
+    /// Its parameters, by name; ordered, so a document encodes one way.
+    pub parameters: std::collections::BTreeMap<String, String>,
 }
 
 /// The side of a turn to a new heading.
@@ -63,6 +79,17 @@ pub enum FlightAction {
     FollowPlan {
         /// The flight plan reference.
         plan: FlightPlanReference,
+    },
+    /// Follow part of an immutable flight plan: toward its waypoints `first` to `last`,
+    /// in plan order. One plan flown as consecutive segments makes each segment a task of
+    /// its own on one continuous flight.
+    FollowSegment {
+        /// The flight plan reference.
+        plan: FlightPlanReference,
+        /// The zero-based index of the first waypoint the segment flies toward.
+        first_waypoint: u32,
+        /// The zero-based index of the last waypoint the segment flies toward.
+        last_waypoint: u32,
     },
     /// Hold the current flight target.
     MaintainTarget {},
@@ -141,7 +168,7 @@ impl MissionAction {
     #[must_use]
     pub const fn transport_lane(&self) -> TransportLane {
         match self {
-            Self::Flight(_) => TransportLane::Operational,
+            Self::Flight(_) | Self::Bound(_) => TransportLane::Operational,
             Self::Trial(_) => TransportLane::SimulatorOnly,
         }
     }
@@ -150,6 +177,7 @@ impl MissionAction {
         match self {
             Self::Flight(action) => action.validate(field),
             Self::Trial(action) => action.validate(field),
+            Self::Bound(action) => action.validate(field),
         }
     }
 
@@ -157,6 +185,8 @@ impl MissionAction {
         match self {
             Self::Flight(action) => action.required_capability(),
             Self::Trial(action) => action.required_capability(),
+            // The host refuses an executor it does not have; no capability names one.
+            Self::Bound(_) => None,
         }
     }
 
@@ -164,12 +194,15 @@ impl MissionAction {
         match self {
             Self::Flight(action) => action.name(),
             Self::Trial(action) => action.name(),
+            Self::Bound(_) => "bound",
         }
     }
 
     pub(crate) fn flight_plan(&self) -> Option<&FlightPlanReference> {
         match self {
-            Self::Flight(FlightAction::FollowPlan { plan }) => Some(plan),
+            Self::Flight(
+                FlightAction::FollowPlan { plan } | FlightAction::FollowSegment { plan, .. },
+            ) => Some(plan),
             _ => None,
         }
     }
@@ -183,6 +216,20 @@ impl FlightAction {
                 *target_altitude_m,
             ),
             Self::FollowPlan { plan } => plan.validate(&format!("{field}.action.plan")),
+            Self::FollowSegment {
+                plan,
+                first_waypoint,
+                last_waypoint,
+            } => {
+                if first_waypoint > last_waypoint {
+                    return Err(ValidationError::InvalidSegment {
+                        field: format!("{field}.action"),
+                        first: *first_waypoint,
+                        last: *last_waypoint,
+                    });
+                }
+                plan.validate(&format!("{field}.action.plan"))
+            }
             Self::Heading {
                 true_heading_rad, ..
             } => crate::validation::range(
@@ -211,7 +258,9 @@ impl FlightAction {
             | Self::Speed { .. }
             | Self::GoAround { .. }
             | Self::Land {} => Some(MissionCapability::FlightControl),
-            Self::FollowPlan { .. } => Some(MissionCapability::FlightPlan),
+            Self::FollowPlan { .. } | Self::FollowSegment { .. } => {
+                Some(MissionCapability::FlightPlan)
+            }
         }
     }
 
@@ -220,6 +269,7 @@ impl FlightAction {
             Self::Arm {} => "flight.arm",
             Self::Climb { .. } => "flight.climb",
             Self::FollowPlan { .. } => "flight.follow_plan",
+            Self::FollowSegment { .. } => "flight.follow_segment",
             Self::MaintainTarget {} => "flight.maintain_target",
             Self::Heading { .. } => "flight.heading",
             Self::Speed { .. } => "flight.speed",
@@ -284,5 +334,25 @@ impl TrialAction {
             Self::Disarm {} => "trial.disarm",
             Self::CollectResults {} => "trial.collect_results",
         }
+    }
+}
+
+/// The most parameters one bound action may carry.
+const MAX_BOUND_PARAMETERS: usize = 32;
+
+impl BoundAction {
+    fn validate(&self, field: &str) -> Result<(), ValidationError> {
+        crate::validation::text(&format!("{field}.action.executor"), &self.executor)?;
+        crate::validation::text(&format!("{field}.action.operation"), &self.operation)?;
+        crate::validation::count_with_limit(
+            &format!("{field}.action.parameters"),
+            self.parameters.len(),
+            MAX_BOUND_PARAMETERS,
+        )?;
+        for (name, value) in &self.parameters {
+            crate::validation::text(&format!("{field}.action.parameters.name"), name)?;
+            crate::validation::text(&format!("{field}.action.parameters.{name}"), value)?;
+        }
+        Ok(())
     }
 }

@@ -9,8 +9,10 @@
 mod approval;
 mod compile;
 mod digest;
+mod evidence;
 mod expiry;
 mod run;
+mod status;
 mod steering;
 mod successor;
 
@@ -24,10 +26,11 @@ use crate::survey::SurveyRequest;
 
 pub use compile::SurveyDefaults;
 pub use digest::proposal_digest;
-pub use run::{FrameAssessment, RunProgress};
+pub use run::{FrameAssessment, RunExecution, RunProgress};
 pub use steering::{HOST_ISSUER, Requester, Steering};
 
 use compile::Compiled;
+pub use evidence::{FrameTicket, VerdictRefused};
 use run::RunTracker;
 
 /// What a lane is configured with for every proposal it compiles.
@@ -51,6 +54,9 @@ pub struct LaneConfig {
     pub cruise_power_w: Option<f64>,
     /// The recovery the lane applies when it cannot continue.
     pub recovery_policy: String,
+    /// A judgment service judges the run's pictures, so a survey line is
+    /// done only with enough pictures judged usable.
+    pub judged: bool,
 }
 
 /// What the host supplies with an intent: the civil time and a fresh,
@@ -127,6 +133,8 @@ pub struct Lane {
     clock_unix_ms: u64,
     /// The active approval expired during the run and its recovery applied.
     expired: bool,
+    /// What the run does now, as the host last said.
+    execution: Option<RunExecution>,
 }
 
 impl Lane {
@@ -147,6 +155,7 @@ impl Lane {
             changed: true,
             clock_unix_ms: 0,
             expired: false,
+            execution: None,
         }
     }
 
@@ -170,7 +179,7 @@ impl Lane {
             Some(Action::Start(start)) => self.start(start, context),
             Some(Action::Hold(_)) => self.transition(
                 &[wire::MissionLaneState::Running],
-                wire::MissionLaneState::Held,
+                wire::MissionLaneState::HoldRequested,
                 LaneEffect::Hold,
             ),
             Some(Action::Resume(_)) => self.resume(context),
@@ -179,6 +188,7 @@ impl Lane {
             Some(Action::MemberDown(_)) => {
                 Err("a vehicle lane has no members; send it to the team".to_owned())
             }
+            Some(Action::Fetch(fetch)) => self.fetch(&fetch.digest),
             Some(Action::Skip(_)) => Err(
                 "skipping a task needs a successor plan, which this lane does not compile yet"
                     .to_owned(),
@@ -273,7 +283,11 @@ impl Lane {
         approval::still_valid(approval, context.now_unix_ms)?;
         self.expired = false;
         let run_id = context.fresh_id.clone();
-        self.run = Some(RunTracker::new(run_id.clone(), compiled));
+        self.run = Some(RunTracker::new(
+            run_id.clone(),
+            compiled,
+            self.config.judged,
+        ));
         self.state = wire::MissionLaneState::Running;
         self.detail = "running".to_owned();
         Ok((
@@ -286,6 +300,22 @@ impl Lane {
         ))
     }
 
+    /// The full proposal `digest` names: the plan, or a drafted revision;
+    /// an empty digest names the plan.
+    fn fetch(
+        &self,
+        digest: &[u8],
+    ) -> Result<(Option<LaneEffect>, Option<wire::MissionProposal>), String> {
+        let plan = self.proposal.as_ref().map(|c| &c.proposal);
+        let revision = self.successor.as_ref().map(|s| &s.compiled.proposal);
+        [plan, revision]
+            .into_iter()
+            .flatten()
+            .find(|p| digest.is_empty() || p.digest == digest)
+            .map(|p| (None, Some(p.clone())))
+            .ok_or_else(|| "the lane holds no proposal with that digest".to_owned())
+    }
+
     fn abort(&mut self) -> Result<(Option<LaneEffect>, Option<wire::MissionProposal>), String> {
         if !self.is_flying() {
             return Err(format!("nothing to abort; the lane is {:?}", self.state));
@@ -294,7 +324,7 @@ impl Lane {
         self.successor = None;
         self.detail = "aborted by intent; the vehicle stops in place".to_owned();
         if let Some(run) = self.run.as_mut() {
-            run.close();
+            run.close_aborted();
         }
         Ok((Some(LaneEffect::Abort), None))
     }
@@ -313,10 +343,28 @@ impl Lane {
         Ok((Some(effect), None))
     }
 
+    /// The identities of the tasks of the plan the lane holds, in plan order: each
+    /// survey line, then the way home.
+    #[must_use]
+    pub fn task_ids(&self) -> Vec<String> {
+        self.proposal
+            .as_ref()
+            .map(|compiled| {
+                compiled
+                    .proposal
+                    .tasks
+                    .iter()
+                    .map(|task| task.task_id.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     fn is_flying(&self) -> bool {
         matches!(
             self.state,
             wire::MissionLaneState::Running
+                | wire::MissionLaneState::HoldRequested
                 | wire::MissionLaneState::Held
                 | wire::MissionLaneState::Uncertain
         )
@@ -327,8 +375,17 @@ impl Lane {
     /// successor's run, the effect returned.
     pub fn on_progress(&mut self, progress: &RunProgress) -> Option<LaneEffect> {
         let flying = self.is_flying();
+        if progress.execution != self.execution {
+            self.execution = progress.execution;
+            self.changed = true;
+        }
         let run = self.run.as_mut()?;
         if run.on_progress(progress) {
+            self.changed = true;
+        }
+        if self.state == wire::MissionLaneState::HoldRequested && progress.holding {
+            self.state = wire::MissionLaneState::Held;
+            self.detail = "held in place".to_owned();
             self.changed = true;
         }
         if flying && let Some(effect) = self.at_checkpoint(progress.plan_complete) {
@@ -353,72 +410,57 @@ impl Lane {
     }
 
     /// Counts a captured picture against the active survey line. Returns
-    /// the line's task identifier when one is active.
-    pub fn on_frame(&mut self) -> Option<String> {
+    /// its ticket, for a judgment, when a line is active.
+    pub fn on_frame(&mut self) -> Option<FrameTicket> {
         if !self.is_flying() {
             return None;
         }
-        let task = self.run.as_mut()?.on_frame()?;
+        let ticket = self.run.as_mut()?.on_frame()?;
         self.changed = true;
-        Some(task)
+        Some(ticket)
     }
 
-    /// Records a judgment of a picture captured on `task_id`.
-    pub fn on_assessment(&mut self, task_id: &str, assessment: FrameAssessment) {
+    /// Whether the line `ticket` names still needs pictures sent for
+    /// judgment to meet its evidence: the host sends such a picture without
+    /// waiting for its sampling period, so a short line is judged too.
+    #[must_use]
+    pub fn wants_judgment(&self, ticket: &FrameTicket) -> bool {
+        self.run
+            .as_ref()
+            .is_some_and(|run| run.wants_judgment(ticket))
+    }
+
+    /// Notes the picture `ticket` names as sent for judgment: the line's
+    /// evidence is pending until its verdict or the news that it was not
+    /// judged.
+    pub fn on_sent(&mut self, ticket: &FrameTicket) {
         if let Some(run) = self.run.as_mut()
-            && run.on_assessment(task_id, assessment)
+            && run.on_sent(ticket)
         {
             self.changed = true;
         }
     }
 
-    /// The status as it stands, with the sequence of the last change.
-    #[must_use]
-    pub fn status(&self) -> wire::MissionStatus {
-        let proposal = self.proposal.as_ref().map(|compiled| &compiled.proposal);
-        let survey = proposal
-            .and_then(|p| p.objective.as_ref())
-            .and_then(|o| o.kind.as_ref())
-            .map(|wire::mission_objective::Kind::Survey(survey)| survey);
-        wire::MissionStatus {
-            lane: self.config.name.clone(),
-            state: self.state as i32,
-            objective_id: proposal.map(|p| p.objective_id.clone()).unwrap_or_default(),
-            proposal_digest: proposal.map(|p| p.digest.clone()).unwrap_or_default(),
-            plan_digest: proposal
-                .and_then(|p| p.assumptions.as_ref())
-                .map(|a| a.plan_digest.clone())
-                .unwrap_or_default(),
-            run_id: self
-                .run
-                .as_ref()
-                .map(RunTracker::run_id)
-                .unwrap_or_default(),
-            tasks: self
-                .history
-                .iter()
-                .cloned()
-                .chain(match (self.run.as_ref(), proposal) {
-                    (Some(run), _) => run.task_statuses(),
-                    (None, Some(p)) => run::planned_statuses(&p.tasks),
-                    (None, None) => Vec::new(),
-                })
-                .collect(),
-            active_task: self
-                .run
-                .as_ref()
-                .and_then(RunTracker::active_task)
-                .unwrap_or_default(),
-            recovery_policy: self.config.recovery_policy.clone(),
-            estimates: proposal.and_then(|p| p.estimates),
-            simulated: self.config.simulated,
-            detail: self.detail.clone(),
-            members: Vec::new(),
-            sequence: self.sequence,
-            area: survey.map(|s| s.area.clone()).unwrap_or_default(),
-            height_m: survey.map_or(0.0, |s| s.height_m),
-            successor: self.successor_status(),
+    /// Records the judgment of the picture `ticket` names; `None` when the
+    /// service did not judge it.
+    ///
+    /// # Errors
+    ///
+    /// [`VerdictRefused`] for a verdict of another run, of a picture never
+    /// sent, or a second verdict of one picture; the lane changes nothing.
+    pub fn on_assessment(
+        &mut self,
+        ticket: &FrameTicket,
+        assessment: Option<FrameAssessment>,
+    ) -> Result<(), VerdictRefused> {
+        let run = self.run.as_mut().ok_or_else(|| VerdictRefused::OtherRun {
+            run_id: ticket.run_id.clone(),
+            task_id: ticket.task_id.clone(),
+        })?;
+        if run.on_assessment(ticket, assessment)? {
+            self.changed = true;
         }
+        Ok(())
     }
 
     /// The status when it changed since the last call, with a new

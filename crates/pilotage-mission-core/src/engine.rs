@@ -10,8 +10,8 @@ mod run;
 mod runtime;
 
 pub use directive::{
-    ActionId, DirectiveContext, DirectivePurpose, DirectiveReceipt, FlightDirective,
-    MissionDirective, ReceiptResult, TrialDirective,
+    ActionId, BoundDirective, DirectiveContext, DirectivePurpose, DirectiveReceipt,
+    FlightDirective, MissionDirective, ReceiptResult, TrialDirective,
 };
 pub use error::{EngineInputError, EngineStartError};
 pub use observation::{
@@ -34,7 +34,8 @@ use runtime::{PhaseProgress, RunState, TickCollector, TickContext};
 pub struct MissionEngine {
     document: MissionDocument,
     wall_deadline: WallDeadline,
-    last_simulator_time_ns: u64,
+    last_mission_time_ns: u64,
+    last_simulator_time_ns: Option<u64>,
     last_wall_time_ns: u64,
     last_action_id: u32,
     entered_phases: Vec<usize>,
@@ -56,16 +57,21 @@ impl MissionEngine {
             .verify_content_digest()
             .map_err(|source| EngineStartError::DocumentIdentity { source })?;
         validate_wall_deadline(&document, start)?;
+        let first = document.next_ready(&[]).unwrap_or(0);
         Ok(Self {
             document,
             wall_deadline: start.wall_deadline,
+            last_mission_time_ns: start.mission_time_ns,
             last_simulator_time_ns: start.simulator_time_ns,
             last_wall_time_ns: start.wall_time_ns,
             last_action_id: 0,
             entered_phases: Vec::new(),
             run_state: RunState::Running(runtime::RunningState {
-                phase_index: 0,
-                phase_started_at_ns: start.simulator_time_ns,
+                phase_index: first,
+                phase_started: runtime::Clocks {
+                    mission_ns: start.mission_time_ns,
+                    simulator_ns: start.simulator_time_ns,
+                },
                 progress: PhaseProgress::Entry,
             }),
         })
@@ -80,6 +86,7 @@ impl MissionEngine {
     /// directive.
     pub fn tick(&mut self, input: TickInput) -> Result<TickOutput, EngineInputError> {
         self.validate_input(&input)?;
+        self.last_mission_time_ns = input.mission_time_ns;
         self.last_simulator_time_ns = input.simulator_time_ns;
         self.last_wall_time_ns = input.wall_time_ns;
         let mut collector = TickCollector::default();
@@ -126,6 +133,13 @@ impl MissionEngine {
         validate_receipts(input, self.outstanding_action_id())
     }
 
+    fn current_phase(&self) -> Option<&crate::MissionPhase> {
+        match &self.run_state {
+            RunState::Running(state) => self.document.phases.get(state.phase_index),
+            RunState::CleaningUp(_) | RunState::Terminal(_) => None,
+        }
+    }
+
     fn outstanding_action_id(&self) -> Option<ActionId> {
         match &self.run_state {
             RunState::Running(state) => match &state.progress {
@@ -160,10 +174,27 @@ fn validate_wall_deadline(
 }
 
 fn validate_clocks(engine: &MissionEngine, input: &TickInput) -> Result<(), EngineInputError> {
-    if input.simulator_time_ns < engine.last_simulator_time_ns {
+    if input.mission_time_ns < engine.last_mission_time_ns {
+        return Err(EngineInputError::MissionClockRegressed {
+            previous_ns: engine.last_mission_time_ns,
+            current_ns: input.mission_time_ns,
+        });
+    }
+    if let (Some(previous_ns), Some(current_ns)) =
+        (engine.last_simulator_time_ns, input.simulator_time_ns)
+        && current_ns < previous_ns
+    {
         return Err(EngineInputError::SimulatorClockRegressed {
-            previous_ns: engine.last_simulator_time_ns,
-            current_ns: input.simulator_time_ns,
+            previous_ns,
+            current_ns,
+        });
+    }
+    if input.simulator_time_ns.is_none()
+        && let Some(phase) = engine.current_phase()
+        && phase.needs_simulator_time()
+    {
+        return Err(EngineInputError::SimulatorTimeMissing {
+            phase_id: phase.id.clone(),
         });
     }
     if input.wall_time_ns < engine.last_wall_time_ns {

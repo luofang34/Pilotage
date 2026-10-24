@@ -58,7 +58,10 @@ impl Lane {
             };
             return self.propose(objective, context);
         }
-        if !matches!(self.state, State::Running | State::Held) {
+        if !matches!(
+            self.state,
+            State::Running | State::HoldRequested | State::Held
+        ) {
             return Err(format!("nothing to revise; the lane is {:?}", self.state));
         }
         let run = self.run.as_ref().ok_or("no run to revise")?;
@@ -71,12 +74,7 @@ impl Lane {
         }
         let (mut compiled, summary) = self.compile_change(change, current, context)?;
         self.revisions = self.revisions.wrapping_add(1);
-        compile::succeed(
-            &mut compiled,
-            self.revisions,
-            &current.proposal.digest,
-            summary,
-        );
+        compile::succeed(&mut compiled, &current.proposal.digest, summary);
         let proposal = compiled.proposal.clone();
         self.successor = Some(Successor {
             compiled,
@@ -201,7 +199,7 @@ impl Lane {
             .run
             .as_ref()
             .is_some_and(super::run::RunTracker::on_line);
-        if self.state == State::Held || !on_line {
+        if matches!(self.state, State::Held | State::HoldRequested) || !on_line {
             return self.switch();
         }
         self.detail = "revision admitted; it applies at the end of the line in progress".to_owned();
@@ -233,6 +231,7 @@ impl Lane {
         successor.stage = Stage::Applied;
         let compiled = successor.compiled.clone();
         let previous = self.run.take();
+        let predecessor = previous.as_ref().map(super::run::RunTracker::run_id);
         let run_id = format!(
             "{}-rev{}",
             previous
@@ -244,7 +243,9 @@ impl Lane {
         if let Some(run) = previous {
             self.history.extend(run.superseded_statuses());
         }
-        self.run = Some(super::run::RunTracker::new(run_id.clone(), &compiled));
+        let mut run = super::run::RunTracker::new(run_id.clone(), &compiled, self.config.judged);
+        run.predecessor = predecessor;
+        self.run = Some(run);
         self.state = State::Running;
         self.detail = format!(
             "flying revision {}: {}",
@@ -264,7 +265,9 @@ impl Lane {
     pub(super) fn successor_status(&self) -> Option<wire::MissionSuccessor> {
         let successor = self.successor.as_ref()?;
         let applies_after = match successor.stage {
-            Stage::Admitted if self.state == State::Held => "now: the run is held".to_owned(),
+            Stage::Admitted if matches!(self.state, State::Held | State::HoldRequested) => {
+                "now: the run is held".to_owned()
+            }
             Stage::Drafted | Stage::Admitted => self
                 .run
                 .as_ref()

@@ -11,6 +11,7 @@ use pilotage_mission::{
     OwnshipSample, OwnshipSource, SurveyError, SurveyPlanRecord, SurveyRequest, TruthRole,
     plan_survey,
 };
+use pilotage_mission_core::{FlightAction, MissionAction};
 use pilotage_protocol::{ControlAction, ControlIntent, ReferenceFrame};
 
 const CLOCK: ClockDomainId = ClockDomainId::new(7);
@@ -115,15 +116,20 @@ fn assert_record(record: &SurveyPlanRecord) {
             .starts_with("operational-survey-v1:")
     );
     assert_eq!(
-        record.mission_identity.navigation_data_identity.cycle,
-        "survey"
+        record
+            .mission_identity
+            .navigation_data_identity
+            .as_ref()
+            .map(|identity| identity.cycle.as_str()),
+        Some("survey")
     );
     assert_eq!(
         record
             .mission_identity
             .navigation_data_identity
-            .snapshot_digest,
-        record.digest
+            .as_ref()
+            .map(|identity| identity.snapshot_digest),
+        Some(record.digest)
     );
 }
 
@@ -266,7 +272,29 @@ fn a_real_vehicle_starts_from_the_hover_and_a_simulator_arms_first() {
         first_action(&mut real, TruthRole::OperationalEstimate).is_none(),
         "a pilot-launched vehicle is never asked to arm"
     );
-    assert_eq!(real.mission_document().phases.len(), 2);
+    // The climb, then one phase per task: toward each line, along it, and home.
+    let ids: Vec<&str> = real
+        .mission_document()
+        .phases
+        .iter()
+        .map(|phase| phase.id.as_str())
+        .collect();
+    assert_eq!(ids.first().copied(), Some("climb"));
+    assert_eq!(ids.get(1..3), Some(&["transit:line-01", "line-01"][..]));
+    assert!(!ids.contains(&"arm"));
+    let line = &real.mission_document().phases[2];
+    assert!(
+        matches!(
+            line.action,
+            MissionAction::Flight(FlightAction::FollowSegment {
+                first_waypoint: 1,
+                last_waypoint: 1,
+                ..
+            })
+        ),
+        "line 1 flies along its own segment of the one plan: {:?}",
+        line.action
+    );
     let mut simulated = config(OwnshipSource::SimulationTruth);
     simulated.execution_target = ExecutionTarget::Simulator;
     let (mut simulator, _) =
@@ -275,7 +303,12 @@ fn a_real_vehicle_starts_from_the_hover_and_a_simulator_arms_first() {
         first_action(&mut simulator, TruthRole::SimulationTruth),
         Some(ControlAction::Arm)
     ));
-    assert_eq!(simulator.mission_document().phases.len(), 3);
+    // A simulator's mission arms first, then flies the same phases.
+    assert_eq!(
+        simulator.mission_document().phases.len(),
+        real.mission_document().phases.len() + 1
+    );
+    assert_eq!(simulator.mission_document().phases[0].id, "arm");
 }
 
 #[test]

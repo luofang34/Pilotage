@@ -86,8 +86,33 @@ pub struct MissionPhase {
     pub completion_conditions: Vec<MissionCondition>,
     /// The conditions that abort the mission.
     pub abort_conditions: Vec<MissionCondition>,
-    /// The maximum phase duration in simulator nanoseconds.
-    pub simulator_time_deadline_ns: u64,
+    /// How long the phase may run, on the clock it names; a phase without one, such as
+    /// one that waits for a person, runs until its conditions end it.
+    pub deadline: Option<PhaseDeadline>,
+    /// The phases, by identifier, that complete before this one may start. The engine
+    /// runs the first phase in list order whose dependencies have all completed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub depends_on: Vec<String>,
+}
+
+/// The clock a phase deadline is measured on.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum PhaseClock {
+    /// The caller's mission clock: monotonic, and paused while the mission is held.
+    Mission,
+    /// The simulator's clock, which only a simulator supplies.
+    Simulator,
+}
+
+/// The longest one phase may run.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PhaseDeadline {
+    /// The clock the duration is measured on.
+    pub clock: PhaseClock,
+    /// The duration in nanoseconds.
+    pub duration_ns: u64,
 }
 
 /// A canonical mission document.
@@ -110,7 +135,7 @@ impl MissionDocument {
     /// Returns an error if the content is invalid or cannot be encoded.
     pub fn new(
         revision_id: String,
-        navigation_data_identity: NavigationDataIdentity,
+        navigation_data_identity: Option<NavigationDataIdentity>,
         execution_policy: ExecutionPolicy,
         phases: Vec<MissionPhase>,
     ) -> Result<Self, CodecError> {
@@ -201,7 +226,7 @@ impl MissionDocument {
     fn validate_phases(&self) -> Result<(), ValidationError> {
         validation::nonempty_count("mission.phases", self.phases.len(), MAX_PHASES)?;
         for (index, phase) in self.phases.iter().enumerate() {
-            phase.validate(index, &self.identity.navigation_data_identity)?;
+            phase.validate(index, self.identity.navigation_data_identity.as_ref())?;
             if self.phases[..index]
                 .iter()
                 .any(|prior| prior.id == phase.id)
@@ -212,7 +237,54 @@ impl MissionDocument {
                 });
             }
         }
+        self.validate_dependencies()
+    }
+
+    /// Every dependency names another phase of the document, and no phase depends on
+    /// itself through others: some phase is always ready until every one has run.
+    fn validate_dependencies(&self) -> Result<(), ValidationError> {
+        let index_of = |id: &str| self.phases.iter().position(|phase| phase.id == id);
+        for phase in &self.phases {
+            for dependency in &phase.depends_on {
+                if dependency == &phase.id || index_of(dependency).is_none() {
+                    return Err(ValidationError::InvalidDependency {
+                        phase_id: phase.id.clone(),
+                        depends_on: dependency.clone(),
+                    });
+                }
+            }
+        }
+        let mut done = Vec::with_capacity(self.phases.len());
+        while let Some(next) = self.next_ready(&done) {
+            done.push(next);
+        }
+        if let Some(stuck) = self
+            .phases
+            .iter()
+            .enumerate()
+            .find(|(i, _)| !done.contains(i))
+        {
+            return Err(ValidationError::InvalidDependency {
+                phase_id: stuck.1.id.clone(),
+                depends_on: stuck.1.depends_on.join(", "),
+            });
+        }
         Ok(())
+    }
+
+    /// The first phase in list order that has not run and whose dependencies have all
+    /// completed, `completed` naming phases by index.
+    pub(crate) fn next_ready(&self, completed: &[usize]) -> Option<usize> {
+        let done = |id: &String| {
+            completed
+                .iter()
+                .any(|index| self.phases.get(*index).is_some_and(|phase| &phase.id == id))
+        };
+        self.phases
+            .iter()
+            .enumerate()
+            .find(|(index, phase)| !completed.contains(index) && phase.depends_on.iter().all(done))
+            .map(|(index, _)| index)
     }
 
     fn validate_admission(&self, target: ExecutionTarget) -> Result<(), ValidationError> {
@@ -250,7 +322,7 @@ impl MissionPhase {
     fn validate(
         &self,
         index: usize,
-        navigation_data: &NavigationDataIdentity,
+        navigation_data: Option<&NavigationDataIdentity>,
     ) -> Result<(), ValidationError> {
         let field = format!("mission.phases[{index}]");
         validation::text(&format!("{field}.id"), &self.id)?;
@@ -272,12 +344,28 @@ impl MissionPhase {
     }
 
     fn validate_deadline(&self) -> Result<(), ValidationError> {
-        if self.simulator_time_deadline_ns == 0 {
+        if self
+            .deadline
+            .is_some_and(|deadline| deadline.duration_ns == 0)
+        {
             return Err(ValidationError::MissingDeadline {
                 phase_id: self.id.clone(),
             });
         }
         Ok(())
+    }
+
+    /// Whether the phase reads the simulator's clock: its deadline is on it, or one of its
+    /// conditions compares it.
+    pub(crate) fn needs_simulator_time(&self) -> bool {
+        self.deadline
+            .is_some_and(|deadline| deadline.clock == PhaseClock::Simulator)
+            || self
+                .entry_conditions
+                .iter()
+                .chain(&self.completion_conditions)
+                .chain(&self.abort_conditions)
+                .any(|condition| matches!(condition, MissionCondition::Simulator(_)))
     }
 
     fn validate_capability_list(&self) -> Result<(), ValidationError> {
@@ -311,9 +399,9 @@ impl MissionPhase {
     fn validate_plan_identity(
         &self,
         action: &MissionAction,
-        navigation_data: &NavigationDataIdentity,
+        navigation_data: Option<&NavigationDataIdentity>,
     ) -> Result<(), ValidationError> {
-        if let Some(plan) = action.flight_plan()
+        if let (Some(plan), Some(navigation_data)) = (action.flight_plan(), navigation_data)
             && plan.navigation_data_identity != *navigation_data
         {
             return Err(ValidationError::NavigationDataMismatch {
@@ -325,7 +413,9 @@ impl MissionPhase {
     }
 
     fn validate_capability_declarations(&self) -> Result<(), ValidationError> {
-        self.require_declared(MissionCapability::SimulatorTime)?;
+        if self.needs_simulator_time() {
+            self.require_declared(MissionCapability::SimulatorTime)?;
+        }
         if let Some(capability) = self.action.required_capability() {
             self.require_declared(capability)?;
         }

@@ -90,7 +90,7 @@ pub fn mission_document_from_scenario(
         .collect::<Result<Vec<_>, _>>()?;
     MissionDocument::new(
         format!("{}:{}", scenario.id, scenario.revision),
-        navigation_data_identity,
+        Some(navigation_data_identity),
         ExecutionPolicy {
             target: ExecutionTarget::Simulator,
             retry_limit,
@@ -132,7 +132,11 @@ fn project_phase(phase: &pilotage_trial::Phase) -> Result<MissionPhase, Scenario
             .iter()
             .map(project_condition)
             .collect::<Result<Vec<_>, _>>()?,
-        simulator_time_deadline_ns: phase.max_sim_time_ns,
+        depends_on: Vec::new(),
+        deadline: Some(pilotage_mission_core::PhaseDeadline {
+            clock: pilotage_mission_core::PhaseClock::Simulator,
+            duration_ns: phase.max_sim_time_ns,
+        }),
     })
 }
 

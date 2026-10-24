@@ -13,8 +13,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use pilotage_adapter_api::RawVideoFrame;
 use pilotage_mission::{
-    FrameAssessment, IntentContext, Lane, LaneEffect, MissionState, Requester, RunProgress,
-    Steering,
+    FrameAssessment, IntentContext, Lane, LaneEffect, MissionState, Requester, RunExecution,
+    RunProgress, Steering,
 };
 use pilotage_protocol::wire;
 use pilotage_session::ClientKey;
@@ -135,11 +135,14 @@ impl LaneTask {
                     None => break,
                 },
                 result = judge::next(&mut judged) => {
-                    if let Some((task, judgment)) = result {
-                        self.lane.on_assessment(&task, FrameAssessment {
+                    if let Some((ticket, judgment)) = result {
+                        let assessment = judgment.map(|judgment| FrameAssessment {
                             usable: judgment.usable >= 0.5,
                             hazard: judgment.hazard >= 0.5,
                         });
+                        if let Err(refused) = self.lane.on_assessment(&ticket, assessment) {
+                            warn!(%refused, "judgment refused");
+                        }
                     }
                 },
                 _ = ticker.tick() => {
@@ -255,6 +258,7 @@ impl LaneTask {
         let ended = !matches!(
             self.lane.state(),
             wire::MissionLaneState::Running
+                | wire::MissionLaneState::HoldRequested
                 | wire::MissionLaneState::Held
                 | wire::MissionLaneState::Uncertain
         );
@@ -267,10 +271,11 @@ impl LaneTask {
     }
 
     fn on_frame(&mut self, frame: Arc<RawVideoFrame>) {
-        if let Some(task) = self.lane.on_frame()
+        if let Some(ticket) = self.lane.on_frame()
             && let Some(judge) = self.judge.as_mut()
+            && judge.offer(ticket.clone(), frame, self.lane.wants_judgment(&ticket))
         {
-            judge.offer(task, frame);
+            self.lane.on_sent(&ticket);
         }
     }
 
@@ -314,7 +319,8 @@ fn unix_now_ms() -> u64 {
 /// or whose mission failed has ended.
 fn run_progress(status: &AutomationStatus, finished: bool) -> RunProgress {
     RunProgress {
-        target_waypoint: status.target_waypoint,
+        active_task: status.active_task.clone(),
+        finished_tasks: status.finished_tasks.clone(),
         plan_complete: status.plan_complete,
         ended: finished
             || status.fenced
@@ -322,6 +328,23 @@ fn run_progress(status: &AutomationStatus, finished: bool) -> RunProgress {
             || status.ended_by_vehicle.is_some()
             || status.mission_state == Some(MissionState::Failed),
         ended_because: status.ended_by_vehicle,
+        holding: status.holding,
+        execution: Some(execution(status)),
+    }
+}
+
+/// What the run does now, from its status.
+fn execution(status: &AutomationStatus) -> RunExecution {
+    if status.stopped {
+        RunExecution::Stopped
+    } else if status.awaiting_launch {
+        RunExecution::AwaitingLaunch
+    } else if status.held {
+        RunExecution::LeaseHeldElsewhere(status.lease_holder)
+    } else if status.operator_held {
+        RunExecution::Holding
+    } else {
+        RunExecution::Flying
     }
 }
 

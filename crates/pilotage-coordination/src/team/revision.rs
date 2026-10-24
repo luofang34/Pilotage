@@ -182,7 +182,7 @@ impl TeamLane {
             .filter(|r| r.stage == Stage::Drafted && r.proposal.digest == approval.proposal_digest)
             .ok_or("no drafted revision has that digest")?;
         if let Change::Reassign { from, .. } = &drafted.change
-            && self.lost.get(from) == Some(&false)
+            && self.lost.get(from) == Some(&wire::MemberLink::Lost)
         {
             return Err(format!(
                 "{from}'s link is lost and its state is unknown; its work stays reserved until it reports again or a person states that it is down"
@@ -216,7 +216,8 @@ impl TeamLane {
                 kept,
                 moved,
             } => {
-                if self.lost.get(&from) == Some(&true) {
+                if self.stated_down(&from) {
+                    self.lost.insert(from.clone(), wire::MemberLink::Released);
                     // A member a person stated down hears nothing: its lines
                     // are skipped here, and the team no longer waits for it.
                     self.book.skip_paths(&from, &moved);
@@ -336,8 +337,9 @@ impl TeamLane {
             None => Err(format!(
                 "{member} reports; only a member whose link is lost can be stated down"
             )),
+            Some(wire::MemberLink::Released) => Ok((Vec::new(), false)),
             Some(_) => {
-                self.lost.insert(member.to_owned(), true);
+                self.lost.insert(member.to_owned(), wire::MemberLink::Down);
                 if let Some(status) = self.statuses.get_mut(member) {
                     status.detail = "down, as a person stated; its work may move".to_owned();
                 }
@@ -351,25 +353,68 @@ impl TeamLane {
     /// line in progress stay reserved to it until it reports again or a
     /// person states that it is down.
     pub fn on_member_lost(&mut self, member: &str) {
-        if self.lost.get(member) == Some(&true) {
+        if self.stated_down(member) {
             return;
         }
         if let Some(status) = self.statuses.get_mut(member) {
             status.detail = "link lost; state unknown, work stays reserved".to_owned();
             self.changed = true;
         }
-        self.lost.entry(member.to_owned()).or_insert(false);
+        self.lost
+            .entry(member.to_owned())
+            .or_insert(wire::MemberLink::Lost);
     }
 
     /// Whether the team takes `member`'s report: a member that reports
     /// again is no longer lost, unless a person stated it down, as others
     /// may fly its lines.
     pub(super) fn reporting(&mut self, member: &str) -> bool {
-        if self.lost.get(member) == Some(&true) {
+        if self.stated_down(member) {
             return false;
         }
         self.lost.remove(member);
         true
+    }
+
+    /// Answers a fetch with the full proposal `digest` names: the team
+    /// plan, or a drafted revision; an empty digest names the plan.
+    pub(super) fn on_fetch(&self, id: String, digest: &[u8]) -> super::TeamReply {
+        let plan = self.proposal.as_ref();
+        let revision = self.revision.as_ref().map(|r| &r.proposal);
+        let found = [plan, revision]
+            .into_iter()
+            .flatten()
+            .find(|p| digest.is_empty() || p.digest == digest)
+            .cloned();
+        let receipt = match found {
+            Some(proposal) => self.receipt(id, true, String::new(), Some(proposal)),
+            None => self.receipt(
+                id,
+                false,
+                "the team holds no proposal with that digest".to_owned(),
+                None,
+            ),
+        };
+        super::TeamReply {
+            receipt: Some(receipt),
+            intents: Vec::new(),
+        }
+    }
+
+    /// Whether a person stated `member` down, whether or not its work moved.
+    pub(super) fn stated_down(&self, member: &str) -> bool {
+        matches!(
+            self.lost.get(member),
+            Some(wire::MemberLink::Down | wire::MemberLink::Released)
+        )
+    }
+
+    /// How the team sees `member`.
+    pub(super) fn link(&self, member: &str) -> wire::MemberLink {
+        self.lost
+            .get(member)
+            .copied()
+            .unwrap_or(wire::MemberLink::Reporting)
     }
 
     /// The revision as the team's status reports it.
