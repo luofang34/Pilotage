@@ -14,10 +14,37 @@ pub(super) enum RunState {
     Terminal(MissionTerminal),
 }
 
+/// The caller's clocks at one instant.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Clocks {
+    pub(super) mission_ns: u64,
+    pub(super) simulator_ns: Option<u64>,
+}
+
+impl Clocks {
+    pub(super) fn of(input: &crate::TickInput) -> Self {
+        Self {
+            mission_ns: input.mission_time_ns,
+            simulator_ns: input.simulator_time_ns,
+        }
+    }
+
+    /// Time since `started` on `clock`; zero when a clock is missing at either end.
+    pub(super) fn since(self, started: Self, clock: crate::PhaseClock) -> u64 {
+        match clock {
+            crate::PhaseClock::Mission => self.mission_ns.saturating_sub(started.mission_ns),
+            crate::PhaseClock::Simulator => match (self.simulator_ns, started.simulator_ns) {
+                (Some(now), Some(then)) => now.saturating_sub(then),
+                _ => 0,
+            },
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct RunningState {
     pub(super) phase_index: usize,
-    pub(super) phase_started_at_ns: u64,
+    pub(super) phase_started: Clocks,
     pub(super) progress: PhaseProgress,
 }
 

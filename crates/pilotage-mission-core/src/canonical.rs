@@ -14,7 +14,7 @@ const CONTENT_DIGEST_DOMAIN: &[u8] = b"pilotage.mission-document.content.v1\0";
 struct ContentIdentity<'a> {
     revision_id: &'a str,
     schema_version: u16,
-    navigation_data_identity: &'a NavigationDataIdentity,
+    navigation_data_identity: &'a Option<NavigationDataIdentity>,
 }
 
 #[derive(Serialize)]

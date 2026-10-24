@@ -7,7 +7,7 @@ use crate::{
 
 pub(crate) fn all_match(
     conditions: &[MissionCondition],
-    simulator_time_ns: u64,
+    simulator_time_ns: Option<u64>,
     observation: &MissionObservation,
 ) -> bool {
     conditions
@@ -17,7 +17,7 @@ pub(crate) fn all_match(
 
 pub(crate) fn first_match(
     conditions: &[MissionCondition],
-    simulator_time_ns: u64,
+    simulator_time_ns: Option<u64>,
     observation: &MissionObservation,
 ) -> Option<usize> {
     conditions
@@ -27,7 +27,7 @@ pub(crate) fn first_match(
 
 fn matches(
     condition: &MissionCondition,
-    simulator_time_ns: u64,
+    simulator_time_ns: Option<u64>,
     observation: &MissionObservation,
 ) -> bool {
     match condition {
@@ -73,12 +73,13 @@ fn vehicle(condition: &VehicleCondition, observation: &MissionObservation) -> bo
     }
 }
 
-fn simulator(condition: &SimulatorCondition, simulator_time_ns: u64) -> bool {
+/// A simulator condition holds only on a simulator's clock; without one it never holds.
+fn simulator(condition: &SimulatorCondition, simulator_time_ns: Option<u64>) -> bool {
     let SimulatorCondition::Time {
         comparison,
         value_ns,
     } = condition;
-    compare_u64(*comparison, simulator_time_ns, *value_ns)
+    simulator_time_ns.is_some_and(|now| compare_u64(*comparison, now, *value_ns))
 }
 
 fn signal(condition: &SignalCondition, observation: &MissionObservation) -> bool {

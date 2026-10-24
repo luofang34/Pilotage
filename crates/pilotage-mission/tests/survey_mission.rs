@@ -115,15 +115,20 @@ fn assert_record(record: &SurveyPlanRecord) {
             .starts_with("operational-survey-v1:")
     );
     assert_eq!(
-        record.mission_identity.navigation_data_identity.cycle,
-        "survey"
+        record
+            .mission_identity
+            .navigation_data_identity
+            .as_ref()
+            .map(|identity| identity.cycle.as_str()),
+        Some("survey")
     );
     assert_eq!(
         record
             .mission_identity
             .navigation_data_identity
-            .snapshot_digest,
-        record.digest
+            .as_ref()
+            .map(|identity| identity.snapshot_digest),
+        Some(record.digest)
     );
 }
 

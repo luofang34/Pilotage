@@ -12,7 +12,6 @@ const MAX_SCENARIOS_PER_SET: usize = 64;
 /// they bound the same set of measured objectives.
 const MAX_POLICY_OBJECTIVES: usize = 64;
 const PROMOTION_POLICY_SCHEMA_VERSION: u16 = 2;
-const MISSION_SCHEMA_VERSION: u16 = 3;
 const MAX_SAMPLE_TIMEOUT_NS: u64 = 60_000_000_000;
 
 pub(super) fn verify(stage: &SearchStage) -> Result<(), FeedbackError> {
@@ -118,7 +117,7 @@ fn verify_scenario(
     verify_name(&mission.revision_id, "mission")?;
     if !ids.insert(mission.revision_id.clone())
         || !digests.insert(mission.content_digest)
-        || mission.schema_version != MISSION_SCHEMA_VERSION
+        || mission.schema_version != flight_tune::MISSION_SCHEMA_VERSION
         || mission.content_digest.is_zero()
         || mission.max_samples == 0
         || mission.sample_timeout_ns == 0

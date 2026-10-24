@@ -43,7 +43,8 @@ fn stale_receipt_is_rejected_without_changing_state() {
     let expected = engine.state();
     let error = engine
         .tick(TickInput {
-            simulator_time_ns: 1,
+            mission_time_ns: 1,
+            simulator_time_ns: Some(1),
             wall_time_ns: 1,
             observation: MissionObservation::default(),
             receipts: vec![DirectiveReceipt {
@@ -95,7 +96,8 @@ fn action_identifier_wrap_skips_zero_and_replaces_the_resolved_attempt() {
     ));
     let stale = engine
         .tick(TickInput {
-            simulator_time_ns: 2,
+            mission_time_ns: 2,
+            simulator_time_ns: Some(2),
             wall_time_ns: 2,
             observation: MissionObservation::default(),
             receipts: vec![DirectiveReceipt {
@@ -114,7 +116,8 @@ fn wall_deadline_identity_must_match_the_mission_digest() {
         document,
         EngineStart {
             host_target: ExecutionTarget::Simulator,
-            simulator_time_ns: 0,
+            mission_time_ns: 0,
+            simulator_time_ns: Some(0),
             wall_time_ns: 0,
             wall_deadline: WallDeadline {
                 mission_content_digest: digest(99),

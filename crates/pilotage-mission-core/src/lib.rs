@@ -19,7 +19,8 @@ pub use condition::{
 };
 pub use digest::Digest;
 pub use document::{
-    ExecutionPolicy, ExecutionTarget, MissionCapability, MissionDocument, MissionPhase,
+    ExecutionPolicy, ExecutionTarget, MissionCapability, MissionDocument, MissionPhase, PhaseClock,
+    PhaseDeadline,
 };
 pub use engine::{
     AbortCause, ActionId, CleanupFailure, CleanupFailureKind, DeadlineClass, DirectiveContext,
@@ -42,7 +43,7 @@ pub use trial::{
 };
 
 /// The mission document schema version supported by this crate.
-pub const MISSION_SCHEMA_VERSION: u16 = 3;
+pub const MISSION_SCHEMA_VERSION: u16 = 4;
 
 /// The maximum encoded mission document size.
 pub const MAX_DOCUMENT_BYTES: usize = 1_048_576;

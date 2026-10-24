@@ -167,14 +167,17 @@ fn the_mission_core_admits_each_lowered_action() {
                 cleanup_actions: Vec::new(),
                 completion_conditions: Vec::new(),
                 abort_conditions: Vec::new(),
-                simulator_time_deadline_ns: 1_000_000,
+                deadline: Some(pilotage_mission_core::PhaseDeadline {
+                    clock: pilotage_mission_core::PhaseClock::Simulator,
+                    duration_ns: 1_000_000,
+                }),
             });
         }
     }
     assert_eq!(phases.len(), 7);
     MissionDocument::new(
         "lowered-directives".to_owned(),
-        navigation_data(),
+        Some(navigation_data()),
         ExecutionPolicy {
             target: ExecutionTarget::RealVehicle,
             retry_limit: 1,
