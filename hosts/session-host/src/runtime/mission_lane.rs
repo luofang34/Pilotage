@@ -311,7 +311,9 @@ fn run_progress(status: &AutomationStatus, finished: bool) -> RunProgress {
         ended: finished
             || status.fenced
             || status.closed
+            || status.ended_by_vehicle.is_some()
             || status.mission_state == Some(MissionState::Failed),
+        ended_because: status.ended_by_vehicle,
     }
 }
 

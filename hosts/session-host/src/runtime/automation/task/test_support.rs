@@ -46,6 +46,7 @@ impl MissionTask {
             controls: None,
             operator_hold: false,
             stopping: None,
+            flight: super::flight_watch::FlightWatch::default(),
         }
     }
 }

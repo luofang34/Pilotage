@@ -4,6 +4,7 @@
 //! and authority fencing live in the submodules.
 
 mod fencing;
+mod flight_watch;
 mod nav_guidance;
 mod run_control;
 mod session_flow;
@@ -113,6 +114,8 @@ pub(super) struct MissionTask {
     operator_hold: bool,
     /// Neutral frames still owed before an abort releases the lease.
     stopping: Option<u8>,
+    /// The flight controller's reports during this run.
+    flight: flight_watch::FlightWatch,
 }
 
 impl MissionTask {
@@ -153,6 +156,7 @@ impl MissionTask {
             controls: None,
             operator_hold: false,
             stopping: None,
+            flight: flight_watch::FlightWatch::default(),
         }
     }
 
