@@ -383,7 +383,10 @@ Handover records outlive the plan that they came from: a new proposal, a
 failed proposal and the refusal of a member keep every record that is not
 settled. A record is settled when it is withdrawn, when the receiver flew
 the moved lines, or when a person resolved it. Only a settled record is
-dropped. An assignment identity includes the run of the team, so a
+dropped. When a team starts new work after its run ended, a handover that
+is still open or committed has no run to follow, so it becomes unreconciled
+too. A flight of moved lines carries the identity of its handover, and the
+team matches the flight to that handover only. An assignment identity includes the run of the team, so a
 restarted coordinator never uses an identity or a generation again. It
 has no run of the team, and it can give work only through a new team
 proposal that each member must accept. A member lane refuses a proposal

@@ -256,8 +256,8 @@ impl TeamLane {
                         "{from} is down; {to} flies its {} unfinished lines",
                         moved.len()
                     );
-                    self.override_handover(&from, &to, &moved);
-                    intents.extend(self.queue_moved(&to, &from, moved, context));
+                    let assignment = self.override_handover(&from, &to, &moved);
+                    intents.extend(self.queue_moved(&to, &from, moved, assignment, context));
                 } else {
                     // The moved lines go to `to` only once `from` reports
                     // that it released them.

@@ -22,6 +22,7 @@ impl TeamLane {
                 self.phase
             ));
         }
+        self.orphan_live_handovers();
         self.refuse_while_unreconciled()?;
         let Some(wire::mission_objective::Kind::Survey(survey)) = objective.kind.as_ref() else {
             return Err("the objective is not a survey".to_owned());

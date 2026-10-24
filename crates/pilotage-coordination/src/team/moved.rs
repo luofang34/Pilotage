@@ -16,6 +16,7 @@ impl TeamLane {
         member: &str,
         from: &str,
         moved: Vec<Vec<wire::GeoPoint>>,
+        assignment: String,
         context: &IntentContext,
     ) -> Vec<MemberIntent> {
         let index = self.reflies.len();
@@ -28,6 +29,7 @@ impl TeamLane {
             proposal: None,
             run_id: None,
             moved,
+            assignment: Some(assignment),
         });
         let complete = self
             .statuses

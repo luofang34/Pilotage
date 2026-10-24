@@ -113,26 +113,27 @@ impl TeamLane {
     }
 
     /// Records a handover a person's statement that `from` is down commits
-    /// at once: an override, not a release.
+    /// at once: an override, not a release. Returns its assignment.
     pub(super) fn override_handover(
         &mut self,
         from: &str,
         to: &str,
         moved: &[Vec<wire::GeoPoint>],
-    ) {
+    ) -> String {
         let stated_by = self
             .stated_by
             .get(from)
             .cloned()
             .unwrap_or_else(|| "a person".to_owned());
         let moved = self.moved_tasks(from, moved);
+        let assignment_id = format!(
+            "{}/{}/handover-{}",
+            self.config.name,
+            self.run_id.clone().unwrap_or_default(),
+            self.handovers.len().wrapping_add(1)
+        );
         self.handovers.push(Handover {
-            assignment_id: format!(
-                "{}/{}/handover-{}",
-                self.config.name,
-                self.run_id.clone().unwrap_or_default(),
-                self.handovers.len().wrapping_add(1)
-            ),
+            assignment_id: assignment_id.clone(),
             generation: 2,
             from: from.to_owned(),
             to: to.to_owned(),
@@ -144,6 +145,7 @@ impl TeamLane {
                 "{stated_by} stated that {from} is down; this does not show that {from} stopped or that its airspace is clear"
             ),
         });
+        assignment_id
     }
 
     /// The tasks of `from` on the paths `moved`, as `from` names them.
@@ -248,21 +250,22 @@ impl TeamLane {
             )
         };
         let to = handover.to.clone();
+        let assignment = handover.assignment_id.clone();
         let paths: Vec<Vec<wire::GeoPoint>> =
             handover.moved.iter().map(|(_, p)| p.clone()).collect();
         self.detail = format!("{member} released {} lines; {to} flies them", paths.len());
-        self.queue_moved(&to, member, paths, context)
+        self.queue_moved(&to, member, paths, assignment, context)
     }
 
-    /// The moved work `member` was to fly from `owner` did not start: it is
-    /// released and unassigned.
-    pub(super) fn unassign_moved(&mut self, member: &str, owner: &str, reason: &str) {
+    /// The moved work of `assignment` did not start: it is released and
+    /// unassigned.
+    pub(super) fn unassign_moved(&mut self, assignment: &str, reason: &str) {
         for handover in &mut self.handovers {
-            if handover.to == member && handover.from == owner && handover.state == State::Committed
-            {
+            if handover.assignment_id == assignment && handover.state == State::Committed {
                 handover.state = State::Unassigned;
                 handover.basis = format!(
-                    "{owner} released the work and {member} did not take it ({reason}); an operator gives it to a member"
+                    "{} released the work and {} did not take it ({reason}); an operator gives it to a member",
+                    handover.from, handover.to
                 );
             }
         }
@@ -274,14 +277,15 @@ impl TeamLane {
         let queued: Vec<String> = self
             .reflies
             .iter_mut()
-            .filter(|r| r.member == member && !r.moved.is_empty() && r.state == ReflyState::Queued)
-            .map(|r| {
+            .filter(|r| r.member == member && r.state == ReflyState::Queued)
+            .filter_map(|r| {
+                let assignment = r.assignment.clone()?;
                 r.state = ReflyState::Failed;
-                r.owner.clone()
+                Some(assignment)
             })
             .collect();
-        for owner in queued {
-            self.unassign_moved(member, &owner, "it is stated down");
+        for assignment in queued {
+            self.unassign_moved(&assignment, "it is stated down");
         }
     }
 
@@ -331,21 +335,42 @@ impl TeamLane {
         Ok((Vec::new(), false))
     }
 
-    /// The flight of moved lines `member` flew for `owner` ended: flown to
-    /// its end, or failed part of the way with nobody holding the rest.
-    pub(super) fn moved_flight_ended(&mut self, member: &str, owner: &str, completed: bool) {
+    /// The flight of the moved lines of `assignment` ended: flown to its
+    /// end, or failed part of the way with nobody holding the rest.
+    pub(super) fn moved_flight_ended(&mut self, assignment: &str, completed: bool) {
         for handover in &mut self.handovers {
-            if handover.to == member && handover.from == owner && handover.state == State::Committed
-            {
+            if handover.assignment_id == assignment && handover.state == State::Committed {
                 if completed {
                     handover.state = State::Completed;
-                    handover.basis = format!("{member} flew the moved lines");
+                    handover.basis = format!("{} flew the moved lines", handover.to);
                 } else {
                     handover.state = State::Unassigned;
                     handover.basis = format!(
-                        "{member}'s flight of the moved lines ended before they were flown; an operator gives them to a member"
+                        "{}'s flight of the moved lines ended before they were flown; an operator gives them to a member",
+                        handover.to
                     );
                 }
+            }
+        }
+    }
+
+    /// A team whose run ended starts new work: a handover still open or
+    /// committed has no run to follow any more, so whether a member flies
+    /// its work is not known.
+    pub(super) fn orphan_live_handovers(&mut self) {
+        for handover in &mut self.handovers {
+            if matches!(handover.state, State::Releasing | State::Committed) {
+                handover.basis = format!(
+                    "the team's run ended while this handover was {}; check whether {} or {} flies its lines, then resolve it",
+                    if handover.state == State::Releasing {
+                        "open"
+                    } else {
+                        "committed"
+                    },
+                    handover.from,
+                    handover.to
+                );
+                handover.state = State::Unreconciled;
             }
         }
     }
@@ -361,6 +386,13 @@ impl TeamLane {
     /// whether a member flies its work, so it shows it and moves nothing.
     pub fn restore_handovers(&mut self, records: &[wire::MissionHandover]) {
         for record in records {
+            if self
+                .handovers
+                .iter()
+                .any(|h| h.assignment_id == record.assignment_id)
+            {
+                continue;
+            }
             let open = matches!(
                 State::try_from(record.state),
                 Ok(State::Releasing | State::Committed)

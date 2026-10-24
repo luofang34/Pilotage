@@ -132,3 +132,42 @@ fn a_proposal_a_member_refuses_keeps_an_unassigned_record() {
         "it is still unresolved"
     );
 }
+
+#[test]
+fn a_live_handover_of_an_ended_run_stops_the_next_plan_until_resolved() {
+    for released in [true, false] {
+        let (mut fleet, _) = running_fleet(true);
+        let intents = move_sim1_to_sim2(&mut fleet);
+        fleet.route(intents);
+        if released {
+            let status = sim1_switches(&mut fleet);
+            fleet.team.on_member_status(&status, &context("released"));
+            assert_eq!(handover(&fleet).state, State::Committed as i32);
+        } else {
+            assert_eq!(handover(&fleet).state, State::Releasing as i32);
+        }
+        fleet.team.on_intent(
+            &wire::MissionIntent {
+                request_id: "abort".to_owned(),
+                action: Some(Action::Abort(wire::MissionAbort {})),
+            },
+            &context("abort"),
+        );
+        let (receipt, intents) = propose(&mut fleet);
+        let receipt = receipt.expect("refused at once");
+        assert!(
+            !accepted(&receipt) && intents.is_empty(),
+            "{}",
+            receipt.reason
+        );
+        assert_eq!(handover(&fleet).state, State::Unreconciled as i32);
+    }
+}
+
+#[test]
+fn reading_the_journal_back_twice_keeps_one_record_of_each_handover() {
+    let mut fleet = restarted_with_a_committed_handover();
+    let journal = fleet.team.handovers();
+    fleet.team.restore_handovers(&journal);
+    assert_eq!(fleet.team.status().handovers.len(), 1);
+}

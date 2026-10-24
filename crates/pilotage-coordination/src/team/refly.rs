@@ -52,6 +52,8 @@ pub(super) struct Refly {
     pub run_id: Option<String>,
     /// The paths of lines moved to the member; empty for a re-flight.
     pub moved: Vec<Vec<wire::GeoPoint>>,
+    /// The handover whose moved lines these are; none for a re-flight.
+    pub assignment: Option<String>,
 }
 
 impl Refly {
@@ -123,6 +125,7 @@ impl TeamLane {
                     proposal: None,
                     run_id: None,
                     moved: Vec::new(),
+                    assignment: None,
                 });
             }
         }
@@ -285,9 +288,8 @@ impl TeamLane {
                 "{} refused to fly {} again: {}",
                 refly.member, refly.line, receipt.reason
             );
-            if !refly.moved.is_empty() {
-                let (member, owner) = (refly.member.clone(), refly.owner.clone());
-                self.unassign_moved(&member, &owner, &receipt.reason);
+            if let Some(assignment) = refly.assignment.clone() {
+                self.unassign_moved(&assignment, &receipt.reason);
             }
             return Vec::new();
         }
@@ -378,23 +380,23 @@ impl TeamLane {
             .iter()
             .find(|t| t.kind == wire::MissionTaskKind::SurveyLine as i32);
         let moved = !refly.moved.is_empty();
-        let (member, owner) = (refly.member.clone(), refly.owner.clone());
+        let assignment = refly.assignment.clone();
         if status.state == wire::MissionLaneState::Complete as i32 {
             refly.state = ReflyState::Done;
             if let (Some(line_status), false) = (line_status, moved) {
                 self.book
                     .apply_refly(&refly.owner, &refly.line, line_status);
             }
-            if moved {
-                self.moved_flight_ended(&member, &owner, true);
+            if let Some(assignment) = assignment.as_deref() {
+                self.moved_flight_ended(assignment, true);
             }
         } else if matches!(
             wire::MissionLaneState::try_from(status.state),
             Ok(wire::MissionLaneState::Failed | wire::MissionLaneState::Aborted)
         ) {
             refly.state = ReflyState::Failed;
-            if moved {
-                self.moved_flight_ended(&member, &owner, false);
+            if let Some(assignment) = assignment.as_deref() {
+                self.moved_flight_ended(assignment, false);
             }
         }
     }
