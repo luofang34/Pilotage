@@ -263,3 +263,25 @@ fn a_revision_continues_the_lanes_plan_and_its_draft_is_what_approve_names() {
     };
     assert_eq!(approval.proposal_digest, b"\x02");
 }
+
+#[test]
+fn a_proposal_is_approvable_as_soon_as_its_receipt_arrives_before_any_status() {
+    let mut desk = MissionDesk::new("test", 7);
+    let mut engine = crate::tests::engine();
+    crate::tests::admit(&mut engine, 1, 1);
+    let objective = survey().objective("test", 1);
+    let (request_id, _) = desk.send(&engine, Action::Propose(objective)).unwrap();
+    desk.on_receipt(wire::MissionReceipt {
+        request_id,
+        outcome: wire::MissionReceiptOutcome::Accepted as i32,
+        proposal: Some(proposal(&[7; 32])),
+        ..wire::MissionReceipt::default()
+    })
+    .unwrap();
+    assert!(desk.status().is_none(), "no status has come yet");
+    let command = MissionCommand::Approve {
+        digest: None,
+        policy: ApprovalPolicy::default(),
+    };
+    assert!(matches!(desk.resolve(&command, 1), Ok(Action::Approve(_))));
+}
