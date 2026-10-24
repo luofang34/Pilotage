@@ -26,8 +26,7 @@ fn finish() -> wire::mission_revise::Change {
 
 fn progress(target: usize) -> RunProgress {
     RunProgress {
-        target_waypoint: Some(target),
-        ..RunProgress::default()
+        ..toward(target, usize::MAX / 4)
     }
 }
 
@@ -106,12 +105,12 @@ fn an_approved_revision_waits_for_the_line_in_progress_to_end() {
         Some(wire::MissionSuccessorState::Applied as i32)
     );
     lane.on_progress(&RunProgress {
-        target_waypoint: Some(0),
         plan_complete: true,
         ended: false,
         ended_because: None,
         holding: false,
         execution: None,
+        ..toward(0, usize::MAX / 4)
     });
     assert_eq!(lane.state(), wire::MissionLaneState::Complete);
 }

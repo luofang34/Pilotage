@@ -209,14 +209,12 @@ fn a_line_is_done_only_with_usable_pictures() {
     assert!(lines >= 2);
     // Toward the start of line 1: a transit, no task takes pictures.
     lane.on_progress(&RunProgress {
-        target_waypoint: Some(0),
-        ..RunProgress::default()
+        ..toward(0, usize::MAX / 4)
     });
     assert!(lane.on_frame().is_none());
     // Along line 1: three pictures, two judged usable.
     lane.on_progress(&RunProgress {
-        target_waypoint: Some(1),
-        ..RunProgress::default()
+        ..toward(1, usize::MAX / 4)
     });
     for usable in [true, true, false] {
         let ticket = lane.on_frame().expect("line 1 is active");
@@ -232,8 +230,7 @@ fn a_line_is_done_only_with_usable_pictures() {
     }
     // Along line 2: one picture, judged unusable.
     lane.on_progress(&RunProgress {
-        target_waypoint: Some(3),
-        ..RunProgress::default()
+        ..toward(3, usize::MAX / 4)
     });
     let ticket = lane.on_frame().expect("line 2 is active");
     lane.on_sent(&ticket);
@@ -246,16 +243,15 @@ fn a_line_is_done_only_with_usable_pictures() {
     )
     .unwrap();
     lane.on_progress(&RunProgress {
-        target_waypoint: Some(2 * lines),
-        ..RunProgress::default()
+        ..toward(2 * lines, lines)
     });
     lane.on_progress(&RunProgress {
-        target_waypoint: Some(2 * lines),
         plan_complete: true,
         ended: false,
         ended_because: None,
         holding: false,
         execution: None,
+        ..toward(2 * lines, lines)
     });
     let status = lane.take_changed().expect("changed");
     assert_eq!(status.state, wire::MissionLaneState::Complete as i32);
@@ -339,8 +335,7 @@ fn an_abort_leaves_the_line_in_progress_and_the_rest_unfinished() {
     // Along line 1 with enough pictures for its evidence: cut short, it
     // is still not done.
     lane.on_progress(&RunProgress {
-        target_waypoint: Some(1),
-        ..RunProgress::default()
+        ..toward(1, usize::MAX / 4)
     });
     for _ in 0..3 {
         let ticket = lane.on_frame().expect("line 1 is active");
@@ -372,8 +367,7 @@ fn an_abort_on_the_way_home_does_not_complete_the_way_home() {
     let (mut lane, lines) = running_lane();
     // Every line flown; the vehicle flies home.
     lane.on_progress(&RunProgress {
-        target_waypoint: Some(2 * lines + 1),
-        ..RunProgress::default()
+        ..toward(2 * lines + 1, lines)
     });
     lane.on_intent(&intent(Action::Abort(wire::MissionAbort {})), &context("x"));
     let states = task_states(&lane);
@@ -404,6 +398,30 @@ fn a_run_reports_what_it_does_while_its_lane_flies() {
     assert_eq!(lane.status().execution, None, "no run, nothing to report");
 }
 
+/// What the survey's phases report while the vehicle flies toward waypoint `waypoint` of a
+/// plan of `lines` lines: line `k` is flown toward waypoint `2k + 1` after its transit
+/// toward `2k`, and the way home follows the last line.
+pub(super) fn toward(waypoint: usize, lines: usize) -> RunProgress {
+    let line = |number: usize| format!("line-{number:02}");
+    if waypoint >= 2 * lines {
+        return RunProgress {
+            active_task: Some("home".to_owned()),
+            finished_tasks: (1..=lines).map(line).collect(),
+            ..RunProgress::default()
+        };
+    }
+    let flown = waypoint / 2;
+    RunProgress {
+        active_task: Some(if waypoint % 2 == 1 {
+            line(flown + 1)
+        } else {
+            format!("transit-{:02}", flown + 1)
+        }),
+        finished_tasks: (1..=flown).map(line).collect(),
+        ..RunProgress::default()
+    }
+}
+
 mod evidence;
 mod expiry;
 mod successor;
@@ -412,14 +430,12 @@ mod successor;
 fn a_run_the_vehicle_ended_fails_with_its_reason() {
     let (mut lane, _) = running_lane();
     lane.on_progress(&RunProgress {
-        target_waypoint: Some(0),
-        ..RunProgress::default()
+        ..toward(0, usize::MAX / 4)
     });
     lane.on_progress(&RunProgress {
-        target_waypoint: Some(0),
         ended: true,
         ended_because: Some("the vehicle landed outside the plan"),
-        ..RunProgress::default()
+        ..toward(0, usize::MAX / 4)
     });
     let status = lane.take_changed().expect("changed");
     assert_eq!(status.state, wire::MissionLaneState::Failed as i32);
@@ -442,4 +458,27 @@ fn a_fetch_returns_the_full_plan_the_digest_names() {
     assert_eq!(plan.digest, digest);
     assert!(!plan.tasks.is_empty(), "the full plan, not a summary");
     assert!(!accepted(&lane.on_intent(&fetch(b"other"), &context("g"))));
+}
+
+#[test]
+fn tasks_follow_the_core_task_events_not_waypoint_indices() {
+    let (mut lane, lines) = running_lane();
+    assert!(lines >= 2);
+    // However many waypoints a line has, the core names the task it flies.
+    lane.on_progress(&RunProgress {
+        active_task: Some("line-02".to_owned()),
+        finished_tasks: vec!["transit-01".to_owned(), "line-01".to_owned()],
+        ..RunProgress::default()
+    });
+    let states = task_states(&lane);
+    assert!(states.contains(&("line-01".to_owned(), wire::MissionTaskState::Incomplete)));
+    assert!(states.contains(&("line-02".to_owned(), wire::MissionTaskState::Active)));
+    assert!(lane.on_frame().is_some(), "line 2 takes pictures");
+    // A transit is no task: between lines nothing takes pictures.
+    lane.on_progress(&RunProgress {
+        active_task: Some("transit-03".to_owned()),
+        finished_tasks: vec!["line-01".to_owned(), "line-02".to_owned()],
+        ..RunProgress::default()
+    });
+    assert!(lane.on_frame().is_none());
 }

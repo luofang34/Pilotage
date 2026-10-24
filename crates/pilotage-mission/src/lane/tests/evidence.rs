@@ -10,8 +10,7 @@ use crate::lane::{FrameTicket, VerdictRefused};
 
 fn along(lane: &mut Lane, line: usize) {
     lane.on_progress(&RunProgress {
-        target_waypoint: Some(2 * line - 1),
-        ..RunProgress::default()
+        ..toward(2 * line - 1, usize::MAX / 4)
     });
 }
 

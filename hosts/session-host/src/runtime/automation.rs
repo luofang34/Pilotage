@@ -109,6 +109,10 @@ pub struct AutomationStatus {
     /// The principal that holds the motion lease when another one does, as
     /// the welcome or an authority event named it.
     pub lease_holder: Option<u64>,
+    /// The task the run flies now, as the mission core names its phase.
+    pub active_task: Option<String>,
+    /// The tasks the run finished, in order.
+    pub finished_tasks: Vec<String>,
 }
 
 /// Where the plan comes from: a navdata snapshot the route expands

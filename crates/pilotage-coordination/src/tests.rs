@@ -180,8 +180,7 @@ impl Fleet {
                 .count();
             for line in 0..lines {
                 lane.on_progress(&RunProgress {
-                    target_waypoint: Some(2 * line + 1),
-                    ..RunProgress::default()
+                    ..toward(2 * line + 1, lines)
                 });
                 for _ in 0..3 {
                     if let Some(ticket) = lane.on_frame() {
@@ -199,12 +198,12 @@ impl Fleet {
                 }
             }
             lane.on_progress(&RunProgress {
-                target_waypoint: Some(2 * lines),
                 plan_complete: true,
                 ended: false,
                 ended_because: None,
                 holding: false,
                 execution: None,
+                ..toward(2 * lines, lines)
             });
             if let Some(status) = lane.take_changed() {
                 intents.extend(self.team.on_member_status(&status, &context("fly")));
@@ -491,6 +490,8 @@ fn a_parent_team_counts_the_lines_its_member_team_flew_again() {
 }
 
 mod hold;
+mod progress;
+use progress::toward;
 mod judge;
 mod lines;
 mod revision;

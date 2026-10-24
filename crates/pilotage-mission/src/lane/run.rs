@@ -7,12 +7,14 @@ use pilotage_protocol::wire;
 use super::compile::Compiled;
 use super::evidence::{FrameTicket, Judgments, VerdictRefused};
 
-/// The executor's progress, as the host reads it from the mission engine.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// The executor's progress, as the host reads it from the mission engine: the tasks it
+/// started and finished, as the mission core names their phases.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RunProgress {
-    /// Index of the waypoint the vehicle flies toward, `None` before the
-    /// plan is active.
-    pub target_waypoint: Option<usize>,
+    /// The task the run flies now; none between tasks.
+    pub active_task: Option<String>,
+    /// The tasks the run finished, in the order it finished them.
+    pub finished_tasks: Vec<String>,
     /// The plan's last waypoint is captured.
     pub plan_complete: bool,
     /// The run ended without completing its plan.
@@ -83,7 +85,6 @@ struct TaskTrack {
 pub(super) struct RunTracker {
     run_id: String,
     tasks: Vec<TaskTrack>,
-    lines: usize,
     min_usable: u32,
     active: Option<usize>,
     /// A judgment service judges the run's pictures.
@@ -104,11 +105,9 @@ impl RunTracker {
                 attempt: 1,
             })
             .collect();
-        let lines = tasks.iter().filter(|t| is_line(&t.plan)).count();
         Self {
             run_id,
             tasks,
-            lines,
             min_usable: compiled.min_usable_per_line,
             active: None,
             judged,
@@ -119,41 +118,63 @@ impl RunTracker {
         self.run_id.clone()
     }
 
-    /// Survey line `k` is flown toward waypoint `2k + 1`; the way home
-    /// toward waypoint `2 × lines`. Returns whether a task changed.
+    /// Projects the run's task events: a finished line takes its verdict, the way home
+    /// is done, and the task in progress is active. Returns whether a task changed.
     pub(super) fn on_progress(&mut self, progress: &RunProgress) -> bool {
-        let Some(target) = progress.target_waypoint else {
-            return false;
-        };
-        let active = if target >= 2 * self.lines {
-            self.tasks.iter().position(|t| !is_line(&t.plan))
-        } else if target % 2 == 1 {
-            Some(target / 2)
-        } else {
-            None
-        };
-        let flown_lines = if target >= 2 * self.lines {
-            self.lines
-        } else {
-            target / 2
-        };
-        let mut changed = active != self.active;
-        for (index, task) in self.tasks.iter_mut().enumerate() {
-            if is_line(&task.plan)
-                && index < flown_lines
-                && task.state != wire::MissionTaskState::Done
-            {
-                if task.state != wire::MissionTaskState::Incomplete {
-                    changed = true;
-                }
-                task.state = verdict(task, self.judged, self.min_usable);
-            } else if Some(index) == active && task.state == wire::MissionTaskState::Pending {
-                task.state = wire::MissionTaskState::Active;
+        let (judged, min_usable) = (self.judged, self.min_usable);
+        let mut changed = false;
+        for phase in &progress.finished_tasks {
+            let Some(task) = self
+                .task_of_phase(phase)
+                .and_then(|i| self.tasks.get_mut(i))
+            else {
+                continue;
+            };
+            if matches!(
+                task.state,
+                wire::MissionTaskState::Pending | wire::MissionTaskState::Active
+            ) {
+                task.state = if is_line(&task.plan) {
+                    verdict(task, judged, min_usable)
+                } else {
+                    wire::MissionTaskState::Done
+                };
                 changed = true;
             }
         }
+        let active = progress
+            .active_task
+            .as_deref()
+            .and_then(|phase| self.task_of_phase(phase));
+        if let Some(task) = active.and_then(|i| self.tasks.get_mut(i))
+            && task.state == wire::MissionTaskState::Pending
+        {
+            task.state = wire::MissionTaskState::Active;
+            changed = true;
+        }
+        changed |= active != self.active;
         self.active = active;
         changed
+    }
+
+    /// The run's task that the core's phase `phase` flies: the task of that identifier,
+    /// else, for a revision whose tasks carry its prefix, the line of that number in the
+    /// run's own plan, or its way home. A phase that is no task, such as a transit to a
+    /// line, names none.
+    fn task_of_phase(&self, phase: &str) -> Option<usize> {
+        if let Some(index) = self.tasks.iter().position(|t| t.plan.task_id == phase) {
+            return Some(index);
+        }
+        if phase == "home" {
+            return self.tasks.iter().position(|t| !is_line(&t.plan));
+        }
+        let number: usize = phase.strip_prefix("line-")?.parse().ok()?;
+        self.tasks
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| is_line(&t.plan))
+            .nth(number.checked_sub(1)?)
+            .map(|(index, _)| index)
     }
 
     pub(super) fn on_frame(&mut self) -> Option<FrameTicket> {

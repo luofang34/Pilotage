@@ -178,7 +178,17 @@ impl MissionEngine {
         let mut action = None;
         for event in &output.events {
             match event {
-                CoreEvent::PhaseCompleted { .. } => self.active_action = None,
+                CoreEvent::PhaseEntered { phase_id, .. } => {
+                    events.push(MissionEvent::TaskStarted {
+                        task: phase_id.clone(),
+                    })
+                }
+                CoreEvent::PhaseCompleted { phase_id, .. } => {
+                    self.active_action = None;
+                    events.push(MissionEvent::TaskFinished {
+                        task: phase_id.clone(),
+                    });
+                }
                 CoreEvent::ReceiptAccepted {
                     context, result, ..
                 } if context.phase_id == ARM_PHASE_ID => {
