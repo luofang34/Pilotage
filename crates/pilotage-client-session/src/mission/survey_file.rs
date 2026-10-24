@@ -91,6 +91,7 @@ impl SurveyFile {
                     hold_height: self.hold_height,
                 },
             )),
+            delegated_by: String::new(),
         }
     }
 }

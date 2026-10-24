@@ -41,6 +41,8 @@ pub(super) struct Revision {
     /// The draft as it travels.
     pub record: wire::MissionProposalRecord,
     pub drafted_by: String,
+    /// The parent team whose revision this is the team's share of.
+    pub share_of: String,
 }
 
 type Drafted = Result<(wire::MissionProposalRecord, Vec<MemberIntent>), String>;
@@ -91,6 +93,7 @@ impl TeamLane {
                 .as_ref()
                 .map(|o| o.subject.clone())
                 .unwrap_or_default(),
+            share_of: revise.share_of.clone(),
         });
         self.detail = "revision drafted; waiting for review".to_owned();
         if !revise.within_envelope {
@@ -316,6 +319,7 @@ impl TeamLane {
             within_envelope: false,
             drafted_by: None,
             release,
+            share_of: self.config.name.clone(),
             change: Some(change),
         };
         vec![self.request_revision(

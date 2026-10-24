@@ -96,3 +96,29 @@ fn only_an_approver_states_that_a_member_is_down() {
     assert!(refused.is_err_and(|reason| reason.contains("approver secret")));
     assert!(steering.admit(&mut down(), &human()).is_ok());
 }
+
+#[test]
+fn only_an_approver_speaks_for_a_team() {
+    use wire::mission_intent::Action;
+    let steering = Steering::default();
+    let client = Requester {
+        subject: "pilotage-coordinator".to_owned(),
+        may_approve: false,
+    };
+    let mut share = intent(Action::Revise(wire::MissionRevise {
+        share_of: "TEAM".to_owned(),
+        ..wire::MissionRevise::default()
+    }));
+    assert!(steering.admit(&mut share, &client).is_err());
+    let mut proposal = intent(Action::Propose(wire::MissionObjective {
+        delegated_by: "TEAM".to_owned(),
+        ..wire::MissionObjective::default()
+    }));
+    assert!(steering.admit(&mut proposal, &client).is_err());
+    let approver = Requester {
+        may_approve: true,
+        ..client
+    };
+    assert!(steering.admit(&mut share, &approver).is_ok());
+    assert!(steering.admit(&mut proposal, &approver).is_ok());
+}
