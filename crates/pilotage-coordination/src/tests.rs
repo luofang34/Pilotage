@@ -416,9 +416,11 @@ fn an_idle_team_of_simulated_members_reports_simulated() {
 }
 
 mod authorize;
+mod handover;
 mod hold;
 mod parent;
 mod progress;
+mod renewal;
 use progress::toward;
 mod judge;
 mod lines;

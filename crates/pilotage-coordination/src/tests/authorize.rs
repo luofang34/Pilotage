@@ -18,6 +18,7 @@ fn revise_within(fleet: &mut Fleet, change: wire::mission_revise::Change) -> Vec
                 run_id: status.run_id.clone(),
                 within_envelope: true,
                 drafted_by: None,
+                release: None,
                 change: Some(change),
             })),
         },

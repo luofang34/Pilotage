@@ -116,9 +116,7 @@ impl TeamLane {
         context: &IntentContext,
     ) -> Result<(Vec<MemberIntent>, bool), String> {
         if matches!(self.phase, Phase::Running | Phase::Held) {
-            return self
-                .approve_revision(approval, context)
-                .map(|intents| (intents, false));
+            return self.approve_running(approval, context);
         }
         if self.phase != Phase::Proposed {
             return Err(format!(
@@ -145,7 +143,8 @@ impl TeamLane {
             let launch = self.member(&assignment.member).map(|m| m.launch);
             let member_approval = delegate(
                 approval,
-                member_proposal,
+                &member_proposal.proposal_id,
+                &member_proposal.digest,
                 &assignment.band,
                 launch,
                 &self.config.name,
@@ -238,10 +237,11 @@ pub(super) fn valid_envelope(
 }
 
 /// A member's approval inside the team's: the same limits, narrowed to the
-/// member's band, bound to the member's own proposal.
+/// member's band, bound to the member's own proposal `id` and its `digest`.
 pub(super) fn delegate(
     team: &wire::MissionApproval,
-    member: &wire::MissionProposal,
+    id: &str,
+    digest: &[u8],
     band: &[wire::GeoPoint],
     launch: Option<wire::GeoPoint>,
     issuer: &str,
@@ -255,8 +255,8 @@ pub(super) fn delegate(
     envelope.permit_allocate = false;
     envelope.permit_change_objective = false;
     wire::MissionApproval {
-        approval_id: format!("{}/{}", team.approval_id, member.proposal_id),
-        proposal_digest: member.digest.clone(),
+        approval_id: format!("{}/{id}", team.approval_id),
+        proposal_digest: digest.to_vec(),
         approver: Some(wire::RecordOrigin {
             issuer: "pilotage-coordinator".to_owned(),
             subject: issuer.to_owned(),
@@ -268,5 +268,6 @@ pub(super) fn delegate(
         }),
         envelope: Some(envelope),
         approved_unix_ms: team.approved_unix_ms,
+        run_id: String::new(),
     }
 }

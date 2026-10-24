@@ -267,12 +267,62 @@ fn members_hold(team: &TeamLane) -> bool {
         })
 }
 
+/// How the members that may still fly move: the team holds only when every
+/// one of them reports that it holds, and a member whose link is lost may
+/// still fly.
+fn members_motion(team: &TeamLane) -> wire::MissionLaneState {
+    use wire::MissionLaneState as State;
+    let mut motion = State::Running;
+    let mut any_flying = false;
+    for (member, status) in &team.statuses {
+        if team.stated_down(member) {
+            continue;
+        }
+        match State::try_from(status.state) {
+            Ok(State::Running | State::Uncertain) => return State::Running,
+            Ok(State::HoldRequested) => motion = State::HoldRequested,
+            Ok(State::Held) if motion != State::HoldRequested => motion = State::Held,
+            _ => continue,
+        }
+        if team.lost.contains_key(member) {
+            return State::Running;
+        }
+        any_flying = true;
+    }
+    if any_flying { motion } else { State::Running }
+}
+
+/// Why the team holds: its operator's hold, and every reason of its members
+/// that may still fly.
+fn hold_reasons(team: &TeamLane, state: wire::MissionLaneState) -> Vec<i32> {
+    use wire::MissionLaneState as State;
+    if !matches!(state, State::Held | State::HoldRequested) {
+        return Vec::new();
+    }
+    let mut holds = Vec::new();
+    if team.phase == Phase::Held {
+        holds.push(wire::MissionHoldReason::Operator as i32);
+    }
+    for (member, status) in &team.statuses {
+        if team.stated_down(member) {
+            continue;
+        }
+        for reason in &status.holds {
+            if !holds.contains(reason) {
+                holds.push(*reason);
+            }
+        }
+    }
+    holds.sort_unstable();
+    holds
+}
+
 pub(super) fn team_status(team: &TeamLane) -> wire::MissionStatus {
     let state = match team.phase {
         Phase::Idle | Phase::Proposing => wire::MissionLaneState::Idle,
         Phase::Proposed | Phase::Approving => wire::MissionLaneState::Proposed,
         Phase::Admitted | Phase::Starting => wire::MissionLaneState::Admitted,
-        Phase::Running => wire::MissionLaneState::Running,
+        Phase::Running => members_motion(team),
         Phase::Held if members_hold(team) => wire::MissionLaneState::Held,
         Phase::Held => wire::MissionLaneState::HoldRequested,
         Phase::Complete => wire::MissionLaneState::Complete,
@@ -320,6 +370,9 @@ pub(super) fn team_status(team: &TeamLane) -> wire::MissionStatus {
             .collect(),
         member_link: wire::MemberLink::Unspecified as i32,
         execution: None,
+        holds: hold_reasons(team, state),
+        released: Vec::new(),
+        handovers: team.handovers(),
         predecessor_run_id: String::new(),
         sequence: team.sequence,
         area: survey.map(|s| s.area.clone()).unwrap_or_default(),

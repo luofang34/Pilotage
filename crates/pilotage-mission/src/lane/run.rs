@@ -299,6 +299,15 @@ impl RunTracker {
             .is_some_and(|task| !task.is_line())
     }
 
+    /// The tasks the run has not begun.
+    pub(super) fn not_begun(&self) -> Vec<String> {
+        self.tasks
+            .iter()
+            .filter(|t| t.execution == Execution::Pending)
+            .map(|t| t.plan.task_id.clone())
+            .collect()
+    }
+
     /// The name of the task in progress, for display.
     pub(super) fn active_task(&self) -> Option<String> {
         self.tasks.get(self.active?).map(|t| t.plan.name.clone())

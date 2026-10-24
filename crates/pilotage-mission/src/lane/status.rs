@@ -59,6 +59,9 @@ impl Lane {
                 .execution
                 .filter(|_| self.is_flying())
                 .map(RunExecution::wire),
+            holds: self.hold_reasons(),
+            released: self.released.clone(),
+            handovers: Vec::new(),
             predecessor_run_id: self
                 .run
                 .as_ref()

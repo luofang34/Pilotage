@@ -202,6 +202,15 @@ impl MissionDesk {
 
     /// The digest an approval names: a drafted revision first, else the
     /// plan the lane proposed.
+    /// The lane holds because its approval expired.
+    fn approval_expired(&self) -> bool {
+        self.status.as_ref().is_some_and(|status| {
+            status
+                .holds
+                .contains(&(wire::MissionHoldReason::ApprovalExpired as i32))
+        })
+    }
+
     fn under_review(&self) -> Option<Vec<u8>> {
         let digest = match self.drafted_successor() {
             Some(successor) => successor.digest.clone(),
@@ -233,10 +242,14 @@ impl MissionDesk {
     }
 
     /// The digest of the proposal under review that this client has not
-    /// seen in full, for a [`MissionCommand::Fetch`](super::MissionCommand::Fetch).
+    /// seen in full, for a [`MissionCommand::Fetch`](super::MissionCommand::Fetch): a
+    /// proposal, a drafted revision, or the plan of a run its expired approval
+    /// holds.
     #[must_use]
     pub fn unseen_proposal(&self) -> Option<Vec<u8>> {
-        let reviewing = self.state() == Lane::Proposed || self.drafted_successor().is_some();
+        let reviewing = self.state() == Lane::Proposed
+            || self.drafted_successor().is_some()
+            || self.approval_expired();
         self.under_review()
             .filter(|digest| reviewing && self.held(digest).is_none())
     }
@@ -258,7 +271,10 @@ impl MissionDesk {
             return Offered::default();
         }
         let state = self.state();
-        let reviewing = state == Lane::Proposed || self.drafted_successor().is_some();
+        let expired = self.approval_expired();
+        // An expired approval is renewed by a new approval of the plan in
+        // progress; a resume is refused until then.
+        let reviewing = state == Lane::Proposed || self.drafted_successor().is_some() || expired;
         let proposal = self.approvable().filter(|_| reviewing);
         let height = proposal
             .as_ref()
@@ -281,7 +297,7 @@ impl MissionDesk {
             approve_needs_height: proposal.is_some() && height.is_none(),
             start: state == Lane::Admitted && named,
             hold: state == Lane::Running,
-            resume: matches!(state, Lane::Held | Lane::HoldRequested),
+            resume: matches!(state, Lane::Held | Lane::HoldRequested) && !expired,
             abort: matches!(
                 state,
                 Lane::Admitted | Lane::Running | Lane::HoldRequested | Lane::Held | Lane::Uncertain
@@ -391,6 +407,7 @@ impl MissionDesk {
             run_id: status.run_id.clone(),
             within_envelope,
             drafted_by: None,
+            release: None,
             change: Some(change),
         }))
     }

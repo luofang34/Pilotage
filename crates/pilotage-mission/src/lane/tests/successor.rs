@@ -16,6 +16,7 @@ fn revise(
         run_id: status.run_id.clone(),
         within_envelope,
         drafted_by: None,
+        release: None,
         change: Some(change),
     }))
 }
@@ -220,4 +221,53 @@ fn between_lines_a_revision_applies_at_once() {
         task_state(&status, "line-01"),
         Some(wire::MissionTaskState::Skipped)
     );
+}
+
+#[test]
+fn a_released_plan_cannot_come_back() {
+    let (mut lane, _) = running_lane();
+    lane.on_progress(&progress(&lane, 1));
+    let before = lane.status();
+    let mut asked = revise(&before, finish(), false);
+    if let Some(Action::Revise(revise)) = asked.action.as_mut() {
+        revise.release = Some(wire::WorkRelease {
+            assignment_id: "TEAM/run/handover-1".to_owned(),
+            generation: 1,
+        });
+    }
+    let draft = lane
+        .on_intent(&asked, &context("rev"))
+        .receipt
+        .proposal
+        .expect("draft");
+    let mut approved = approval(&draft.digest, 120.0);
+    approved.run_id.clone_from(&before.run_id);
+    assert!(accepted(
+        &lane.on_intent(&intent(Action::Approve(approved)), &context("a"))
+    ));
+    assert!(matches!(
+        lane.on_progress(&progress(&lane, 2)),
+        Some(LaneEffect::Start(_))
+    ));
+    let after = lane.status();
+    let released = after.released.first().expect("the release fact");
+    assert_eq!(
+        (
+            released.generation,
+            &released.digest,
+            &released.superseded_run_id
+        ),
+        (1, &draft.digest, &before.run_id)
+    );
+    assert!(!released.task_ids.is_empty());
+    // A late approval or revision of the replaced plan changes nothing.
+    let mut late = approval(&before.proposal_digest, 120.0);
+    late.run_id.clone_from(&after.run_id);
+    assert!(!accepted(
+        &lane.on_intent(&intent(Action::Approve(late)), &context("late"))
+    ));
+    assert!(!accepted(
+        &lane.on_intent(&revise(&before, finish(), true), &context("late"))
+    ));
+    assert_eq!(lane.status().proposal_digest, after.proposal_digest);
 }

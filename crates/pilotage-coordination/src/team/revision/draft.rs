@@ -176,7 +176,7 @@ impl TeamLane {
         }
     }
 
-    pub(super) fn across(&self) -> Option<Across> {
+    pub(in crate::team) fn across(&self) -> Option<Across> {
         let area = match self.objective.as_ref()?.kind.as_ref()? {
             wire::mission_objective::Kind::Survey(s) => s.area.clone(),
         };

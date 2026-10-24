@@ -41,6 +41,7 @@ impl Lane {
         }
         self.detail =
             "the approval expired; the run holds until its plan is approved again".to_owned();
+        self.add_hold(wire::MissionHoldReason::ApprovalExpired);
         if self.state == State::Running {
             self.state = State::HoldRequested;
             return Some(LaneEffect::Hold);
@@ -57,22 +58,6 @@ impl Lane {
                 .is_some_and(|a| approval::still_valid(a, self.clock_unix_ms).is_err())
     }
 
-    /// Resumes a held run under an approval still valid at `context`'s time.
-    pub(super) fn resume(&mut self, context: &IntentContext) -> Outcome {
-        if !matches!(self.state, State::Held | State::HoldRequested) {
-            return Err(format!("not possible while the lane is {:?}", self.state));
-        }
-        let approval = self
-            .approval
-            .as_ref()
-            .ok_or("no approval to resume under")?;
-        approval::still_valid(approval, context.now_unix_ms)
-            .map_err(|reason| format!("{reason}; approve the plan again to resume"))?;
-        self.state = State::Running;
-        self.detail = "running".to_owned();
-        Ok((Some(LaneEffect::Resume), None))
-    }
-
     /// A new approval of the plan the run flies: it replaces the active one.
     pub(super) fn renew(
         &mut self,
@@ -83,8 +68,10 @@ impl Lane {
         approval::admit(approval, current, &self.config, context.now_unix_ms)?;
         self.approval = Some(approval.clone());
         self.expired = false;
+        self.holds
+            .retain(|r| *r != wire::MissionHoldReason::ApprovalExpired);
         self.detail = "the approval of the plan in progress is renewed".to_owned();
-        Ok((None, None))
+        Ok((self.resume_when_free(), None))
     }
 
     /// The return home an expired approval names: a successor that ends
@@ -113,6 +100,7 @@ impl Lane {
             drafted_by: "the approval's expiry".to_owned(),
             flown_at_draft: flown,
             recovery: true,
+            release: None,
         });
         self.detail =
             "the approval expired; the run returns home after the line in progress".to_owned();

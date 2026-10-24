@@ -60,10 +60,28 @@ the digest of its predecessor, validity, and releasability.
   the recovery for its expiry: hold in place, or end after the line in
   progress and return to the launch point. When the approval expires
   during a run, the lane applies that recovery one time. Then the run does
-  not resume, and an admitted revision does not apply, until a new
-  approval of the plan replaces the expired approval.
-  revise, to allocate work, and to change the objective. A client approves
-  only a proposal that it holds in full. The lane's status names a
+  not resume, and an admitted revision does not apply, until a renewal of
+  the plan replaces the expired approval.
+  An approval names its target by its digest and its run. With no run, it
+  approves the plan before its start. With the run in progress, it renews
+  the plan of that run, and a lane refuses it for another run. This
+  prevents an approval of one run from renewing another run of the same
+  plan. An approval of a drafted successor names the run in progress or no
+  run. A vehicle lane and a team find the target with the same rule.
+  A held run reports each reason why it holds: the operator, or the
+  expiry of its approval. A renewal removes only the expiry reason, and an
+  operator's resume removes only the operator reason. The lane refuses a
+  resume while the expiry reason stays, and the run resumes when no reason
+  stays. A fault, a motion lease held elsewhere and an unknown member state
+  are not hold reasons, and a renewal does not clear them. A team checks
+  its envelope and its run, then sends each member that can still fly a
+  renewal of the plan and the run of that member. A member that finished
+  gets no renewal. A member whose link is lost, or that a person stated
+  down, gets none, and the receipt of the team names it. The team answers
+  after its members answered. A team reports `Held` only when each member
+  that can still fly reports that it holds, and it reports the reasons of
+  all those members.
+  A client approves only a proposal that it holds in full. The lane's status names a
   proposal only by its digest and a summary, so a client that did not
   make the proposal fetches it from the lane before it approves it.
 - **Plan.** The executable `MissionDocument`
@@ -296,7 +314,51 @@ it had stopped; reassignment needs a release acknowledgement, a valid
 expiry with fencing, or work preallocated as disjoint. A team lane keeps
 the work of a member with a lost link, and its line in progress, reserved
 to that member until the member reports again or an approver states, as a
-separate act, that the member is down. The team reports each member's
+separate act, that the member is down.
+
+A handover between two members has four separate facts: the link (can the
+team contact the member), the execution (does the member still fly), the
+assignment (which member holds the work, in which generation) and the space
+(which area the work needs). A move of work between two members that both
+report has one commit point. The team asks the giving member for a release
+of one assignment in one generation, in the revision that it sends to that
+member. When the lane of that member applies the revision, its status
+reports the release fact: the assignment, the generation, the digest of the
+revision, the replaced run and the tasks that the replaced run did not
+begin. The team commits the work to the receiving member, in the next
+generation, only when the fact names the open handover, the revision that
+the team approved, and the run that it asked. Before that, the receiving
+member gets nothing, and the work and its space stay with the giving
+member. The team does not use a changed run or a shorter list of tasks as
+a release. A moved task that the giving member began before the revision
+applied is not in the release, and it stays with that member. Without a
+release fact, the handover stays open and the status shows it. Nothing is
+assumed at a time-out. When the giving member refuses its revision, the
+handover is withdrawn and that member keeps the work. When the receiving
+member refuses the released work, or a person states it down before it
+starts the work, the work is unassigned. It does not go back to the giving
+member. A lane refuses an approval or a revision for a plan that a
+revision replaced, so a late message cannot bring a released plan back.
+Fencing at a control endpoint (ADR-0010) makes an old generation invalid
+at that endpoint only: a lease on the receiving vehicle does not stop the
+giving vehicle.
+
+A person's statement that a member is down is an override with a source.
+The team records who stated it, and the handover that it causes names it
+as its basis. The statement does not prove that the member stopped, that
+its control is revoked, or that its space is clear. The coordinator host writes the
+handovers to durable storage before it sends work to a member, and it
+sends no intent when it cannot write them. A coordinator that restarts
+reads them back. It shows each handover that was open or committed as
+unreconciled, because it cannot know whether a member flies that work,
+and it moves nothing. An operator checks both members and gives the work
+to one. An assignment identity includes the run of the team, so a
+restarted coordinator never uses an identity or a generation again. It
+has no run of the team, and it can give work only through a new team
+proposal that each member must accept. A member lane refuses a proposal
+while it flies.
+
+The team reports each member's
 link as a typed state (`Reporting`, `Lost`, `Down` or `Released`), and a
 vehicle's lane reports what its run does now: flying, waiting for a
 launch, waiting for a lease that another principal holds, holding, or

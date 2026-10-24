@@ -52,6 +52,7 @@ fn revise_within(
             run_id: status.run_id.clone(),
             within_envelope: true,
             drafted_by: None,
+            release: None,
             change: Some(wire::mission_revise::Change::Objective(objective)),
         })),
         &context("rev"),

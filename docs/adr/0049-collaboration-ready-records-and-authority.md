@@ -88,7 +88,13 @@ agent context (ADR-0047), and other organizations.
    fencing generation.
 
 No new primitive is added. The receiving vehicle can be in another session
-and another organization, because the records use global identities.
+and another organization, because the records use global identities. When
+the giving vehicle still flies the work, the handover commits only on its
+release of that work (ADR-0052). Fencing of the task scope makes the old
+generation invalid at one endpoint; it does not stop the giving vehicle. A
+person's statement that the giving vehicle is down is an override with a
+source. It is not a proof that the vehicle stopped or that its space is
+clear.
 
 ### 5. Control across organizations uses the existing authority model
 

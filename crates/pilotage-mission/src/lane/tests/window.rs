@@ -38,6 +38,7 @@ fn switch_after_line(lane: &mut Lane, line: usize, change: wire::mission_revise:
             run_id: status.run_id.clone(),
             within_envelope: false,
             drafted_by: None,
+            release: None,
             change: Some(change),
         })),
         &context(&format!("rev-{}", status.run_id)),

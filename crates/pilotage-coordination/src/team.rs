@@ -2,10 +2,12 @@
 //! and steer by fan-out, and adapt within the team's approval envelope.
 
 mod aggregate;
+mod handover;
 mod intents;
 mod members;
 mod moved;
 mod refly;
+mod renewal;
 mod revision;
 
 use std::collections::BTreeMap;
@@ -82,6 +84,8 @@ enum Op {
     Approve,
     Start,
     Revise,
+    /// A renewal of a member's approval of its plan in progress.
+    Renew,
 }
 
 /// A member intent awaiting its receipt.
@@ -118,6 +122,12 @@ pub struct TeamLane {
     run_id: Option<String>,
     reflies: Vec<Refly>,
     revision: Option<revision::Revision>,
+    /// A renewal waiting for its members' answers.
+    renewal: Option<renewal::Renewal>,
+    /// Work moving between members, in the order the team opened it.
+    handovers: Vec<handover::Handover>,
+    /// Who stated each member down, by subject.
+    stated_by: BTreeMap<String, String>,
     /// Members whose link is lost, stated down or released; a member
     /// missing here reports. One stated down may give its lines to others,
     /// and the team no longer waits for it.
@@ -150,6 +160,9 @@ impl TeamLane {
             run_id: None,
             reflies: Vec::new(),
             revision: None,
+            renewal: None,
+            handovers: Vec::new(),
+            stated_by: BTreeMap::new(),
             lost: BTreeMap::new(),
             requests: 0,
             detail: "waiting for an objective".to_owned(),
@@ -188,7 +201,7 @@ impl TeamLane {
                 Action::Abort(wire::MissionAbort {}),
             ),
             Some(Action::Revise(revise)) => return self.on_revise(id, revise, context),
-            Some(Action::MemberDown(down)) => self.member_down(&down.member),
+            Some(Action::MemberDown(down)) => self.member_down(down),
             Some(Action::Fetch(fetch)) => return self.on_fetch(id, &fetch.digest),
             Some(Action::Skip(_)) => {
                 Err("a team skips a task through a revision; draft one instead".to_owned())
@@ -232,7 +245,8 @@ impl TeamLane {
         self.book.record(status, &self.reflies);
         self.statuses.insert(member.clone(), status.clone());
         self.refly_progress(&member, status);
-        let intents = self.adapt(context);
+        let mut intents = self.commit_released(&member, status, context);
+        intents.extend(self.adapt(context));
         self.settle();
         intents
     }
@@ -308,6 +322,7 @@ impl TeamLane {
         self.pending.clear();
         self.reflies.clear();
         self.revision = None;
+        self.handovers.clear();
         // A new plan has no run until it starts: a parent following the
         // old run must not read the new plan's tasks as that run's.
         self.run_id = None;

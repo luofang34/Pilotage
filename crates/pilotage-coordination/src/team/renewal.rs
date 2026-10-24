@@ -1,0 +1,152 @@
+//! An approval sent to a running team (ADR-0052): the team finds what it is
+//! for with the rule a vehicle lane uses. A renewal of the team plan names
+//! the team's run; the team passes it on to each member that may still fly,
+//! as a renewal of that member's own plan and run, and answers once they
+//! answered. A member that finished gets none. A member whose link is lost
+//! or that a person stated down gets none either, and the receipt names it.
+//! A member's renewal ends only the hold its approval's expiry applied.
+
+use pilotage_mission::{Approvable, ApprovalTarget, IntentContext, approval_target};
+use pilotage_protocol::wire;
+use wire::MissionLaneState as State;
+
+use super::intents::{delegate, valid_envelope};
+use super::{MemberIntent, Op, TeamLane};
+
+/// A renewal waiting for its members' answers.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(super) struct Renewal {
+    /// Members that refused, with their reasons.
+    refused: Vec<String>,
+    /// Members the renewal was not sent to, with why.
+    skipped: Vec<String>,
+}
+
+/// The member's run may still fly.
+fn may_fly(status: &wire::MissionStatus) -> bool {
+    matches!(
+        State::try_from(status.state),
+        Ok(State::Running | State::HoldRequested | State::Held | State::Uncertain)
+    )
+}
+
+impl TeamLane {
+    /// An approval while the team runs: a renewal of the team plan, or the
+    /// approval of a drafted revision.
+    pub(super) fn approve_running(
+        &mut self,
+        approval: &wire::MissionApproval,
+        context: &IntentContext,
+    ) -> Result<(Vec<MemberIntent>, bool), String> {
+        let plan = self
+            .proposal
+            .as_ref()
+            .map(|p| p.digest.clone())
+            .unwrap_or_default();
+        let drafted = self
+            .revision
+            .as_ref()
+            .filter(|r| r.stage == wire::MissionSuccessorState::Drafted)
+            .map(|r| r.proposal.digest.clone());
+        let held = Approvable {
+            plan: &plan,
+            run: self.run_id.as_deref(),
+            drafted: drafted.as_deref(),
+        };
+        match approval_target(approval, held)? {
+            ApprovalTarget::Renewal => self.renew(approval, context),
+            ApprovalTarget::Successor | ApprovalTarget::Plan => self
+                .approve_revision(approval, context)
+                .map(|intents| (intents, false)),
+        }
+    }
+
+    fn renew(
+        &mut self,
+        approval: &wire::MissionApproval,
+        context: &IntentContext,
+    ) -> Result<(Vec<MemberIntent>, bool), String> {
+        let envelope = valid_envelope(approval, context.now_unix_ms)?;
+        if self.height_m > envelope.max_height_m + 1e-6 {
+            return Err(format!(
+                "the team flies at {:.1} m; the envelope allows {:.1} m",
+                self.height_m, envelope.max_height_m
+            ));
+        }
+        self.approval = Some(approval.clone());
+        let mut renewal = Renewal::default();
+        let mut intents = Vec::new();
+        let members: Vec<String> = self.member_proposals.keys().cloned().collect();
+        for member in members {
+            if self.lost.contains_key(&member) {
+                renewal
+                    .skipped
+                    .push(format!("{member}: its link is lost or it is stated down"));
+                continue;
+            }
+            let Some(status) = self.statuses.get(&member).filter(|s| may_fly(s)) else {
+                continue;
+            };
+            let band: Vec<wire::GeoPoint> =
+                status.tasks.iter().flat_map(|t| t.path.clone()).collect();
+            let launch = self.member(&member).map(|m| m.launch);
+            let mut renewed = delegate(
+                approval,
+                &status.run_id,
+                &status.proposal_digest,
+                &band,
+                launch,
+                &self.config.name,
+            );
+            renewed.run_id.clone_from(&status.run_id);
+            intents.push(self.request(
+                &member,
+                Op::Renew,
+                None,
+                wire::mission_intent::Action::Approve(renewed),
+            ));
+        }
+        self.detail = format!("renewing the approval with {} members", intents.len());
+        let deferred = !intents.is_empty();
+        self.renewal = Some(renewal);
+        if !deferred {
+            self.detail = "the approval is renewed; no member flies".to_owned();
+        }
+        Ok((intents, deferred))
+    }
+
+    /// A member's answer to its renewal. Returns the operator's receipt
+    /// once every member answered.
+    pub(super) fn on_renew_receipt(
+        &mut self,
+        member: &str,
+        accepted: bool,
+        receipt: &wire::MissionReceipt,
+    ) -> Option<wire::MissionReceipt> {
+        let renewal = self.renewal.get_or_insert_with(Renewal::default);
+        if !accepted {
+            renewal
+                .refused
+                .push(format!("{member}: {}", receipt.reason));
+        }
+        if self.pending.values().any(|p| p.op == Op::Renew) {
+            return None;
+        }
+        let renewal = self.renewal.take().unwrap_or_default();
+        let request = self.operator_request.take().unwrap_or_default();
+        let mut reason = Vec::new();
+        if !renewal.refused.is_empty() {
+            reason.push(format!("refused by {}", renewal.refused.join("; ")));
+        }
+        if !renewal.skipped.is_empty() {
+            reason.push(format!("not sent to {}", renewal.skipped.join("; ")));
+        }
+        let reason = reason.join("; ");
+        self.detail = if reason.is_empty() {
+            "the approval is renewed".to_owned()
+        } else {
+            format!("the approval is renewed; {reason}")
+        };
+        Some(self.receipt(request, renewal.refused.is_empty(), reason, None))
+    }
+}

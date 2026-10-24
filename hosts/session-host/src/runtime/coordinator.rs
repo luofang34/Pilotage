@@ -6,6 +6,7 @@
 
 mod adapter;
 mod config;
+mod journal;
 mod member_link;
 
 use std::collections::BTreeMap;
@@ -18,7 +19,7 @@ use pilotage_session::ClientKey;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 use super::engine_actor::ToEngine;
 use super::mission_lane::LaneInbound;
@@ -51,8 +52,19 @@ pub(crate) async fn spawn(
         links.insert(member.name.clone(), intents_tx);
     }
     info!(team = %config.team.name, members = config.members.len(), "coordinator ready");
+    let mut lane = TeamLane::new(config.team);
+    if !config.restored.is_empty() {
+        warn!(
+            handovers = config.restored.len(),
+            "the coordinator restarted with handovers in its journal; open ones are unreconciled"
+        );
+        lane.restore_handovers(&config.restored);
+    }
+    let journaled = lane.handovers();
     let task = TeamTask {
-        lane: TeamLane::new(config.team),
+        lane,
+        journal: config.journal,
+        journaled,
         engine: engine_tx.clone(),
         links,
         operator_requests: BTreeMap::new(),
@@ -68,6 +80,10 @@ pub(crate) async fn spawn(
 
 struct TeamTask {
     lane: TeamLane,
+    /// Where the handovers are written before any intent leaves.
+    journal: std::path::PathBuf,
+    /// The handovers as last written.
+    journaled: Vec<wire::MissionHandover>,
     engine: mpsc::Sender<ToEngine>,
     links: BTreeMap<String, mpsc::Sender<wire::MissionIntent>>,
     /// The operator who sent each deferred intent, by request.
@@ -99,6 +115,7 @@ impl TeamTask {
                 },
                 _ = ticker.tick() => {}
             }
+            self.journal().await;
             if !self.publish().await {
                 break;
             }
@@ -171,7 +188,35 @@ impl TeamTask {
             .ok();
     }
 
-    async fn send(&self, intents: Vec<MemberIntent>) {
+    /// Writes the handovers when they changed. Returns whether the journal
+    /// holds them.
+    async fn journal(&mut self) -> bool {
+        let handovers = self.lane.handovers();
+        if handovers == self.journaled {
+            return true;
+        }
+        match journal::write(&self.journal, &handovers).await {
+            Ok(()) => {
+                self.journaled = handovers;
+                true
+            }
+            Err(failure) => {
+                error!(journal = %self.journal.display(), %failure, "the handover journal cannot be written");
+                false
+            }
+        }
+    }
+
+    /// Sends `intents` once the journal holds the handovers they act on; an
+    /// intent is never sent ahead of the record of the work it gives.
+    async fn send(&mut self, intents: Vec<MemberIntent>) {
+        if !self.journal().await {
+            error!(
+                intents = intents.len(),
+                "member intents not sent: the handover journal is not written"
+            );
+            return;
+        }
         for MemberIntent { member, intent } in intents {
             match self.links.get(&member) {
                 Some(link) => {

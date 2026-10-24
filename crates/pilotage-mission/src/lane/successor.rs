@@ -26,6 +26,8 @@ pub(super) struct Successor {
     pub flown_at_draft: usize,
     /// The recovery an expired approval names, which applies under it.
     pub recovery: bool,
+    /// The work a team asked the revision to release.
+    pub release: Option<wire::WorkRelease>,
 }
 
 type Outcome = Result<(Option<LaneEffect>, Option<wire::MissionProposal>), String>;
@@ -88,6 +90,7 @@ impl Lane {
                 .unwrap_or_default(),
             flown_at_draft: run.flown_lines(),
             recovery: false,
+            release: revise.release.clone(),
         });
         self.detail = "revision drafted; waiting for review".to_owned();
         if !revise.within_envelope {
@@ -232,6 +235,7 @@ impl Lane {
         let successor = self.successor.as_mut()?;
         successor.stage = Stage::Applied;
         let compiled = successor.compiled.clone();
+        let release = successor.release.clone();
         let previous = self.run.take();
         let predecessor = previous.as_ref().map(super::run::RunTracker::run_id);
         let run_id = format!(
@@ -243,11 +247,23 @@ impl Lane {
             self.revisions
         );
         if let Some(run) = previous {
+            if let Some(release) = release {
+                self.released.push(wire::WorkReleased {
+                    assignment_id: release.assignment_id,
+                    generation: release.generation,
+                    digest: compiled.proposal.digest.clone(),
+                    run_id: run_id.clone(),
+                    superseded_run_id: run.run_id(),
+                    task_ids: run.not_begun(),
+                });
+            }
             self.retire(run);
         }
         let mut run = super::run::RunTracker::new(run_id.clone(), &compiled, self.config.judged);
         run.predecessor = predecessor;
         self.run = Some(run);
+        // The successor's run starts flying, as a switch while held does.
+        self.holds.clear();
         self.state = State::Running;
         self.detail = format!(
             "flying revision {}: {}",

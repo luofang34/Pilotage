@@ -3,6 +3,7 @@
 //! waiting revision does not apply under the expired one.
 
 use pilotage_protocol::wire;
+use wire::MissionHoldReason as Reason;
 use wire::mission_intent::Action;
 
 use super::*;
@@ -17,9 +18,11 @@ fn at(now_unix_ms: u64, id: &str) -> IntentContext {
     }
 }
 
-/// An approval of `digest` valid for two more hours from `EXPIRY`.
-fn renewal(digest: &[u8]) -> wire::MissionApproval {
+/// A renewal of `digest` for the run `run_id`, valid for two more hours
+/// from `EXPIRY`.
+fn renewal(digest: &[u8], run_id: &str) -> wire::MissionApproval {
     let mut renewed = approval(digest, 120.0);
+    renewed.run_id = run_id.to_owned();
     if let Some(envelope) = renewed.envelope.as_mut() {
         envelope.expires_unix_ms = EXPIRY + 7_200_000;
     }
@@ -64,14 +67,69 @@ fn a_run_holds_when_its_approval_expires_and_resumes_only_when_renewed() {
         "{}",
         refused.receipt.reason
     );
-    let digest = lane.status().proposal_digest;
+    let status = lane.status();
+    assert_eq!(status.holds, vec![Reason::ApprovalExpired as i32]);
     let renewed = lane.on_intent(
-        &intent(Action::Approve(renewal(&digest))),
+        &intent(Action::Approve(renewal(
+            &status.proposal_digest,
+            &status.run_id,
+        ))),
         &at(EXPIRY + 3, "a2"),
     );
     assert!(accepted(&renewed), "{}", renewed.receipt.reason);
-    let resumed = lane.on_intent(&resume(), &at(EXPIRY + 4, "y"));
+    assert_eq!(
+        renewed.effect,
+        Some(LaneEffect::Resume),
+        "held only for the expiry, the run resumes"
+    );
+    assert_eq!(lane.state(), wire::MissionLaneState::Running);
+}
+
+#[test]
+fn a_renewal_ends_only_the_hold_of_the_expiry() {
+    let (mut lane, _) = running_lane();
+    lane.on_intent(&intent(Action::Hold(wire::MissionHold {})), &context("h"));
+    assert_eq!(lane.on_clock(EXPIRY), None, "already asked to hold");
+    let status = lane.status();
+    assert_eq!(
+        status.holds,
+        vec![Reason::Operator as i32, Reason::ApprovalExpired as i32]
+    );
+    let resume = || intent(Action::Resume(wire::MissionResume {}));
+    let refused = lane.on_intent(&resume(), &at(EXPIRY + 1, "x"));
+    assert!(!accepted(&refused), "the expiry still holds it");
+    let renewed = lane.on_intent(
+        &intent(Action::Approve(renewal(
+            &status.proposal_digest,
+            &status.run_id,
+        ))),
+        &at(EXPIRY + 2, "a2"),
+    );
+    assert!(accepted(&renewed), "{}", renewed.receipt.reason);
+    assert_eq!(renewed.effect, None, "the operator's hold stays");
+    assert_eq!(lane.status().holds, vec![Reason::Operator as i32]);
+    let resumed = lane.on_intent(&resume(), &at(EXPIRY + 3, "y"));
     assert_eq!(resumed.effect, Some(LaneEffect::Resume));
+}
+
+#[test]
+fn a_renewal_names_the_run_it_renews() {
+    let (mut lane, _) = running_lane();
+    assert_eq!(lane.on_clock(EXPIRY), Some(LaneEffect::Hold));
+    let digest = lane.status().proposal_digest;
+    for other in ["", "an-earlier-run"] {
+        let refused = lane.on_intent(
+            &intent(Action::Approve(renewal(&digest, other))),
+            &at(EXPIRY + 1, "a2"),
+        );
+        assert!(!accepted(&refused), "run {other:?}");
+        assert!(
+            refused.receipt.reason.contains("a renewal names the run"),
+            "{}",
+            refused.receipt.reason
+        );
+    }
+    assert_eq!(lane.state(), wire::MissionLaneState::HoldRequested);
 }
 
 #[test]
@@ -116,6 +174,7 @@ fn a_waiting_revision_does_not_apply_under_an_expired_approval() {
         run_id: status.run_id.clone(),
         within_envelope: true,
         drafted_by: None,
+        release: None,
         change: Some(wire::mission_revise::Change::Finish(wire::MissionFinish {})),
     }));
     let drafted = lane.on_intent(&revise, &context("rev"));
