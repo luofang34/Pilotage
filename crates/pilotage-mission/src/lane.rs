@@ -343,6 +343,23 @@ impl Lane {
         Ok((Some(effect), None))
     }
 
+    /// The identities of the tasks of the plan the lane holds, in plan order: each
+    /// survey line, then the way home.
+    #[must_use]
+    pub fn task_ids(&self) -> Vec<String> {
+        self.proposal
+            .as_ref()
+            .map(|compiled| {
+                compiled
+                    .proposal
+                    .tasks
+                    .iter()
+                    .map(|task| task.task_id.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     fn is_flying(&self) -> bool {
         matches!(
             self.state,

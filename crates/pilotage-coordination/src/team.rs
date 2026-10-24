@@ -325,6 +325,7 @@ impl TeamLane {
             for task in &proposal.tasks {
                 let mut task = task.clone();
                 task.task_id = format!("{member}/{}", task.task_id);
+                task.name = format!("{member}/{}", task.name);
                 task.member.clone_from(member);
                 tasks.push(task);
             }

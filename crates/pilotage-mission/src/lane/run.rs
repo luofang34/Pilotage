@@ -89,6 +89,8 @@ pub(super) struct RunTracker {
     active: Option<usize>,
     /// A judgment service judges the run's pictures.
     judged: bool,
+    /// The run a revision replaced with this one.
+    pub(super) predecessor: Option<String>,
 }
 
 impl RunTracker {
@@ -111,6 +113,7 @@ impl RunTracker {
             min_usable: compiled.min_usable_per_line,
             active: None,
             judged,
+            predecessor: None,
         }
     }
 
@@ -157,24 +160,10 @@ impl RunTracker {
         changed
     }
 
-    /// The run's task that the core's phase `phase` flies: the task of that identifier,
-    /// else, for a revision whose tasks carry its prefix, the line of that number in the
-    /// run's own plan, or its way home. A phase that is no task, such as a transit to a
-    /// line, names none.
+    /// The run's task that the core's phase `phase` flies: the phases take the tasks'
+    /// identities, so a phase that is no task, such as a transit to a line, names none.
     fn task_of_phase(&self, phase: &str) -> Option<usize> {
-        if let Some(index) = self.tasks.iter().position(|t| t.plan.task_id == phase) {
-            return Some(index);
-        }
-        if phase == "home" {
-            return self.tasks.iter().position(|t| !is_line(&t.plan));
-        }
-        let number: usize = phase.strip_prefix("line-")?.parse().ok()?;
-        self.tasks
-            .iter()
-            .enumerate()
-            .filter(|(_, t)| is_line(&t.plan))
-            .nth(number.checked_sub(1)?)
-            .map(|(index, _)| index)
+        self.tasks.iter().position(|t| t.plan.task_id == phase)
     }
 
     pub(super) fn on_frame(&mut self) -> Option<FrameTicket> {
@@ -343,8 +332,9 @@ impl RunTracker {
         statuses
     }
 
+    /// The name of the task in progress, for display.
     pub(super) fn active_task(&self) -> Option<String> {
-        self.tasks.get(self.active?).map(|t| t.plan.task_id.clone())
+        self.tasks.get(self.active?).map(|t| t.plan.name.clone())
     }
 
     pub(super) fn task_statuses(&self) -> Vec<wire::MissionTaskStatus> {
@@ -352,6 +342,7 @@ impl RunTracker {
             .iter()
             .map(|task| wire::MissionTaskStatus {
                 task_id: task.plan.task_id.clone(),
+                name: task.plan.name.clone(),
                 kind: task.plan.kind,
                 state: task.state as i32,
                 evidence: Some(wire::MissionTaskEvidence {
@@ -392,6 +383,7 @@ pub(super) fn planned_statuses(tasks: &[wire::MissionTaskPlan]) -> Vec<wire::Mis
         .iter()
         .map(|plan| wire::MissionTaskStatus {
             task_id: plan.task_id.clone(),
+            name: plan.name.clone(),
             kind: plan.kind,
             state: wire::MissionTaskState::Pending as i32,
             evidence: None,

@@ -59,6 +59,11 @@ impl Lane {
                 .execution
                 .filter(|_| self.is_flying())
                 .map(RunExecution::wire),
+            predecessor_run_id: self
+                .run
+                .as_ref()
+                .and_then(|run| run.predecessor.clone())
+                .unwrap_or_default(),
         }
     }
 }

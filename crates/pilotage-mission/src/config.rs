@@ -112,6 +112,9 @@ pub struct MissionConfig {
     /// Default [`ExecutionTarget::Simulator`]; a physical vehicle needs
     /// [`ExecutionTarget::RealVehicle`].
     pub execution_target: ExecutionTarget,
+    /// The identities of the run's tasks in plan order, each survey line then the way
+    /// home, which the core's phases take. Empty, the phases take the tasks' names.
+    pub task_ids: Vec<String>,
 }
 
 impl MissionConfig {
@@ -133,6 +136,7 @@ impl MissionConfig {
             clock,
             ownship_source: OwnshipSource::SimulationTruth,
             execution_target: ExecutionTarget::Simulator,
+            task_ids: Vec::new(),
         }
     }
 }

@@ -10,9 +10,7 @@ use super::*;
 /// Every member flies toward its line 1: the line in progress.
 fn on_line_one(fleet: &mut Fleet) {
     for lane in fleet.members.values_mut() {
-        lane.on_progress(&RunProgress {
-            ..toward(1, usize::MAX / 4)
-        });
+        lane.on_progress(&RunProgress { ..toward(lane, 1) });
     }
 }
 
@@ -87,9 +85,7 @@ fn reassign(fleet: &Fleet, from: &str, to: &str, fraction: f64, within: bool) ->
 /// SIM-1 ends its line 1 and switches to its revision.
 fn switch_sim1(fleet: &mut Fleet) {
     let lane = fleet.members.get_mut("SIM-1").expect("SIM-1");
-    let effect = lane.on_progress(&RunProgress {
-        ..toward(2, usize::MAX / 4)
-    });
+    let effect = lane.on_progress(&RunProgress { ..toward(lane, 2) });
     assert!(
         matches!(effect, Some(LaneEffect::Start(_))),
         "the switch at the line end"
@@ -103,6 +99,14 @@ fn switch_sim1(fleet: &mut Fleet) {
 #[test]
 fn half_of_a_members_unflown_lines_move_and_are_flown_once() {
     let (mut fleet, planned) = running_fleet(false);
+    let planned_sim2: Vec<String> = fleet
+        .team
+        .status()
+        .tasks
+        .iter()
+        .filter(|t| t.member == "SIM-2")
+        .map(|t| t.task_id.clone())
+        .collect();
     let reassign = reassign(&fleet, "SIM-1", "SIM-2", 0.5, false);
     let (receipt, intents) = team_intent(&mut fleet, reassign);
     let receipt = receipt.expect("answered at once");
@@ -156,7 +160,12 @@ fn half_of_a_members_unflown_lines_move_and_are_flown_once() {
         "every planned line flown once: {}",
         team.detail
     );
-    assert!(team.tasks.iter().any(|t| t.task_id.contains("SIM-2/moved")));
+    // The moved lines are tasks of SIM-2's own later run, which the team follows.
+    assert!(team.tasks.iter().any(|t| {
+        t.member == "SIM-2"
+            && t.state == wire::MissionTaskState::Done as i32
+            && !planned_sim2.contains(&t.task_id)
+    }));
 }
 
 #[test]
