@@ -91,3 +91,101 @@ fn a_parent_team_counts_the_lines_its_member_team_flew_again() {
     assert_eq!(line.reflown, 1);
     assert!(status.detail.contains("1 flown again"), "{}", status.detail);
 }
+
+/// Delivers a parent's intents to its members, the fleet's team `TEAM` and
+/// the vehicle lane `vehicle`, and their answers back, until it settles.
+fn relay_two(
+    parent: &mut TeamLane,
+    fleet: &mut Fleet,
+    vehicle: &mut Lane,
+    mut intents: Vec<MemberIntent>,
+) -> Vec<wire::MissionReceipt> {
+    let mut decided = Vec::new();
+    while let Some(MemberIntent { member, intent }) = intents.pop() {
+        let ctx = context("relay");
+        let receipts = if member == "TEAM" {
+            let reply = fleet.team.on_intent(&intent, &ctx);
+            let routed = fleet.route(reply.intents);
+            reply.receipt.into_iter().chain(routed).collect()
+        } else {
+            vec![vehicle.on_intent(&intent, &ctx).receipt]
+        };
+        for receipt in receipts {
+            let answer = parent.on_member_receipt(&member, &receipt, &ctx);
+            decided.extend(answer.receipt);
+            intents.extend(answer.intents);
+        }
+        let statuses: Vec<wire::MissionStatus> = fleet
+            .team
+            .take_changed()
+            .into_iter()
+            .chain(vehicle.take_changed())
+            .collect();
+        for status in statuses {
+            intents.extend(parent.on_member_status(&status, &ctx));
+        }
+    }
+    decided
+}
+
+#[test]
+fn a_member_team_spends_only_its_part_of_the_re_flight_budget() {
+    use wire::mission_intent::Action;
+    let mut fleet = Fleet::new();
+    let mut vehicle = vehicle_lane("SIM-9");
+    let mut parent = TeamLane::new(TeamConfig {
+        name: "COMMAND".to_owned(),
+        members: vec![
+            Member {
+                name: "TEAM".to_owned(),
+                launch: point(40.3328, -74.6722),
+                launch_altitude_m: 0.0,
+            },
+            Member {
+                name: "SIM-9".to_owned(),
+                launch: point(40.3368, -74.6648),
+                launch_altitude_m: 0.0,
+            },
+        ],
+        defaults: defaults(),
+        recovery_policy: "hold".to_owned(),
+    });
+    let intent = |id: &str, action| wire::MissionIntent {
+        request_id: id.to_owned(),
+        action: Some(action),
+    };
+    let reply = parent.on_intent(&intent("p", Action::Propose(objective())), &context("p"));
+    let proposal = relay_two(&mut parent, &mut fleet, &mut vehicle, reply.intents)
+        .first()
+        .and_then(opened)
+        .expect("the parent proposal");
+    // Three lines in all: the team gets two, the parent keeps one for SIM-9.
+    let mut approved = approval(&proposal.digest, 3);
+    if let Some(envelope) = approved.envelope.as_mut() {
+        envelope.bound = vec![
+            point(40.3300, -74.6760),
+            point(40.3300, -74.6610),
+            point(40.3400, -74.6610),
+            point(40.3400, -74.6760),
+        ];
+    }
+    let reply = parent.on_intent(&intent("a", Action::Approve(approved)), &context("a"));
+    let decided = relay_two(&mut parent, &mut fleet, &mut vehicle, reply.intents);
+    assert!(decided.first().is_some_and(accepted), "{decided:?}");
+    let start = Action::Start(wire::MissionStart {
+        proposal_digest: proposal.digest.clone(),
+    });
+    let reply = parent.on_intent(&intent("s", start), &context("s"));
+    relay_two(&mut parent, &mut fleet, &mut vehicle, reply.intents);
+    let bad = [
+        ("SIM-1", "line-01"),
+        ("SIM-2", "line-01"),
+        ("SIM-3", "line-01"),
+    ];
+    for _ in 0..4 {
+        let refly = fleet.fly(&bad);
+        fleet.route(refly);
+    }
+    let reflown: u32 = fleet.team.status().tasks.iter().map(|t| t.reflown).sum();
+    assert_eq!(reflown, 2, "{}", fleet.team.status().detail);
+}

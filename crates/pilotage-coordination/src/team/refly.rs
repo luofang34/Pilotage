@@ -7,8 +7,9 @@
 //! settled (every picture sent for its judgment has an answer). A member
 //! that already completed flies it at once; otherwise the line's own
 //! member flies it after its plan. Each line is flown again at most once,
-//! the envelope's `max_refly_lines` bounds the total, and only the team
-//! spends that budget. Lines a revision moved to a member
+//! and the team spends only the part of the envelope's `max_refly_lines`
+//! that it keeps for its vehicle members (`team/budget.rs`); each member
+//! team spends its own part. Lines a revision moved to a member
 //! wait in a queue until the member completes its own plan; they never
 //! splice into a plan in progress.
 
@@ -89,7 +90,7 @@ impl TeamLane {
         for owner in members {
             for (line, path) in self.book.incomplete_lines(&owner) {
                 let flown_again = self.reflies.iter().filter(|r| r.moved.is_empty()).count();
-                if u32::try_from(flown_again).unwrap_or(u32::MAX) >= envelope.max_refly_lines {
+                if u32::try_from(flown_again).unwrap_or(u32::MAX) >= self.own_refly_budget() {
                     return;
                 }
                 let tried = self
@@ -316,6 +317,7 @@ impl TeamLane {
                     launch,
                     &self.config.name,
                 );
+                let approval = self.with_share(&member, approval);
                 vec![self.request(
                     &member,
                     Op::Approve,
