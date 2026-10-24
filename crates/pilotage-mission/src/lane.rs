@@ -9,6 +9,7 @@
 mod approval;
 mod compile;
 mod digest;
+mod expiry;
 mod run;
 mod steering;
 mod successor;
@@ -122,6 +123,10 @@ pub struct Lane {
     detail: String,
     sequence: u64,
     changed: bool,
+    /// The latest civil time the lane knows, from intents and the clock.
+    clock_unix_ms: u64,
+    /// The active approval expired during the run and its recovery applied.
+    expired: bool,
 }
 
 impl Lane {
@@ -140,6 +145,8 @@ impl Lane {
             detail: "waiting for an objective".to_owned(),
             sequence: 0,
             changed: true,
+            clock_unix_ms: 0,
+            expired: false,
         }
     }
 
@@ -156,6 +163,7 @@ impl Lane {
         context: &IntentContext,
     ) -> LaneReply {
         use wire::mission_intent::Action;
+        self.clock_unix_ms = self.clock_unix_ms.max(context.now_unix_ms);
         let result = match intent.action.as_ref() {
             Some(Action::Propose(objective)) => self.propose(objective, context),
             Some(Action::Approve(approval)) => self.approve(approval, context),
@@ -165,11 +173,7 @@ impl Lane {
                 wire::MissionLaneState::Held,
                 LaneEffect::Hold,
             ),
-            Some(Action::Resume(_)) => self.transition(
-                &[wire::MissionLaneState::Held],
-                wire::MissionLaneState::Running,
-                LaneEffect::Resume,
-            ),
+            Some(Action::Resume(_)) => self.resume(context),
             Some(Action::Abort(_)) => self.abort(),
             Some(Action::Revise(revise)) => self.revise(revise, context),
             Some(Action::Skip(_)) => Err(
@@ -227,6 +231,10 @@ impl Lane {
         context: &IntentContext,
     ) -> Result<(Option<LaneEffect>, Option<wire::MissionProposal>), String> {
         if self.is_flying() {
+            let current = self.proposal.as_ref().map(|c| &c.proposal.digest);
+            if current == Some(&approval.proposal_digest) {
+                return self.renew(approval, context);
+            }
             return self.approve_successor(approval, context);
         }
         if self.state != wire::MissionLaneState::Proposed {
@@ -260,6 +268,7 @@ impl Lane {
             return Err("the start names another proposal than the approved one".to_owned());
         }
         approval::still_valid(approval, context.now_unix_ms)?;
+        self.expired = false;
         let run_id = context.fresh_id.clone();
         self.run = Some(RunTracker::new(run_id.clone(), compiled));
         self.state = wire::MissionLaneState::Running;

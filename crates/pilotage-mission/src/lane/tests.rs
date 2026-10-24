@@ -293,4 +293,5 @@ fn hold_resume_and_abort_follow_the_lifecycle() {
     assert!(status.sequence > 0 && lane.take_changed().is_none());
 }
 
+mod expiry;
 mod successor;

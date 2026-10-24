@@ -143,6 +143,9 @@ impl LaneTask {
                     }
                 },
                 _ = ticker.tick() => {
+                    if let Some(effect) = self.lane.on_clock(unix_now_ms()) {
+                        self.apply(effect).await;
+                    }
                     self.on_progress().await;
                     if !self.publish(false).await {
                         break;
@@ -173,11 +176,7 @@ impl LaneTask {
                 .await;
         }
         self.ids = self.ids.wrapping_add(1);
-        let now_unix_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |since| {
-                u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
-            });
+        let now_unix_ms = unix_now_ms();
         let context = IntentContext {
             now_unix_ms,
             fresh_id: format!("{}-{now_unix_ms}-{}", self.lane.status().lane, self.ids),
@@ -300,6 +299,15 @@ impl LaneTask {
             .await
             .is_ok()
     }
+}
+
+/// Civil time now, milliseconds since the Unix epoch.
+fn unix_now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |since| {
+            u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
+        })
 }
 
 /// The lane's view of its run: a run that exited, was fenced or closed,
