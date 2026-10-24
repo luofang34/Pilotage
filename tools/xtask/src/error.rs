@@ -207,4 +207,27 @@ pub enum XtaskError {
         /// The port the host's LISTENING line proved.
         actual: u16,
     },
+    /// The mission fleet file cannot be read, parsed, or used.
+    #[error("mission fleet file {}: {reason}", path.display())]
+    MissionFile {
+        /// The file.
+        path: PathBuf,
+        /// What is wrong with it.
+        reason: String,
+    },
+    /// The mission fleet file's camera fault cannot be placed.
+    #[error("cannot place the camera fault: {reason}")]
+    MissionFault {
+        /// Why not.
+        reason: String,
+    },
+    /// A mission host failed after the fleet was up.
+    #[error("mission host {lane} stopped: {source}")]
+    MissionHost {
+        /// The host's lane name.
+        lane: String,
+        /// How it stopped.
+        #[source]
+        source: Box<XtaskError>,
+    },
 }

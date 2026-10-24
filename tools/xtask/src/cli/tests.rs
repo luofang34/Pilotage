@@ -388,3 +388,36 @@ fn build_jsbsim_takes_no_arguments_and_is_documented() {
     assert_eq!(USAGE.matches("\n  build-jsbsim\n").count(), 1);
     assert!(USAGE.contains(super::super::jsbsim::JSBSIM_TAG));
 }
+
+#[test]
+fn mission_defaults_to_the_landmark_fleet_and_parses_its_flags() {
+    let Command::Mission(mission) = parse_args(&args(&["mission"])).expect("parses") else {
+        panic!("expected mission");
+    };
+    assert_eq!(
+        mission.plan,
+        std::path::PathBuf::from(super::DEFAULT_MISSION_PLAN)
+    );
+    assert_eq!(mission.decision, None);
+    assert!(!mission.no_fault);
+    assert_eq!(mission.ready_timeout_s, 60);
+    let Command::Mission(mission) = parse_args(&args(&[
+        "mission",
+        "--plan",
+        "/tmp/fleet.json",
+        "--decision",
+        "http://127.0.0.1:8761/v1/systemone",
+        "--decision-every",
+        "8",
+        "--no-fault",
+    ]))
+    .expect("parses") else {
+        panic!("expected mission");
+    };
+    assert_eq!(mission.plan, std::path::PathBuf::from("/tmp/fleet.json"));
+    assert_eq!(mission.decision_every_s, Some(8.0));
+    assert!(mission.no_fault);
+    assert!(parse_args(&args(&["mission", "--decision-every", "0"])).is_err());
+    assert!(parse_args(&args(&["mission", "--fleet"])).is_err());
+    assert_eq!(USAGE.matches("  mission [options]\n").count(), 1);
+}

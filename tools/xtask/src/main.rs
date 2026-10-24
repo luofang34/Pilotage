@@ -13,6 +13,7 @@ mod error;
 mod guards;
 mod jsbsim;
 mod log_archive;
+mod mission;
 mod output;
 mod process;
 mod readiness;
@@ -54,6 +55,7 @@ fn run(args: &[String]) -> Result<(), error::XtaskError> {
         Command::BuildSimTerrain => sim_terrain::run_build_sim_terrain(&session::repo_root()?),
         Command::Sim(sim) => run_supervised(session::run_sim(&sim)),
         Command::Fleet(fleet) => run_supervised(session::fleet::run_fleet(&fleet)),
+        Command::Mission(mission) => run_supervised(mission::run_mission(&mission)),
     }
 }
 

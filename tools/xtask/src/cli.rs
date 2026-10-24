@@ -1,11 +1,16 @@
-//! Argument parsing for the xtask entry point: `sim`, `reset`,
+//! Argument parsing for the xtask entry point: `sim`, `fleet`, `mission`, `reset`,
 //! `handshake`, `affected`, `guards`, `serve-viewer`, `build-jsbsim`,
 //! `build-sim-terrain`, `help`.
 
 use crate::error::XtaskError;
 
+mod mission;
 mod profile;
 mod sim;
+#[cfg(test)]
+pub(crate) use mission::DEFAULT_PLAN as DEFAULT_MISSION_PLAN;
+pub use mission::MissionArgs;
+use mission::parse_mission;
 pub use profile::Profile;
 mod usage;
 use sim::parse_sim;
@@ -78,6 +83,9 @@ pub enum Command {
     Sim(SimArgs),
     /// Launch one session per vehicle and supervise them all.
     Fleet(FleetArgs),
+    /// Launch a mission fleet of simulated aircraft under section and
+    /// command leads, and supervise it.
+    Mission(MissionArgs),
     /// Reset the running simulation world and FC of the named backend.
     Reset {
         /// The backend.
@@ -118,6 +126,7 @@ pub fn parse_args(args: &[String]) -> Result<Command, XtaskError> {
     match command.as_str() {
         "sim" => Ok(Command::Sim(parse_sim(rest)?)),
         "fleet" => Ok(Command::Fleet(parse_fleet(rest)?)),
+        "mission" => Ok(Command::Mission(parse_mission(rest)?)),
         "reset" => {
             let (fc, instance) = parse_reset(rest)?;
             Ok(Command::Reset { fc, instance })
@@ -137,7 +146,7 @@ pub fn parse_args(args: &[String]) -> Result<Command, XtaskError> {
         "help" | "--help" | "-h" => Ok(Command::Help),
         other => Err(XtaskError::Usage {
             message: format!(
-                "unknown command {other:?} (expected sim, fleet, reset, handshake, affected, guards, serve-viewer, build-jsbsim, build-sim-terrain, or help)"
+                "unknown command {other:?} (expected sim, fleet, mission, reset, handshake, affected, guards, serve-viewer, build-jsbsim, build-sim-terrain, or help)"
             ),
         }),
     }
