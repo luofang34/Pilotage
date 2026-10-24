@@ -3,7 +3,7 @@
 //! datagrams (telemetry, rejection notices), decoded with the same wire
 //! vocabulary remote clients read.
 
-use pilotage_mission::{MissionEngine, MissionLimits, OwnshipSource};
+use pilotage_mission::{MissionEngine, MissionLimits, MissionState, OwnshipSource};
 use pilotage_protocol::{
     ControlAction, ControlActionResult, FrameRejected, FrameRejectionReason, LeaseRequest,
     LeaseResponse, ProfileActivation, ScopeId, ServerWelcome, wire,
@@ -18,7 +18,7 @@ use super::super::PlanSource;
 use super::nav_guidance::NavGuidancePublisher;
 use super::{
     ACTIVATION_REVISION, MISSION_SCOPE, MissionTask, NO_DEVICE_DIGEST, PROFILE_DIGEST, PROFILE_ID,
-    PROFILE_REVISION, ownship,
+    PROFILE_REVISION, RunControl, ownship,
 };
 
 /// Height above the launch point, metres, from which a real vehicle counts
@@ -210,6 +210,27 @@ impl MissionTask {
         self.update(|status| status.awaiting_launch = true);
     }
 
+    /// Ends a run whose vehicle disarmed or landed during a flown phase: the
+    /// plan never lands, so the vehicle did it on its own, and the run
+    /// stops the way an abort does with the reason in its status. A
+    /// vehicle that lands after the plan completed, or before its launch,
+    /// ends nothing.
+    fn on_vehicle_left_flight(&mut self, reason: &'static str) {
+        let flown = matches!(
+            self.mission.as_ref().map(MissionEngine::state),
+            Some(MissionState::Climb | MissionState::Enroute | MissionState::Held)
+        );
+        if !flown || self.awaiting_launch || self.stopping.is_some() || self.fenced {
+            return;
+        }
+        warn!(
+            reason,
+            "the run ends: the vehicle left flight outside the plan"
+        );
+        self.update(|status| status.ended_by_vehicle = Some(reason));
+        self.on_control(RunControl::Abort);
+    }
+
     /// Notes the vehicle airborne: the next tick asks for the lease, and
     /// the mission keeps asking while another principal holds the scope.
     fn on_airborne(&mut self, height_m: f64) {
@@ -324,9 +345,6 @@ impl MissionTask {
 
     fn on_telemetry(&mut self, sample: &wire::TelemetrySample) {
         let now = self.mission_now();
-        let Some(mission) = self.mission.as_mut() else {
-            return;
-        };
         let ours = sample
             .vehicle
             .as_ref()
@@ -334,6 +352,16 @@ impl MissionTask {
         if !ours {
             return;
         }
+        if let Some(reason) = sample
+            .fc_state
+            .as_ref()
+            .and_then(|fc| self.flight.observe(fc))
+        {
+            self.on_vehicle_left_flight(reason);
+        }
+        let Some(mission) = self.mission.as_mut() else {
+            return;
+        };
         let ownship = match self.ownship_source {
             OwnshipSource::SimulationTruth => {
                 ownship::ownship_from_wire(sample, now, self.planar_pose_is_truth)

@@ -100,6 +100,9 @@ pub struct AutomationStatus {
     pub operator_held: bool,
     /// An abort stopped the vehicle, released the lease and ended the run.
     pub stopped: bool,
+    /// The vehicle disarmed or landed on its own during a flown phase, and
+    /// the run ended for that reason.
+    pub ended_by_vehicle: Option<&'static str>,
 }
 
 /// Where the plan comes from: a navdata snapshot the route expands

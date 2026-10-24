@@ -199,6 +199,7 @@ impl Fleet {
                 target_waypoint: Some(2 * lines),
                 plan_complete: true,
                 ended: false,
+                ended_because: None,
             });
             if let Some(status) = lane.take_changed() {
                 intents.extend(self.team.on_member_status(&status, &context("fly")));
