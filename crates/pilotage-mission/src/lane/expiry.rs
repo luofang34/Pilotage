@@ -8,7 +8,7 @@ use pilotage_protocol::wire;
 use wire::MissionLaneState as State;
 use wire::MissionSuccessorState as Stage;
 
-use super::successor::Successor;
+use super::successor::{Basis, Successor};
 use super::{IntentContext, Lane, LaneEffect, approval, compile};
 
 type Outcome = Result<(Option<LaneEffect>, Option<wire::MissionProposalRecord>), String>;
@@ -47,15 +47,6 @@ impl Lane {
             return Some(LaneEffect::Hold);
         }
         None
-    }
-
-    /// Whether the active approval has expired by the latest known time.
-    pub(super) fn approval_expired(&self) -> bool {
-        self.expired
-            || self
-                .approval
-                .as_ref()
-                .is_some_and(|a| approval::still_valid(a, self.clock_unix_ms).is_err())
     }
 
     /// A new approval of the plan the run flies: it replaces the active one.
@@ -99,11 +90,12 @@ impl Lane {
             stage: Stage::Drafted,
             drafted_by: "the approval's expiry".to_owned(),
             flown_at_draft: flown,
-            recovery: true,
+            basis: Basis::Drafted,
+            approval: None,
             release: None,
         });
         self.detail =
             "the approval expired; the run returns home after the line in progress".to_owned();
-        self.admit_successor(delegated)
+        self.admit_successor(delegated, Basis::ExpiryRecovery)
     }
 }

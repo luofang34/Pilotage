@@ -203,6 +203,18 @@ while a task runs and switches at the next checkpoint: the completion of
 the running task, or at once while the lane is `Held`. The lane never
 splices a running plan.
 
+The run in progress and an admitted successor each hold their own approval,
+bound to its own digest, run and expiry. A successor is admitted on one of
+three bases: an approval of its own digest, the approval in force inside its
+envelope, or the recovery that an expired approval names. A renewal of the
+run changes only the approval of the run; an approval of a successor changes
+only that of the successor. Each approval expires on its own, so the run
+applies its own expiry policy whatever the approval of the successor. At the
+checkpoint, the lane checks the approval of the successor again against the
+successor. When that approval no longer admits it, the successor waits for a
+new approval. At the switch, the approval of the successor becomes the
+approval of the run.
+
 An urgent action does not wait for a checkpoint. `Hold`, `Return`, `Land`
 and `Abort` are preemptions: the lane requests the stop, observes the
 vehicle's transition, and applies the change only when the transition is
