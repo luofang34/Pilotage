@@ -40,31 +40,46 @@ pub(super) struct Segment {
 }
 
 /// The segments of a survey of `lines` lines over `waypoints` waypoints: toward each
-/// line's start, along the line, and home over the rest.
-pub(super) fn survey_segments(lines: usize, waypoints: usize) -> Vec<Segment> {
+/// line's start, along the line, and home over the rest. Each line and the way home take
+/// the identity `task_ids` gives them in that order, else their names; a transit takes
+/// its line's identity, marked as the way to it.
+pub(super) fn survey_segments(lines: usize, waypoints: usize, task_ids: &[String]) -> Vec<Segment> {
     let index = |i: usize| u32::try_from(i).unwrap_or(u32::MAX);
+    let id = |position: usize, name: String| task_ids.get(position).cloned().unwrap_or(name);
     let mut segments = Vec::with_capacity(2 * lines + 1);
     for line in 0..lines {
-        let number = line.wrapping_add(1);
+        let line_id = id(line, format!("line-{:02}", line.wrapping_add(1)));
         segments.push(Segment {
-            id: format!("transit-{number:02}"),
+            id: format!("transit:{line_id}"),
             first: index(2 * line),
             last: index(2 * line),
         });
         segments.push(Segment {
-            id: format!("line-{number:02}"),
+            id: line_id,
             first: index(2 * line + 1),
             last: index(2 * line + 1),
         });
     }
     if waypoints > 2 * lines {
         segments.push(Segment {
-            id: "home".to_owned(),
+            id: id(lines, "home".to_owned()),
             first: index(2 * lines),
             last: index(waypoints.saturating_sub(1)),
         });
     }
     segments
+}
+
+/// The one segment of a plan home, under the identity of the way-home task.
+pub(super) fn home_segments(waypoints: usize, task_ids: &[String]) -> Vec<Segment> {
+    match task_ids.first() {
+        Some(id) if waypoints > 0 => vec![Segment {
+            id: id.clone(),
+            first: 0,
+            last: u32::try_from(waypoints - 1).unwrap_or(u32::MAX),
+        }],
+        _ => Vec::new(),
+    }
 }
 
 pub(super) fn build_document(

@@ -26,7 +26,7 @@ fn a_team_holds_only_once_every_member_holds() {
         lane.on_progress(&RunProgress {
             holding: true,
             execution: None,
-            ..toward(1, usize::MAX / 4)
+            ..toward(lane, 1)
         });
         if let Some(status) = lane.take_changed() {
             fleet.team.on_member_status(&status, &context("held"));

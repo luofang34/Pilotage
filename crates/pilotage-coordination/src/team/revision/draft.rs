@@ -193,7 +193,8 @@ impl TeamLane {
     ) -> wire::MissionProposal {
         let mut tasks = Vec::new();
         let line = |member: &str, index: usize, path: &Vec<wire::GeoPoint>| wire::MissionTaskPlan {
-            task_id: format!("{member}/unflown-{:02}", index + 1),
+            task_id: format!("{}#{member}-{index}", context.fresh_id),
+            name: format!("{member}/unflown-{:02}", index + 1),
             kind: wire::MissionTaskKind::SurveyLine as i32,
             path: path.clone(),
             length_m: 0.0,

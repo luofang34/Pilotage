@@ -184,7 +184,7 @@ impl MissionEngine {
             .collect();
         let execution =
             PlanExecution::new(survey.plan, ExecutionConfig::new(survey.capture_radius_m))?;
-        let segments = document::survey_segments(survey.line_count, idents.len());
+        let segments = document::survey_segments(survey.line_count, idents.len(), &config.task_ids);
         let mut engine = Self::from_execution(
             execution,
             config,

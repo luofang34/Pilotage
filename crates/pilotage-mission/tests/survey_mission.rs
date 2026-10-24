@@ -280,7 +280,7 @@ fn a_real_vehicle_starts_from_the_hover_and_a_simulator_arms_first() {
         .map(|phase| phase.id.as_str())
         .collect();
     assert_eq!(ids.first().copied(), Some("climb"));
-    assert_eq!(ids.get(1..3), Some(&["transit-01", "line-01"][..]));
+    assert_eq!(ids.get(1..3), Some(&["transit:line-01", "line-01"][..]));
     assert!(!ids.contains(&"arm"));
     let line = &real.mission_document().phases[2];
     assert!(

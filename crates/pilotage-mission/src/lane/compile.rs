@@ -79,7 +79,8 @@ pub(super) fn compile(
     let plan = plan_survey(&request, &config.anchor, height_m).map_err(|e| e.to_string())?;
     let (_, record) =
         MissionEngine::from_survey(&request, config.clone()).map_err(|e| e.to_string())?;
-    let tasks = tasks_of(&plan, request.return_to_launch);
+    let tasks = tasks_of(&plan, request.return_to_launch, &proposal_id);
+    config.task_ids = tasks.iter().map(|task| task.task_id.clone()).collect();
     let duration_s = record.path_length_m / cruise_mps + height_m / config.climb_rate_mps.max(0.1);
     let estimates = wire::MissionEstimates {
         path_length_m: record.path_length_m,
@@ -130,16 +131,19 @@ pub(super) fn home(base: &Compiled, proposal_id: String) -> Compiled {
         latitude_deg: anchor.latitude_rad.to_degrees(),
         longitude_deg: anchor.longitude_rad.to_degrees(),
     };
+    let home_id = task_id(&proposal_id, "home");
+    let task_ids = vec![home_id.clone()];
     let mut proposal = wire::MissionProposal {
         proposal_id,
         objective_id: base.proposal.objective_id.clone(),
         digest: Vec::new(),
         tasks: vec![wire::MissionTaskPlan {
-            task_id: "home".to_owned(),
+            task_id: home_id,
             kind: wire::MissionTaskKind::ReturnHome as i32,
             path: vec![home],
             length_m: 0.0,
             member: String::new(),
+            name: "home".to_owned(),
         }],
         estimates: Some(wire::MissionEstimates::default()),
         assumptions: base.proposal.assumptions.clone(),
@@ -152,19 +156,18 @@ pub(super) fn home(base: &Compiled, proposal_id: String) -> Compiled {
     Compiled {
         proposal,
         plan: RunPlan::Home,
-        config: base.config.clone(),
+        config: MissionConfig {
+            task_ids,
+            ..base.config.clone()
+        },
         height_m: base.height_m,
         min_usable_per_line: base.min_usable_per_line,
     }
 }
 
-/// Makes `compiled` the successor of `predecessor`: its tasks take the
-/// revision's number so they never share an identifier with a task
-/// already flown, and its digest binds the predecessor and the summary.
-pub(super) fn succeed(compiled: &mut Compiled, number: u32, predecessor: &[u8], summary: String) {
-    for task in &mut compiled.proposal.tasks {
-        task.task_id = format!("rev{number}-{}", task.task_id);
-    }
+/// Makes `compiled` the successor of `predecessor`: its digest binds the predecessor and
+/// the summary. Its tasks keep their identities, unique to its own proposal.
+pub(super) fn succeed(compiled: &mut Compiled, predecessor: &[u8], summary: String) {
     compiled.proposal.predecessor_digest = predecessor.to_vec();
     compiled.proposal.summary = summary;
     compiled.proposal.digest = proposal_digest(&compiled.proposal).to_vec();
@@ -200,8 +203,14 @@ fn survey_request(
     request
 }
 
+/// The identity of the task `key` of proposal `proposal_id`: opaque, unique to the
+/// proposal. Nothing reads it back for its parts.
+fn task_id(proposal_id: &str, key: &str) -> String {
+    format!("{proposal_id}#{key}")
+}
+
 /// One task per survey line, then the way home.
-fn tasks_of(plan: &SurveyPlan, return_home: bool) -> Vec<wire::MissionTaskPlan> {
+fn tasks_of(plan: &SurveyPlan, return_home: bool, proposal_id: &str) -> Vec<wire::MissionTaskPlan> {
     let point = |index: usize| {
         plan.plan
             .waypoints
@@ -215,7 +224,8 @@ fn tasks_of(plan: &SurveyPlan, return_home: bool) -> Vec<wire::MissionTaskPlan> 
         .filter_map(|line| {
             let path = vec![point(2 * line)?, point(2 * line + 1)?];
             Some(wire::MissionTaskPlan {
-                task_id: format!("line-{:02}", line + 1),
+                task_id: task_id(proposal_id, &line.to_string()),
+                name: format!("line-{:02}", line + 1),
                 kind: wire::MissionTaskKind::SurveyLine as i32,
                 length_m: distance_m(&path[0], &path[1]),
                 path,
@@ -228,7 +238,8 @@ fn tasks_of(plan: &SurveyPlan, return_home: bool) -> Vec<wire::MissionTaskPlan> 
             (point(2 * plan.line_count - 1), point(2 * plan.line_count))
     {
         tasks.push(wire::MissionTaskPlan {
-            task_id: "home".to_owned(),
+            task_id: task_id(proposal_id, "home"),
+            name: "home".to_owned(),
             kind: wire::MissionTaskKind::ReturnHome as i32,
             length_m: distance_m(&from, &home),
             path: vec![from, home],

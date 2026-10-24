@@ -13,15 +13,20 @@ use super::{Phase, TeamLane};
 pub(super) struct TaskBook {
     tasks: BTreeMap<String, wire::MissionTaskStatus>,
     paths: BTreeMap<String, Vec<wire::GeoPoint>>,
-    /// Each member's run of the team plan; later runs are re-flights.
-    original_run: BTreeMap<String, String>,
-    /// Runs of lines a revision moved to a member, with the prefix their
-    /// tasks take in the book.
-    adopted: BTreeMap<String, (String, String)>,
+    /// Each member's runs of the team plan: its first run, and the runs its revisions
+    /// replaced it with, each naming its predecessor. Other runs are re-flights.
+    team_runs: BTreeMap<String, Vec<String>>,
+    /// Runs of lines a revision moved to a member, by run, with the member.
+    adopted: BTreeMap<String, String>,
 }
 
 fn key(member: &str, task: &str) -> String {
     format!("{member}/{task}")
+}
+
+/// A member task's name as the team shows it.
+fn display(member: &str, name: &str) -> String {
+    format!("{member}/{name}")
 }
 
 impl TaskBook {
@@ -29,7 +34,7 @@ impl TaskBook {
     pub(super) fn plan(&mut self, proposals: &BTreeMap<String, wire::MissionProposal>) {
         self.tasks.clear();
         self.paths.clear();
-        self.original_run.clear();
+        self.team_runs.clear();
         self.adopted.clear();
         for (member, proposal) in proposals {
             for task in &proposal.tasks {
@@ -39,6 +44,7 @@ impl TaskBook {
                     id.clone(),
                     wire::MissionTaskStatus {
                         task_id: id,
+                        name: display(member, &task.name),
                         kind: task.kind,
                         state: wire::MissionTaskState::Pending as i32,
                         evidence: None,
@@ -62,21 +68,18 @@ impl TaskBook {
         if status.run_id.is_empty() {
             return;
         }
-        if !self.original_run.contains_key(member) && !reflying {
-            self.original_run
-                .insert(member.to_owned(), status.run_id.clone());
-        }
-        let Some(prefix) = self.prefix_of(member, &status.run_id) else {
+        if !self.follows(member, status, reflying) {
             return;
-        };
+        }
         for task in &status.tasks {
-            let id = key(member, &format!("{prefix}{}", task.task_id));
+            let id = key(member, &task.task_id);
             // A revision's tasks, and the tasks of moved lines, are new.
             let entry = self
                 .tasks
                 .entry(id.clone())
                 .or_insert_with(|| wire::MissionTaskStatus {
                     task_id: id.clone(),
+                    name: display(member, &task.name),
                     member: member.to_owned(),
                     ..task.clone()
                 });
@@ -96,22 +99,27 @@ impl TaskBook {
         }
     }
 
-    /// The prefix the tasks of `member`'s run `run_id` take in the book:
-    /// none for the member's run of the team plan and the runs its own
-    /// revisions replaced it with, the adopted prefix for moved lines.
-    fn prefix_of(&self, member: &str, run_id: &str) -> Option<String> {
-        if let Some((owner, prefix)) = self.adopted.get(run_id) {
-            return (owner == member).then(|| prefix.clone());
+    /// Whether the book follows `member`'s run in `status`: its first run of the team plan,
+    /// a run that continues one the book follows, as the status names its predecessor,
+    /// or a run of lines moved to it. A re-flight's run is followed by its re-flight.
+    fn follows(&mut self, member: &str, status: &wire::MissionStatus, reflying: bool) -> bool {
+        if let Some(owner) = self.adopted.get(&status.run_id) {
+            return owner == member;
         }
-        let original = self.original_run.get(member)?;
-        let lineage = run_id == original || run_id.starts_with(&format!("{original}-rev"));
-        lineage.then(String::new)
+        let runs = self.team_runs.entry(member.to_owned()).or_default();
+        if runs.contains(&status.run_id) {
+            return true;
+        }
+        if (runs.is_empty() && !reflying) || runs.contains(&status.predecessor_run_id) {
+            runs.push(status.run_id.clone());
+            return true;
+        }
+        false
     }
 
-    /// Follows `member`'s run `run_id` of moved lines under `prefix`.
-    pub(super) fn adopt(&mut self, member: &str, run_id: &str, prefix: &str) {
-        self.adopted
-            .insert(run_id.to_owned(), (member.to_owned(), prefix.to_owned()));
+    /// Follows `member`'s run `run_id` of moved lines.
+    pub(super) fn adopt(&mut self, member: &str, run_id: &str) {
+        self.adopted.insert(run_id.to_owned(), member.to_owned());
     }
 
     /// The member's survey lines not yet flown, nor in flight, with their
@@ -260,7 +268,7 @@ pub(super) fn team_status(team: &TeamLane) -> wire::MissionStatus {
         .statuses()
         .iter()
         .filter(|t| t.state == wire::MissionTaskState::Active as i32)
-        .map(|t| t.task_id.clone())
+        .map(|t| t.name.clone())
         .collect::<Vec<_>>()
         .join(", ");
     wire::MissionStatus {
@@ -290,6 +298,7 @@ pub(super) fn team_status(team: &TeamLane) -> wire::MissionStatus {
             .collect(),
         member_link: wire::MemberLink::Unspecified as i32,
         execution: None,
+        predecessor_run_id: String::new(),
         sequence: team.sequence,
         area: survey.map(|s| s.area.clone()).unwrap_or_default(),
         height_m: survey.map_or(0.0, |s| s.height_m),
