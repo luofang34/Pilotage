@@ -53,9 +53,12 @@ pub(crate) struct Command {
     pub seconds: u64,
     /// Lines for a person rather than JSON lines for a program.
     pub human: bool,
+    /// The chat endpoint that interprets instructions in a person's words,
+    /// in agent mode.
+    pub instruction_model: Option<String>,
 }
 
-const USAGE: &str = "mission-operator --host URL --cert HEX [--token-file PATH] [--name NAME] [--json | --human] (propose FILE | approve [DIGEST] [policy] | start [DIGEST] | hold | resume | abort | watch | run FILE --approve [policy] | agent | survey-agent FILE) [--seconds N]; policy: --max-height M --expires-min N --refly N --no-revise --reserve F";
+const USAGE: &str = "mission-operator --host URL --cert HEX [--token-file PATH] [--name NAME] [--json | --human] [--instruction-model URL] (propose FILE | approve [DIGEST] [policy] | start [DIGEST] | hold | resume | abort | watch | run FILE --approve [policy] | agent | survey-agent FILE) [--seconds N]; policy: --max-height M --expires-min N --refly N --no-revise --reserve F";
 
 pub(crate) fn parse(args: &[String]) -> Result<Command, OperatorError> {
     let usage = || OperatorError::Usage(USAGE.to_owned());
@@ -68,6 +71,7 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, OperatorError> {
     let mut approve = false;
     // A terminal gets lines for a person; a pipe gets JSON lines.
     let mut human = std::io::IsTerminal::is_terminal(&std::io::stdout());
+    let mut instruction_model = None;
     let mut positional = Vec::new();
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
@@ -86,6 +90,7 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, OperatorError> {
             "--approve" => approve = true,
             "--json" => human = false,
             "--human" => human = true,
+            "--instruction-model" => instruction_model = Some(value()?),
             other => positional.push(other.to_owned()),
         }
     }
@@ -117,6 +122,7 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, OperatorError> {
         policy,
         seconds,
         human,
+        instruction_model,
     })
 }
 

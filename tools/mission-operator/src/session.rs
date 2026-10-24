@@ -19,6 +19,7 @@ use tokio::time::Instant;
 use crate::cli::{Action, Command, OperatorError};
 
 mod agent;
+mod instruct;
 mod output;
 mod survey_agent;
 
@@ -39,6 +40,10 @@ struct Session {
     started: Instant,
     output: Output,
     last_telemetry: Option<Instant>,
+    /// The chat endpoint that interprets instructions, when named.
+    instruction_model: Option<String>,
+    /// The command the latest instruction became, waiting to be confirmed.
+    draft: Option<pilotage_client_session::mission::Instruction>,
 }
 
 pub(crate) async fn execute(command: Command) -> Result<bool, OperatorError> {
@@ -83,6 +88,8 @@ impl Session {
             started: Instant::now(),
             output: Output::new(command.human),
             last_telemetry: None,
+            instruction_model: command.instruction_model.clone(),
+            draft: None,
         };
         let actions = session.engine.handle(TransportEvent::Connected, 0);
         session.perform(actions).await?;

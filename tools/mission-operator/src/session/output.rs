@@ -37,6 +37,11 @@ impl Output {
         writeln!(std::io::stdout().lock(), "{value}").ok();
     }
 
+    /// Whether the lines are for a person.
+    pub(crate) fn human(&self) -> bool {
+        self.human
+    }
+
     pub(crate) fn admitted(&self, name: &str) {
         if self.human {
             self.line(&format!("connected as {name}"));
@@ -115,6 +120,24 @@ impl Output {
     }
 
     /// What a scripted agent is doing, and why.
+    /// The command an instruction became, waiting to be confirmed.
+    pub(crate) fn draft(&self, instruction: &pilotage_client_session::mission::Instruction) {
+        if self.human {
+            self.line(&format!("{} · y sends it", instruction.describe()));
+        } else {
+            Self::json(&json!({
+                "event": "draft",
+                "understood": instruction.understood,
+                "describes": instruction.describe(),
+                "steps": instruction
+                    .steps
+                    .iter()
+                    .map(|s| json!({"lane": s.lane, "action": s.action, "command": s.command()}))
+                    .collect::<Vec<_>>(),
+            }));
+        }
+    }
+
     pub(crate) fn note(&self, text: &str) {
         if self.human {
             self.line(&format!("agent: {text}"));
