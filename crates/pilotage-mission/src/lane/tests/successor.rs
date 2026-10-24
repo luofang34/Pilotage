@@ -111,6 +111,7 @@ fn an_approved_revision_waits_for_the_line_in_progress_to_end() {
         ended: false,
         ended_because: None,
         holding: false,
+        execution: None,
     });
     assert_eq!(lane.state(), wire::MissionLaneState::Complete);
 }

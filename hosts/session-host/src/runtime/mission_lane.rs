@@ -13,8 +13,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use pilotage_adapter_api::RawVideoFrame;
 use pilotage_mission::{
-    FrameAssessment, IntentContext, Lane, LaneEffect, MissionState, Requester, RunProgress,
-    Steering,
+    FrameAssessment, IntentContext, Lane, LaneEffect, MissionState, Requester, RunExecution,
+    RunProgress, Steering,
 };
 use pilotage_protocol::wire;
 use pilotage_session::ClientKey;
@@ -328,6 +328,22 @@ fn run_progress(status: &AutomationStatus, finished: bool) -> RunProgress {
             || status.mission_state == Some(MissionState::Failed),
         ended_because: status.ended_by_vehicle,
         holding: status.holding,
+        execution: Some(execution(status)),
+    }
+}
+
+/// What the run does now, from its status.
+fn execution(status: &AutomationStatus) -> RunExecution {
+    if status.stopped {
+        RunExecution::Stopped
+    } else if status.awaiting_launch {
+        RunExecution::AwaitingLaunch
+    } else if status.held {
+        RunExecution::LeaseHeldElsewhere(status.lease_holder)
+    } else if status.operator_held {
+        RunExecution::Holding
+    } else {
+        RunExecution::Flying
     }
 }
 

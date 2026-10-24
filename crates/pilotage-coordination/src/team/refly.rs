@@ -197,7 +197,7 @@ impl TeamLane {
         }
         let others_flying = self.member_proposals.keys().any(|m| {
             m != member
-                && self.lost.get(m) != Some(&true)
+                && !self.stated_down(m)
                 && self
                     .statuses
                     .get(m)

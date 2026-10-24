@@ -49,6 +49,7 @@ fn fly_lines(
         ended: false,
         ended_because: None,
         holding: false,
+        execution: None,
     });
     match lane.take_changed() {
         Some(status) => fleet.team.on_member_status(&status, &context("fly")),

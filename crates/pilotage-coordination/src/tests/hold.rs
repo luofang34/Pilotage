@@ -26,6 +26,7 @@ fn a_team_holds_only_once_every_member_holds() {
         lane.on_progress(&RunProgress {
             target_waypoint: Some(1),
             holding: true,
+            execution: None,
             ..RunProgress::default()
         });
         if let Some(status) = lane.take_changed() {

@@ -97,7 +97,18 @@ impl MissionTask {
         self.session = Some(welcome.session);
         self.principal = Some(welcome.principal);
         self.nav_guidance = Some(NavGuidancePublisher::for_session(welcome.session));
-        self.update(|status| status.session = Some(welcome.session.as_u64()));
+        let ours = welcome.principal.as_u64();
+        let holder = welcome
+            .scope_holders
+            .iter()
+            .find(|h| h.vehicle == HOST_VEHICLE && h.scope.as_str() == MISSION_SCOPE)
+            .and_then(|h| h.holder)
+            .map(|h| h.as_u64())
+            .filter(|h| *h != ours);
+        self.update(|status| {
+            status.session = Some(welcome.session.as_u64());
+            status.lease_holder = holder;
+        });
         self.try_start(&welcome.host_capabilities).await
     }
 

@@ -28,3 +28,33 @@ fn a_run_the_vehicle_ended_has_ended_with_its_reason() {
         Some("the vehicle landed outside the plan")
     );
 }
+
+#[test]
+fn a_run_waiting_for_a_lease_held_elsewhere_names_its_holder() {
+    use pilotage_mission::RunExecution;
+    let mut status = AutomationStatus {
+        mission_state: Some(MissionState::Enroute),
+        ..AutomationStatus::default()
+    };
+    assert_eq!(
+        run_progress(&status, false).execution,
+        Some(RunExecution::Flying)
+    );
+    status.held = true;
+    status.lease_holder = Some(9);
+    assert_eq!(
+        run_progress(&status, false).execution,
+        Some(RunExecution::LeaseHeldElsewhere(Some(9)))
+    );
+    status.held = false;
+    status.operator_held = true;
+    assert_eq!(
+        run_progress(&status, false).execution,
+        Some(RunExecution::Holding)
+    );
+    status.stopped = true;
+    assert_eq!(
+        run_progress(&status, false).execution,
+        Some(RunExecution::Stopped)
+    );
+}

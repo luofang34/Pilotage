@@ -33,12 +33,12 @@ impl TeamLane {
         // reports again or a person states that it is down. A member that is
         // down cannot finish its line in progress either.
         let lines = match self.lost.get(from) {
-            Some(false) => {
+            Some(wire::MemberLink::Lost) => {
                 return Err(format!(
                     "{from}'s link is lost and its state is unknown; its work stays reserved until it reports again or a person states that it is down"
                 ));
             }
-            Some(true) => self.book.unfinished_lines(from),
+            Some(_) => self.book.unfinished_lines(from),
             None => self.book.unflown_lines(from),
         };
         let mut unflown: Vec<(f64, Vec<wire::GeoPoint>)> = lines

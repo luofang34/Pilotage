@@ -377,6 +377,48 @@ message MissionStatus {
   double height_m = 16;
   // A successor drafted, admitted or applied to the plan in progress.
   MissionSuccessor successor = 17;
+  // On a team's member entry: how the team sees the member's link and
+  // whether the member's work is still its own. A client acts on this,
+  // never on `detail`, which is for display only.
+  MemberLink member_link = 18;
+  // How a vehicle's run executes now; absent without a run.
+  MissionExecution execution = 19;
+}
+
+// How a team sees one member.
+enum MemberLink {
+  MEMBER_LINK_UNSPECIFIED = 0;
+  // The member reports.
+  MEMBER_LINK_REPORTING = 1;
+  // The link is lost and the member's state is unknown: it may still fly,
+  // so its work and its line in progress stay reserved to it.
+  MEMBER_LINK_LOST = 2;
+  // A person stated that the member is down: its work may move.
+  MEMBER_LINK_DOWN = 3;
+  // The member is down and its work moved to other members.
+  MEMBER_LINK_RELEASED = 4;
+}
+
+// What a vehicle's run does now, beside the lane's state.
+message MissionExecution {
+  MissionExecutionState state = 1;
+  // The principal that holds the motion lease the run waits for, when the
+  // run knows it.
+  uint64 lease_holder = 2;
+}
+
+enum MissionExecutionState {
+  MISSION_EXECUTION_STATE_UNSPECIFIED = 0;
+  // The run flies its plan.
+  MISSION_EXECUTION_STATE_FLYING = 1;
+  // A real vehicle's run waits for its pilot to launch it.
+  MISSION_EXECUTION_STATE_AWAITING_LAUNCH = 2;
+  // Another principal holds the motion lease; the run waits to get it back.
+  MISSION_EXECUTION_STATE_LEASE_HELD_ELSEWHERE = 3;
+  // The run holds the vehicle in place.
+  MISSION_EXECUTION_STATE_HOLDING = 4;
+  // The run stopped and released the vehicle.
+  MISSION_EXECUTION_STATE_STOPPED = 5;
 }
 
 enum MissionSuccessorState {

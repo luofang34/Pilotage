@@ -21,6 +21,42 @@ pub struct RunProgress {
     pub ended_because: Option<&'static str>,
     /// The vehicle holds in place, as a hold asked.
     pub holding: bool,
+    /// What the run does now, when the host knows.
+    pub execution: Option<RunExecution>,
+}
+
+/// What a vehicle's run does now, as the host reads it from the run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunExecution {
+    /// The run flies its plan.
+    Flying,
+    /// A real vehicle's run waits for its pilot to launch it.
+    AwaitingLaunch,
+    /// Another principal holds the motion lease, when the run knows which.
+    LeaseHeldElsewhere(Option<u64>),
+    /// The run holds the vehicle in place.
+    Holding,
+    /// The run stopped and released the vehicle.
+    Stopped,
+}
+
+impl RunExecution {
+    /// The execution as a status reports it.
+    #[must_use]
+    pub fn wire(self) -> wire::MissionExecution {
+        use wire::MissionExecutionState as State;
+        let (state, lease_holder) = match self {
+            Self::Flying => (State::Flying, 0),
+            Self::AwaitingLaunch => (State::AwaitingLaunch, 0),
+            Self::LeaseHeldElsewhere(holder) => (State::LeaseHeldElsewhere, holder.unwrap_or(0)),
+            Self::Holding => (State::Holding, 0),
+            Self::Stopped => (State::Stopped, 0),
+        };
+        wire::MissionExecution {
+            state: state as i32,
+            lease_holder,
+        }
+    }
 }
 
 /// One judgment of one picture.
