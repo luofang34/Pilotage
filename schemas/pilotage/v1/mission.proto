@@ -372,9 +372,8 @@ message MissionStatus {
   uint64 sequence = 14;
   // The objective's area, for display.
   repeated GeoPoint area = 15;
-  // The objective's height above the launch point, metres; zero when it
-  // states none. Any client sizes an approval's height ceiling from it,
-  // also for a proposal another client made.
+  // The objective's height above the launch point, metres, for display;
+  // zero when it states none. An approval is sized from the full proposal.
   double height_m = 16;
   // A successor drafted, admitted or applied to the plan in progress.
   MissionSuccessor successor = 17;
