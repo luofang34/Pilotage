@@ -239,6 +239,15 @@ impl MissionDesk {
             .filter(|digest| reviewing && self.held(digest).is_none())
     }
 
+    /// The digest of the proposal an approval would name that this client has not seen
+    /// in full: one under review, or the plan in progress, whose approval a person
+    /// renews once it expired.
+    #[must_use]
+    pub fn unseen_approvable(&self) -> Option<Vec<u8>> {
+        self.under_review()
+            .filter(|digest| self.held(digest).is_none())
+    }
+
     /// The commands the lane's state offers under `policy`, none before
     /// admission.
     #[must_use]
@@ -318,7 +327,7 @@ impl MissionDesk {
                 }))
             }
             MissionCommand::Fetch {} => Ok(Action::Fetch(wire::MissionFetch {
-                digest: self.unseen_proposal().ok_or(DeskRefusal::NoProposal)?,
+                digest: self.unseen_approvable().ok_or(DeskRefusal::NoProposal)?,
             })),
             MissionCommand::Start { digest } => {
                 let proposal_digest = match digest {
