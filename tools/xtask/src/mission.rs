@@ -42,6 +42,7 @@ struct Fleet {
     log_dir: PathBuf,
     token: PathBuf,
     ready_timeout_s: u64,
+    instruction_model: Option<String>,
 }
 
 /// Runs the mission fleet until ctrl-c or any host's failure.
@@ -78,6 +79,7 @@ pub async fn run_mission(args: &MissionArgs) -> Result<(), XtaskError> {
         dir,
         repo_root,
         ready_timeout_s: args.ready_timeout_s,
+        instruction_model: args.instruction_model.clone(),
     };
     write_objective(&fleet, &file)?;
     let mut cancel = spawn_cancel_listener()?;
@@ -404,10 +406,15 @@ fn announce(fleet: &Fleet, file: &MissionFile, hosts: &[Host]) {
         file.sections.len(),
         hosts.len() - leads.len()
     ));
-    let bindings: Vec<String> = leads
+    let mut bindings: Vec<String> = leads
         .iter()
         .map(|lead| format!("--pilotage-join-token-file {}={token}", lead.lane))
         .collect();
+    let mut interpreter = String::new();
+    if let Some(url) = &fleet.instruction_model {
+        bindings.push(format!("--pilotage-instruction-model {url}"));
+        interpreter = format!(" --instruction-model {url}");
+    }
     print_line("App (approver on every lead), from the Sokoly-App checkout:");
     print_line(&format!(
         "  cargo run --release -p sokoly-app -- --pilotage-fleet {dir}/fleet.json \
@@ -417,7 +424,7 @@ fn announce(fleet: &Fleet, file: &MissionFile, hosts: &[Host]) {
     let operator = fleet.repo_root.join("target/release/mission-operator");
     for lead in &leads {
         print_line(&format!(
-            "agent on {}: {} --host https://{LOOPBACK}:{}/pilotage --cert {} --name agent --human agent",
+            "agent on {}: {} --host https://{LOOPBACK}:{}/pilotage --cert {} --name agent --human{interpreter} agent",
             lead.lane,
             operator.display(),
             lead.port,

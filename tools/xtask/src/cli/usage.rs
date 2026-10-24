@@ -81,6 +81,9 @@ commands:
                            (default: none: pictures are counted, not
                            judged)
       --decision-every <s> seconds between picture assessments
+      --instruction-model <url>
+                           chat endpoint that interprets instructions in
+                           words; the printed App and agent commands name it
       --no-fault           leave the fleet file's camera fault out
       --ready-timeout <s>  how long each host may take to listen
                            (default: 60)
