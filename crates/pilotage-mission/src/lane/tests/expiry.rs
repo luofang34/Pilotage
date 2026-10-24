@@ -47,8 +47,7 @@ fn running_under(policy: wire::MissionExpiryPolicy) -> Lane {
 
 fn progress(target: usize) -> RunProgress {
     RunProgress {
-        target_waypoint: Some(target),
-        ..RunProgress::default()
+        ..toward(target, usize::MAX / 4)
     }
 }
 

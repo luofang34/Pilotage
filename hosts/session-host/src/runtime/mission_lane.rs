@@ -319,7 +319,8 @@ fn unix_now_ms() -> u64 {
 /// or whose mission failed has ended.
 fn run_progress(status: &AutomationStatus, finished: bool) -> RunProgress {
     RunProgress {
-        target_waypoint: status.target_waypoint,
+        active_task: status.active_task.clone(),
+        finished_tasks: status.finished_tasks.clone(),
         plan_complete: status.plan_complete,
         ended: finished
             || status.fenced

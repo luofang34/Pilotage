@@ -11,8 +11,7 @@ use super::*;
 fn on_line_one(fleet: &mut Fleet) {
     for lane in fleet.members.values_mut() {
         lane.on_progress(&RunProgress {
-            target_waypoint: Some(1),
-            ..RunProgress::default()
+            ..toward(1, usize::MAX / 4)
         });
     }
 }
@@ -89,8 +88,7 @@ fn reassign(fleet: &Fleet, from: &str, to: &str, fraction: f64, within: bool) ->
 fn switch_sim1(fleet: &mut Fleet) {
     let lane = fleet.members.get_mut("SIM-1").expect("SIM-1");
     let effect = lane.on_progress(&RunProgress {
-        target_waypoint: Some(2),
-        ..RunProgress::default()
+        ..toward(2, usize::MAX / 4)
     });
     assert!(
         matches!(effect, Some(LaneEffect::Start(_))),

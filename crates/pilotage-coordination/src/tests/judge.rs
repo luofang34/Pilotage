@@ -26,8 +26,7 @@ fn fly_lines(
         .count();
     for line in from..=to.min(lines) {
         lane.on_progress(&RunProgress {
-            target_waypoint: Some(2 * line - 1),
-            ..RunProgress::default()
+            ..toward(2 * line - 1, lines)
         });
         for _ in 0..3 {
             if let Some(ticket) = lane.on_frame() {
@@ -44,12 +43,12 @@ fn fly_lines(
         }
     }
     lane.on_progress(&RunProgress {
-        target_waypoint: Some(2 * to.min(lines)),
         plan_complete: to >= lines,
         ended: false,
         ended_because: None,
         holding: false,
         execution: None,
+        ..toward(2 * to.min(lines), lines)
     });
     match lane.take_changed() {
         Some(status) => fleet.team.on_member_status(&status, &context("fly")),
@@ -62,8 +61,7 @@ fn fly_lines(
 fn fly_unanswered(fleet: &mut Fleet, member: &str, line: usize) -> Vec<FrameTicket> {
     let lane = fleet.members.get_mut(member).expect("member");
     lane.on_progress(&RunProgress {
-        target_waypoint: Some(2 * line - 1),
-        ..RunProgress::default()
+        ..toward(2 * line - 1, usize::MAX / 4)
     });
     let tickets: Vec<FrameTicket> = (0..3).filter_map(|_| lane.on_frame()).collect();
     for ticket in &tickets {
@@ -76,8 +74,7 @@ fn fly_unanswered(fleet: &mut Fleet, member: &str, line: usize) -> Vec<FrameTick
 fn advance(fleet: &mut Fleet, member: &str, target: usize) -> Vec<MemberIntent> {
     let lane = fleet.members.get_mut(member).expect("member");
     lane.on_progress(&RunProgress {
-        target_waypoint: Some(target),
-        ..RunProgress::default()
+        ..toward(target, usize::MAX / 4)
     });
     match lane.take_changed() {
         Some(status) => fleet.team.on_member_status(&status, &context("fly")),
