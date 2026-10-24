@@ -150,14 +150,23 @@ impl TeamLane {
                 launch,
                 &self.config.name,
             );
-            intents.push(self.request(
-                &assignment.member,
-                Op::Approve,
-                None,
-                wire::mission_intent::Action::Approve(member_approval),
-            ));
+            intents.push((assignment.member.clone(), member_approval));
         }
         self.approval = Some(approval.clone());
+        // The members' parts of the re-flight budget follow from the team's
+        // approval, now in force.
+        let intents = intents
+            .into_iter()
+            .map(|(member, member_approval)| {
+                let member_approval = self.with_share(&member, member_approval);
+                self.request(
+                    &member,
+                    Op::Approve,
+                    None,
+                    wire::mission_intent::Action::Approve(member_approval),
+                )
+            })
+            .collect();
         self.phase = Phase::Approving;
         self.detail = "passing the approval to the members".to_owned();
         Ok((intents, true))

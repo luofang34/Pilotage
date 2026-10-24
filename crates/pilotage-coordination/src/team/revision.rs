@@ -371,6 +371,7 @@ impl TeamLane {
             launch,
             &self.config.name,
         );
+        let approval = self.with_share(member, approval);
         vec![self.request_revision(
             member,
             Op::Approve,
