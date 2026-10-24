@@ -297,6 +297,16 @@ enum MissionHandoverState {
   // Released by the giving member, and not taken by the receiving member:
   // nobody holds the work until an operator gives it to a member.
   MISSION_HANDOVER_STATE_UNASSIGNED = 4;
+  // The coordinator restarted while the handover was open or committed. It
+  // is not known whether a member flies the work; an operator checks both
+  // members and gives the work to one.
+  MISSION_HANDOVER_STATE_UNRECONCILED = 5;
+}
+
+// A coordinator's handovers as it writes them to durable storage before it
+// sends work to a member, so a restart does not lose them.
+message MissionHandoverJournal {
+  repeated MissionHandover handovers = 1;
 }
 
 message MissionSkip {

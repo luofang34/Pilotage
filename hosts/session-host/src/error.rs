@@ -332,6 +332,15 @@ pub enum HostError {
         /// What is wrong.
         reason: String,
     },
+    /// The coordinator's handover journal cannot be read: the coordinator
+    /// does not start, as it cannot show which work may be unflown.
+    #[error("cannot read the coordinator handover journal {path:?}: {reason}")]
+    CoordinatorJournal {
+        /// The journal file.
+        path: std::path::PathBuf,
+        /// What is wrong.
+        reason: String,
+    },
     /// A mission lane variable did not parse or is outside its range.
     #[error("invalid mission lane setting {variable}={value:?}")]
     LaneConfig {

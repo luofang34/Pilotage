@@ -350,7 +350,7 @@ pub(super) fn team_status(team: &TeamLane) -> wire::MissionStatus {
         execution: None,
         holds: hold_reasons(team, state),
         released: Vec::new(),
-        handovers: team.handover_statuses(),
+        handovers: team.handovers(),
         predecessor_run_id: String::new(),
         sequence: team.sequence,
         area: survey.map(|s| s.area.clone()).unwrap_or_default(),

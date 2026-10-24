@@ -10,8 +10,11 @@
 //! Work released and then not taken by the receiving member is unassigned:
 //! it does not go back to the giving member.
 //!
-//! The team's state is not persisted. An assignment's identity includes the
-//! team's run, so a coordinator that restarts never reuses an identity or a
+//! The host writes the handovers to durable storage before it sends work to
+//! a member. A coordinator that restarts reads them back: each handover that
+//! was open or committed is unreconciled, shown to the operator, as it is not
+//! known whether a member flies that work. An assignment's identity includes
+//! the team's run, so a restarted coordinator never reuses an identity or a
 //! generation, and it has no run to commit into.
 
 use pilotage_mission::IntentContext;
@@ -273,7 +276,51 @@ impl TeamLane {
         }
     }
 
-    pub(super) fn handover_statuses(&self) -> Vec<wire::MissionHandover> {
+    /// The handovers, as the host writes them before it sends any intent.
+    #[must_use]
+    pub fn handovers(&self) -> Vec<wire::MissionHandover> {
         self.handovers.iter().map(Handover::wire).collect()
+    }
+
+    /// Takes the handovers a coordinator wrote before it restarted. One that
+    /// was open or committed is unreconciled: the restarted team cannot know
+    /// whether a member flies its work, so it shows it and moves nothing.
+    pub fn restore_handovers(&mut self, records: &[wire::MissionHandover]) {
+        for record in records {
+            let open = matches!(
+                State::try_from(record.state),
+                Ok(State::Releasing | State::Committed)
+            );
+            let mut restored = Handover {
+                assignment_id: record.assignment_id.clone(),
+                generation: record.generation,
+                from: record.from_member.clone(),
+                to: record.to_member.clone(),
+                moved: record
+                    .task_ids
+                    .iter()
+                    .map(|id| (id.clone(), Vec::new()))
+                    .collect(),
+                from_run: String::new(),
+                approved: None,
+                state: State::try_from(record.state).unwrap_or(State::Unspecified),
+                basis: record.basis.clone(),
+            };
+            if open {
+                restored.state = State::Unreconciled;
+                restored.basis = format!(
+                    "the coordinator restarted while this handover was {}; check whether {} or {} flies these lines, then give them to a member",
+                    if record.state == State::Releasing as i32 {
+                        "open"
+                    } else {
+                        "committed"
+                    },
+                    record.from_member,
+                    record.to_member
+                );
+            }
+            self.handovers.push(restored);
+        }
+        self.changed = true;
     }
 }

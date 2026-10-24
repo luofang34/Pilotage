@@ -285,12 +285,17 @@ giving vehicle.
 A person's statement that a member is down is an override with a source.
 The team records who stated it, and the handover that it causes names it
 as its basis. The statement does not prove that the member stopped, that
-its control is revoked, or that its space is clear. The team state is not
-persisted. An assignment identity includes the run of the team, so a
-coordinator that restarts never uses an identity or a generation again.
-A restarted coordinator has no run of the team. It can give work only
-through a new team proposal that each member must accept, and a member
-lane refuses a proposal while it flies.
+its control is revoked, or that its space is clear. The coordinator host writes the
+handovers to durable storage before it sends work to a member, and it
+sends no intent when it cannot write them. A coordinator that restarts
+reads them back. It shows each handover that was open or committed as
+unreconciled, because it cannot know whether a member flies that work,
+and it moves nothing. An operator checks both members and gives the work
+to one. An assignment identity includes the run of the team, so a
+restarted coordinator never uses an identity or a generation again. It
+has no run of the team, and it can give work only through a new team
+proposal that each member must accept. A member lane refuses a proposal
+while it flies.
 
 The team reports each member's
 link as a typed state (`Reporting`, `Lost`, `Down` or `Released`), and a

@@ -286,3 +286,36 @@ fn moved_work_of_a_receiver_stated_down_before_it_starts_is_unassigned() {
     assert!(reply.receipt.is_some_and(|r| accepted(&r)));
     assert_eq!(handover(&fleet).state, State::Unassigned as i32);
 }
+
+#[test]
+fn a_restarted_coordinator_shows_its_journaled_handovers_as_unreconciled() {
+    let (mut fleet, _) = running_fleet(true);
+    let intents = move_sim1_to_sim2(&mut fleet);
+    fleet.route(intents);
+    let status = sim1_switches(&mut fleet);
+    fleet.team.on_member_status(&status, &context("released"));
+    // The host wrote these before it sent SIM-2 the moved lines.
+    let journal = fleet.team.handovers();
+    assert_eq!(journal[0].state, State::Committed as i32);
+
+    fleet.team = team();
+    fleet.team.restore_handovers(&journal);
+    let shown = handover(&fleet);
+    assert_eq!(shown.state, State::Unreconciled as i32);
+    assert_eq!(shown.task_ids, journal[0].task_ids);
+    assert!(
+        shown
+            .basis
+            .contains("check whether SIM-1 or SIM-2 flies these lines"),
+        "{}",
+        shown.basis
+    );
+    // Nothing moves on a restored handover.
+    let sim2 = fleet.members.get("SIM-2").map(Lane::status).expect("SIM-2");
+    assert!(
+        fleet
+            .team
+            .on_member_status(&sim2, &context("again"))
+            .is_empty()
+    );
+}
