@@ -255,6 +255,37 @@ followed by runtime monitoring with trusted invariant templates that are
 independent of any model-generated specification. A model provider is
 replaceable, and no model class is tied to a level of autonomy.
 
+### Instructions in a person's words become drafts
+
+A person or an agent can give a lane an instruction in words. The shared
+client library (`pilotage-client-session`, `mission::instruction`) makes
+the request to the instruction interpreter and checks its reply. The
+request names the chain of command that the client follows and the
+actions that each lane offers now. The reply names one action, one lane
+and the slots of that action. The App and the command-line operator use
+the same library, so a person and an agent get the same result from the
+same words.
+
+An instruction can become only these commands: hold, resume, a drafted
+move of unflown lines, and a drafted finish. It does not become approve,
+start or abort. A drafted change does not apply at once. The library
+refuses these replies:
+
+- A reply that names a lane that the client does not follow. The library
+  does not send the command to the lead above that lane.
+- A move that names a member that the lane does not lead.
+- A move whose amount is not in the words of the person.
+
+The client shows the draft in fixed words that the library makes from
+the command. The client sends the command only when a person or an agent
+confirms the draft. A drafted change then waits for an approval, as other
+drafts do.
+
+The lanes declare their actions, so the interpreter request and the
+draft display come from the lanes and not from client code. A new
+mission kind or a new kind of change adds its action to the lanes and to
+the library. It does not add a control to the App.
+
 ### Capability, authority, resources and conditions are separate axes
 
 A vehicle's verified capability, the authority delegated to a principal,

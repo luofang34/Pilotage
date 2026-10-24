@@ -13,12 +13,14 @@
 mod approval;
 mod command;
 mod desk;
+mod instruction;
 mod survey_file;
 mod view;
 
 pub use approval::{ApprovalPolicy, approval, approved_height_m};
 pub use command::{IntentKind, MissionCommand, Reassign};
 pub use desk::{DeskRefusal, FiledReceipt, MissionDesk, Offered};
+pub use instruction::{Chain, ChainLane, Instruction, InstructionError, Offers};
 pub use survey_file::SurveyFile;
 pub use view::{
     MemberSummary, MemberView, MissionSummary, MissionView, ProposalView, ReceiptView,
