@@ -29,11 +29,17 @@ impl TeamLane {
             ));
         }
         let across = self.across().ok_or("the team has no sweep")?;
-        // A lost member cannot finish its line in progress either.
-        let lines = if self.lost.contains_key(from) {
-            self.book.unfinished_lines(from)
-        } else {
-            self.book.unflown_lines(from)
+        // A lost member may still fly: its work stays reserved until it
+        // reports again or a person states that it is down. A member that is
+        // down cannot finish its line in progress either.
+        let lines = match self.lost.get(from) {
+            Some(false) => {
+                return Err(format!(
+                    "{from}'s link is lost and its state is unknown; its work stays reserved until it reports again or a person states that it is down"
+                ));
+            }
+            Some(true) => self.book.unfinished_lines(from),
+            None => self.book.unflown_lines(from),
         };
         let mut unflown: Vec<(f64, Vec<wire::GeoPoint>)> = lines
             .into_iter()

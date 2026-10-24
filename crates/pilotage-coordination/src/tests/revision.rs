@@ -258,12 +258,67 @@ fn a_parents_strip_keeps_exactly_the_lines_inside_it() {
     assert_eq!(draft.tasks.len(), 3, "{}", draft.summary);
 }
 
+fn member_down(member: &str) -> Action {
+    Action::MemberDown(wire::MissionMemberDown {
+        member: member.to_owned(),
+    })
+}
+
 #[test]
-fn a_person_releases_a_lost_member_and_the_team_completes_without_it() {
+fn a_lost_member_keeps_its_work_until_it_reports_or_a_person_states_it_down() {
+    let (mut fleet, _) = running_fleet(false);
+    // SIM-3 is only partitioned: it keeps flying its line 1.
+    fleet.team.on_member_lost("SIM-3");
+    let give = reassign(&fleet, "SIM-3", "SIM-1", 1.0, false);
+    let (receipt, intents) = team_intent(&mut fleet, give);
+    let receipt = receipt.expect("answered");
+    assert!(!accepted(&receipt));
+    assert!(
+        receipt.reason.contains("stays reserved"),
+        "{}",
+        receipt.reason
+    );
+    assert!(intents.is_empty());
+    // A member that reports cannot be stated down.
+    let (receipt, _) = team_intent(&mut fleet, member_down("SIM-1"));
+    assert!(!receipt.is_some_and(|r| accepted(&r)));
+    // SIM-3 reports again: a reassignment moves only the lines it has not begun.
+    let sim3 = fleet.members.get("SIM-3").expect("SIM-3").status();
+    fleet.team.on_member_status(&sim3, &context("back"));
+    let give = reassign(&fleet, "SIM-3", "SIM-1", 1.0, false);
+    let (receipt, _) = team_intent(&mut fleet, give);
+    let draft = receipt.expect("answered").proposal.expect("a draft");
+    let line_in_progress = sim3
+        .tasks
+        .iter()
+        .find(|t| t.state == wire::MissionTaskState::Active as i32)
+        .expect("SIM-3 flies a line");
+    let moved_paths: Vec<_> = draft
+        .tasks
+        .iter()
+        .filter(|t| t.member == "SIM-1")
+        .map(|t| t.path.clone())
+        .collect();
+    assert!(
+        !moved_paths.contains(&line_in_progress.path),
+        "the line in progress stays with SIM-3"
+    );
+    // Its link goes again before the approval: the draft waits.
+    fleet.team.on_member_lost("SIM-3");
+    let (receipt, intents) = team_intent(&mut fleet, Action::Approve(approval(&draft.digest, 0)));
+    let receipt = receipt.expect("answered");
+    assert!(!accepted(&receipt), "{}", receipt.reason);
+    assert!(intents.is_empty());
+}
+
+#[test]
+fn a_person_states_a_lost_member_down_and_the_team_completes_without_it() {
     let (mut fleet, planned) = running_fleet(false);
     // SIM-3's host is gone mid-line: the team keeps its work reserved.
     fleet.team.on_member_lost("SIM-3");
     fleet.members.remove("SIM-3");
+    let (receipt, _) = team_intent(&mut fleet, member_down("SIM-3"));
+    assert!(receipt.is_some_and(|r| accepted(&r)));
     let give = reassign(&fleet, "SIM-3", "SIM-1", 1.0, false);
     let (receipt, intents) = team_intent(&mut fleet, give);
     let draft = receipt.expect("answered").proposal.expect("a draft");
@@ -275,7 +330,7 @@ fn a_person_releases_a_lost_member_and_the_team_completes_without_it() {
         "nothing goes to a member that cannot hear it"
     );
     assert!(
-        fleet.team.status().detail.contains("SIM-3 released"),
+        fleet.team.status().detail.contains("SIM-3 is down"),
         "{}",
         fleet.team.status().detail
     );
@@ -285,8 +340,8 @@ fn a_person_releases_a_lost_member_and_the_team_completes_without_it() {
         .members
         .into_iter()
         .find(|m| m.lane == "SIM-3");
-    assert!(sim3.is_some_and(|m| m.detail.contains("released")));
-    // The host keeps failing to reconnect; the release stands.
+    assert!(sim3.is_some_and(|m| m.detail.contains("down")));
+    // The host keeps failing to reconnect; the statement stands.
     fleet.team.on_member_lost("SIM-3");
     let sim3 = fleet
         .team
@@ -294,7 +349,7 @@ fn a_person_releases_a_lost_member_and_the_team_completes_without_it() {
         .members
         .into_iter()
         .find(|m| m.lane == "SIM-3");
-    assert!(sim3.is_some_and(|m| m.detail.contains("released")));
+    assert!(sim3.is_some_and(|m| m.detail.contains("down")));
     fleet.route(intents);
     let follow = fleet.fly(&[]);
     fleet.route(follow);

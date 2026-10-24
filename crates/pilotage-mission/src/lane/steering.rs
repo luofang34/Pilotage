@@ -67,6 +67,10 @@ impl Steering {
                 });
                 Ok(())
             }
+            Some(Action::MemberDown(_)) if !requester.may_approve => Err(format!(
+                "{} may not state that a member is down: it needs the approver secret",
+                requester.subject
+            )),
             Some(Action::Resume(_)) if self.held_by_approver && !requester.may_approve => {
                 Err(format!(
                     "{} may not resume: an approver held the mission",
