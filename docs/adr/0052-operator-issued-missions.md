@@ -71,10 +71,28 @@ the digest of its predecessor, validity, and releasability.
   the recovery for its expiry: hold in place, or end after the line in
   progress and return to the launch point. When the approval expires
   during a run, the lane applies that recovery one time. Then the run does
-  not resume, and an admitted revision does not apply, until a new
-  approval of the plan replaces the expired approval.
-  revise, to allocate work, and to change the objective. A client approves
-  only a proposal that it holds in full. The lane's status names a
+  not resume, and an admitted revision does not apply, until a renewal of
+  the plan replaces the expired approval.
+  An approval names its target by its digest and its run. With no run, it
+  approves the plan before its start. With the run in progress, it renews
+  the plan of that run, and a lane refuses it for another run. This
+  prevents an approval of one run from renewing another run of the same
+  plan. An approval of a drafted successor names the run in progress or no
+  run. A vehicle lane and a team find the target with the same rule.
+  A held run reports each reason why it holds: the operator, or the
+  expiry of its approval. A renewal removes only the expiry reason, and an
+  operator's resume removes only the operator reason. The lane refuses a
+  resume while the expiry reason stays, and the run resumes when no reason
+  stays. A fault, a motion lease held elsewhere and an unknown member state
+  are not hold reasons, and a renewal does not clear them. A team checks
+  its envelope and its run, then sends each member that can still fly a
+  renewal of the plan and the run of that member. A member that finished
+  gets no renewal. A member whose link is lost, or that a person stated
+  down, gets none, and the receipt of the team names it. The team answers
+  after its members answered. A team reports `Held` only when each member
+  that can still fly reports that it holds, and it reports the reasons of
+  all those members.
+  A client approves only a proposal that it holds in full. The lane's status names a
   proposal only by its digest and a summary, so a client that did not
   make the proposal fetches it from the lane before it approves it.
 - **Plan.** The executable `MissionDocument`
@@ -101,8 +119,8 @@ lane has a lifecycle: `Idle`, `Admitted`, `Running`, `HoldRequested`,
 `Held`, `Uncertain`, `Complete`, `Aborted`. An accepted hold makes the lane
 `HoldRequested`; the lane becomes `Held` only when the vehicle reports that
 it holds in place. An abort keeps each task that did not finish as
-unfinished: the task in progress becomes `Incomplete`, and a pending task
-stays pending. The environment variables remain a bootstrap source
+unfinished: the execution of the task in progress becomes `Cancelled`, and
+a pending task stays pending. The environment variables remain a bootstrap source
 that issues the first plan into an `Idle` lane; an issued plan supersedes
 them.
 
@@ -118,16 +136,53 @@ events of the core. A run that a revision starts names the run that it
 continues, so a team follows the work of a member through its revisions
 without the use of the names of runs or tasks. A route leg is not a task: Navigate
 keeps the sequencing of legs inside the task, and flight and camera
-acquisition run together under it. A task is complete only when its
-completion evidence exists; for a survey line, the acquired pictures with
-their placements. Each picture that a lane sends for judgment carries its
-run, its task, the attempt and the picture number. The lane refuses a
-verdict for another run, for a picture that it did not send, or a second
-verdict for one picture. The evidence of a task is `Pending` until each
-sent picture has an answer, then `Met` or `Missing`; it is `NotJudged`
-when no judgment service judged it. On a lane with a judgment service, a
-survey line is complete only with `Met`. A display may show progress inside a task from the
-remaining waypoints, and that view is not a second execution truth. The
+acquisition run together under it.
+
+A task status has three facts, and each fact has one source:
+
+| Fact | Values | Source |
+|---|---|---|
+| Execution | `Pending`, `Active`, `Completed`, `Cancelled`, `Failed`, `Skipped` | Run events: a task finishes, an abort, an unplanned end of the run, a revision |
+| Evidence collection | `Open`, `Settled`, `Closed` | The pictures of the task, the answers to them and the evidence window |
+| Judgment | `Undetermined`, `Met`, `NotMet` | The rule of the task kind, from the execution and the evidence |
+
+Evidence never changes the execution. A verdict that arrives after the
+execution ended can change the evidence and the judgment. It cannot make a
+cancelled or failed execution complete. A survey line is `Met` only when
+its execution is `Completed` and its evidence meets the minimum, because a
+line cut short does not cover its swath. On a lane with a judgment service,
+the minimum is a number of pictures judged usable, and a line that nobody
+judged is not usable. The way home is `Met` when its execution is
+`Completed`. A display state (`Done`, `Incomplete` and the others) comes
+from the three facts. A lane, a team, a client or an agent makes its
+decisions from the three facts, never from the display state. A step that
+waits for a task names the fact that it waits for: the next survey line
+waits for the end of the execution of the line before it, and a report
+waits for the judgment.
+
+Each picture that a lane sends for judgment carries its run, its task, the
+attempt and the picture number. The lane gives a verdict to the run that
+sent the picture. This is also true after a successor replaced that run. The
+lane refuses a verdict for a run that it does not know, for a picture that
+it did not send, or a second verdict for one picture. The evidence of a
+task is `Open` while the task takes pictures and while a sent picture has
+no answer.
+
+The evidence window of a task starts when its execution ends. From then on,
+the task takes no more pictures, so the set of pictures that can get an
+answer is closed. The window has a length from the lane configuration. This
+length is a deployment default, not a validated value. The window uses the
+monotonic clock of the host. It does not use the mission clock (ADR-0041),
+because the mission clock stops while the run holds, and a held run must
+still close its windows. When the window closes with answers outstanding,
+the evidence becomes `Closed`, and the judgment uses the answers that
+arrived. The lane counts an answer that arrives after that as late. A late
+answer changes no other fact. At most four replaced runs wait for answers
+at one time; when one more run is replaced, the windows of the oldest close
+at once. The lane is not persisted. A host that restarts makes a new lane,
+which refuses verdicts for the runs of the old lane, and the host never
+compares the monotonic times of two processes. A display may show progress inside a task from
+the remaining waypoints, and that view is not a second execution truth. The
 first delivery uses a sequence of tasks per vehicle. A team task graph and
 concurrent tasks within a bound come later; a linear list is not promised
 to cover every mission.
@@ -159,7 +214,31 @@ inside the approval's adaptation envelope is admitted locally, by the lane
 or by a coordinator, without another operator action. A successor outside
 the envelope needs a new approval. When no approval can be obtained, the
 lane applies the recovery behaviour the approval already authorized; it
-never changes the objective to declare success. Task-by-task consent is an
+never changes the objective to declare success.
+
+A successor is inside the envelope only when the envelope permits each
+class of change that the successor makes. The lane or the coordinator finds
+the classes when it compares the old content with the new content. It never
+uses the kind of request as the class. The classes are:
+
+| Class | What it changes | Permission |
+|---|---|---|
+| Plan | How the work is done: the tasks, their order, the speed, the height when no constraint fixes it | `permit_revise` |
+| Assignment | Who holds the work | `permit_allocate` |
+| Objective | What the work must achieve | `permit_change_objective` |
+
+One successor can make changes of more than one class. Then each of the
+permissions is necessary, and a refusal names each missing permission. A
+vehicle lane and a team use the same check. The task kind gives the meaning
+of its fields. For a survey, the area, the return to the launch point and
+the evidence that each line needs are objective fields. The height is a
+plan field, but it is an objective field when the objective holds the
+height (`hold_height`). The height bound of the envelope applies to all
+plans. The title, the identity and the revision number of an objective are
+not content: an objective with the same identity and different content is
+an objective change. An explicit approval of the digest of a draft is the
+permission of the approver for that draft, so this check applies only to
+admission inside the envelope. Task-by-task consent is an
 optional workflow inside this rule, not a separate level.
 
 Bounds copied into a plan grant nothing. The lane verifies a plan against
@@ -246,7 +325,51 @@ it had stopped; reassignment needs a release acknowledgement, a valid
 expiry with fencing, or work preallocated as disjoint. A team lane keeps
 the work of a member with a lost link, and its line in progress, reserved
 to that member until the member reports again or an approver states, as a
-separate act, that the member is down. The team reports each member's
+separate act, that the member is down.
+
+A handover between two members has four separate facts: the link (can the
+team contact the member), the execution (does the member still fly), the
+assignment (which member holds the work, in which generation) and the space
+(which area the work needs). A move of work between two members that both
+report has one commit point. The team asks the giving member for a release
+of one assignment in one generation, in the revision that it sends to that
+member. When the lane of that member applies the revision, its status
+reports the release fact: the assignment, the generation, the digest of the
+revision, the replaced run and the tasks that the replaced run did not
+begin. The team commits the work to the receiving member, in the next
+generation, only when the fact names the open handover, the revision that
+the team approved, and the run that it asked. Before that, the receiving
+member gets nothing, and the work and its space stay with the giving
+member. The team does not use a changed run or a shorter list of tasks as
+a release. A moved task that the giving member began before the revision
+applied is not in the release, and it stays with that member. Without a
+release fact, the handover stays open and the status shows it. Nothing is
+assumed at a time-out. When the giving member refuses its revision, the
+handover is withdrawn and that member keeps the work. When the receiving
+member refuses the released work, or a person states it down before it
+starts the work, the work is unassigned. It does not go back to the giving
+member. A lane refuses an approval or a revision for a plan that a
+revision replaced, so a late message cannot bring a released plan back.
+Fencing at a control endpoint (ADR-0010) makes an old generation invalid
+at that endpoint only: a lease on the receiving vehicle does not stop the
+giving vehicle.
+
+A person's statement that a member is down is an override with a source.
+The team records who stated it, and the handover that it causes names it
+as its basis. The statement does not prove that the member stopped, that
+its control is revoked, or that its space is clear. The coordinator host writes the
+handovers to durable storage before it sends work to a member, and it
+sends no intent when it cannot write them. A coordinator that restarts
+reads them back. It shows each handover that was open or committed as
+unreconciled, because it cannot know whether a member flies that work,
+and it moves nothing. An operator checks both members and gives the work
+to one. An assignment identity includes the run of the team, so a
+restarted coordinator never uses an identity or a generation again. It
+has no run of the team, and it can give work only through a new team
+proposal that each member must accept. A member lane refuses a proposal
+while it flies.
+
+The team reports each member's
 link as a typed state (`Reporting`, `Lost`, `Down` or `Released`), and a
 vehicle's lane reports what its run does now: flying, waiting for a
 launch, waiting for a lease that another principal holds, holding, or

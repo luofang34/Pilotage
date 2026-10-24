@@ -11,6 +11,7 @@
 //! [`pilotage_protocol::ControlAction`] values. Framing, sessions,
 //! leases, and authority stay with the host task.
 
+pub mod change;
 pub mod config;
 pub mod engine;
 pub mod error;
@@ -30,9 +31,9 @@ pub use engine::{
 };
 pub use error::MissionBuildError;
 pub use lane::{
-    FrameAssessment, FrameTicket, HOST_ISSUER, IntentContext, Lane, LaneConfig, LaneEffect,
-    LaneReply, Requester, RunExecution, RunOrder, RunPlan, RunProgress, Steering, SurveyDefaults,
-    VerdictRefused,
+    Approvable, ApprovalTarget, FrameAssessment, FrameTicket, HOST_ISSUER, IntentContext, Lane,
+    LaneConfig, LaneEffect, LaneReply, Requester, RunExecution, RunOrder, RunPlan, RunProgress,
+    Steering, SurveyDefaults, VerdictRefused, approval_target,
 };
 pub use ownship::{OwnshipAltitude, OwnshipSample, TruthRole};
 pub use pilotage_mission_core::ExecutionTarget;

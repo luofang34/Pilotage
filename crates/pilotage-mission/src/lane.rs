@@ -10,10 +10,13 @@ mod approval;
 mod compile;
 mod evidence;
 mod expiry;
+mod hold;
 mod run;
+mod settle;
 mod status;
 mod steering;
 mod successor;
+mod target;
 
 #[cfg(test)]
 mod tests;
@@ -26,10 +29,14 @@ use crate::survey::SurveyRequest;
 pub use compile::SurveyDefaults;
 pub use run::{FrameAssessment, RunExecution, RunProgress};
 pub use steering::{HOST_ISSUER, Requester, Steering};
+pub use target::{Approvable, ApprovalTarget, approval_target};
 
 use compile::Compiled;
 pub use evidence::{FrameTicket, VerdictRefused};
 use run::RunTracker;
+
+/// Replaced runs that may wait for answers at one time.
+const MAX_SETTLING_RUNS: usize = 4;
 
 /// What a lane is configured with for every proposal it compiles.
 #[derive(Debug, Clone, PartialEq)]
@@ -55,6 +62,10 @@ pub struct LaneConfig {
     /// A judgment service judges the run's pictures, so a survey line is
     /// done only with enough pictures judged usable.
     pub judged: bool,
+    /// How long a task whose execution ended still takes the answers to its
+    /// pictures, milliseconds on the host's monotonic clock. The clock does
+    /// not stop while the run holds.
+    pub evidence_window_ms: u64,
 }
 
 /// What the host supplies with an intent: the civil time and a fresh,
@@ -122,8 +133,9 @@ pub struct Lane {
     successor: Option<successor::Successor>,
     /// Revisions drafted so far; numbers each successor's tasks.
     revisions: u32,
-    /// The tasks of runs a successor replaced, as they ended.
-    history: Vec<wire::MissionTaskStatus>,
+    /// The runs a successor replaced, oldest first. Each keeps the answers
+    /// still due inside its tasks' evidence windows.
+    past: Vec<RunTracker>,
     detail: String,
     sequence: u64,
     changed: bool,
@@ -133,6 +145,12 @@ pub struct Lane {
     expired: bool,
     /// What the run does now, as the host last said.
     execution: Option<RunExecution>,
+    /// Why the run holds, when it does.
+    holds: Vec<wire::MissionHoldReason>,
+    /// Work the plan's revisions released, for the team that asked.
+    released: Vec<wire::WorkReleased>,
+    /// The latest time on the host's monotonic clock, milliseconds.
+    host_ms: u64,
 }
 
 impl Lane {
@@ -147,13 +165,16 @@ impl Lane {
             run: None,
             successor: None,
             revisions: 0,
-            history: Vec::new(),
+            past: Vec::new(),
             detail: "waiting for an objective".to_owned(),
             sequence: 0,
             changed: true,
             clock_unix_ms: 0,
             expired: false,
             execution: None,
+            holds: Vec::new(),
+            released: Vec::new(),
+            host_ms: 0,
         }
     }
 
@@ -175,11 +196,7 @@ impl Lane {
             Some(Action::Propose(objective)) => self.propose(objective, context),
             Some(Action::Approve(approval)) => self.approve(approval, context),
             Some(Action::Start(start)) => self.start(start, context),
-            Some(Action::Hold(_)) => self.transition(
-                &[wire::MissionLaneState::Running],
-                wire::MissionLaneState::HoldRequested,
-                LaneEffect::Hold,
-            ),
+            Some(Action::Hold(_)) => self.hold(),
             Some(Action::Resume(_)) => self.resume(context),
             Some(Action::Abort(_)) => self.abort(),
             Some(Action::Revise(revise)) => self.revise(revise, context),
@@ -231,7 +248,9 @@ impl Lane {
         self.run = None;
         self.successor = None;
         self.revisions = 0;
-        self.history.clear();
+        self.past.clear();
+        self.holds.clear();
+        self.released.clear();
         self.state = wire::MissionLaneState::Proposed;
         self.detail = "proposed; waiting for an approval".to_owned();
         Ok((None, Some(record)))
@@ -243,11 +262,28 @@ impl Lane {
         context: &IntentContext,
     ) -> Result<(Option<LaneEffect>, Option<wire::MissionProposalRecord>), String> {
         if self.is_flying() {
-            let current = self.proposal.as_ref().map(|c| &c.proposal.digest);
-            if current == Some(&approval.proposal_digest) {
-                return self.renew(approval, context);
-            }
-            return self.approve_successor(approval, context);
+            let plan = self
+                .proposal
+                .as_ref()
+                .map(|c| c.proposal.digest.clone())
+                .unwrap_or_default();
+            let run = self.run.as_ref().map(RunTracker::run_id);
+            let drafted = self
+                .successor
+                .as_ref()
+                .filter(|s| s.stage == wire::MissionSuccessorState::Drafted)
+                .map(|s| s.compiled.proposal.digest.clone());
+            let held = Approvable {
+                plan: &plan,
+                run: run.as_deref(),
+                drafted: drafted.as_deref(),
+            };
+            return match approval_target(approval, held)? {
+                ApprovalTarget::Renewal => self.renew(approval, context),
+                ApprovalTarget::Successor | ApprovalTarget::Plan => {
+                    self.approve_successor(approval, context)
+                }
+            };
         }
         if self.state != wire::MissionLaneState::Proposed {
             return Err(format!(
@@ -256,6 +292,12 @@ impl Lane {
             ));
         }
         let compiled = self.proposal.as_ref().ok_or("no proposal to approve")?;
+        let held = Approvable {
+            plan: &compiled.proposal.digest,
+            run: None,
+            drafted: None,
+        };
+        approval_target(approval, held)?;
         approval::admit(approval, compiled, &self.config, context.now_unix_ms)?;
         self.approval = Some(approval.clone());
         self.state = wire::MissionLaneState::Admitted;
@@ -323,25 +365,12 @@ impl Lane {
         }
         self.state = wire::MissionLaneState::Aborted;
         self.successor = None;
+        self.holds.clear();
         self.detail = "aborted by intent; the vehicle stops in place".to_owned();
         if let Some(run) = self.run.as_mut() {
-            run.close_aborted();
+            run.close(wire::MissionTaskExecution::Cancelled, self.host_ms);
         }
         Ok((Some(LaneEffect::Abort), None))
-    }
-
-    fn transition(
-        &mut self,
-        from: &[wire::MissionLaneState],
-        to: wire::MissionLaneState,
-        effect: LaneEffect,
-    ) -> Result<(Option<LaneEffect>, Option<wire::MissionProposalRecord>), String> {
-        if !from.contains(&self.state) {
-            return Err(format!("not possible while the lane is {:?}", self.state));
-        }
-        self.state = to;
-        self.detail = format!("{to:?}").to_lowercase();
-        Ok((Some(effect), None))
     }
 
     /// The identities of the tasks of the plan the lane holds, in plan order: each
@@ -380,8 +409,9 @@ impl Lane {
             self.execution = progress.execution;
             self.changed = true;
         }
+        let now_ms = self.host_ms;
         let run = self.run.as_mut()?;
-        if run.on_progress(progress) {
+        if run.on_progress(progress, now_ms) {
             self.changed = true;
         }
         if self.state == wire::MissionLaneState::HoldRequested && progress.holding {
@@ -394,12 +424,12 @@ impl Lane {
         }
         let run = self.run.as_mut()?;
         if progress.plan_complete && flying {
-            run.close();
+            run.close(wire::MissionTaskExecution::Completed, now_ms);
             self.state = wire::MissionLaneState::Complete;
             self.detail = run.summary();
             self.changed = true;
         } else if progress.ended && flying {
-            run.close();
+            run.close(wire::MissionTaskExecution::Failed, now_ms);
             self.state = wire::MissionLaneState::Failed;
             self.detail = progress
                 .ended_because
@@ -408,60 +438,6 @@ impl Lane {
             self.changed = true;
         }
         None
-    }
-
-    /// Counts a captured picture against the active survey line. Returns
-    /// its ticket, for a judgment, when a line is active.
-    pub fn on_frame(&mut self) -> Option<FrameTicket> {
-        if !self.is_flying() {
-            return None;
-        }
-        let ticket = self.run.as_mut()?.on_frame()?;
-        self.changed = true;
-        Some(ticket)
-    }
-
-    /// Whether the line `ticket` names still needs pictures sent for
-    /// judgment to meet its evidence: the host sends such a picture without
-    /// waiting for its sampling period, so a short line is judged too.
-    #[must_use]
-    pub fn wants_judgment(&self, ticket: &FrameTicket) -> bool {
-        self.run
-            .as_ref()
-            .is_some_and(|run| run.wants_judgment(ticket))
-    }
-
-    /// Notes the picture `ticket` names as sent for judgment: the line's
-    /// evidence is pending until its verdict or the news that it was not
-    /// judged.
-    pub fn on_sent(&mut self, ticket: &FrameTicket) {
-        if let Some(run) = self.run.as_mut()
-            && run.on_sent(ticket)
-        {
-            self.changed = true;
-        }
-    }
-
-    /// Records the judgment of the picture `ticket` names; `None` when the
-    /// service did not judge it.
-    ///
-    /// # Errors
-    ///
-    /// [`VerdictRefused`] for a verdict of another run, of a picture never
-    /// sent, or a second verdict of one picture; the lane changes nothing.
-    pub fn on_assessment(
-        &mut self,
-        ticket: &FrameTicket,
-        assessment: Option<FrameAssessment>,
-    ) -> Result<(), VerdictRefused> {
-        let run = self.run.as_mut().ok_or_else(|| VerdictRefused::OtherRun {
-            run_id: ticket.run_id.clone(),
-            task_id: ticket.task_id.clone(),
-        })?;
-        if run.on_assessment(ticket, assessment)? {
-            self.changed = true;
-        }
-        Ok(())
     }
 
     /// The status when it changed since the last call, with a new

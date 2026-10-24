@@ -8,6 +8,8 @@ use super::{
 use crate::config::{MissionConfig, OwnshipSource};
 
 const NOW: u64 = 1_800_000_000_000;
+/// The evidence window of the test lanes, milliseconds.
+const WINDOW_MS: u64 = 60_000;
 
 fn config() -> LaneConfig {
     let mut template = MissionConfig::new(
@@ -26,6 +28,7 @@ fn config() -> LaneConfig {
         cruise_power_w: Some(150.0),
         recovery_policy: "hold in place".to_owned(),
         judged: true,
+        evidence_window_ms: WINDOW_MS,
     }
 }
 
@@ -432,9 +435,12 @@ pub(super) fn toward(lane: &Lane, waypoint: usize) -> RunProgress {
     }
 }
 
+mod authorize;
 mod evidence;
 mod expiry;
+mod outcome;
 mod successor;
+mod window;
 
 #[test]
 fn a_run_the_vehicle_ended_fails_with_its_reason() {

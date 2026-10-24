@@ -1,11 +1,17 @@
-//! The run record: which task is active, what each task acquired and what
-//! the judgment service said. A survey line is complete only with its
-//! acquisition evidence; a flown line without it is incomplete.
+//! The run record: which task is active, how each task's execution ended,
+//! what it acquired and what the judgment service said. Run events end a
+//! task's execution; a verdict, however late, changes only its evidence and
+//! the judgment that follows from it.
+
+mod task;
 
 use pilotage_protocol::wire;
+use wire::MissionTaskExecution as Execution;
+use wire::MissionTaskJudgment as Judgment;
 
 use super::compile::Compiled;
-use super::evidence::{FrameTicket, Judgments, VerdictRefused};
+use super::evidence::{FrameTicket, VerdictRefused};
+use task::{EvidenceRule, TaskTrack};
 
 /// The executor's progress, as the host reads it from the mission engine: the tasks it
 /// started and finished, as the mission core names their phases.
@@ -70,49 +76,33 @@ pub struct FrameAssessment {
     pub hazard: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-struct TaskTrack {
-    plan: wire::MissionTaskPlan,
-    state: wire::MissionTaskState,
-    evidence: wire::MissionTaskEvidence,
-    judgments: Judgments,
-    /// The task's attempt in this run; a run flies each task once.
-    attempt: u32,
-}
-
 /// The run of one approved proposal.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct RunTracker {
     run_id: String,
     tasks: Vec<TaskTrack>,
-    min_usable: u32,
+    rule: EvidenceRule,
     active: Option<usize>,
-    /// A judgment service judges the run's pictures.
-    judged: bool,
     /// The run a revision replaced with this one.
     pub(super) predecessor: Option<String>,
 }
 
 impl RunTracker {
     pub(super) fn new(run_id: String, compiled: &Compiled, judged: bool) -> Self {
-        let tasks: Vec<TaskTrack> = compiled
-            .proposal
-            .tasks
-            .iter()
-            .map(|plan| TaskTrack {
-                plan: plan.clone(),
-                state: wire::MissionTaskState::Pending,
-                evidence: wire::MissionTaskEvidence::default(),
-                judgments: Judgments::default(),
-                attempt: 1,
-            })
-            .collect();
         Self {
             run_id,
-            tasks,
-            min_usable: compiled.min_usable_per_line,
+            tasks: compiled
+                .proposal
+                .tasks
+                .iter()
+                .cloned()
+                .map(TaskTrack::new)
+                .collect(),
+            rule: EvidenceRule {
+                judged,
+                min_usable: compiled.min_usable_per_line,
+            },
             active: None,
-            judged,
             predecessor: None,
         }
     }
@@ -121,10 +111,10 @@ impl RunTracker {
         self.run_id.clone()
     }
 
-    /// Projects the run's task events: a finished line takes its verdict, the way home
-    /// is done, and the task in progress is active. Returns whether a task changed.
-    pub(super) fn on_progress(&mut self, progress: &RunProgress) -> bool {
-        let (judged, min_usable) = (self.judged, self.min_usable);
+    /// Projects the run's task events at `now_ms` on the host's monotonic clock: a
+    /// finished task completed, and the task in progress is active. Returns whether a
+    /// task changed.
+    pub(super) fn on_progress(&mut self, progress: &RunProgress, now_ms: u64) -> bool {
         let mut changed = false;
         for phase in &progress.finished_tasks {
             let Some(task) = self
@@ -133,26 +123,16 @@ impl RunTracker {
             else {
                 continue;
             };
-            if matches!(
-                task.state,
-                wire::MissionTaskState::Pending | wire::MissionTaskState::Active
-            ) {
-                task.state = if is_line(&task.plan) {
-                    verdict(task, judged, min_usable)
-                } else {
-                    wire::MissionTaskState::Done
-                };
-                changed = true;
-            }
+            changed |= task.end(Execution::Completed, now_ms);
         }
         let active = progress
             .active_task
             .as_deref()
             .and_then(|phase| self.task_of_phase(phase));
         if let Some(task) = active.and_then(|i| self.tasks.get_mut(i))
-            && task.state == wire::MissionTaskState::Pending
+            && task.execution == Execution::Pending
         {
-            task.state = wire::MissionTaskState::Active;
+            task.execution = Execution::Active;
             changed = true;
         }
         changed |= active != self.active;
@@ -168,7 +148,7 @@ impl RunTracker {
 
     pub(super) fn on_frame(&mut self) -> Option<FrameTicket> {
         let task = self.tasks.get_mut(self.active?)?;
-        if !is_line(&task.plan) {
+        if !task.is_line() || task.execution != Execution::Active {
             return None;
         }
         task.evidence.frames = task.evidence.frames.wrapping_add(1);
@@ -184,8 +164,8 @@ impl RunTracker {
     /// usable pictures and the ones awaiting an answer fall short of what
     /// its evidence needs.
     pub(super) fn wants_judgment(&self, ticket: &FrameTicket) -> bool {
-        let need = usize::try_from(self.min_usable).unwrap_or(usize::MAX);
-        self.judged
+        let need = usize::try_from(self.rule.min_usable).unwrap_or(usize::MAX);
+        self.rule.judged
             && ticket.run_id == self.run_id
             && self.tasks.iter().any(|t| {
                 let usable = usize::try_from(t.evidence.usable).unwrap_or(usize::MAX);
@@ -206,15 +186,24 @@ impl RunTracker {
     }
 
     /// Takes the verdict for the picture `ticket` names, or the news that
-    /// it was not judged. Returns whether the task changed.
+    /// it was not judged. It changes the task's evidence, never how its
+    /// execution ended. After the task's evidence window closed, the answer
+    /// is counted as late and changes nothing else. Returns whether the task
+    /// changed.
     pub(super) fn on_assessment(
         &mut self,
         ticket: &FrameTicket,
         assessment: Option<FrameAssessment>,
     ) -> Result<bool, VerdictRefused> {
-        let (judged, min_usable) = (self.judged, self.min_usable);
         let task = self.task_of(ticket)?;
         task.judgments.answer(ticket)?;
+        if task.sealed {
+            task.evidence.late = task.evidence.late.wrapping_add(1);
+            return Err(VerdictRefused::Late {
+                task_id: ticket.task_id.clone(),
+                frame: ticket.frame,
+            });
+        }
         let evidence = &mut task.evidence;
         if let Some(assessment) = assessment {
             evidence.assessed = evidence.assessed.wrapping_add(1);
@@ -224,12 +213,6 @@ impl RunTracker {
             if assessment.hazard {
                 evidence.hazards = evidence.hazards.wrapping_add(1);
             }
-        }
-        if matches!(
-            task.state,
-            wire::MissionTaskState::Done | wire::MissionTaskState::Incomplete
-        ) {
-            task.state = verdict(task, judged, min_usable);
         }
         Ok(true)
     }
@@ -250,50 +233,55 @@ impl RunTracker {
             })
     }
 
-    /// Ends the run: lines already flown get their verdict, the way home
-    /// is done when it was active, nothing else changes.
-    pub(super) fn close(&mut self) {
-        for (index, task) in self.tasks.iter_mut().enumerate() {
-            if task.state == wire::MissionTaskState::Active {
-                task.state = if is_line(&task.plan) {
-                    verdict(task, self.judged, self.min_usable)
-                } else {
-                    wire::MissionTaskState::Done
-                };
-            }
-            if Some(index) == self.active && !is_line(&task.plan) {
-                task.state = wire::MissionTaskState::Done;
-            }
-        }
-        self.active = None;
-    }
-
-    /// Closes an aborted run: the task in progress was cut short, so it
-    /// stays unfinished whatever evidence it had, and a pending task stays
-    /// pending.
-    pub(super) fn close_aborted(&mut self) {
-        if let Some(task) = self.active.and_then(|index| self.tasks.get_mut(index)) {
-            task.state = wire::MissionTaskState::Incomplete;
-        }
+    /// Ends the run with `outcome` for the task in progress: completed when
+    /// the plan completed, cancelled by an abort, failed when the run ended
+    /// without completing its plan. A task not begun stays pending.
+    pub(super) fn close(&mut self, outcome: Execution, now_ms: u64) {
         for task in &mut self.tasks {
-            if task.state == wire::MissionTaskState::Active {
-                task.state = wire::MissionTaskState::Incomplete;
-            }
+            task.end_active(outcome, now_ms);
         }
         self.active = None;
     }
 
-    /// Survey lines flown so far, with or without their evidence.
+    /// A successor replaced the run at `now_ms`: a task not begun is skipped,
+    /// one in progress is cancelled, and what was flown keeps its outcome and
+    /// its evidence window.
+    pub(super) fn supersede(&mut self, now_ms: u64) {
+        for task in &mut self.tasks {
+            if matches!(task.execution, Execution::Pending | Execution::Unspecified) {
+                task.execution = Execution::Skipped;
+            }
+            task.end_active(Execution::Cancelled, now_ms);
+        }
+        self.active = None;
+    }
+
+    /// Closes the evidence window of each task that ended `window_ms` before
+    /// `now_ms`, or of every ended task when `force`. Returns whether a task
+    /// changed.
+    pub(super) fn seal(&mut self, now_ms: u64, window_ms: u64, force: bool) -> bool {
+        let mut changed = false;
+        for task in &mut self.tasks {
+            changed |= task.seal(now_ms, window_ms, force);
+        }
+        changed
+    }
+
+    /// A task of the run still waits for answers inside its window.
+    pub(super) fn settling(&self) -> bool {
+        self.tasks.iter().any(TaskTrack::settling)
+    }
+
+    /// Whether `ticket` names a picture of this run.
+    pub(super) fn issued(&self, ticket: &FrameTicket) -> bool {
+        ticket.run_id == self.run_id
+    }
+
+    /// Survey lines whose execution ended so far, with or without their evidence.
     pub(super) fn flown_lines(&self) -> usize {
         self.tasks
             .iter()
-            .filter(|t| is_line(&t.plan))
-            .filter(|t| {
-                matches!(
-                    t.state,
-                    wire::MissionTaskState::Done | wire::MissionTaskState::Incomplete
-                )
-            })
+            .filter(|t| t.is_line() && t.ended())
             .count()
     }
 
@@ -301,35 +289,23 @@ impl RunTracker {
     pub(super) fn on_line(&self) -> bool {
         self.active
             .and_then(|index| self.tasks.get(index))
-            .is_some_and(|task| is_line(&task.plan))
+            .is_some_and(TaskTrack::is_line)
     }
 
     /// Every line is flown and the run flies home.
     pub(super) fn flying_home(&self) -> bool {
         self.active
             .and_then(|index| self.tasks.get(index))
-            .is_some_and(|task| !is_line(&task.plan))
+            .is_some_and(|task| !task.is_line())
     }
 
-    /// The statuses a successor leaves behind: what was flown keeps its
-    /// verdict, and every task not flown is skipped, superseded.
-    pub(super) fn superseded_statuses(&self) -> Vec<wire::MissionTaskStatus> {
-        let mut statuses = self.task_statuses();
-        for status in &mut statuses {
-            if matches!(
-                wire::MissionTaskState::try_from(status.state),
-                Ok(wire::MissionTaskState::Pending | wire::MissionTaskState::Active)
-            ) {
-                status.state = wire::MissionTaskState::Skipped as i32;
-            }
-            // A replaced run takes no more verdicts.
-            if let Some(evidence) = status.evidence.as_mut()
-                && evidence.state == wire::MissionEvidenceState::Pending as i32
-            {
-                evidence.state = wire::MissionEvidenceState::NotJudged as i32;
-            }
-        }
-        statuses
+    /// The tasks the run has not begun.
+    pub(super) fn not_begun(&self) -> Vec<String> {
+        self.tasks
+            .iter()
+            .filter(|t| t.execution == Execution::Pending)
+            .map(|t| t.plan.task_id.clone())
+            .collect()
     }
 
     /// The name of the task in progress, for display.
@@ -340,40 +316,21 @@ impl RunTracker {
     pub(super) fn task_statuses(&self) -> Vec<wire::MissionTaskStatus> {
         self.tasks
             .iter()
-            .map(|task| wire::MissionTaskStatus {
-                task_id: task.plan.task_id.clone(),
-                name: task.plan.name.clone(),
-                kind: task.plan.kind,
-                state: task.state as i32,
-                evidence: Some(wire::MissionTaskEvidence {
-                    state: task
-                        .judgments
-                        .state(&task.evidence, self.judged, self.min_usable)
-                        as i32,
-                    ..task.evidence.clone()
-                }),
-                progress: match task.state {
-                    wire::MissionTaskState::Done | wire::MissionTaskState::Incomplete => 1.0,
-                    _ => 0.0,
-                },
-                member: task.plan.member.clone(),
-                reflown: 0,
-                path: task.plan.path.clone(),
-            })
+            .map(|task| task.status(self.rule))
             .collect()
     }
 
     /// One line for the status detail when the run completes.
     pub(super) fn summary(&self) -> String {
-        let lines = self.tasks.iter().filter(|t| is_line(&t.plan));
-        let done = lines
+        let lines = self.tasks.iter().filter(|t| t.is_line());
+        let met = lines
             .clone()
-            .filter(|t| t.state == wire::MissionTaskState::Done)
+            .filter(|t| t.judgment(self.rule) == Judgment::Met)
             .count();
-        let incomplete = lines
-            .filter(|t| t.state == wire::MissionTaskState::Incomplete)
+        let not_met = lines
+            .filter(|t| t.judgment(self.rule) == Judgment::NotMet)
             .count();
-        format!("complete: {done} lines with evidence, {incomplete} lines without")
+        format!("complete: {met} lines with evidence, {not_met} lines without")
     }
 }
 
@@ -391,27 +348,8 @@ pub(super) fn planned_statuses(tasks: &[wire::MissionTaskPlan]) -> Vec<wire::Mis
             member: plan.member.clone(),
             reflown: 0,
             path: plan.path.clone(),
+            execution: Execution::Pending as i32,
+            judgment: Judgment::Undetermined as i32,
         })
         .collect()
-}
-
-fn is_line(plan: &wire::MissionTaskPlan) -> bool {
-    plan.kind == wire::MissionTaskKind::SurveyLine as i32
-}
-
-/// A flown line is done with its evidence. A run with a judgment service
-/// needs enough pictures judged usable, every sent picture answered; a
-/// line nobody judged is not usable. A run without one counts captured
-/// pictures, and its evidence reads as not judged.
-fn verdict(task: &TaskTrack, judged: bool, min_usable: u32) -> wire::MissionTaskState {
-    let done = if judged {
-        task.judgments.state(&task.evidence, judged, min_usable) == wire::MissionEvidenceState::Met
-    } else {
-        task.evidence.frames >= min_usable
-    };
-    if done {
-        wire::MissionTaskState::Done
-    } else {
-        wire::MissionTaskState::Incomplete
-    }
 }

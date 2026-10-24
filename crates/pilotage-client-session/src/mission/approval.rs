@@ -82,13 +82,15 @@ pub fn approved_height_m(proposal: &wire::MissionProposal, policy: &ApprovalPoli
         .map(|height| height + policy.height_margin_m)
 }
 
-/// The approval of `proposal` at `now_ms` under `policy`, or `None` when
+/// The approval of `proposal` at `now_ms` under `policy`, for the run
+/// `run_id` in progress or, empty, for a plan before its start; `None` when
 /// no height bounds it. The host writes the approver; the record names the
 /// session that sent it.
 #[must_use]
 pub fn approval(
     proposal: &wire::MissionProposal,
     policy: &ApprovalPolicy,
+    run_id: &str,
     now_ms: u64,
 ) -> Option<wire::mission_intent::Action> {
     let max_height_m = approved_height_m(proposal, policy)?;
@@ -111,6 +113,7 @@ pub fn approval(
                 on_expiry: policy.on_expiry.wire() as i32,
             }),
             approved_unix_ms: now_ms,
+            run_id: run_id.to_owned(),
             proposal_format: wire::MissionProposalFormat::V1 as i32,
         },
     ))

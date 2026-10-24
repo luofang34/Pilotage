@@ -350,3 +350,40 @@ fn a_record_whose_digest_does_not_name_its_body_is_not_kept() {
     };
     assert_eq!(desk.resolve(&command, 1), Err(DeskRefusal::NoProposal));
 }
+
+#[test]
+fn an_expired_approval_offers_a_renewal_of_the_run_and_no_resume() {
+    let mut desk = MissionDesk::new("person", 7);
+    let mut held = status(wire::MissionLaneState::Held, b"\x52");
+    held.run_id = "run-7".to_owned();
+    held.holds = vec![wire::MissionHoldReason::ApprovalExpired as i32];
+    desk.on_status(held.clone());
+    assert_eq!(
+        desk.unseen_proposal(),
+        Some(b"\x52".to_vec()),
+        "the plan to renew is fetched"
+    );
+    fetched(&mut desk, b"\x52");
+    let offered = desk.offered(true, &ApprovalPolicy::default());
+    assert!(
+        offered.approve.is_some(),
+        "the plan in progress may be renewed"
+    );
+    assert!(
+        !offered.resume,
+        "a resume is refused while the expiry holds the run"
+    );
+    let approve = MissionCommand::Approve {
+        digest: None,
+        policy: ApprovalPolicy::default(),
+    };
+    let Ok(Action::Approve(renewal)) = desk.resolve(&approve, 0) else {
+        panic!("a renewal");
+    };
+    assert_eq!(renewal.run_id, "run-7", "the renewal names its run");
+
+    held.holds = vec![wire::MissionHoldReason::Operator as i32];
+    desk.on_status(held);
+    let offered = desk.offered(true, &ApprovalPolicy::default());
+    assert!(offered.resume && offered.approve.is_none());
+}

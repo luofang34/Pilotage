@@ -140,12 +140,14 @@ impl LaneTask {
                             usable: judgment.usable >= 0.5,
                             hazard: judgment.hazard >= 0.5,
                         });
+                        self.lane.on_host_clock(self.host_ms());
                         if let Err(refused) = self.lane.on_assessment(&ticket, assessment) {
                             warn!(%refused, "judgment refused");
                         }
                     }
                 },
                 _ = ticker.tick() => {
+                    self.lane.on_host_clock(self.host_ms());
                     if let Some(effect) = self.lane.on_clock(unix_now_ms()) {
                         self.apply(effect).await;
                     }
@@ -160,6 +162,11 @@ impl LaneTask {
             run.controls.send(RunControl::Abort).await.ok();
             run.handle.await.ok();
         }
+    }
+
+    /// Milliseconds since the host started, on its monotonic clock.
+    fn host_ms(&self) -> u64 {
+        u64::try_from(self.start.elapsed().as_millis()).unwrap_or(u64::MAX)
     }
 
     async fn on_intent(

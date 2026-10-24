@@ -8,6 +8,9 @@
 //!   presents to that host; the approver secret lets it pass the team's
 //!   approval down.
 //! - `PILOTAGE_LANE_NAME`: the team lane's name; default `TEAM`.
+//! - `PILOTAGE_COORDINATOR_JOURNAL`: the file the coordinator writes its
+//!   handovers to before it sends work to a member, and reads back when it
+//!   starts; default the member file's path with `.handovers` appended.
 
 use std::path::PathBuf;
 
@@ -32,6 +35,10 @@ pub(crate) struct MemberHost {
 pub(crate) struct CoordinatorConfig {
     pub team: TeamConfig,
     pub members: Vec<MemberHost>,
+    /// Where the handovers are written.
+    pub journal: PathBuf,
+    /// The handovers a coordinator wrote before this one started.
+    pub restored: Vec<wire::MissionHandover>,
 }
 
 #[derive(Deserialize)]
@@ -94,7 +101,18 @@ impl CoordinatorConfig {
                 token,
             });
         }
+        let journal = env_var("PILOTAGE_COORDINATOR_JOURNAL")?.map_or_else(
+            || {
+                let mut name = path.clone().into_os_string();
+                name.push(".handovers");
+                PathBuf::from(name)
+            },
+            PathBuf::from,
+        );
+        let restored = super::journal::read_blocking(&journal)?;
         Ok(Self {
+            journal,
+            restored,
             team: TeamConfig {
                 name: env_var("PILOTAGE_LANE_NAME")?.unwrap_or_else(|| "TEAM".to_owned()),
                 members,

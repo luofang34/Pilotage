@@ -71,6 +71,15 @@ impl Steering {
                 "{} may not state that a member is down: it needs the approver secret",
                 requester.subject
             )),
+            Some(Action::MemberDown(down)) => {
+                // The record names the session that stated it.
+                down.stated_by = Some(wire::RecordOrigin {
+                    issuer: HOST_ISSUER.to_owned(),
+                    subject: requester.subject.clone(),
+                    organization: String::new(),
+                });
+                Ok(())
+            }
             Some(Action::Resume(_)) if self.held_by_approver && !requester.may_approve => {
                 Err(format!(
                     "{} may not resume: an approver held the mission",

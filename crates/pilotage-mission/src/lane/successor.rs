@@ -12,6 +12,8 @@ use wire::MissionLaneState as State;
 use wire::MissionSuccessorState as Stage;
 
 use super::{IntentContext, Lane, LaneEffect, RunOrder, approval, compile};
+use crate::change::{ChangeClass, ChangeSet, authorize};
+use crate::survey::objective_change;
 use compile::Compiled;
 
 /// A revision of the plan in progress.
@@ -24,6 +26,8 @@ pub(super) struct Successor {
     pub flown_at_draft: usize,
     /// The recovery an expired approval names, which applies under it.
     pub recovery: bool,
+    /// The work a team asked the revision to release.
+    pub release: Option<wire::WorkRelease>,
 }
 
 type Outcome = Result<(Option<LaneEffect>, Option<wire::MissionProposalRecord>), String>;
@@ -86,6 +90,7 @@ impl Lane {
                 .unwrap_or_default(),
             flown_at_draft: run.flown_lines(),
             recovery: false,
+            release: revise.release.clone(),
         });
         self.detail = "revision drafted; waiting for review".to_owned();
         if !revise.within_envelope {
@@ -144,10 +149,10 @@ impl Lane {
             .envelope
             .clone()
             .ok_or("the approval has no envelope")?;
-        if !envelope.permit_revise {
-            return Err("the approval does not permit revisions inside its envelope; approve the draft instead".to_owned());
-        }
         let successor = self.successor.as_ref().ok_or("no drafted revision")?;
+        let current = self.proposal.as_ref().ok_or("there is no plan to revise")?;
+        authorize(&envelope, &changes(current, &successor.compiled))
+            .map_err(|unpermitted| format!("{unpermitted}; the draft waits for an approval"))?;
         let delegated = wire::MissionApproval {
             proposal_digest: successor.compiled.proposal.digest.clone(),
             ..active
@@ -230,6 +235,7 @@ impl Lane {
         let successor = self.successor.as_mut()?;
         successor.stage = Stage::Applied;
         let compiled = successor.compiled.clone();
+        let release = successor.release.clone();
         let previous = self.run.take();
         let predecessor = previous.as_ref().map(super::run::RunTracker::run_id);
         let run_id = format!(
@@ -241,11 +247,23 @@ impl Lane {
             self.revisions
         );
         if let Some(run) = previous {
-            self.history.extend(run.superseded_statuses());
+            if let Some(release) = release {
+                self.released.push(wire::WorkReleased {
+                    assignment_id: release.assignment_id,
+                    generation: release.generation,
+                    digest: compiled.proposal.digest.clone(),
+                    run_id: run_id.clone(),
+                    superseded_run_id: run.run_id(),
+                    task_ids: run.not_begun(),
+                });
+            }
+            self.retire(run);
         }
         let mut run = super::run::RunTracker::new(run_id.clone(), &compiled, self.config.judged);
         run.predecessor = predecessor;
         self.run = Some(run);
+        // The successor's run starts flying, as a switch while held does.
+        self.holds.clear();
         self.state = State::Running;
         self.detail = format!(
             "flying revision {}: {}",
@@ -283,4 +301,42 @@ impl Lane {
             drafted_by: successor.drafted_by.clone(),
         })
     }
+}
+
+/// Every change from the plan `current` to the successor `next`: what the
+/// survey objective changes, and the tasks and their holders.
+pub(super) fn changes(current: &Compiled, next: &Compiled) -> ChangeSet {
+    let mut set = match (&current.proposal.objective, &next.proposal.objective) {
+        (Some(before), Some(after)) => objective_change::classify(before, after),
+        (None, None) => ChangeSet::default(),
+        _ => {
+            let mut set = ChangeSet::default();
+            set.add(ChangeClass::Objective, "the objective");
+            set
+        }
+    };
+    let shape = |c: &Compiled| -> Vec<(i32, Vec<(u64, u64)>)> {
+        c.proposal
+            .tasks
+            .iter()
+            .map(|t| {
+                let path = t
+                    .path
+                    .iter()
+                    .map(|p| (p.latitude_deg.to_bits(), p.longitude_deg.to_bits()))
+                    .collect();
+                (t.kind, path)
+            })
+            .collect()
+    };
+    if shape(current) != shape(next) {
+        set.add(ChangeClass::Plan, "the tasks");
+    }
+    let holders = |c: &Compiled| -> std::collections::BTreeSet<String> {
+        c.proposal.tasks.iter().map(|t| t.member.clone()).collect()
+    };
+    if holders(current) != holders(next) {
+        set.add(ChangeClass::Assignment, "who holds the tasks");
+    }
+    set
 }

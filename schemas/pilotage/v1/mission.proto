@@ -49,6 +49,10 @@ message SurveyObjective {
   // Line bearing, degrees clockwise from true north. Absent follows the
   // area's longest edge. A team fixes it, so its members' lines align.
   optional double line_bearing_deg = 10;
+  // The operator requires `height_m`: a revision that changes the height
+  // changes the objective. Without it, the height is part of the plan, and
+  // only the envelope's `max_height_m` bounds it.
+  bool hold_height = 11;
 }
 
 // What the operator wants. A route is one way to satisfy it.
@@ -200,13 +204,21 @@ enum MissionExpiryPolicy {
   MISSION_EXPIRY_POLICY_RETURN_HOME = 2;
 }
 
-// A permission bound to one proposal digest.
+// A permission bound to one proposal digest. The lane finds what the
+// approval is for from the digest and the run: the plan before its start,
+// a drafted successor, or a renewal of the plan in progress.
 message MissionApproval {
   string approval_id = 1;
   bytes proposal_digest = 2;
   RecordOrigin approver = 3;
   AdaptationEnvelope envelope = 4;
   uint64 approved_unix_ms = 5;
+  // The run the approval is for. Empty for a plan before its start. A
+  // renewal of the plan in progress names its run, and a lane refuses it
+  // for any other run, so an approval of one run never renews another run
+  // of the same plan. An approval of a drafted successor names the run in
+  // progress or nothing.
+  string run_id = 6;
   // The format of the record whose digest the approval binds. A lane
   // refuses an approval that names no format, so a client that does not
   // know records gets a clear refusal.
@@ -239,6 +251,10 @@ message MissionRevise {
   bool within_envelope = 3;
   // Who drafted the change; the host writes the admitted session.
   RecordOrigin drafted_by = 4;
+  // Work the revision releases: a team asks it of a member before another
+  // member gets the work. When the revision applies, the member's status
+  // reports the release in `released`.
+  WorkRelease release = 5;
   oneof change {
     // A new revision of the objective. A vehicle lane flies it from the
     // checkpoint; a team takes only a strip on its own line grid.
@@ -261,6 +277,74 @@ message MissionReassign {
 
 message MissionFinish {}
 
+// The work a team asks a member to release: one assignment, in one
+// generation.
+message WorkRelease {
+  // The assignment's identity; it includes the team's run, so a restarted
+  // coordinator never reuses one.
+  string assignment_id = 1;
+  uint64 generation = 2;
+}
+
+// A member's report that a revision released work: the old run no longer
+// flies the released tasks, and the lane refuses any intent for the plan
+// that the revision replaced.
+message WorkReleased {
+  string assignment_id = 1;
+  uint64 generation = 2;
+  // The digest of the revision that released the work.
+  bytes digest = 3;
+  // The run that flies the revision.
+  string run_id = 4;
+  // The run the revision replaced.
+  string superseded_run_id = 5;
+  // The tasks of the replaced run that it did not begin; none of them is
+  // flown by that run.
+  repeated string task_ids = 6;
+}
+
+// Work that moves from one team member to another.
+message MissionHandover {
+  string assignment_id = 1;
+  // The generation of the assignment now: the giving member's while the
+  // release is open, one more once the work is committed to the receiving
+  // member.
+  uint64 generation = 2;
+  string from_member = 3;
+  string to_member = 4;
+  MissionHandoverState state = 5;
+  // The moved tasks, as the giving member names them.
+  repeated string task_ids = 6;
+  // What the commit rests on: the giving member's release, or a person's
+  // statement that it is down. A statement is an override; it does not
+  // prove that the member stopped or that its airspace is clear.
+  string basis = 7;
+}
+
+enum MissionHandoverState {
+  MISSION_HANDOVER_STATE_UNSPECIFIED = 0;
+  // Waiting for the giving member's release. The work and its space stay
+  // with the giving member, and the receiving member gets nothing.
+  MISSION_HANDOVER_STATE_RELEASING = 1;
+  // Committed to the receiving member.
+  MISSION_HANDOVER_STATE_COMMITTED = 2;
+  // The giving member refused, so it keeps the work.
+  MISSION_HANDOVER_STATE_WITHDRAWN = 3;
+  // Released by the giving member, and not taken by the receiving member:
+  // nobody holds the work until an operator gives it to a member.
+  MISSION_HANDOVER_STATE_UNASSIGNED = 4;
+  // The coordinator restarted while the handover was open or committed. It
+  // is not known whether a member flies the work; an operator checks both
+  // members and gives the work to one.
+  MISSION_HANDOVER_STATE_UNRECONCILED = 5;
+}
+
+// A coordinator's handovers as it writes them to durable storage before it
+// sends work to a member, so a restart does not lose them.
+message MissionHandoverJournal {
+  repeated MissionHandover handovers = 1;
+}
+
 message MissionSkip {
   string task_id = 1;
 }
@@ -270,6 +354,8 @@ message MissionSkip {
 // this, its work and its line in progress stay reserved to it.
 message MissionMemberDown {
   string member = 1;
+  // Who stated it; the host writes the admitted session.
+  RecordOrigin stated_by = 2;
 }
 
 // A request for the full proposal that `digest` names: the lane's plan or
@@ -333,6 +419,9 @@ enum MissionLaneState {
   MISSION_LANE_STATE_HOLD_REQUESTED = 10;
 }
 
+// A task's state for display, derived from its execution and its
+// judgment. A decision reads `execution`, `judgment` and the evidence
+// `collection`, never this value.
 enum MissionTaskState {
   MISSION_TASK_STATE_UNSPECIFIED = 0;
   MISSION_TASK_STATE_PENDING = 1;
@@ -342,6 +431,48 @@ enum MissionTaskState {
   // without enough evidence, or cut short by an abort.
   MISSION_TASK_STATE_INCOMPLETE = 4;
   MISSION_TASK_STATE_SKIPPED = 5;
+}
+
+// How a task's execution stands or ended. Only run events set it: evidence
+// that arrives later never changes it.
+enum MissionTaskExecution {
+  MISSION_TASK_EXECUTION_UNSPECIFIED = 0;
+  // Not begun.
+  MISSION_TASK_EXECUTION_PENDING = 1;
+  MISSION_TASK_EXECUTION_ACTIVE = 2;
+  // The run finished the task.
+  MISSION_TASK_EXECUTION_COMPLETED = 3;
+  // An abort or a revision stopped the task after it began.
+  MISSION_TASK_EXECUTION_CANCELLED = 4;
+  // The run ended without finishing the task, such as by an unplanned
+  // landing.
+  MISSION_TASK_EXECUTION_FAILED = 5;
+  // A revision replaced the task before it began.
+  MISSION_TASK_EXECUTION_SKIPPED = 6;
+}
+
+// Whether the known evidence of a task meets what its objective needs. The
+// task kind's rule gives it from the execution and the evidence.
+enum MissionTaskJudgment {
+  MISSION_TASK_JUDGMENT_UNSPECIFIED = 0;
+  // Not known yet: the task has not ended, or its evidence is still open.
+  MISSION_TASK_JUDGMENT_UNDETERMINED = 1;
+  MISSION_TASK_JUDGMENT_MET = 2;
+  MISSION_TASK_JUDGMENT_NOT_MET = 3;
+}
+
+// Whether a task can still get evidence.
+enum MissionEvidenceCollection {
+  MISSION_EVIDENCE_COLLECTION_UNSPECIFIED = 0;
+  // The task still takes pictures, or a picture sent for a judgment has no
+  // answer yet.
+  MISSION_EVIDENCE_COLLECTION_OPEN = 1;
+  // The task ended and every picture sent for a judgment has an answer, or
+  // the task will take no pictures.
+  MISSION_EVIDENCE_COLLECTION_SETTLED = 2;
+  // The evidence window of the task closed while a picture sent for a
+  // judgment had no answer. The judgment uses the answers that arrived.
+  MISSION_EVIDENCE_COLLECTION_CLOSED = 3;
 }
 
 // What a task acquired and what the judgment service said about it.
@@ -355,12 +486,15 @@ message MissionTaskEvidence {
   // Assessed pictures that showed a possible hazard.
   uint32 hazards = 4;
   string note = 5;
-  // Whether the task's completion evidence is settled.
+  // The evidence as one value, for display.
   MissionEvidenceState state = 6;
+  MissionEvidenceCollection collection = 7;
+  // Answers that arrived after the evidence window closed. They are
+  // counted here only; they change no other field.
+  uint32 late = 8;
 }
 
-// Where a task's completion evidence stands. A task that needs a judgment
-// is done only with MET.
+// Where a task's completion evidence stands, as one value for display.
 enum MissionEvidenceState {
   MISSION_EVIDENCE_STATE_UNSPECIFIED = 0;
   // Pictures sent for a judgment have no answer yet.
@@ -388,6 +522,8 @@ message MissionTaskStatus {
   repeated GeoPoint path = 8;
   // The task's name, for display only.
   string name = 9;
+  MissionTaskExecution execution = 10;
+  MissionTaskJudgment judgment = 11;
 }
 
 // One lane's state, published on the reliable stream when it changes and
@@ -427,6 +563,25 @@ message MissionStatus {
   // The run this run continues, when a revision replaced it; empty for a
   // run of a first plan.
   string predecessor_run_id = 20;
+  // Why the run holds or is asked to hold; empty when it does not. A team
+  // lists every reason of its members that may still fly.
+  repeated MissionHoldReason holds = 21;
+  // Work this lane's revisions released, for the team that asked.
+  repeated WorkReleased released = 22;
+  // A team's work moving between its members.
+  repeated MissionHandover handovers = 23;
+}
+
+// One reason a run holds. A renewal of the approval removes only
+// APPROVAL_EXPIRED, and an operator's resume removes only OPERATOR; the run
+// resumes when no reason stays. A fault, a motion lease held elsewhere or an
+// unknown member state is no hold reason, and neither removes it.
+enum MissionHoldReason {
+  MISSION_HOLD_REASON_UNSPECIFIED = 0;
+  // An operator asked the run to hold.
+  MISSION_HOLD_REASON_OPERATOR = 1;
+  // The approval expired, and its recovery holds the run.
+  MISSION_HOLD_REASON_APPROVAL_EXPIRED = 2;
 }
 
 // How a team sees one member.
@@ -473,6 +628,8 @@ enum MissionSuccessorState {
   MISSION_SUCCESSOR_STATE_ADMITTED = 2;
   // The lane flies it.
   MISSION_SUCCESSOR_STATE_APPLIED = 3;
+  // A member refused its share, so the revision does not apply.
+  MISSION_SUCCESSOR_STATE_WITHDRAWN = 4;
 }
 
 // A successor as a lane's status reports it.

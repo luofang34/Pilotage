@@ -7,10 +7,17 @@ use wire::mission_intent::Action;
 
 use super::*;
 
-/// Every member flies toward its line 1: the line in progress.
+/// Every member flies toward its line 1, the line in progress, and reports
+/// it to the team.
 fn on_line_one(fleet: &mut Fleet) {
+    let mut statuses = Vec::new();
     for lane in fleet.members.values_mut() {
         lane.on_progress(&RunProgress { ..toward(lane, 1) });
+        statuses.extend(lane.take_changed());
+    }
+    for status in statuses {
+        let intents = fleet.team.on_member_status(&status, &context("line-1"));
+        fleet.route(intents);
     }
 }
 
@@ -73,6 +80,7 @@ fn reassign(fleet: &Fleet, from: &str, to: &str, fraction: f64, within: bool) ->
         run_id: status.run_id.clone(),
         within_envelope: within,
         drafted_by: None,
+        release: None,
         change: Some(wire::mission_revise::Change::Reassign(
             wire::MissionReassign {
                 from_member: from.to_owned(),
@@ -83,9 +91,19 @@ fn reassign(fleet: &Fleet, from: &str, to: &str, fraction: f64, within: bool) ->
     })
 }
 
-/// SIM-1 ends its line 1 and switches to its revision.
+/// SIM-1 ends its line 1, with usable pictures, and switches to its revision.
 fn switch_sim1(fleet: &mut Fleet) {
     let lane = fleet.members.get_mut("SIM-1").expect("SIM-1");
+    for _ in 0..3 {
+        if let Some(ticket) = lane.on_frame() {
+            lane.on_sent(&ticket);
+            let usable = Some(FrameAssessment {
+                usable: true,
+                hazard: false,
+            });
+            lane.on_assessment(&ticket, usable).unwrap();
+        }
+    }
     let effect = lane.on_progress(&RunProgress { ..toward(lane, 2) });
     assert!(
         matches!(effect, Some(LaneEffect::Start(_))),
@@ -257,6 +275,7 @@ fn a_parents_strip_keeps_exactly_the_lines_inside_it() {
         run_id: status.run_id.clone(),
         within_envelope: false,
         drafted_by: None,
+        release: None,
         change: Some(wire::mission_revise::Change::Objective(objective)),
     });
     let (receipt, _) = team_intent(&mut fleet, revise);
@@ -281,6 +300,7 @@ fn link_of(fleet: &Fleet, member: &str) -> wire::MemberLink {
 fn member_down(member: &str) -> Action {
     Action::MemberDown(wire::MissionMemberDown {
         member: member.to_owned(),
+        stated_by: None,
     })
 }
 

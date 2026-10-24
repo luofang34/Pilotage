@@ -1,6 +1,7 @@
 //! The intent a mission command asks for, built from what the desk holds.
 
 use pilotage_protocol::wire;
+use wire::MissionLaneState as Lane;
 
 use pilotage_protocol::proposal_record::unknown_features;
 
@@ -8,6 +9,21 @@ use super::{DeskRefusal, KNOWN_FEATURES, MissionDesk, parse_hex};
 use crate::mission::{MissionCommand, approval};
 
 impl MissionDesk {
+    /// The run an approval is for: the run in progress, so that a renewal
+    /// names the run it renews; empty before a start.
+    fn run_in_progress(&self) -> String {
+        self.status
+            .as_ref()
+            .filter(|status| {
+                matches!(
+                    Lane::try_from(status.state),
+                    Ok(Lane::Running | Lane::HoldRequested | Lane::Held | Lane::Uncertain)
+                )
+            })
+            .map(|status| status.run_id.clone())
+            .unwrap_or_default()
+    }
+
     /// The intent `command` asks for at `now_ms`. The lane, not the desk,
     /// decides whether the lane's state allows it.
     ///
@@ -40,11 +56,13 @@ impl MissionDesk {
                 if !unknown.is_empty() {
                     return Err(DeskRefusal::UnknownFeatures(unknown));
                 }
-                approval(&proposal, policy, now_ms).ok_or(DeskRefusal::NoHeight)
+                approval(&proposal, policy, &self.run_in_progress(), now_ms)
+                    .ok_or(DeskRefusal::NoHeight)
             }
             MissionCommand::MemberDown { member } => {
                 Ok(Action::MemberDown(wire::MissionMemberDown {
                     member: member.clone(),
+                    stated_by: None,
                 }))
             }
             MissionCommand::Fetch {} => Ok(Action::Fetch(wire::MissionFetch {

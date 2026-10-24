@@ -30,9 +30,9 @@ impl Lane {
                 .map(RunTracker::run_id)
                 .unwrap_or_default(),
             tasks: self
-                .history
+                .past
                 .iter()
-                .cloned()
+                .flat_map(RunTracker::task_statuses)
                 .chain(match (self.run.as_ref(), proposal) {
                     (Some(run), _) => run.task_statuses(),
                     (None, Some(p)) => run::planned_statuses(&p.tasks),
@@ -59,6 +59,9 @@ impl Lane {
                 .execution
                 .filter(|_| self.is_flying())
                 .map(RunExecution::wire),
+            holds: self.hold_reasons(),
+            released: self.released.clone(),
+            handovers: Vec::new(),
             predecessor_run_id: self
                 .run
                 .as_ref()
