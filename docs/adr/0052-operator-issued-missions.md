@@ -108,8 +108,8 @@ lane has a lifecycle: `Idle`, `Admitted`, `Running`, `HoldRequested`,
 `Held`, `Uncertain`, `Complete`, `Aborted`. An accepted hold makes the lane
 `HoldRequested`; the lane becomes `Held` only when the vehicle reports that
 it holds in place. An abort keeps each task that did not finish as
-unfinished: the task in progress becomes `Incomplete`, and a pending task
-stays pending. The environment variables remain a bootstrap source
+unfinished: the execution of the task in progress becomes `Cancelled`, and
+a pending task stays pending. The environment variables remain a bootstrap source
 that issues the first plan into an `Idle` lane; an issued plan supersedes
 them.
 
@@ -125,16 +125,53 @@ events of the core. A run that a revision starts names the run that it
 continues, so a team follows the work of a member through its revisions
 without the use of the names of runs or tasks. A route leg is not a task: Navigate
 keeps the sequencing of legs inside the task, and flight and camera
-acquisition run together under it. A task is complete only when its
-completion evidence exists; for a survey line, the acquired pictures with
-their placements. Each picture that a lane sends for judgment carries its
-run, its task, the attempt and the picture number. The lane refuses a
-verdict for another run, for a picture that it did not send, or a second
-verdict for one picture. The evidence of a task is `Pending` until each
-sent picture has an answer, then `Met` or `Missing`; it is `NotJudged`
-when no judgment service judged it. On a lane with a judgment service, a
-survey line is complete only with `Met`. A display may show progress inside a task from the
-remaining waypoints, and that view is not a second execution truth. The
+acquisition run together under it.
+
+A task status has three facts, and each fact has one source:
+
+| Fact | Values | Source |
+|---|---|---|
+| Execution | `Pending`, `Active`, `Completed`, `Cancelled`, `Failed`, `Skipped` | Run events: a task finishes, an abort, an unplanned end of the run, a revision |
+| Evidence collection | `Open`, `Settled`, `Closed` | The pictures of the task, the answers to them and the evidence window |
+| Judgment | `Undetermined`, `Met`, `NotMet` | The rule of the task kind, from the execution and the evidence |
+
+Evidence never changes the execution. A verdict that arrives after the
+execution ended can change the evidence and the judgment. It cannot make a
+cancelled or failed execution complete. A survey line is `Met` only when
+its execution is `Completed` and its evidence meets the minimum, because a
+line cut short does not cover its swath. On a lane with a judgment service,
+the minimum is a number of pictures judged usable, and a line that nobody
+judged is not usable. The way home is `Met` when its execution is
+`Completed`. A display state (`Done`, `Incomplete` and the others) comes
+from the three facts. A lane, a team, a client or an agent makes its
+decisions from the three facts, never from the display state. A step that
+waits for a task names the fact that it waits for: the next survey line
+waits for the end of the execution of the line before it, and a report
+waits for the judgment.
+
+Each picture that a lane sends for judgment carries its run, its task, the
+attempt and the picture number. The lane gives a verdict to the run that
+sent the picture. This is also true after a successor replaced that run. The
+lane refuses a verdict for a run that it does not know, for a picture that
+it did not send, or a second verdict for one picture. The evidence of a
+task is `Open` while the task takes pictures and while a sent picture has
+no answer.
+
+The evidence window of a task starts when its execution ends. From then on,
+the task takes no more pictures, so the set of pictures that can get an
+answer is closed. The window has a length from the lane configuration. This
+length is a deployment default, not a validated value. The window uses the
+monotonic clock of the host. It does not use the mission clock (ADR-0041),
+because the mission clock stops while the run holds, and a held run must
+still close its windows. When the window closes with answers outstanding,
+the evidence becomes `Closed`, and the judgment uses the answers that
+arrived. The lane counts an answer that arrives after that as late. A late
+answer changes no other fact. At most four replaced runs wait for answers
+at one time; when one more run is replaced, the windows of the oldest close
+at once. The lane is not persisted. A host that restarts makes a new lane,
+which refuses verdicts for the runs of the old lane, and the host never
+compares the monotonic times of two processes. A display may show progress inside a task from
+the remaining waypoints, and that view is not a second execution truth. The
 first delivery uses a sequence of tasks per vehicle. A team task graph and
 concurrent tasks within a bound come later; a linear list is not promised
 to cover every mission.
@@ -166,7 +203,31 @@ inside the approval's adaptation envelope is admitted locally, by the lane
 or by a coordinator, without another operator action. A successor outside
 the envelope needs a new approval. When no approval can be obtained, the
 lane applies the recovery behaviour the approval already authorized; it
-never changes the objective to declare success. Task-by-task consent is an
+never changes the objective to declare success.
+
+A successor is inside the envelope only when the envelope permits each
+class of change that the successor makes. The lane or the coordinator finds
+the classes when it compares the old content with the new content. It never
+uses the kind of request as the class. The classes are:
+
+| Class | What it changes | Permission |
+|---|---|---|
+| Plan | How the work is done: the tasks, their order, the speed, the height when no constraint fixes it | `permit_revise` |
+| Assignment | Who holds the work | `permit_allocate` |
+| Objective | What the work must achieve | `permit_change_objective` |
+
+One successor can make changes of more than one class. Then each of the
+permissions is necessary, and a refusal names each missing permission. A
+vehicle lane and a team use the same check. The task kind gives the meaning
+of its fields. For a survey, the area, the return to the launch point and
+the evidence that each line needs are objective fields. The height is a
+plan field, but it is an objective field when the objective holds the
+height (`hold_height`). The height bound of the envelope applies to all
+plans. The title, the identity and the revision number of an objective are
+not content: an objective with the same identity and different content is
+an objective change. An explicit approval of the digest of a draft is the
+permission of the approver for that draft, so this check applies only to
+admission inside the envelope. Task-by-task consent is an
 optional workflow inside this rule, not a separate level.
 
 Bounds copied into a plan grant nothing. The lane verifies a plan against

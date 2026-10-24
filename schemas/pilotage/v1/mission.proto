@@ -49,6 +49,10 @@ message SurveyObjective {
   // Line bearing, degrees clockwise from true north. Absent follows the
   // area's longest edge. A team fixes it, so its members' lines align.
   optional double line_bearing_deg = 10;
+  // The operator requires `height_m`: a revision that changes the height
+  // changes the objective. Without it, the height is part of the plan, and
+  // only the envelope's `max_height_m` bounds it.
+  bool hold_height = 11;
 }
 
 // What the operator wants. A route is one way to satisfy it.
@@ -381,6 +385,9 @@ enum MissionLaneState {
   MISSION_LANE_STATE_HOLD_REQUESTED = 10;
 }
 
+// A task's state for display, derived from its execution and its
+// judgment. A decision reads `execution`, `judgment` and the evidence
+// `collection`, never this value.
 enum MissionTaskState {
   MISSION_TASK_STATE_UNSPECIFIED = 0;
   MISSION_TASK_STATE_PENDING = 1;
@@ -390,6 +397,48 @@ enum MissionTaskState {
   // without enough evidence, or cut short by an abort.
   MISSION_TASK_STATE_INCOMPLETE = 4;
   MISSION_TASK_STATE_SKIPPED = 5;
+}
+
+// How a task's execution stands or ended. Only run events set it: evidence
+// that arrives later never changes it.
+enum MissionTaskExecution {
+  MISSION_TASK_EXECUTION_UNSPECIFIED = 0;
+  // Not begun.
+  MISSION_TASK_EXECUTION_PENDING = 1;
+  MISSION_TASK_EXECUTION_ACTIVE = 2;
+  // The run finished the task.
+  MISSION_TASK_EXECUTION_COMPLETED = 3;
+  // An abort or a revision stopped the task after it began.
+  MISSION_TASK_EXECUTION_CANCELLED = 4;
+  // The run ended without finishing the task, such as by an unplanned
+  // landing.
+  MISSION_TASK_EXECUTION_FAILED = 5;
+  // A revision replaced the task before it began.
+  MISSION_TASK_EXECUTION_SKIPPED = 6;
+}
+
+// Whether the known evidence of a task meets what its objective needs. The
+// task kind's rule gives it from the execution and the evidence.
+enum MissionTaskJudgment {
+  MISSION_TASK_JUDGMENT_UNSPECIFIED = 0;
+  // Not known yet: the task has not ended, or its evidence is still open.
+  MISSION_TASK_JUDGMENT_UNDETERMINED = 1;
+  MISSION_TASK_JUDGMENT_MET = 2;
+  MISSION_TASK_JUDGMENT_NOT_MET = 3;
+}
+
+// Whether a task can still get evidence.
+enum MissionEvidenceCollection {
+  MISSION_EVIDENCE_COLLECTION_UNSPECIFIED = 0;
+  // The task still takes pictures, or a picture sent for a judgment has no
+  // answer yet.
+  MISSION_EVIDENCE_COLLECTION_OPEN = 1;
+  // The task ended and every picture sent for a judgment has an answer, or
+  // the task will take no pictures.
+  MISSION_EVIDENCE_COLLECTION_SETTLED = 2;
+  // The evidence window of the task closed while a picture sent for a
+  // judgment had no answer. The judgment uses the answers that arrived.
+  MISSION_EVIDENCE_COLLECTION_CLOSED = 3;
 }
 
 // What a task acquired and what the judgment service said about it.
@@ -403,12 +452,15 @@ message MissionTaskEvidence {
   // Assessed pictures that showed a possible hazard.
   uint32 hazards = 4;
   string note = 5;
-  // Whether the task's completion evidence is settled.
+  // The evidence as one value, for display.
   MissionEvidenceState state = 6;
+  MissionEvidenceCollection collection = 7;
+  // Answers that arrived after the evidence window closed. They are
+  // counted here only; they change no other field.
+  uint32 late = 8;
 }
 
-// Where a task's completion evidence stands. A task that needs a judgment
-// is done only with MET.
+// Where a task's completion evidence stands, as one value for display.
 enum MissionEvidenceState {
   MISSION_EVIDENCE_STATE_UNSPECIFIED = 0;
   // Pictures sent for a judgment have no answer yet.
@@ -436,6 +488,8 @@ message MissionTaskStatus {
   repeated GeoPoint path = 8;
   // The task's name, for display only.
   string name = 9;
+  MissionTaskExecution execution = 10;
+  MissionTaskJudgment judgment = 11;
 }
 
 // One lane's state, published on the reliable stream when it changes and

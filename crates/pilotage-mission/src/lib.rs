@@ -11,6 +11,7 @@
 //! [`pilotage_protocol::ControlAction`] values. Framing, sessions,
 //! leases, and authority stay with the host task.
 
+pub mod change;
 pub mod config;
 pub mod engine;
 pub mod error;

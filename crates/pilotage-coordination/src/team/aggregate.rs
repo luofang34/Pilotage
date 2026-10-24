@@ -4,6 +4,8 @@
 use std::collections::BTreeMap;
 
 use pilotage_protocol::wire;
+use wire::MissionTaskExecution as Execution;
+use wire::MissionTaskJudgment as Judgment;
 
 use super::refly::{Refly, ReflyState};
 use super::{Phase, TeamLane};
@@ -52,6 +54,8 @@ impl TaskBook {
                         member: member.clone(),
                         reflown: 0,
                         path: task.path.clone(),
+                        execution: Execution::Pending as i32,
+                        judgment: Judgment::Undetermined as i32,
                     },
                 );
             }
@@ -92,6 +96,8 @@ impl TaskBook {
                 continue;
             }
             entry.state = task.state;
+            entry.execution = task.execution;
+            entry.judgment = task.judgment;
             entry.evidence.clone_from(&task.evidence);
             entry.progress = task.progress;
             // A member team reports the lines it flew again itself.
@@ -128,7 +134,7 @@ impl TaskBook {
         self.tasks
             .values()
             .filter(|t| t.member == member && t.kind == wire::MissionTaskKind::SurveyLine as i32)
-            .filter(|t| t.state == wire::MissionTaskState::Pending as i32)
+            .filter(|t| t.execution == Execution::Pending as i32)
             .filter_map(|t| Some((t.task_id.clone(), self.paths.get(&t.task_id)?.clone())))
             .collect()
     }
@@ -139,8 +145,7 @@ impl TaskBook {
             .values()
             .filter(|t| t.member == member && t.kind == wire::MissionTaskKind::SurveyLine as i32)
             .filter(|t| {
-                t.state == wire::MissionTaskState::Pending as i32
-                    || t.state == wire::MissionTaskState::Active as i32
+                t.execution == Execution::Pending as i32 || t.execution == Execution::Active as i32
             })
             .filter_map(|t| Some((t.task_id.clone(), self.paths.get(&t.task_id)?.clone())))
             .collect()
@@ -151,6 +156,8 @@ impl TaskBook {
         for (id, task) in &mut self.tasks {
             if task.member == member && self.paths.get(id).is_some_and(|p| paths.contains(p)) {
                 task.state = wire::MissionTaskState::Skipped as i32;
+                task.execution = Execution::Skipped as i32;
+                task.judgment = Judgment::Undetermined as i32;
             }
         }
     }
@@ -164,11 +171,13 @@ impl TaskBook {
             .collect()
     }
 
-    /// The member's lines flown without evidence, with their paths.
+    /// The member's lines whose execution ended without meeting their
+    /// evidence, with their paths.
     pub(super) fn incomplete_lines(&self, member: &str) -> Vec<(String, Vec<wire::GeoPoint>)> {
         self.tasks
             .values()
-            .filter(|t| t.member == member && t.state == wire::MissionTaskState::Incomplete as i32)
+            .filter(|t| t.member == member && t.kind == wire::MissionTaskKind::SurveyLine as i32)
+            .filter(|t| ended(t) && t.judgment == Judgment::NotMet as i32)
             .filter_map(|t| {
                 let line = t.task_id.strip_prefix(&format!("{member}/"))?.to_owned();
                 Some((line, self.paths.get(&t.task_id)?.clone()))
@@ -176,17 +185,14 @@ impl TaskBook {
             .collect()
     }
 
-    /// Whether the verdict on the member's `line` has settled: the line
-    /// was flown and every picture sent for its judgment has an answer.
+    /// Whether the verdict on the member's `line` has settled: the line's
+    /// execution ended and its evidence can no longer change.
     pub(super) fn settled(&self, member: &str, line: &str) -> bool {
         self.tasks.get(&key(member, line)).is_some_and(|t| {
-            matches!(
-                wire::MissionTaskState::try_from(t.state),
-                Ok(wire::MissionTaskState::Done | wire::MissionTaskState::Incomplete)
-            ) && t
-                .evidence
-                .as_ref()
-                .is_none_or(|e| e.state != wire::MissionEvidenceState::Pending as i32)
+            ended(t)
+                && t.evidence
+                    .as_ref()
+                    .is_some_and(|e| e.collection != wire::MissionEvidenceCollection::Open as i32)
         })
     }
 
@@ -200,6 +206,8 @@ impl TaskBook {
         if let Some(entry) = self.tasks.get_mut(&key(member, line)) {
             entry.reflown = entry.reflown.wrapping_add(1);
             entry.state = flown.state;
+            entry.execution = flown.execution;
+            entry.judgment = flown.judgment;
             entry.evidence.clone_from(&flown.evidence);
         }
     }
@@ -210,15 +218,18 @@ impl TaskBook {
             .values()
             .filter(|t| t.kind == wire::MissionTaskKind::SurveyLine as i32)
             .collect();
-        let count = |state: wire::MissionTaskState| {
-            lines.iter().filter(|t| t.state == state as i32).count()
+        let count = |judgment: Judgment| {
+            lines
+                .iter()
+                .filter(|t| t.judgment == judgment as i32)
+                .count()
         };
         let reflown: u32 = lines.iter().map(|t| t.reflown).sum();
         format!(
             "{} of {} lines with evidence, {} without, {} flown again",
-            count(wire::MissionTaskState::Done),
+            count(Judgment::Met),
             lines.len(),
-            count(wire::MissionTaskState::Incomplete),
+            count(Judgment::NotMet),
             reflown
         )
     }
@@ -226,6 +237,17 @@ impl TaskBook {
     fn statuses(&self) -> Vec<wire::MissionTaskStatus> {
         self.tasks.values().cloned().collect()
     }
+}
+
+/// Whether the task's execution ended, whichever way.
+fn ended(task: &wire::MissionTaskStatus) -> bool {
+    [
+        Execution::Completed,
+        Execution::Cancelled,
+        Execution::Failed,
+    ]
+    .iter()
+    .any(|e| task.execution == *e as i32)
 }
 
 /// Whether every member that may still fly reports that it holds: a
@@ -317,7 +339,7 @@ pub(super) fn team_status(team: &TeamLane) -> wire::MissionStatus {
         .book
         .statuses()
         .iter()
-        .filter(|t| t.state == wire::MissionTaskState::Active as i32)
+        .filter(|t| t.execution == Execution::Active as i32)
         .map(|t| t.name.clone())
         .collect::<Vec<_>>()
         .join(", ");

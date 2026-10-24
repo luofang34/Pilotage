@@ -134,7 +134,7 @@ fn inside_the_envelope_a_revision_applies_without_a_new_approval() {
         Some(wire::MissionSuccessorState::Drafted as i32)
     );
     assert!(
-        status.detail.contains("does not permit revisions"),
+        status.detail.contains("lacks permit_revise"),
         "{}",
         status.detail
     );

@@ -54,6 +54,7 @@ fn vehicle_lane(name: &str) -> Lane {
         cruise_power_w: None,
         recovery_policy: "hold".to_owned(),
         judged: true,
+        evidence_window_ms: 60_000,
     })
 }
 
@@ -414,6 +415,7 @@ fn an_idle_team_of_simulated_members_reports_simulated() {
     assert!(status.simulated, "every member is simulated");
 }
 
+mod authorize;
 mod handover;
 mod hold;
 mod parent;
