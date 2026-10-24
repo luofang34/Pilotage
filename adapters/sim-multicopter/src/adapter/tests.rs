@@ -354,3 +354,26 @@ fn a_grounded_vehicle_takes_a_neutral_frame_and_refuses_motion() {
         motion.disposition
     );
 }
+
+#[test]
+fn a_battery_is_swapped_when_the_vehicle_disarms_at_its_launch_point_only() {
+    let mut home = adapter();
+    assert!(act(&mut home, ControlAction::Takeoff));
+    fly(&mut home, None, 20);
+    assert!(home.battery_remaining() < 1.0, "flying drew on the battery");
+    assert!(act(&mut home, ControlAction::Land));
+    home.step(StepBudget { ticks: 2_000 });
+    assert_eq!(home.phase(), FlightPhase::Disarmed);
+    assert_eq!(home.battery_remaining(), 1.0, "swapped at the launch point");
+
+    let mut away = adapter();
+    assert!(act(&mut away, ControlAction::Takeoff));
+    fly(&mut away, velocity(10.0, 0.0, 0.0), 10);
+    assert!(act(&mut away, ControlAction::Land));
+    away.step(StepBudget { ticks: 2_000 });
+    assert_eq!(away.phase(), FlightPhase::Disarmed);
+    assert!(
+        away.battery_remaining() < 1.0,
+        "landed away, nothing to swap"
+    );
+}

@@ -34,6 +34,8 @@ pub const GIMBAL_SCOPE: &str = "vehicle.gimbal";
 /// its adapter every 10 ms.
 pub const TICK_NS: u64 = 10_000_000;
 /// Simulation time of one step tick, seconds.
+/// How close to its launch point a disarmed vehicle has its battery swapped, metres.
+const BATTERY_SWAP_RADIUS_M: f64 = 25.0;
 const TICK_S: f64 = 0.01;
 /// A stick command older than this stops: the vehicle hovers, as a DJI
 /// virtual stick does when its commands stop.
@@ -170,6 +172,16 @@ impl SimMulticopterAdapter {
         }
     }
 
+    /// A crew swaps the battery of a vehicle that disarms at its launch point, so the next
+    /// run starts full; one that lands elsewhere keeps what it has left.
+    fn swap_battery_at_launch(&mut self) {
+        let [north, east, _] = self.body.pos_ned_m;
+        if self.phase == FlightPhase::Disarmed && north.hypot(east) <= BATTERY_SWAP_RADIUS_M {
+            self.battery = Battery::full(self.config.battery);
+            tracing::info!("simulated battery swapped at the launch point");
+        }
+    }
+
     fn current_command(&self) -> BodyVelocity {
         if self.motion_policy.is_some() {
             return BodyVelocity::default();
@@ -198,6 +210,7 @@ impl SimMulticopterAdapter {
                 height_m = self.body.height_m(),
                 "simulated multicopter lifecycle"
             );
+            self.swap_battery_at_launch();
         }
         let gimbal_stale = self
             .gimbal_rate_at
