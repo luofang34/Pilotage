@@ -223,6 +223,10 @@ message MissionApproval {
   // refuses an approval that names no format, so a client that does not
   // know records gets a clear refusal.
   MissionProposalFormat proposal_format = 7;
+  // The team lane that passed this approval down to a member, inside its
+  // own approval; empty for an approval a person or a client gave. The
+  // team owes the approvals of this lane that follow from it.
+  string delegated_by = 8;
 }
 
 message MissionStart {
@@ -570,6 +574,35 @@ message MissionStatus {
   repeated WorkReleased released = 22;
   // A team's work moving between its members.
   repeated MissionHandover handovers = 23;
+  // The approvals the lane needs now. A client raises one for a person
+  // only when no other lane owes it.
+  repeated MissionApprovalNeed approvals_needed = 24;
+}
+
+// What an approval is for.
+enum MissionApprovalTarget {
+  MISSION_APPROVAL_TARGET_UNSPECIFIED = 0;
+  // The plan, before its start.
+  MISSION_APPROVAL_TARGET_PLAN = 1;
+  // A drafted successor of the plan in progress.
+  MISSION_APPROVAL_TARGET_SUCCESSOR = 2;
+  // The plan in progress, whose approval expired.
+  MISSION_APPROVAL_TARGET_RENEWAL = 3;
+}
+
+// One approval a lane needs.
+message MissionApprovalNeed {
+  MissionApprovalTarget target = 1;
+  // The digest the approval binds.
+  bytes digest = 2;
+  // The run the approval names; empty for a plan.
+  string run_id = 3;
+  // The team lane that owes the approval: the team that passed down the
+  // approval in force, for its own share of a revision or the renewal of
+  // what it granted. Empty when any approver may give it.
+  string owed_by_lane = 4;
+  // Why the approval is needed, for display.
+  string reason = 5;
 }
 
 // One reason a run holds. A renewal of the approval removes only

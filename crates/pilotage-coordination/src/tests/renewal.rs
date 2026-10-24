@@ -136,3 +136,40 @@ fn a_team_renewal_for_another_run_is_refused() {
     );
     assert!(reply.intents.is_empty());
 }
+
+#[test]
+fn after_an_expiry_the_team_owes_its_members_renewals_and_a_person_owes_the_teams() {
+    let (mut fleet, _) = running_fleet(false);
+    fleet
+        .members
+        .get_mut("SIM-2")
+        .expect("SIM-2")
+        .on_clock(EXPIRY);
+    holds(&mut fleet, "SIM-2");
+    let member = fleet.members.get("SIM-2").map(Lane::status).expect("SIM-2");
+    let owed: Vec<&str> = member
+        .approvals_needed
+        .iter()
+        .map(|n| n.owed_by_lane.as_str())
+        .collect();
+    assert_eq!(owed, ["TEAM"], "the team granted it, so the team renews it");
+    for member in ["SIM-1", "SIM-3"] {
+        fleet
+            .members
+            .get_mut(member)
+            .expect("member")
+            .on_clock(EXPIRY);
+        holds(&mut fleet, member);
+    }
+    let team = fleet.team.status();
+    let needs: Vec<(i32, &str)> = team
+        .approvals_needed
+        .iter()
+        .map(|n| (n.target, n.owed_by_lane.as_str()))
+        .collect();
+    assert_eq!(
+        needs,
+        [(wire::MissionApprovalTarget::Renewal as i32, "")],
+        "a person renews the team's approval"
+    );
+}
