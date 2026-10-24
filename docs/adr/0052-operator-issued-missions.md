@@ -60,10 +60,28 @@ the digest of its predecessor, validity, and releasability.
   the recovery for its expiry: hold in place, or end after the line in
   progress and return to the launch point. When the approval expires
   during a run, the lane applies that recovery one time. Then the run does
-  not resume, and an admitted revision does not apply, until a new
-  approval of the plan replaces the expired approval.
-  revise, to allocate work, and to change the objective. A client approves
-  only a proposal that it holds in full. The lane's status names a
+  not resume, and an admitted revision does not apply, until a renewal of
+  the plan replaces the expired approval.
+  An approval names its target by its digest and its run. With no run, it
+  approves the plan before its start. With the run in progress, it renews
+  the plan of that run, and a lane refuses it for another run. This
+  prevents an approval of one run from renewing another run of the same
+  plan. An approval of a drafted successor names the run in progress or no
+  run. A vehicle lane and a team find the target with the same rule.
+  A held run reports each reason why it holds: the operator, or the
+  expiry of its approval. A renewal removes only the expiry reason, and an
+  operator's resume removes only the operator reason. The lane refuses a
+  resume while the expiry reason stays, and the run resumes when no reason
+  stays. A fault, a motion lease held elsewhere and an unknown member state
+  are not hold reasons, and a renewal does not clear them. A team checks
+  its envelope and its run, then sends each member that can still fly a
+  renewal of the plan and the run of that member. A member that finished
+  gets no renewal. A member whose link is lost, or that a person stated
+  down, gets none, and the receipt of the team names it. The team answers
+  after its members answered. A team reports `Held` only when each member
+  that can still fly reports that it holds, and it reports the reasons of
+  all those members.
+  A client approves only a proposal that it holds in full. The lane's status names a
   proposal only by its digest and a summary, so a client that did not
   make the proposal fetches it from the lane before it approves it.
 - **Plan.** The executable `MissionDocument`

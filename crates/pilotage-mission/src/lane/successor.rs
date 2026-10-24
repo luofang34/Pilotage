@@ -246,6 +246,8 @@ impl Lane {
         let mut run = super::run::RunTracker::new(run_id.clone(), &compiled, self.config.judged);
         run.predecessor = predecessor;
         self.run = Some(run);
+        // The successor's run starts flying, as a switch while held does.
+        self.holds.clear();
         self.state = State::Running;
         self.detail = format!(
             "flying revision {}: {}",

@@ -304,7 +304,14 @@ impl TeamLane {
                     .iter()
                     .flat_map(|t| t.path.clone())
                     .collect::<Vec<_>>();
-                let approval = delegate(&team, &proposal, &band, launch, &self.config.name);
+                let approval = delegate(
+                    &team,
+                    &proposal.proposal_id,
+                    &proposal.digest,
+                    &band,
+                    launch,
+                    &self.config.name,
+                );
                 vec![self.request(
                     &member,
                     Op::Approve,
@@ -332,7 +339,7 @@ impl TeamLane {
                 refly.state = ReflyState::Flying;
                 Vec::new()
             }
-            Op::Revise => Vec::new(),
+            Op::Revise | Op::Renew => Vec::new(),
         }
     }
 

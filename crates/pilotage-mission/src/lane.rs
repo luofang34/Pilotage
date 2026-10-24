@@ -11,10 +11,12 @@ mod compile;
 mod digest;
 mod evidence;
 mod expiry;
+mod hold;
 mod run;
 mod status;
 mod steering;
 mod successor;
+mod target;
 
 #[cfg(test)]
 mod tests;
@@ -28,6 +30,7 @@ pub use compile::SurveyDefaults;
 pub use digest::proposal_digest;
 pub use run::{FrameAssessment, RunExecution, RunProgress};
 pub use steering::{HOST_ISSUER, Requester, Steering};
+pub use target::{Approvable, ApprovalTarget, approval_target};
 
 use compile::Compiled;
 pub use evidence::{FrameTicket, VerdictRefused};
@@ -135,6 +138,8 @@ pub struct Lane {
     expired: bool,
     /// What the run does now, as the host last said.
     execution: Option<RunExecution>,
+    /// Why the run holds, when it does.
+    holds: Vec<wire::MissionHoldReason>,
 }
 
 impl Lane {
@@ -156,6 +161,7 @@ impl Lane {
             clock_unix_ms: 0,
             expired: false,
             execution: None,
+            holds: Vec::new(),
         }
     }
 
@@ -177,11 +183,7 @@ impl Lane {
             Some(Action::Propose(objective)) => self.propose(objective, context),
             Some(Action::Approve(approval)) => self.approve(approval, context),
             Some(Action::Start(start)) => self.start(start, context),
-            Some(Action::Hold(_)) => self.transition(
-                &[wire::MissionLaneState::Running],
-                wire::MissionLaneState::HoldRequested,
-                LaneEffect::Hold,
-            ),
+            Some(Action::Hold(_)) => self.hold(),
             Some(Action::Resume(_)) => self.resume(context),
             Some(Action::Abort(_)) => self.abort(),
             Some(Action::Revise(revise)) => self.revise(revise, context),
@@ -232,6 +234,7 @@ impl Lane {
         self.run = None;
         self.successor = None;
         self.revisions = 0;
+        self.holds.clear();
         self.history.clear();
         self.state = wire::MissionLaneState::Proposed;
         self.detail = "proposed; waiting for an approval".to_owned();
@@ -244,11 +247,28 @@ impl Lane {
         context: &IntentContext,
     ) -> Result<(Option<LaneEffect>, Option<wire::MissionProposal>), String> {
         if self.is_flying() {
-            let current = self.proposal.as_ref().map(|c| &c.proposal.digest);
-            if current == Some(&approval.proposal_digest) {
-                return self.renew(approval, context);
-            }
-            return self.approve_successor(approval, context);
+            let plan = self
+                .proposal
+                .as_ref()
+                .map(|c| c.proposal.digest.clone())
+                .unwrap_or_default();
+            let run = self.run.as_ref().map(RunTracker::run_id);
+            let drafted = self
+                .successor
+                .as_ref()
+                .filter(|s| s.stage == wire::MissionSuccessorState::Drafted)
+                .map(|s| s.compiled.proposal.digest.clone());
+            let held = Approvable {
+                plan: &plan,
+                run: run.as_deref(),
+                drafted: drafted.as_deref(),
+            };
+            return match approval_target(approval, held)? {
+                ApprovalTarget::Renewal => self.renew(approval, context),
+                ApprovalTarget::Successor | ApprovalTarget::Plan => {
+                    self.approve_successor(approval, context)
+                }
+            };
         }
         if self.state != wire::MissionLaneState::Proposed {
             return Err(format!(
@@ -257,6 +277,12 @@ impl Lane {
             ));
         }
         let compiled = self.proposal.as_ref().ok_or("no proposal to approve")?;
+        let held = Approvable {
+            plan: &compiled.proposal.digest,
+            run: None,
+            drafted: None,
+        };
+        approval_target(approval, held)?;
         approval::admit(approval, compiled, &self.config, context.now_unix_ms)?;
         self.approval = Some(approval.clone());
         self.state = wire::MissionLaneState::Admitted;
@@ -322,25 +348,12 @@ impl Lane {
         }
         self.state = wire::MissionLaneState::Aborted;
         self.successor = None;
+        self.holds.clear();
         self.detail = "aborted by intent; the vehicle stops in place".to_owned();
         if let Some(run) = self.run.as_mut() {
             run.close_aborted();
         }
         Ok((Some(LaneEffect::Abort), None))
-    }
-
-    fn transition(
-        &mut self,
-        from: &[wire::MissionLaneState],
-        to: wire::MissionLaneState,
-        effect: LaneEffect,
-    ) -> Result<(Option<LaneEffect>, Option<wire::MissionProposal>), String> {
-        if !from.contains(&self.state) {
-            return Err(format!("not possible while the lane is {:?}", self.state));
-        }
-        self.state = to;
-        self.detail = format!("{to:?}").to_lowercase();
-        Ok((Some(effect), None))
     }
 
     /// The identities of the tasks of the plan the lane holds, in plan order: each

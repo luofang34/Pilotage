@@ -172,13 +172,21 @@ enum MissionExpiryPolicy {
   MISSION_EXPIRY_POLICY_RETURN_HOME = 2;
 }
 
-// A permission bound to one proposal digest.
+// A permission bound to one proposal digest. The lane finds what the
+// approval is for from the digest and the run: the plan before its start,
+// a drafted successor, or a renewal of the plan in progress.
 message MissionApproval {
   string approval_id = 1;
   bytes proposal_digest = 2;
   RecordOrigin approver = 3;
   AdaptationEnvelope envelope = 4;
   uint64 approved_unix_ms = 5;
+  // The run the approval is for. Empty for a plan before its start. A
+  // renewal of the plan in progress names its run, and a lane refuses it
+  // for any other run, so an approval of one run never renews another run
+  // of the same plan. An approval of a drafted successor names the run in
+  // progress or nothing.
+  string run_id = 6;
 }
 
 message MissionStart {
@@ -393,6 +401,21 @@ message MissionStatus {
   // The run this run continues, when a revision replaced it; empty for a
   // run of a first plan.
   string predecessor_run_id = 20;
+  // Why the run holds or is asked to hold; empty when it does not. A team
+  // lists every reason of its members that may still fly.
+  repeated MissionHoldReason holds = 21;
+}
+
+// One reason a run holds. A renewal of the approval removes only
+// APPROVAL_EXPIRED, and an operator's resume removes only OPERATOR; the run
+// resumes when no reason stays. A fault, a motion lease held elsewhere or an
+// unknown member state is no hold reason, and neither removes it.
+enum MissionHoldReason {
+  MISSION_HOLD_REASON_UNSPECIFIED = 0;
+  // An operator asked the run to hold.
+  MISSION_HOLD_REASON_OPERATOR = 1;
+  // The approval expired, and its recovery holds the run.
+  MISSION_HOLD_REASON_APPROVAL_EXPIRED = 2;
 }
 
 // How a team sees one member.

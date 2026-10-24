@@ -314,7 +314,14 @@ impl TeamLane {
         };
         let band: Vec<wire::GeoPoint> = draft.tasks.iter().flat_map(|t| t.path.clone()).collect();
         let launch = self.member(member).map(|m| m.launch);
-        let approval = delegate(&team, &draft, &band, launch, &self.config.name);
+        let approval = delegate(
+            &team,
+            &draft.proposal_id,
+            &draft.digest,
+            &band,
+            launch,
+            &self.config.name,
+        );
         vec![self.request_revision(
             member,
             Op::Approve,

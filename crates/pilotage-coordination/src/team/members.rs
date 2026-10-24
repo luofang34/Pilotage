@@ -19,6 +19,12 @@ impl TeamLane {
         };
         self.changed = true;
         let accepted = receipt.outcome == wire::MissionReceiptOutcome::Accepted as i32;
+        if pending.op == Op::Renew {
+            return TeamReply {
+                receipt: self.on_renew_receipt(member, accepted, receipt),
+                intents: Vec::new(),
+            };
+        }
         if pending.revision {
             return TeamReply {
                 receipt: None,
@@ -41,7 +47,7 @@ impl TeamLane {
                     self.member_proposals.insert(member.to_owned(), proposal);
                 }
             }
-            Op::Approve | Op::Start | Op::Revise => {}
+            Op::Approve | Op::Start | Op::Revise | Op::Renew => {}
         }
         if self
             .pending
@@ -68,7 +74,7 @@ impl TeamLane {
                 "approved by every member; waiting for start".to_owned(),
                 None,
             ),
-            Op::Start | Op::Revise => (Phase::Running, "running".to_owned(), None),
+            Op::Start | Op::Revise | Op::Renew => (Phase::Running, "running".to_owned(), None),
         };
         self.phase = phase;
         self.detail = detail;
@@ -84,7 +90,7 @@ impl TeamLane {
         let (phase, what) = match op {
             Op::Propose => (Phase::Idle, "proposal"),
             Op::Approve => (Phase::Proposed, "approval"),
-            Op::Start | Op::Revise => (Phase::Failed, "start"),
+            Op::Start | Op::Revise | Op::Renew => (Phase::Failed, "start"),
         };
         self.phase = phase;
         self.detail = format!("{member} refused the {what}: {reason}");

@@ -6,6 +6,7 @@ mod intents;
 mod members;
 mod moved;
 mod refly;
+mod renewal;
 mod revision;
 
 use std::collections::BTreeMap;
@@ -82,6 +83,8 @@ enum Op {
     Approve,
     Start,
     Revise,
+    /// A renewal of a member's approval of its plan in progress.
+    Renew,
 }
 
 /// A member intent awaiting its receipt.
@@ -118,6 +121,8 @@ pub struct TeamLane {
     run_id: Option<String>,
     reflies: Vec<Refly>,
     revision: Option<revision::Revision>,
+    /// A renewal waiting for its members' answers.
+    renewal: Option<renewal::Renewal>,
     /// Members whose link is lost, stated down or released; a member
     /// missing here reports. One stated down may give its lines to others,
     /// and the team no longer waits for it.
@@ -150,6 +155,7 @@ impl TeamLane {
             run_id: None,
             reflies: Vec::new(),
             revision: None,
+            renewal: None,
             lost: BTreeMap::new(),
             requests: 0,
             detail: "waiting for an objective".to_owned(),
