@@ -10,7 +10,7 @@
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-use super::{ChainLane, Drafted, InstructionError, Offers, states_an_amount};
+use super::{ChainLane, Drafted, InstructionError, Offers, amount};
 use crate::mission::{MissionCommand, Reassign};
 
 /// One action an instruction may become.
@@ -191,13 +191,11 @@ pub(super) fn build(
                     to,
                 });
             }
-            if !states_an_amount(words) {
-                return Err(InstructionError::NeedsAmount);
-            }
             let fraction = args.get("fraction").and_then(Value::as_f64).unwrap_or(0.0);
             if !(fraction > 0.0 && fraction <= 1.0) {
                 return Err(InstructionError::Fraction(fraction));
             }
+            amount::ground(words, &from, fraction)?;
             revise(Some(Reassign { from, to, fraction }), false)
         }
         "survey_area" => return Ok(Drafted::Survey { area: text("area") }),

@@ -15,10 +15,13 @@ use serde_json::{Map, Value, json};
 
 use super::{ApprovalPolicy, MissionCommand, MissionDesk};
 
+mod amount;
 pub mod catalog;
+mod dispatch;
 mod prompt;
 
 use catalog::Action;
+pub use dispatch::{Dispatch, Progress};
 
 /// One lane the client can send to, as the interpreter sees it.
 #[derive(Clone, Debug, PartialEq)]
@@ -178,8 +181,17 @@ pub enum InstructionError {
     },
     /// A move states no amount: the instruction's words must name how much
     /// moves, so the interpreter never supplies the number.
-    #[error("say how much moves: a number, a percentage, or a word such as half or all")]
+    #[error("say how much moves: a percentage, a fraction, or a word such as half or all")]
     NeedsAmount,
+    /// The words do not tie the move's fraction to the member that gives the lines,
+    /// so the person states it again.
+    #[error("say how much of {from}'s lines moves: the words do not state {fraction} for it")]
+    UnsureAmount {
+        /// The member that gives lines.
+        from: String,
+        /// The fraction the interpreter gave.
+        fraction: f64,
+    },
     /// A new survey names no area.
     #[error("say which area to survey: a place on the map or an area drawn on it")]
     NeedsArea,
@@ -313,25 +325,6 @@ impl Chain {
             drafted: catalog::build(action, lane, args, words)?,
         })
     }
-}
-
-/// Whether `instruction` states an amount: a digit, or a word for one.
-fn states_an_amount(instruction: &str) -> bool {
-    const WORDS: [&str; 8] = [
-        "all",
-        "every",
-        "half",
-        "third",
-        "quarter",
-        "rest",
-        "remaining",
-        "whole",
-    ];
-    let lower = instruction.to_lowercase();
-    lower.chars().any(|c| c.is_ascii_digit())
-        || lower
-            .split(|c: char| !c.is_alphanumeric())
-            .any(|word| WORDS.iter().any(|w| word.starts_with(w)))
 }
 
 #[cfg(test)]

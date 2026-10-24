@@ -21,7 +21,8 @@ pub use approval::{ApprovalPolicy, approval, approved_height_m};
 pub use command::{IntentKind, MissionCommand, Reassign};
 pub use desk::{DeskRefusal, FiledReceipt, MissionDesk, Offered};
 pub use instruction::{
-    Chain, ChainLane, Drafted, Instruction, InstructionError, Offers, Step, catalog,
+    Chain, ChainLane, Dispatch, Drafted, Instruction, InstructionError, Offers, Progress, Step,
+    catalog,
 };
 pub use survey_file::SurveyFile;
 pub use view::{

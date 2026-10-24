@@ -4,10 +4,12 @@
 
 use std::time::Duration;
 
-use pilotage_client_session::mission::{Chain, ChainLane};
+use pilotage_client_session::mission::{Chain, ChainLane, Dispatch, Progress};
 use serde_json::Value;
 
-use super::Session;
+use tokio::time::Instant;
+
+use super::{RECEIPT_TIMEOUT, Session, now_ms};
 use crate::cli::OperatorError;
 
 /// How long the interpreter may take to answer.
@@ -83,19 +85,41 @@ impl Session {
             self.output.refused("desk", "no draft to send");
             return Ok(());
         };
-        // The steps go to this session's lane in the order the words asked; the
-        // interpreter offered only this lane, so every step names it.
+        let mut commands = Vec::new();
         for step in &draft.steps {
             let Some(command) = step.command() else {
                 self.output
                     .refused("desk", "a step needs an area found on a map");
                 return Ok(());
             };
-            if let Some(request) = self.submit(command).await? {
-                self.output.sent(&request);
+            commands.push((step.lane.clone(), command.clone()));
+        }
+        // The interpreter offered only this session's lane, so every step names it; each
+        // step goes after the lane accepts the one before it.
+        let mut dispatch = Dispatch::new(commands);
+        let mut deadline = Instant::now() + RECEIPT_TIMEOUT;
+        loop {
+            match dispatch.poll(|_| Some(&self.desk), now_ms()) {
+                Progress::Send { command, .. } => {
+                    let Some(request) = self.submit(&command).await? else {
+                        return Ok(());
+                    };
+                    self.output.sent(&request);
+                    deadline = Instant::now() + RECEIPT_TIMEOUT;
+                }
+                Progress::Waiting => {
+                    self.step(deadline).await?;
+                }
+                Progress::Done => return Ok(()),
+                Progress::Stopped { lane, reason } => {
+                    self.output.refused(
+                        "desk",
+                        &format!("{lane}: {reason}; the steps after it were not sent"),
+                    );
+                    return Ok(());
+                }
             }
         }
-        Ok(())
     }
 }
 

@@ -286,15 +286,20 @@ does not apply at once. The library refuses these replies:
 - A step that names a lane that the client does not follow. The library
   does not send the step to the lead above that lane.
 - A move that names a member that the lane does not lead.
-- A move whose amount is not in the words of the person.
+- A move whose amount is not in the words of the person. When the words
+  state more than one amount, each amount applies only to the member that
+  it is nearest to. If the words do not tie one amount to the member, the
+  person must state it again.
 - A step that the lane does not offer in its current state.
 
 An area reference is the name of a place or of an area that a person drew.
 The client finds the area on its map before the step becomes a command.
 The interpreter does not give coordinates. The client shows each step in
 fixed words that the library makes from the step, and it sends the steps
-only when a person or an agent confirms them. A drafted change then waits
-for an approval, as other drafts do.
+only when a person or an agent confirms them. The client sends one step
+at a time. It sends a step only after the lane accepts the step before
+it. If a lane refuses a step, the client does not send the steps after
+it. A drafted change then waits for an approval, as other drafts do.
 
 ### Capability, authority, resources and conditions are separate axes
 

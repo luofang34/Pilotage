@@ -1,8 +1,10 @@
+use pilotage_protocol::wire;
 use serde_json::{Value, json};
+use wire::mission_intent::Action;
 
 use super::catalog::{Effect, ParamKind, Precondition};
-use super::{Chain, ChainLane, Drafted, InstructionError, Offers};
-use crate::mission::{MissionCommand, Reassign};
+use super::{Chain, ChainLane, Dispatch, Drafted, InstructionError, Offers, Progress};
+use crate::mission::{MissionCommand, MissionDesk, Reassign};
 
 const RUNNING: Offers = Offers {
     hold: true,
@@ -233,18 +235,218 @@ fn a_step_the_chain_cannot_take_refuses_the_whole_instruction() {
 #[test]
 fn a_move_whose_words_state_no_amount_asks_for_one() {
     let r = response(&[moved("COMMAND", "CAMPUS", "BATTLEFIELD", 0.25)]);
-    assert_eq!(
-        chain()
-            .parse("let battlefield help campus", &r)
-            .unwrap_err(),
-        InstructionError::NeedsAmount
-    );
+    // A lane's number is not an amount, and neither is a count of lines.
     for words in [
-        "move 25% of campus",
-        "a quarter of campus",
-        "give all of it",
-        "the remaining lines",
+        "let battlefield help campus",
+        "move 3 of SIM-B2's lines to SIM-B1",
     ] {
-        assert!(chain().parse(words, &r).is_ok(), "{words}");
+        assert_eq!(
+            chain().parse(words, &r).unwrap_err(),
+            InstructionError::NeedsAmount,
+            "{words}"
+        );
     }
+}
+
+#[test]
+fn each_word_form_states_its_own_amount_and_no_other() {
+    let parse = |words: &str, fraction: f64| {
+        chain().parse(
+            words,
+            &response(&[moved("COMMAND", "CAMPUS", "BATTLEFIELD", fraction)]),
+        )
+    };
+    for (words, fraction) in [
+        ("move all of campus to battlefield", 1.0),
+        ("give battlefield the remaining lines of campus", 1.0),
+        ("move half of campus", 0.5),
+        ("a third of campus", 0.333),
+        ("two thirds of campus", 0.667),
+        ("a quarter of campus", 0.25),
+        ("three quarters of campus", 0.75),
+        ("move 25% of campus", 0.25),
+        ("move 40 percent of campus", 0.4),
+        ("move 0.3 of campus.", 0.3),
+        ("move 1/5 of campus", 0.2),
+    ] {
+        assert!(parse(words, fraction).is_ok(), "{words}");
+        assert_eq!(
+            parse(words, if fraction > 0.5 { 0.1 } else { 0.9 }).unwrap_err(),
+            InstructionError::UnsureAmount {
+                from: "CAMPUS".to_owned(),
+                fraction: if fraction > 0.5 { 0.1 } else { 0.9 },
+            },
+            "{words}"
+        );
+    }
+}
+
+#[test]
+fn two_amounts_each_stand_only_for_the_member_they_name() {
+    let c = chain();
+    let words = "move half of SIM-B1 and a quarter of SIM-B2 to the other";
+    let moves = |b1: f64, b2: f64| {
+        response(&[
+            moved("BATTLEFIELD", "SIM-B1", "SIM-B2", b1),
+            moved("BATTLEFIELD", "SIM-B2", "SIM-B1", b2),
+        ])
+    };
+    assert!(c.parse(words, &moves(0.5, 0.25)).is_ok());
+    assert_eq!(
+        c.parse(words, &moves(0.25, 0.5)).unwrap_err(),
+        InstructionError::UnsureAmount {
+            from: "SIM-B1".to_owned(),
+            fraction: 0.25,
+        },
+        "a swapped pair"
+    );
+    // Words that tie neither amount to a member ask again.
+    assert!(matches!(
+        c.parse("move half and a quarter of them", &moves(0.5, 0.25)),
+        Err(InstructionError::UnsureAmount { .. })
+    ));
+}
+
+/// A dispatch of a hold and then a resume for COMMAND, its desk, and an admitted engine.
+fn dispatched() -> (Dispatch, MissionDesk, crate::ClientEngine) {
+    let mut engine = crate::tests::engine();
+    crate::tests::admit(&mut engine, 1, 1);
+    let dispatch = Dispatch::new(vec![
+        ("COMMAND".to_owned(), MissionCommand::Hold {}),
+        ("COMMAND".to_owned(), MissionCommand::Resume {}),
+    ]);
+    (dispatch, MissionDesk::new("test", 7), engine)
+}
+
+fn answered(desk: &mut MissionDesk, request_id: String, outcome: wire::MissionReceiptOutcome) {
+    desk.on_receipt(wire::MissionReceipt {
+        request_id,
+        outcome: outcome as i32,
+        reason: "the lane is not running".to_owned(),
+        ..wire::MissionReceipt::default()
+    })
+    .unwrap();
+}
+
+#[test]
+fn a_step_is_sent_only_after_the_step_before_it_is_accepted() {
+    let (mut dispatch, mut desk, engine) = dispatched();
+    assert_eq!(
+        dispatch.poll(|_| Some(&desk), 0),
+        Progress::Send {
+            lane: "COMMAND".to_owned(),
+            command: MissionCommand::Hold {}
+        }
+    );
+    assert_eq!(dispatch.poll(|_| Some(&desk), 10), Progress::Waiting);
+    let (hold, _) = desk
+        .send(&engine, Action::Hold(wire::MissionHold {}))
+        .unwrap();
+    assert_eq!(dispatch.poll(|_| Some(&desk), 20), Progress::Waiting);
+    answered(&mut desk, hold, wire::MissionReceiptOutcome::Accepted);
+    assert_eq!(
+        dispatch.poll(|_| Some(&desk), 30),
+        Progress::Send {
+            lane: "COMMAND".to_owned(),
+            command: MissionCommand::Resume {}
+        }
+    );
+    let (resume, _) = desk
+        .send(&engine, Action::Resume(wire::MissionResume {}))
+        .unwrap();
+    answered(&mut desk, resume, wire::MissionReceiptOutcome::Accepted);
+    assert_eq!(dispatch.poll(|_| Some(&desk), 40), Progress::Done);
+}
+
+#[test]
+fn a_refused_step_stops_the_steps_after_it() {
+    let (mut dispatch, mut desk, engine) = dispatched();
+    assert!(matches!(
+        dispatch.poll(|_| Some(&desk), 0),
+        Progress::Send { .. }
+    ));
+    let (hold, _) = desk
+        .send(&engine, Action::Hold(wire::MissionHold {}))
+        .unwrap();
+    answered(&mut desk, hold, wire::MissionReceiptOutcome::Refused);
+    assert_eq!(
+        dispatch.poll(|_| Some(&desk), 10),
+        Progress::Stopped {
+            lane: "COMMAND".to_owned(),
+            reason: "refused: the lane is not running".to_owned()
+        }
+    );
+    assert_eq!(dispatch.remaining(), 0, "the resume is never sent");
+    assert_eq!(dispatch.poll(|_| Some(&desk), 20), Progress::Done);
+}
+
+#[test]
+fn a_step_the_desk_does_not_send_or_the_lane_does_not_answer_stops_the_rest() {
+    let (mut dispatch, desk, _) = dispatched();
+    assert!(matches!(
+        dispatch.poll(|_| Some(&desk), 0),
+        Progress::Send { .. }
+    ));
+    assert_eq!(dispatch.poll(|_| Some(&desk), 5_000), Progress::Waiting);
+    assert!(matches!(
+        dispatch.poll(|_| Some(&desk), 5_001),
+        Progress::Stopped { .. }
+    ));
+    let (mut dispatch, mut desk, engine) = dispatched();
+    assert!(matches!(
+        dispatch.poll(|_| Some(&desk), 0),
+        Progress::Send { .. }
+    ));
+    desk.send(&engine, Action::Hold(wire::MissionHold {}))
+        .unwrap();
+    assert_eq!(dispatch.poll(|_| Some(&desk), 60_000), Progress::Waiting);
+    assert!(matches!(
+        dispatch.poll(|_| Some(&desk), 60_001),
+        Progress::Stopped { .. }
+    ));
+    assert!(matches!(
+        Dispatch::new(vec![("GONE".to_owned(), MissionCommand::Hold {})]).poll(|_| None, 0),
+        Progress::Stopped { .. }
+    ));
+}
+
+#[test]
+fn another_command_on_the_same_desk_answers_nothing_for_a_step() {
+    let (mut dispatch, mut desk, engine) = dispatched();
+    assert!(matches!(
+        dispatch.poll(|_| Some(&desk), 0),
+        Progress::Send { .. }
+    ));
+    let (hold, _) = desk
+        .send(&engine, Action::Hold(wire::MissionHold {}))
+        .unwrap();
+    // The person presses Abort in the panel while the hold waits for its answer.
+    let (abort, _) = desk
+        .send(&engine, Action::Abort(wire::MissionAbort {}))
+        .unwrap();
+    answered(&mut desk, abort, wire::MissionReceiptOutcome::Accepted);
+    assert_eq!(dispatch.poll(|_| Some(&desk), 10), Progress::Waiting);
+    answered(&mut desk, hold, wire::MissionReceiptOutcome::Refused);
+    assert!(matches!(
+        dispatch.poll(|_| Some(&desk), 20),
+        Progress::Stopped { .. }
+    ));
+    // A command that takes the step's request id, because the desk refused the step,
+    // does not stand for the step either.
+    let (mut dispatch, mut desk, engine) = dispatched();
+    assert!(matches!(
+        dispatch.poll(|_| Some(&desk), 0),
+        Progress::Send { .. }
+    ));
+    let (abort, _) = desk
+        .send(&engine, Action::Abort(wire::MissionAbort {}))
+        .unwrap();
+    answered(&mut desk, abort, wire::MissionReceiptOutcome::Accepted);
+    assert_eq!(
+        dispatch.poll(|_| Some(&desk), 10),
+        Progress::Stopped {
+            lane: "COMMAND".to_owned(),
+            reason: "the desk did not send the step; another command went first".to_owned()
+        }
+    );
 }
