@@ -221,5 +221,6 @@ fn vehicle(name: &str, airframe: Airframe) -> Lane {
         usable_energy_wh: Some(airframe.energy_wh),
         cruise_power_w: Some(airframe.cruise_power_w),
         recovery_policy: "hold".to_owned(),
+        judged: false,
     })
 }

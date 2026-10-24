@@ -90,7 +90,13 @@ line with its acquisition is one task. A route leg is not a task: Navigate
 keeps the sequencing of legs inside the task, and flight and camera
 acquisition run together under it. A task is complete only when its
 completion evidence exists; for a survey line, the acquired pictures with
-their placements. A display may show progress inside a task from the
+their placements. Each picture that a lane sends for judgment carries its
+run, its task, the attempt and the picture number. The lane refuses a
+verdict for another run, for a picture that it did not send, or a second
+verdict for one picture. The evidence of a task is `Pending` until each
+sent picture has an answer, then `Met` or `Missing`; it is `NotJudged`
+when no judgment service judged it. On a lane with a judgment service, a
+survey line is complete only with `Met`. A display may show progress inside a task from the
 remaining waypoints, and that view is not a second execution truth. The
 first delivery uses a sequence of tasks per vehicle. A team task graph and
 concurrent tasks within a bound come later; a linear list is not promised

@@ -283,6 +283,22 @@ message MissionTaskEvidence {
   // Assessed pictures that showed a possible hazard.
   uint32 hazards = 4;
   string note = 5;
+  // Whether the task's completion evidence is settled.
+  MissionEvidenceState state = 6;
+}
+
+// Where a task's completion evidence stands. A task that needs a judgment
+// is done only with MET.
+enum MissionEvidenceState {
+  MISSION_EVIDENCE_STATE_UNSPECIFIED = 0;
+  // Pictures sent for a judgment have no answer yet.
+  MISSION_EVIDENCE_STATE_PENDING = 1;
+  // Enough pictures were judged usable.
+  MISSION_EVIDENCE_STATE_MET = 2;
+  // Every judgment is in, and too few pictures were judged usable.
+  MISSION_EVIDENCE_STATE_MISSING = 3;
+  // No judgment service judged the task's pictures.
+  MISSION_EVIDENCE_STATE_NOT_JUDGED = 4;
 }
 
 message MissionTaskStatus {
