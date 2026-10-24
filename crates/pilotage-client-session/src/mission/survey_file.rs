@@ -41,6 +41,10 @@ pub struct SurveyFile {
     /// Bearing of the lines, degrees true; absent lets the lane choose.
     #[serde(default)]
     pub line_bearing_deg: Option<f64>,
+    /// The operator requires `height_m`: a revision that changes it changes
+    /// the objective.
+    #[serde(default)]
+    pub hold_height: bool,
 }
 
 impl SurveyFile {
@@ -84,6 +88,7 @@ impl SurveyFile {
                     return_to_launch: true,
                     min_usable_frames_per_line: self.min_usable_frames_per_line,
                     line_bearing_deg: self.line_bearing_deg,
+                    hold_height: self.hold_height,
                 },
             )),
         }
