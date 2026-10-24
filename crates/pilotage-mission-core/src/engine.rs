@@ -10,8 +10,8 @@ mod run;
 mod runtime;
 
 pub use directive::{
-    ActionId, DirectiveContext, DirectivePurpose, DirectiveReceipt, FlightDirective,
-    MissionDirective, ReceiptResult, TrialDirective,
+    ActionId, BoundDirective, DirectiveContext, DirectivePurpose, DirectiveReceipt,
+    FlightDirective, MissionDirective, ReceiptResult, TrialDirective,
 };
 pub use error::{EngineInputError, EngineStartError};
 pub use observation::{
@@ -57,6 +57,7 @@ impl MissionEngine {
             .verify_content_digest()
             .map_err(|source| EngineStartError::DocumentIdentity { source })?;
         validate_wall_deadline(&document, start)?;
+        let first = document.next_ready(&[]).unwrap_or(0);
         Ok(Self {
             document,
             wall_deadline: start.wall_deadline,
@@ -66,7 +67,7 @@ impl MissionEngine {
             last_action_id: 0,
             entered_phases: Vec::new(),
             run_state: RunState::Running(runtime::RunningState {
-                phase_index: 0,
+                phase_index: first,
                 phase_started: runtime::Clocks {
                     mission_ns: start.mission_time_ns,
                     simulator_ns: start.simulator_time_ns,

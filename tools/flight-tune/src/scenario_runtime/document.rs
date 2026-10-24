@@ -132,6 +132,7 @@ fn project_phase(phase: &pilotage_trial::Phase) -> Result<MissionPhase, Scenario
             .iter()
             .map(project_condition)
             .collect::<Result<Vec<_>, _>>()?,
+        depends_on: Vec::new(),
         deadline: Some(pilotage_mission_core::PhaseDeadline {
             clock: pilotage_mission_core::PhaseClock::Simulator,
             duration_ns: phase.max_sim_time_ns,

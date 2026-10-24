@@ -57,6 +57,12 @@ pub enum NavigationCondition {
         /// The required completion state.
         expected: bool,
     },
+    /// The active flight plan captured its waypoint `index`, zero-based, and every one
+    /// before it.
+    WaypointCaptured {
+        /// The waypoint index.
+        index: u32,
+    },
     /// The observed altitude satisfies a comparison.
     Altitude {
         /// The comparison operation.

@@ -211,15 +211,15 @@ fn complete_if_ready(state: &mut RunningState, context: &mut TickContext<'_>) ->
         phase_id: phase.id.clone(),
         mission_time_ns: context.input.mission_time_ns,
     });
-    let next = state.phase_index.wrapping_add(1);
-    if next == context.document.phases.len() {
+    // Every entered phase has completed: a phase is left only by completing it.
+    let Some(next) = context.document.next_ready(context.entered_phases) else {
         return Some(terminal_state(
             MissionTerminal::Complete {
                 completed_phases: context.document.phases.len(),
             },
             context.collector,
         ));
-    }
+    };
     state.phase_index = next;
     state.phase_started = Clocks::of(context.input);
     state.progress = PhaseProgress::Entry;

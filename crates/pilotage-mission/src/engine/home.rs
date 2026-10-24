@@ -48,6 +48,12 @@ impl MissionEngine {
         };
         let plan = FlightPlan::new(format!("home:{digest}"), PlanRole::Mission, vec![home]);
         let execution = PlanExecution::new(plan, ExecutionConfig::new(HOME_CAPTURE_M))?;
-        Self::from_execution(execution, config, identity, document::HOME_REVISION_PREFIX)
+        Self::from_execution(
+            execution,
+            config,
+            identity,
+            document::HOME_REVISION_PREFIX,
+            &[],
+        )
     }
 }

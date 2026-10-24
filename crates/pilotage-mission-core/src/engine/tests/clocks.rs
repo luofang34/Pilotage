@@ -29,6 +29,7 @@ fn mission(deadline: Option<PhaseDeadline>, capabilities: Vec<MissionCapability>
             cleanup_actions: Vec::new(),
             completion_conditions: vec![MissionCondition::Always {}],
             abort_conditions: Vec::new(),
+            depends_on: Vec::new(),
             deadline,
         }],
     )
