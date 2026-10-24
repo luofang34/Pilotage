@@ -78,6 +78,11 @@ pub enum MissionCommand {
     },
     /// Ask the lane for the full proposal this client has not seen.
     Fetch {},
+    /// State that a team's handover is resolved, after checking its members.
+    ResolveHandover {
+        /// The handover's assignment.
+        assignment_id: String,
+    },
 }
 
 /// Part of one member's unflown lines, flown by another member.
@@ -116,6 +121,8 @@ pub enum IntentKind {
     MemberDown,
     /// Ask for a full proposal.
     Fetch,
+    /// Resolve a handover.
+    ResolveHandover,
 }
 
 impl MissionCommand {
@@ -132,6 +139,7 @@ impl MissionCommand {
             Self::Abort {} => IntentKind::Abort,
             Self::MemberDown { .. } => IntentKind::MemberDown,
             Self::Fetch {} => IntentKind::Fetch,
+            Self::ResolveHandover { .. } => IntentKind::ResolveHandover,
         }
     }
 }
@@ -152,6 +160,7 @@ impl IntentKind {
             Action::Revise(_) => Self::Revise,
             Action::MemberDown(_) => Self::MemberDown,
             Action::Fetch(_) => Self::Fetch,
+            Action::ResolveHandover(_) => Self::ResolveHandover,
         }
     }
 
@@ -169,6 +178,7 @@ impl IntentKind {
             Self::Revise => "Revise",
             Self::MemberDown => "MemberDown",
             Self::Fetch => "Fetch",
+            Self::ResolveHandover => "ResolveHandover",
         }
     }
 }

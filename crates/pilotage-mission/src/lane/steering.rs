@@ -67,6 +67,19 @@ impl Steering {
                 });
                 Ok(())
             }
+            Some(Action::ResolveHandover(_)) if !requester.may_approve => Err(format!(
+                "{} may not resolve a handover: it needs the approver secret",
+                requester.subject
+            )),
+            Some(Action::ResolveHandover(resolve)) => {
+                // The record names the session that resolved it.
+                resolve.resolved_by = Some(wire::RecordOrigin {
+                    issuer: HOST_ISSUER.to_owned(),
+                    subject: requester.subject.clone(),
+                    organization: String::new(),
+                });
+                Ok(())
+            }
             Some(Action::MemberDown(_)) if !requester.may_approve => Err(format!(
                 "{} may not state that a member is down: it needs the approver secret",
                 requester.subject

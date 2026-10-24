@@ -377,17 +377,25 @@ impl TeamLane {
             .tasks
             .iter()
             .find(|t| t.kind == wire::MissionTaskKind::SurveyLine as i32);
+        let moved = !refly.moved.is_empty();
+        let (member, owner) = (refly.member.clone(), refly.owner.clone());
         if status.state == wire::MissionLaneState::Complete as i32 {
             refly.state = ReflyState::Done;
-            if let (Some(line_status), true) = (line_status, refly.moved.is_empty()) {
+            if let (Some(line_status), false) = (line_status, moved) {
                 self.book
                     .apply_refly(&refly.owner, &refly.line, line_status);
+            }
+            if moved {
+                self.moved_flight_ended(&member, &owner, true);
             }
         } else if matches!(
             wire::MissionLaneState::try_from(status.state),
             Ok(wire::MissionLaneState::Failed | wire::MissionLaneState::Aborted)
         ) {
             refly.state = ReflyState::Failed;
+            if moved {
+                self.moved_flight_ended(&member, &owner, false);
+            }
         }
     }
 }

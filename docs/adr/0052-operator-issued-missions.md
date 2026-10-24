@@ -376,8 +376,14 @@ handovers to durable storage before it sends work to a member, and it
 sends no intent when it cannot write them. A coordinator that restarts
 reads them back. It shows each handover that was open or committed as
 unreconciled, because it cannot know whether a member flies that work,
-and it moves nothing. An operator checks both members and gives the work
-to one. An assignment identity includes the run of the team, so a
+and it moves nothing. While a handover of its members is unreconciled, the
+team refuses new work. A person checks both members and then resolves the
+handover with an explicit intent; a new proposal does not resolve it.
+Handover records outlive the plan that they came from: a new proposal, a
+failed proposal and the refusal of a member keep every record that is not
+settled. A record is settled when it is withdrawn, when the receiver flew
+the moved lines, or when a person resolved it. Only a settled record is
+dropped. An assignment identity includes the run of the team, so a
 restarted coordinator never uses an identity or a generation again. It
 has no run of the team, and it can give work only through a new team
 proposal that each member must accept. A member lane refuses a proposal

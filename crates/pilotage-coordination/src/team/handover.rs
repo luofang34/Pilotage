@@ -42,6 +42,15 @@ pub(super) struct Handover {
 }
 
 impl Handover {
+    /// The handover ended in a state nobody needs to act on: withdrawn,
+    /// flown by its receiver, or resolved by a person.
+    pub(super) fn settled(&self) -> bool {
+        matches!(
+            self.state,
+            State::Withdrawn | State::Completed | State::Resolved
+        )
+    }
+
     fn wire(&self) -> wire::MissionHandover {
         wire::MissionHandover {
             assignment_id: self.assignment_id.clone(),
@@ -273,6 +282,71 @@ impl TeamLane {
             .collect();
         for owner in queued {
             self.unassign_moved(member, &owner, "it is stated down");
+        }
+    }
+
+    /// Refuses new work while a handover of this team's members is
+    /// unreconciled: whether a member flies its work is not known.
+    pub(super) fn refuse_while_unreconciled(&self) -> Result<(), String> {
+        match self
+            .handovers
+            .iter()
+            .find(|h| h.state == State::Unreconciled)
+        {
+            Some(h) => Err(format!(
+                "handover {} is unreconciled: check whether {} or {} flies its lines, then resolve it",
+                h.assignment_id, h.from, h.to
+            )),
+            None => Ok(()),
+        }
+    }
+
+    /// A person states the unreconciled or unassigned handover `resolve`
+    /// names resolved.
+    pub(super) fn resolve_handover(
+        &mut self,
+        resolve: &wire::MissionResolveHandover,
+    ) -> Result<(Vec<MemberIntent>, bool), String> {
+        let handover = self
+            .handovers
+            .iter_mut()
+            .find(|h| h.assignment_id == resolve.assignment_id)
+            .ok_or_else(|| format!("no handover {}", resolve.assignment_id))?;
+        if !matches!(handover.state, State::Unreconciled | State::Unassigned) {
+            return Err(format!(
+                "handover {} is {:?}; only an unreconciled or unassigned one is resolved by a person",
+                handover.assignment_id, handover.state
+            ));
+        }
+        let by = resolve
+            .resolved_by
+            .as_ref()
+            .map_or_else(|| "a person".to_owned(), |o| o.subject.clone());
+        handover.state = State::Resolved;
+        handover.basis = format!(
+            "{by} resolved it after checking {} and {}",
+            handover.from, handover.to
+        );
+        self.detail = format!("handover {} is resolved", handover.assignment_id);
+        Ok((Vec::new(), false))
+    }
+
+    /// The flight of moved lines `member` flew for `owner` ended: flown to
+    /// its end, or failed part of the way with nobody holding the rest.
+    pub(super) fn moved_flight_ended(&mut self, member: &str, owner: &str, completed: bool) {
+        for handover in &mut self.handovers {
+            if handover.to == member && handover.from == owner && handover.state == State::Committed
+            {
+                if completed {
+                    handover.state = State::Completed;
+                    handover.basis = format!("{member} flew the moved lines");
+                } else {
+                    handover.state = State::Unassigned;
+                    handover.basis = format!(
+                        "{member}'s flight of the moved lines ended before they were flown; an operator gives them to a member"
+                    );
+                }
+            }
         }
     }
 
