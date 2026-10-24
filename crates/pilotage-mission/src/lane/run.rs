@@ -111,9 +111,10 @@ impl RunTracker {
         self.run_id.clone()
     }
 
-    /// Projects the run's task events: a finished task completed, and the task in
-    /// progress is active. Returns whether a task changed.
-    pub(super) fn on_progress(&mut self, progress: &RunProgress) -> bool {
+    /// Projects the run's task events at `now_ms` on the host's monotonic clock: a
+    /// finished task completed, and the task in progress is active. Returns whether a
+    /// task changed.
+    pub(super) fn on_progress(&mut self, progress: &RunProgress, now_ms: u64) -> bool {
         let mut changed = false;
         for phase in &progress.finished_tasks {
             let Some(task) = self
@@ -122,10 +123,7 @@ impl RunTracker {
             else {
                 continue;
             };
-            if matches!(task.execution, Execution::Pending | Execution::Active) {
-                task.execution = Execution::Completed;
-                changed = true;
-            }
+            changed |= task.end(Execution::Completed, now_ms);
         }
         let active = progress
             .active_task
@@ -189,7 +187,9 @@ impl RunTracker {
 
     /// Takes the verdict for the picture `ticket` names, or the news that
     /// it was not judged. It changes the task's evidence, never how its
-    /// execution ended. Returns whether the task changed.
+    /// execution ended. After the task's evidence window closed, the answer
+    /// is counted as late and changes nothing else. Returns whether the task
+    /// changed.
     pub(super) fn on_assessment(
         &mut self,
         ticket: &FrameTicket,
@@ -197,6 +197,13 @@ impl RunTracker {
     ) -> Result<bool, VerdictRefused> {
         let task = self.task_of(ticket)?;
         task.judgments.answer(ticket)?;
+        if task.sealed {
+            task.evidence.late = task.evidence.late.wrapping_add(1);
+            return Err(VerdictRefused::Late {
+                task_id: ticket.task_id.clone(),
+                frame: ticket.frame,
+            });
+        }
         let evidence = &mut task.evidence;
         if let Some(assessment) = assessment {
             evidence.assessed = evidence.assessed.wrapping_add(1);
@@ -229,11 +236,45 @@ impl RunTracker {
     /// Ends the run with `outcome` for the task in progress: completed when
     /// the plan completed, cancelled by an abort, failed when the run ended
     /// without completing its plan. A task not begun stays pending.
-    pub(super) fn close(&mut self, outcome: Execution) {
+    pub(super) fn close(&mut self, outcome: Execution, now_ms: u64) {
         for task in &mut self.tasks {
-            task.end_active(outcome);
+            task.end_active(outcome, now_ms);
         }
         self.active = None;
+    }
+
+    /// A successor replaced the run at `now_ms`: a task not begun is skipped,
+    /// one in progress is cancelled, and what was flown keeps its outcome and
+    /// its evidence window.
+    pub(super) fn supersede(&mut self, now_ms: u64) {
+        for task in &mut self.tasks {
+            if matches!(task.execution, Execution::Pending | Execution::Unspecified) {
+                task.execution = Execution::Skipped;
+            }
+            task.end_active(Execution::Cancelled, now_ms);
+        }
+        self.active = None;
+    }
+
+    /// Closes the evidence window of each task that ended `window_ms` before
+    /// `now_ms`, or of every ended task when `force`. Returns whether a task
+    /// changed.
+    pub(super) fn seal(&mut self, now_ms: u64, window_ms: u64, force: bool) -> bool {
+        let mut changed = false;
+        for task in &mut self.tasks {
+            changed |= task.seal(now_ms, window_ms, force);
+        }
+        changed
+    }
+
+    /// A task of the run still waits for answers inside its window.
+    pub(super) fn settling(&self) -> bool {
+        self.tasks.iter().any(TaskTrack::settling)
+    }
+
+    /// Whether `ticket` names a picture of this run.
+    pub(super) fn issued(&self, ticket: &FrameTicket) -> bool {
+        ticket.run_id == self.run_id
     }
 
     /// Survey lines whose execution ended so far, with or without their evidence.
@@ -256,28 +297,6 @@ impl RunTracker {
         self.active
             .and_then(|index| self.tasks.get(index))
             .is_some_and(|task| !task.is_line())
-    }
-
-    /// The statuses a successor leaves behind: a task not begun is skipped,
-    /// one in progress is cancelled, and what was flown keeps its outcome.
-    pub(super) fn superseded_statuses(&self) -> Vec<wire::MissionTaskStatus> {
-        let mut superseded = self.clone();
-        for task in &mut superseded.tasks {
-            if matches!(task.execution, Execution::Pending | Execution::Unspecified) {
-                task.execution = Execution::Skipped;
-            }
-            task.end_active(Execution::Cancelled);
-        }
-        let mut statuses = superseded.task_statuses();
-        for status in &mut statuses {
-            // A replaced run takes no more verdicts.
-            if let Some(evidence) = status.evidence.as_mut()
-                && evidence.state == wire::MissionEvidenceState::Pending as i32
-            {
-                evidence.state = wire::MissionEvidenceState::NotJudged as i32;
-            }
-        }
-        statuses
     }
 
     /// The name of the task in progress, for display.

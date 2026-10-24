@@ -347,8 +347,12 @@ enum MissionEvidenceCollection {
   // The task still takes pictures, or a picture sent for a judgment has no
   // answer yet.
   MISSION_EVIDENCE_COLLECTION_OPEN = 1;
-  // The task ended and every picture sent for a judgment has an answer.
+  // The task ended and every picture sent for a judgment has an answer, or
+  // the task will take no pictures.
   MISSION_EVIDENCE_COLLECTION_SETTLED = 2;
+  // The evidence window of the task closed while a picture sent for a
+  // judgment had no answer. The judgment uses the answers that arrived.
+  MISSION_EVIDENCE_COLLECTION_CLOSED = 3;
 }
 
 // What a task acquired and what the judgment service said about it.
@@ -365,6 +369,9 @@ message MissionTaskEvidence {
   // The evidence as one value, for display.
   MissionEvidenceState state = 6;
   MissionEvidenceCollection collection = 7;
+  // Answers that arrived after the evidence window closed. They are
+  // counted here only; they change no other field.
+  uint32 late = 8;
 }
 
 // Where a task's completion evidence stands, as one value for display.

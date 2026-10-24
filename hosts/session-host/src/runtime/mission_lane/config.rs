@@ -13,6 +13,9 @@
 //!   [`pilotage_decision::Provider::from_spec`]); absent, pictures are
 //!   counted and not judged.
 //! - `PILOTAGE_DECISION_EVERY_S`: seconds between two judgments; default 6.
+//! - `PILOTAGE_EVIDENCE_WINDOW_S`: seconds a task whose execution ended still
+//!   takes the answers to its pictures; default 120, a deployment default
+//!   sized for a few queued judgments, not a validated value.
 
 use std::time::Duration;
 
@@ -25,6 +28,9 @@ use crate::runtime::options::{env_var, parse_execution_target, parse_ownship_sou
 
 /// Default seconds between two judgments of one lane.
 const DEFAULT_ASSESS_EVERY_S: f64 = 6.0;
+
+/// Default seconds of a task's evidence window.
+const DEFAULT_EVIDENCE_WINDOW_S: f64 = 120.0;
 
 /// The lane and its services.
 #[derive(Debug, Clone)]
@@ -88,6 +94,9 @@ impl LaneRuntimeConfig {
             })
             .transpose()?;
         let defaults = SurveyDefaults::default();
+        let evidence_window = Duration::from_secs_f64(
+            positive("PILOTAGE_EVIDENCE_WINDOW_S")?.unwrap_or(DEFAULT_EVIDENCE_WINDOW_S),
+        );
         Ok(Self {
             lane: LaneConfig {
                 name: env_var("PILOTAGE_LANE_NAME")?.unwrap_or_else(|| adapter.to_owned()),
@@ -99,6 +108,7 @@ impl LaneRuntimeConfig {
                 cruise_power_w: positive("PILOTAGE_LANE_CRUISE_POWER_W")?,
                 recovery_policy: "hold in place; the operator lands".to_owned(),
                 judged: decision.is_some(),
+                evidence_window_ms: duration_ms(evidence_window),
             },
             decision,
             assess_every: Duration::from_secs_f64(
@@ -108,6 +118,10 @@ impl LaneRuntimeConfig {
             planar_pose_is_truth,
         })
     }
+}
+
+fn duration_ms(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
 fn invalid(variable: &'static str, value: &str) -> HostError {

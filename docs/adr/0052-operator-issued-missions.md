@@ -114,7 +114,7 @@ A task status has three facts, and each fact has one source:
 | Fact | Values | Source |
 |---|---|---|
 | Execution | `Pending`, `Active`, `Completed`, `Cancelled`, `Failed`, `Skipped` | Run events: a task finishes, an abort, an unplanned end of the run, a revision |
-| Evidence collection | `Open`, `Settled` | The pictures of the task and the answers to them |
+| Evidence collection | `Open`, `Settled`, `Closed` | The pictures of the task, the answers to them and the evidence window |
 | Judgment | `Undetermined`, `Met`, `NotMet` | The rule of the task kind, from the execution and the evidence |
 
 Evidence never changes the execution. A verdict that arrives after the
@@ -132,10 +132,27 @@ waits for the end of the execution of the line before it, and a report
 waits for the judgment.
 
 Each picture that a lane sends for judgment carries its run, its task, the
-attempt and the picture number. The lane refuses a verdict for another run,
-for a picture that it did not send, or a second verdict for one picture.
-The evidence of a task is `Open` while the task takes pictures and while a
-sent picture has no answer. A display may show progress inside a task from
+attempt and the picture number. The lane gives a verdict to the run that
+sent the picture. This is also true after a successor replaced that run. The
+lane refuses a verdict for a run that it does not know, for a picture that
+it did not send, or a second verdict for one picture. The evidence of a
+task is `Open` while the task takes pictures and while a sent picture has
+no answer.
+
+The evidence window of a task starts when its execution ends. From then on,
+the task takes no more pictures, so the set of pictures that can get an
+answer is closed. The window has a length from the lane configuration. This
+length is a deployment default, not a validated value. The window uses the
+monotonic clock of the host. It does not use the mission clock (ADR-0041),
+because the mission clock stops while the run holds, and a held run must
+still close its windows. When the window closes with answers outstanding,
+the evidence becomes `Closed`, and the judgment uses the answers that
+arrived. The lane counts an answer that arrives after that as late. A late
+answer changes no other fact. At most four replaced runs wait for answers
+at one time; when one more run is replaced, the windows of the oldest close
+at once. The lane is not persisted. A host that restarts makes a new lane,
+which refuses verdicts for the runs of the old lane, and the host never
+compares the monotonic times of two processes. A display may show progress inside a task from
 the remaining waypoints, and that view is not a second execution truth. The
 first delivery uses a sequence of tasks per vehicle. A team task graph and
 concurrent tasks within a bound come later; a linear list is not promised
