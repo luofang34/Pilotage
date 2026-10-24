@@ -286,6 +286,15 @@ fn a_person_releases_a_lost_member_and_the_team_completes_without_it() {
         .into_iter()
         .find(|m| m.lane == "SIM-3");
     assert!(sim3.is_some_and(|m| m.detail.contains("released")));
+    // The host keeps failing to reconnect; the release stands.
+    fleet.team.on_member_lost("SIM-3");
+    let sim3 = fleet
+        .team
+        .status()
+        .members
+        .into_iter()
+        .find(|m| m.lane == "SIM-3");
+    assert!(sim3.is_some_and(|m| m.detail.contains("released")));
     fleet.route(intents);
     let follow = fleet.fly(&[]);
     fleet.route(follow);
