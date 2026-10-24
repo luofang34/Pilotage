@@ -360,7 +360,7 @@ fn an_expired_approval_offers_a_renewal_of_the_run_and_no_resume() {
     desk.on_status(held.clone());
     assert_eq!(
         desk.unseen_proposal(),
-        Some(b"\x52".to_vec()),
+        Some(digest(b"\x52")),
         "the plan to renew is fetched"
     );
     fetched(&mut desk, b"\x52");
