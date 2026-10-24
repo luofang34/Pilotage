@@ -33,7 +33,7 @@ fn renewal(digest: &[u8], run_id: &str) -> wire::MissionApproval {
 fn running_under(policy: wire::MissionExpiryPolicy) -> Lane {
     let mut lane = Lane::new(config());
     let reply = lane.on_intent(&intent(Action::Propose(objective())), &context("p"));
-    let digest = reply.receipt.proposal.expect("a proposal").digest;
+    let digest = opened(&reply.receipt).expect("a proposal").digest;
     let mut approved = approval(&digest, 120.0);
     if let Some(envelope) = approved.envelope.as_mut() {
         envelope.on_expiry = policy as i32;

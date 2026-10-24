@@ -43,7 +43,7 @@ fn switch_after_line(lane: &mut Lane, line: usize, change: wire::mission_revise:
         })),
         &context(&format!("rev-{}", status.run_id)),
     );
-    let draft = drafted.receipt.proposal.expect("a draft");
+    let draft = opened(&drafted.receipt).expect("a draft");
     let approved = lane.on_intent(
         &intent(Action::Approve(approval(&draft.digest, 120.0))),
         &context("approve"),

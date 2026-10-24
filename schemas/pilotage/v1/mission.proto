@@ -122,14 +122,38 @@ message MissionAssumptions {
 // A member lane's proposal inside a team proposal.
 message MemberProposal {
   string member = 1;
-  MissionProposal proposal = 2;
+  // Not set; `record` carries the member's proposal.
+  MissionProposal proposal = 2 [deprecated = true];
+  // The member's proposal record, with the member's bytes unchanged.
+  MissionProposalRecord record = 3;
+}
+
+// How a proposal record's body is encoded.
+enum MissionProposalFormat {
+  MISSION_PROPOSAL_FORMAT_UNSPECIFIED = 0;
+  // The body is a `MissionProposal` with `digest` empty, encoded once by
+  // the lane that compiled it.
+  MISSION_PROPOSAL_FORMAT_V1 = 1;
+}
+
+// A proposal as immutable bytes (ADR-0014). Every receiver hashes the bytes
+// it received and never a new encoding of the decoded message, so the
+// digest that an approval binds names exactly these bytes. Two proposals
+// with the same meaning can have different bytes and different digests.
+message MissionProposalRecord {
+  // A receiver refuses a format it does not know.
+  MissionProposalFormat format = 1;
+  bytes body = 2;
+  // SHA-256 over the domain tag `pilotage.mission-proposal.v1` and a zero
+  // byte, then `body`.
+  bytes digest = 3;
 }
 
 // A compiled, grounded plan with its estimates. It grants nothing.
 message MissionProposal {
   string proposal_id = 1;
   string objective_id = 2;
-  // SHA-256 over this message with `digest` empty.
+  // Empty in a record's body: the record carries the digest of the body.
   bytes digest = 3;
   repeated MissionTaskPlan tasks = 4;
   MissionEstimates estimates = 5;
@@ -142,6 +166,10 @@ message MissionProposal {
   bytes predecessor_digest = 9;
   // What a successor changes, in words, for review.
   string summary = 10;
+  // The execution features the plan uses, such as
+  // `pilotage.task.survey-line/1`. An approver that does not know one of
+  // them does not approve: it cannot review what it does not understand.
+  repeated string requires = 11;
 }
 
 // The limits inside which a lane may adapt an approved plan without a new
@@ -191,6 +219,10 @@ message MissionApproval {
   // of the same plan. An approval of a drafted successor names the run in
   // progress or nothing.
   string run_id = 6;
+  // The format of the record whose digest the approval binds. A lane
+  // refuses an approval that names no format, so a client that does not
+  // know records gets a clear refusal.
+  MissionProposalFormat proposal_format = 7;
 }
 
 message MissionStart {
@@ -363,10 +395,12 @@ message MissionReceipt {
   string request_id = 1;
   MissionReceiptOutcome outcome = 2;
   string reason = 3;
-  // The proposal a `propose` or `revise` intent compiled, or the one a
-  // `fetch` intent names.
-  MissionProposal proposal = 4;
+  // Not set; `proposal_record` carries the proposal.
+  MissionProposal proposal = 4 [deprecated = true];
   string lane = 5;
+  // The proposal a `propose` or `revise` intent compiled, or the one a
+  // `fetch` intent names, as its record.
+  MissionProposalRecord proposal_record = 6;
 }
 
 enum MissionLaneState {

@@ -293,7 +293,7 @@ impl TeamLane {
         let member = refly.member.clone();
         match op {
             Op::Propose => {
-                let Some(proposal) = receipt.proposal.clone() else {
+                let Ok(proposal) = super::opened(receipt).map(|s| s.proposal().clone()) else {
                     refly.state = ReflyState::Failed;
                     return Vec::new();
                 };

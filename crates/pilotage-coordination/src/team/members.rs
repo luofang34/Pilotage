@@ -1,10 +1,11 @@
 //! A team's answers from its members: their receipts, the team step they
 //! complete, and the team proposal composed from the member proposals.
 
-use pilotage_mission::{IntentContext, proposal_digest};
+use pilotage_mission::IntentContext;
+use pilotage_protocol::proposal_record::{FEATURE_TEAM, SealedProposal};
 use pilotage_protocol::wire;
 
-use super::{Op, Phase, TeamLane, TeamReply};
+use super::{Op, Phase, TeamLane, TeamReply, opened};
 
 impl TeamLane {
     /// Folds a member's receipt in.
@@ -42,11 +43,14 @@ impl TeamLane {
             return self.member_refused(member, pending.op, &receipt.reason);
         }
         match pending.op {
-            Op::Propose => {
-                if let Some(proposal) = receipt.proposal.clone() {
+            Op::Propose => match opened(receipt) {
+                Ok(sealed) => {
+                    let (proposal, record) = sealed.into_parts();
                     self.member_proposals.insert(member.to_owned(), proposal);
+                    self.member_records.insert(member.to_owned(), record);
                 }
-            }
+                Err(reason) => return self.member_refused(member, pending.op, &reason),
+            },
             Op::Approve | Op::Start | Op::Revise | Op::Renew => {}
         }
         if self
@@ -103,7 +107,7 @@ impl TeamLane {
 
     /// The team proposal: the members' tasks, each named by its member,
     /// the estimates combined, and the member proposals it binds.
-    pub(super) fn compose(&mut self, context: &IntentContext) -> wire::MissionProposal {
+    pub(super) fn compose(&mut self, context: &IntentContext) -> wire::MissionProposalRecord {
         let mut tasks = Vec::new();
         let each: Vec<wire::MissionEstimates> = self
             .member_proposals
@@ -129,7 +133,8 @@ impl TeamLane {
             }
             members.push(wire::MemberProposal {
                 member: member.clone(),
-                proposal: Some(proposal.clone()),
+                record: self.member_records.get(member).cloned(),
+                ..wire::MemberProposal::default()
             });
         }
         let mut proposal = wire::MissionProposal {
@@ -155,10 +160,19 @@ impl TeamLane {
             objective: self.objective.clone(),
             predecessor_digest: Vec::new(),
             summary: String::new(),
+            requires: Vec::new(),
         };
-        proposal.digest = proposal_digest(&proposal).to_vec();
+        let mut requires = vec![FEATURE_TEAM.to_owned()];
+        for feature in self.member_proposals.values().flat_map(|p| &p.requires) {
+            if !requires.contains(feature) {
+                requires.push(feature.clone());
+            }
+        }
+        proposal.requires = requires;
+        let (proposal, record) = SealedProposal::seal(proposal).into_parts();
         self.book.plan(&self.member_proposals);
-        self.proposal = Some(proposal.clone());
-        proposal
+        self.proposal = Some(proposal);
+        self.proposal_record = Some(record.clone());
+        record
     }
 }

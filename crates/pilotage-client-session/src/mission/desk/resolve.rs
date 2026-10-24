@@ -3,7 +3,9 @@
 use pilotage_protocol::wire;
 use wire::MissionLaneState as Lane;
 
-use super::{DeskRefusal, MissionDesk, parse_hex};
+use pilotage_protocol::proposal_record::unknown_features;
+
+use super::{DeskRefusal, KNOWN_FEATURES, MissionDesk, parse_hex};
 use crate::mission::{MissionCommand, approval};
 
 impl MissionDesk {
@@ -50,6 +52,10 @@ impl MissionDesk {
                     }
                     (None, None) => return Err(DeskRefusal::NoProposal),
                 };
+                let unknown = unknown_features(&proposal, KNOWN_FEATURES);
+                if !unknown.is_empty() {
+                    return Err(DeskRefusal::UnknownFeatures(unknown));
+                }
                 approval(&proposal, policy, &self.run_in_progress(), now_ms)
                     .ok_or(DeskRefusal::NoHeight)
             }

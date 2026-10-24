@@ -12,7 +12,7 @@ use super::*;
 fn lane_permitting(revise: bool, objective: bool) -> Lane {
     let mut lane = Lane::new(config());
     let reply = lane.on_intent(&intent(Action::Propose(super::objective())), &context("p"));
-    let digest = reply.receipt.proposal.expect("a proposal").digest;
+    let digest = opened(&reply.receipt).expect("a proposal").digest;
     let mut approved = approval(&digest, 120.0);
     if let Some(envelope) = approved.envelope.as_mut() {
         envelope.permit_revise = revise;

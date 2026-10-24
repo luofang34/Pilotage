@@ -11,6 +11,7 @@ workspace = true
 pilotage-timing = { workspace = true }
 thiserror = { workspace = true }
 prost = { workspace = true }
+sha2 = { workspace = true }
 subtle = "2.6.1"
 
 [build-dependencies]
@@ -18,6 +19,3 @@ prost-build = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
-# Direct version rather than `workspace = true`: the fixture-provenance digest
-# must resolve on this lane alone, independent of other lanes' dep tables.
-sha2 = "0.10.9"

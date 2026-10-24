@@ -114,6 +114,7 @@ pub fn approval(
             }),
             approved_unix_ms: now_ms,
             run_id: run_id.to_owned(),
+            proposal_format: wire::MissionProposalFormat::V1 as i32,
         },
     ))
 }

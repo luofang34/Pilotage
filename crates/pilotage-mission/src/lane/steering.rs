@@ -101,8 +101,8 @@ impl Steering {
             request_id: intent.request_id.clone(),
             outcome: wire::MissionReceiptOutcome::Refused as i32,
             reason,
-            proposal: None,
             lane: lane.to_owned(),
+            ..wire::MissionReceipt::default()
         }
     }
 

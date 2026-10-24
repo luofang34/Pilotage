@@ -9,6 +9,7 @@ use pilotage_coordination::{Member, MemberIntent, TeamConfig, TeamLane};
 use pilotage_mission::{
     ExecutionTarget, IntentContext, Lane, LaneConfig, MissionConfig, OwnshipSource, SurveyDefaults,
 };
+use pilotage_protocol::proposal_record::SealedProposal;
 use pilotage_protocol::wire;
 
 use super::plan::{Airframe, Fault, Launch, MissionFile};
@@ -148,8 +149,13 @@ fn deliver(
     let (team, children) = match node {
         Node::Vehicle(name, lane) => {
             let reply = lane.on_intent(intent, &context);
-            if let Some(proposal) = &reply.receipt.proposal {
-                proposals.insert(name.clone(), proposal.clone());
+            let opened = reply
+                .receipt
+                .proposal_record
+                .clone()
+                .and_then(|record| SealedProposal::open(record).ok());
+            if let Some(sealed) = opened {
+                proposals.insert(name.clone(), sealed.into_parts().0);
             }
             return vec![reply.receipt];
         }

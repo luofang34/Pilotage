@@ -11,7 +11,7 @@ use wire::MissionSuccessorState as Stage;
 use super::successor::Successor;
 use super::{IntentContext, Lane, LaneEffect, approval, compile};
 
-type Outcome = Result<(Option<LaneEffect>, Option<wire::MissionProposal>), String>;
+type Outcome = Result<(Option<LaneEffect>, Option<wire::MissionProposalRecord>), String>;
 
 impl Lane {
     /// Takes civil time. When the active approval expired during the run,

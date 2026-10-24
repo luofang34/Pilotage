@@ -19,6 +19,7 @@ pub(super) fn admit(
     if approval.proposal_digest != compiled.proposal.digest {
         return Err("the approval binds another proposal digest".to_owned());
     }
+    bound_format(approval)?;
     still_valid(approval, now_unix_ms)?;
     let envelope = approval
         .envelope
@@ -61,6 +62,17 @@ pub(super) fn admit(
         }
     }
     Ok(())
+}
+
+/// The approval names the record format whose digest it binds: a client
+/// that names none does not know records, and the digest it holds may not
+/// name the bytes the lane compiled.
+pub(super) fn bound_format(approval: &wire::MissionApproval) -> Result<(), String> {
+    if approval.proposal_format == wire::MissionProposalFormat::V1 as i32 {
+        Ok(())
+    } else {
+        Err("the approval names no proposal record format; the client must approve a proposal record".to_owned())
+    }
 }
 
 /// The approval permits execution and has not expired.

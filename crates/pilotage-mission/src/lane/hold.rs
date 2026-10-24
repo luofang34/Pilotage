@@ -10,7 +10,7 @@ use wire::MissionLaneState as State;
 
 use super::{IntentContext, Lane, LaneEffect, approval};
 
-type Outcome = Result<(Option<LaneEffect>, Option<wire::MissionProposal>), String>;
+type Outcome = Result<(Option<LaneEffect>, Option<wire::MissionProposalRecord>), String>;
 
 impl Lane {
     /// An operator's hold: a running run is asked to hold, and a held run

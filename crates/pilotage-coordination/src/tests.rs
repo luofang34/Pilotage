@@ -226,6 +226,17 @@ impl Fleet {
     }
 }
 
+/// The proposal `record` carries, opened and verified.
+fn open_record(record: wire::MissionProposalRecord) -> Option<wire::MissionProposal> {
+    let sealed = pilotage_protocol::proposal_record::SealedProposal::open(record).ok()?;
+    Some(sealed.into_parts().0)
+}
+
+/// The proposal a receipt's record carries, opened and verified.
+fn opened(receipt: &wire::MissionReceipt) -> Option<wire::MissionProposal> {
+    open_record(receipt.proposal_record.clone()?)
+}
+
 fn accepted(receipt: &wire::MissionReceipt) -> bool {
     receipt.outcome == wire::MissionReceiptOutcome::Accepted as i32
 }
@@ -242,6 +253,7 @@ fn approval(digest: &[u8], max_refly_lines: u32) -> wire::MissionApproval {
             max_refly_lines,
             ..wire::AdaptationEnvelope::default()
         }),
+        proposal_format: wire::MissionProposalFormat::V1 as i32,
         ..wire::MissionApproval::default()
     }
 }
@@ -299,7 +311,7 @@ fn a_team_survey_is_proposed_approved_flown_and_adapted_inside_its_envelope() {
     let decided = fleet.route(reply.intents);
     let receipt = decided.first().expect("the team proposal");
     assert!(accepted(receipt), "{}", receipt.reason);
-    let proposal = receipt.proposal.clone().expect("a team proposal");
+    let proposal = opened(receipt).clone().expect("a team proposal");
     assert_eq!(proposal.members.len(), 3);
     let team_lines = proposal
         .tasks
@@ -363,7 +375,7 @@ fn without_a_revise_permission_a_bad_line_stays_incomplete() {
     let proposal = fleet
         .route(reply.intents)
         .first()
-        .and_then(|r| r.proposal.clone())
+        .and_then(opened)
         .expect("proposal");
     let mut no_revise = approval(&proposal.digest, 2);
     if let Some(envelope) = no_revise.envelope.as_mut() {

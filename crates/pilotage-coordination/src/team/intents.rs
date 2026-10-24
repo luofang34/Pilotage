@@ -128,6 +128,7 @@ impl TeamLane {
         if approval.proposal_digest != proposal.digest {
             return Err("the approval binds another proposal digest".to_owned());
         }
+        bound_format(approval)?;
         let envelope = valid_envelope(approval, context.now_unix_ms)?;
         if self.height_m > envelope.max_height_m + 1e-6 {
             return Err(format!(
@@ -269,5 +270,15 @@ pub(super) fn delegate(
         envelope: Some(envelope),
         approved_unix_ms: team.approved_unix_ms,
         run_id: String::new(),
+        proposal_format: wire::MissionProposalFormat::V1 as i32,
+    }
+}
+
+/// The approval names the record format whose digest it binds.
+pub(super) fn bound_format(approval: &wire::MissionApproval) -> Result<(), String> {
+    if approval.proposal_format == wire::MissionProposalFormat::V1 as i32 {
+        Ok(())
+    } else {
+        Err("the approval names no proposal record format; the client must approve a proposal record".to_owned())
     }
 }

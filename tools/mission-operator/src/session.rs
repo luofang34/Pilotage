@@ -12,6 +12,7 @@ use pilotage_client_session::mission::{
 use pilotage_client_session::{
     ClientAction, ClientConfig, ClientEngine, ModuleEvent, ReconnectPolicy, TransportEvent,
 };
+use pilotage_protocol::proposal_record::SealedProposal;
 use pilotage_protocol::wire;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
@@ -262,7 +263,11 @@ impl Session {
     }
 
     fn on_receipt(&mut self, receipt: wire::MissionReceipt) {
-        let proposal = receipt.proposal.as_ref().map(ProposalView::of);
+        let proposal = receipt
+            .proposal_record
+            .clone()
+            .and_then(|record| SealedProposal::open(record).ok())
+            .map(|sealed| ProposalView::of(sealed.proposal()));
         let Some(filed) = self.desk.on_receipt(receipt) else {
             return;
         };

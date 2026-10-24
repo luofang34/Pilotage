@@ -17,6 +17,7 @@ mod join_token;
 mod landed_state;
 mod motor_state;
 mod payload;
+pub mod proposal_record;
 mod scopes;
 mod session;
 mod session_convert;

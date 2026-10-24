@@ -2,6 +2,7 @@
 //! a reviewer reads.
 
 use pilotage_mission::IntentContext;
+use pilotage_protocol::proposal_record::SealedProposal;
 use pilotage_protocol::wire;
 
 use super::Change;
@@ -190,7 +191,7 @@ impl TeamLane {
         change: &Change,
         summary: String,
         context: &IntentContext,
-    ) -> wire::MissionProposal {
+    ) -> SealedProposal {
         let mut tasks = Vec::new();
         let line = |member: &str, index: usize, path: &Vec<wire::GeoPoint>| wire::MissionTaskPlan {
             task_id: format!("{}#{member}-{index}", context.fresh_id),
@@ -234,7 +235,7 @@ impl TeamLane {
             };
             tasks.extend(paths.iter().enumerate().map(|(i, p)| line(member, i, p)));
         }
-        let mut proposal = wire::MissionProposal {
+        let proposal = wire::MissionProposal {
             proposal_id: context.fresh_id.clone(),
             objective_id: self
                 .objective
@@ -255,7 +256,6 @@ impl TeamLane {
             summary,
             ..wire::MissionProposal::default()
         };
-        proposal.digest = pilotage_mission::proposal_digest(&proposal).to_vec();
-        proposal
+        SealedProposal::seal(proposal)
     }
 }

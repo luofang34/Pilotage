@@ -180,8 +180,8 @@ fn work_released_and_refused_by_the_receiver_is_unassigned() {
         request_id: to_sim2.intent.request_id.clone(),
         outcome: wire::MissionReceiptOutcome::Refused as i32,
         reason: "the camera failed".to_owned(),
-        proposal: None,
         lane: "SIM-2".to_owned(),
+        ..wire::MissionReceipt::default()
     };
     let reply = fleet
         .team
