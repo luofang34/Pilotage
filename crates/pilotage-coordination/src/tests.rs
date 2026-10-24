@@ -199,6 +199,7 @@ impl Fleet {
                 target_waypoint: Some(2 * lines),
                 plan_complete: true,
                 ended: false,
+                holding: false,
             });
             if let Some(status) = lane.take_changed() {
                 intents.extend(self.team.on_member_status(&status, &context("fly")));
@@ -484,6 +485,7 @@ fn a_parent_team_counts_the_lines_its_member_team_flew_again() {
     assert!(status.detail.contains("1 flown again"), "{}", status.detail);
 }
 
+mod hold;
 mod judge;
 mod lines;
 mod revision;

@@ -243,6 +243,7 @@ fn a_line_is_done_only_with_usable_pictures() {
         target_waypoint: Some(2 * lines),
         plan_complete: true,
         ended: false,
+        holding: false,
     });
     let status = lane.take_changed().expect("changed");
     assert_eq!(status.state, wire::MissionLaneState::Complete as i32);
@@ -278,6 +279,17 @@ fn hold_resume_and_abort_follow_the_lifecycle() {
     assert!(!accepted(&resume), "only a held run resumes");
     let hold = lane.on_intent(&intent(Action::Hold(wire::MissionHold {})), &context("x"));
     assert_eq!(hold.effect, Some(LaneEffect::Hold));
+    assert_eq!(
+        lane.state(),
+        wire::MissionLaneState::HoldRequested,
+        "held only once the vehicle says so"
+    );
+    lane.on_progress(&RunProgress::default());
+    assert_eq!(lane.state(), wire::MissionLaneState::HoldRequested);
+    lane.on_progress(&RunProgress {
+        holding: true,
+        ..RunProgress::default()
+    });
     assert_eq!(lane.state(), wire::MissionLaneState::Held);
     let resume = lane.on_intent(
         &intent(Action::Resume(wire::MissionResume {})),
@@ -291,6 +303,70 @@ fn hold_resume_and_abort_follow_the_lifecycle() {
     assert_eq!(lane.state(), wire::MissionLaneState::Aborted);
     let status = lane.take_changed().expect("changed");
     assert!(status.sequence > 0 && lane.take_changed().is_none());
+}
+
+fn task_states(lane: &Lane) -> Vec<(String, wire::MissionTaskState)> {
+    lane.status()
+        .tasks
+        .iter()
+        .filter_map(|t| {
+            Some((
+                t.task_id.clone(),
+                wire::MissionTaskState::try_from(t.state).ok()?,
+            ))
+        })
+        .collect()
+}
+
+#[test]
+fn an_abort_leaves_the_line_in_progress_and_the_rest_unfinished() {
+    use wire::mission_intent::Action;
+    let (mut lane, lines) = running_lane();
+    assert!(lines >= 2);
+    // Along line 1 with enough pictures for its evidence: cut short, it
+    // is still not done.
+    lane.on_progress(&RunProgress {
+        target_waypoint: Some(1),
+        ..RunProgress::default()
+    });
+    for _ in 0..3 {
+        let task = lane.on_frame().expect("line 1 is active");
+        lane.on_assessment(
+            &task,
+            FrameAssessment {
+                usable: true,
+                hazard: false,
+            },
+        );
+    }
+    lane.on_intent(&intent(Action::Abort(wire::MissionAbort {})), &context("x"));
+    let states = task_states(&lane);
+    assert!(
+        states
+            .iter()
+            .all(|(_, s)| *s != wire::MissionTaskState::Done),
+        "{states:?}"
+    );
+    assert!(states.contains(&("line-01".to_owned(), wire::MissionTaskState::Incomplete)));
+    assert!(states.contains(&("line-02".to_owned(), wire::MissionTaskState::Pending)));
+}
+
+#[test]
+fn an_abort_on_the_way_home_does_not_complete_the_way_home() {
+    use wire::mission_intent::Action;
+    let (mut lane, lines) = running_lane();
+    // Every line flown; the vehicle flies home.
+    lane.on_progress(&RunProgress {
+        target_waypoint: Some(2 * lines + 1),
+        ..RunProgress::default()
+    });
+    lane.on_intent(&intent(Action::Abort(wire::MissionAbort {})), &context("x"));
+    let states = task_states(&lane);
+    let home = states.iter().find(|(id, _)| !id.starts_with("line"));
+    assert!(
+        home.is_some_and(|(_, s)| *s == wire::MissionTaskState::Incomplete),
+        "{states:?}"
+    );
 }
 
 mod successor;

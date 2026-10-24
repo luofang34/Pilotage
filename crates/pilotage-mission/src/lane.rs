@@ -162,11 +162,14 @@ impl Lane {
             Some(Action::Start(start)) => self.start(start, context),
             Some(Action::Hold(_)) => self.transition(
                 &[wire::MissionLaneState::Running],
-                wire::MissionLaneState::Held,
+                wire::MissionLaneState::HoldRequested,
                 LaneEffect::Hold,
             ),
             Some(Action::Resume(_)) => self.transition(
-                &[wire::MissionLaneState::Held],
+                &[
+                    wire::MissionLaneState::Held,
+                    wire::MissionLaneState::HoldRequested,
+                ],
                 wire::MissionLaneState::Running,
                 LaneEffect::Resume,
             ),
@@ -282,7 +285,7 @@ impl Lane {
         self.successor = None;
         self.detail = "aborted by intent; the vehicle stops in place".to_owned();
         if let Some(run) = self.run.as_mut() {
-            run.close();
+            run.close_aborted();
         }
         Ok((Some(LaneEffect::Abort), None))
     }
@@ -305,6 +308,7 @@ impl Lane {
         matches!(
             self.state,
             wire::MissionLaneState::Running
+                | wire::MissionLaneState::HoldRequested
                 | wire::MissionLaneState::Held
                 | wire::MissionLaneState::Uncertain
         )
@@ -317,6 +321,11 @@ impl Lane {
         let flying = self.is_flying();
         let run = self.run.as_mut()?;
         if run.on_progress(progress) {
+            self.changed = true;
+        }
+        if self.state == wire::MissionLaneState::HoldRequested && progress.holding {
+            self.state = wire::MissionLaneState::Held;
+            self.detail = "held in place".to_owned();
             self.changed = true;
         }
         if flying && let Some(effect) = self.at_checkpoint(progress.plan_complete) {

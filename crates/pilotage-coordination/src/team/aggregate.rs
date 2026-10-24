@@ -243,13 +243,31 @@ impl TaskBook {
     }
 }
 
+/// Whether every member that may still fly reports that it holds: a
+/// member whose link is lost has not, as its state is unknown.
+fn members_hold(team: &TeamLane) -> bool {
+    team.member_proposals
+        .keys()
+        .filter(|m| team.lost.get(*m) != Some(&true))
+        .all(|m| {
+            !team.lost.contains_key(m)
+                && team.statuses.get(m).is_some_and(|s| {
+                    !matches!(
+                        wire::MissionLaneState::try_from(s.state),
+                        Ok(wire::MissionLaneState::Running | wire::MissionLaneState::HoldRequested)
+                    )
+                })
+        })
+}
+
 pub(super) fn team_status(team: &TeamLane) -> wire::MissionStatus {
     let state = match team.phase {
         Phase::Idle | Phase::Proposing => wire::MissionLaneState::Idle,
         Phase::Proposed | Phase::Approving => wire::MissionLaneState::Proposed,
         Phase::Admitted | Phase::Starting => wire::MissionLaneState::Admitted,
         Phase::Running => wire::MissionLaneState::Running,
-        Phase::Held => wire::MissionLaneState::Held,
+        Phase::Held if members_hold(team) => wire::MissionLaneState::Held,
+        Phase::Held => wire::MissionLaneState::HoldRequested,
         Phase::Complete => wire::MissionLaneState::Complete,
         Phase::Aborted => wire::MissionLaneState::Aborted,
         Phase::Failed => wire::MissionLaneState::Failed,

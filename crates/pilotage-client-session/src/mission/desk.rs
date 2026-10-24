@@ -239,14 +239,14 @@ impl MissionDesk {
             approve_needs_height: proposal.is_some() && height.is_none(),
             start: state == Lane::Admitted && named,
             hold: state == Lane::Running,
-            resume: state == Lane::Held,
+            resume: matches!(state, Lane::Held | Lane::HoldRequested),
             abort: matches!(
                 state,
-                Lane::Admitted | Lane::Running | Lane::Held | Lane::Uncertain
+                Lane::Admitted | Lane::Running | Lane::HoldRequested | Lane::Held | Lane::Uncertain
             ),
             revise: matches!(
                 state,
-                Lane::Proposed | Lane::Admitted | Lane::Running | Lane::Held
+                Lane::Proposed | Lane::Admitted | Lane::Running | Lane::HoldRequested | Lane::Held
             ),
         }
     }

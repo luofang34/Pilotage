@@ -109,6 +109,7 @@ fn an_approved_revision_waits_for_the_line_in_progress_to_end() {
         target_waypoint: Some(0),
         plan_complete: true,
         ended: false,
+        holding: false,
     });
     assert_eq!(lane.state(), wire::MissionLaneState::Complete);
 }

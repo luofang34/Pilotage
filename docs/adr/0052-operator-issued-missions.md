@@ -77,8 +77,12 @@ Mini 3 that endpoint is the host attached to its remote controller, not
 software inside the aircraft. A flight controller or a companion computer
 may host the deterministic executor when its platform exposes a verified
 command interface and its resources permit; it need not host a model. The
-lane has a lifecycle: `Idle`, `Admitted`, `Running`, `Held`, `Uncertain`,
-`Complete`, `Aborted`. The environment variables remain a bootstrap source
+lane has a lifecycle: `Idle`, `Admitted`, `Running`, `HoldRequested`,
+`Held`, `Uncertain`, `Complete`, `Aborted`. An accepted hold makes the lane
+`HoldRequested`; the lane becomes `Held` only when the vehicle reports that
+it holds in place. An abort keeps each task that did not finish as
+unfinished: the task in progress becomes `Incomplete`, and a pending task
+stays pending. The environment variables remain a bootstrap source
 that issues the first plan into an `Idle` lane; an issued plan supersedes
 them.
 

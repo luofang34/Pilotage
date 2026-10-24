@@ -100,6 +100,9 @@ pub struct AutomationStatus {
     pub operator_held: bool,
     /// An abort stopped the vehicle, released the lease and ended the run.
     pub stopped: bool,
+    /// An operator's hold or an abort holds the vehicle, and the vehicle
+    /// reports that it is still.
+    pub holding: bool,
 }
 
 /// Where the plan comes from: a navdata snapshot the route expands

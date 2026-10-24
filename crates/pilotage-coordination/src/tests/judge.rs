@@ -44,6 +44,7 @@ fn fly_lines(
         target_waypoint: Some(2 * to.min(lines)),
         plan_complete: to >= lines,
         ended: false,
+        holding: false,
     });
     match lane.take_changed() {
         Some(status) => fleet.team.on_member_status(&status, &context("fly")),

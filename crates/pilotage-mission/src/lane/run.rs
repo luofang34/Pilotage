@@ -16,6 +16,8 @@ pub struct RunProgress {
     pub plan_complete: bool,
     /// The run ended without completing its plan.
     pub ended: bool,
+    /// The vehicle holds in place, as a hold asked.
+    pub holding: bool,
 }
 
 /// One judgment of one picture.
@@ -150,6 +152,21 @@ impl RunTracker {
             }
             if Some(index) == self.active && !is_line(&task.plan) {
                 task.state = wire::MissionTaskState::Done;
+            }
+        }
+        self.active = None;
+    }
+
+    /// Closes an aborted run: the task in progress was cut short, so it
+    /// stays unfinished whatever evidence it had, and a pending task stays
+    /// pending.
+    pub(super) fn close_aborted(&mut self) {
+        if let Some(task) = self.active.and_then(|index| self.tasks.get_mut(index)) {
+            task.state = wire::MissionTaskState::Incomplete;
+        }
+        for task in &mut self.tasks {
+            if task.state == wire::MissionTaskState::Active {
+                task.state = wire::MissionTaskState::Incomplete;
             }
         }
         self.active = None;

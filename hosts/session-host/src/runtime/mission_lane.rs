@@ -256,6 +256,7 @@ impl LaneTask {
         let ended = !matches!(
             self.lane.state(),
             wire::MissionLaneState::Running
+                | wire::MissionLaneState::HoldRequested
                 | wire::MissionLaneState::Held
                 | wire::MissionLaneState::Uncertain
         );
@@ -312,6 +313,7 @@ fn run_progress(status: &AutomationStatus, finished: bool) -> RunProgress {
             || status.fenced
             || status.closed
             || status.mission_state == Some(MissionState::Failed),
+        holding: status.holding,
     }
 }
 
