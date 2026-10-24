@@ -410,6 +410,8 @@ fn mission_defaults_to_the_landmark_fleet_and_parses_its_flags() {
         "--decision-every",
         "8",
         "--no-fault",
+        "--instruction-model",
+        "http://127.0.0.1:8761/v1/chat/completions",
     ]))
     .expect("parses") else {
         panic!("expected mission");
@@ -417,6 +419,10 @@ fn mission_defaults_to_the_landmark_fleet_and_parses_its_flags() {
     assert_eq!(mission.plan, std::path::PathBuf::from("/tmp/fleet.json"));
     assert_eq!(mission.decision_every_s, Some(8.0));
     assert!(mission.no_fault);
+    assert_eq!(
+        mission.instruction_model.as_deref(),
+        Some("http://127.0.0.1:8761/v1/chat/completions")
+    );
     assert!(parse_args(&args(&["mission", "--decision-every", "0"])).is_err());
     assert!(parse_args(&args(&["mission", "--fleet"])).is_err());
     assert_eq!(USAGE.matches("  mission [options]\n").count(), 1);
