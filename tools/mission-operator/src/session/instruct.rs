@@ -63,6 +63,13 @@ impl Session {
             Err(error) => return self.output.refused("interpreter", &error.to_string()),
         };
         match chain.parse(text, &response) {
+            Ok(instruction) if instruction.steps.iter().any(|s| s.command().is_none()) => self.output.refused(
+                "interpreter",
+                &format!(
+                    "{}; this client has no map to find the area on: draw it in the App, or propose a survey file",
+                    instruction.describe()
+                ),
+            ),
             Ok(instruction) => {
                 self.output.draft(&instruction);
                 self.draft = Some(instruction);
@@ -76,8 +83,17 @@ impl Session {
             self.output.refused("desk", "no draft to send");
             return Ok(());
         };
-        if let Some(request) = self.submit(&draft.command).await? {
-            self.output.sent(&request);
+        // The steps go to this session's lane in the order the words asked; the
+        // interpreter offered only this lane, so every step names it.
+        for step in &draft.steps {
+            let Some(command) = step.command() else {
+                self.output
+                    .refused("desk", "a step needs an area found on a map");
+                return Ok(());
+            };
+            if let Some(request) = self.submit(command).await? {
+                self.output.sent(&request);
+            }
         }
         Ok(())
     }

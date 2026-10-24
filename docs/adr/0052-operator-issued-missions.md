@@ -257,34 +257,44 @@ replaceable, and no model class is tied to a level of autonomy.
 
 ### Instructions in a person's words become drafts
 
-A person or an agent can give a lane an instruction in words. The shared
-client library (`pilotage-client-session`, `mission::instruction`) makes
-the request to the instruction interpreter and checks its reply. The
-request names the chain of command that the client follows and the
-actions that each lane offers now. The reply names one action, one lane
-and the slots of that action. The App and the command-line operator use
-the same library, so a person and an agent get the same result from the
-same words.
+A person or an agent can give the chain of command an instruction in
+words. The shared client library (`pilotage-client-session`,
+`mission::instruction`) makes the request to the instruction interpreter
+and checks its reply. The App and the command-line operator use the same
+library, so a person and an agent get the same result from the same
+words.
 
-An instruction can become only these commands: hold, resume, a drafted
-move of unflown lines, and a drafted finish. It does not become approve,
-start or abort. A drafted change does not apply at once. The library
-refuses these replies:
+The actions are data in an action catalog (`mission::instruction::catalog`).
+Each action has these items:
 
-- A reply that names a lane that the client does not follow. The library
-  does not send the command to the lead above that lane.
+- A name and a description in words.
+- Typed parameters: a member lane, an amount, or an area reference.
+- The lane state that offers the action.
+- The effect of the action: the lane acts at once, or the lane drafts the
+  change and it waits for an approval.
+
+The library makes the interpreter request from the catalog and from the
+lanes that the client follows. An instruction becomes one or more steps.
+Each step is one action for one lane, in the order of the words. To add an
+action, add its descriptor and the function that builds its command. The
+descriptors serialize in the form that a lane can publish later, or that a
+tool server can give to an agent.
+
+The catalog does not contain approve, start or abort. A drafted change
+does not apply at once. The library refuses these replies:
+
+- A step that names a lane that the client does not follow. The library
+  does not send the step to the lead above that lane.
 - A move that names a member that the lane does not lead.
 - A move whose amount is not in the words of the person.
+- A step that the lane does not offer in its current state.
 
-The client shows the draft in fixed words that the library makes from
-the command. The client sends the command only when a person or an agent
-confirms the draft. A drafted change then waits for an approval, as other
-drafts do.
-
-The lanes declare their actions, so the interpreter request and the
-draft display come from the lanes and not from client code. A new
-mission kind or a new kind of change adds its action to the lanes and to
-the library. It does not add a control to the App.
+An area reference is the name of a place or of an area that a person drew.
+The client finds the area on its map before the step becomes a command.
+The interpreter does not give coordinates. The client shows each step in
+fixed words that the library makes from the step, and it sends the steps
+only when a person or an agent confirms them. A drafted change then waits
+for an approval, as other drafts do.
 
 ### Capability, authority, resources and conditions are separate axes
 

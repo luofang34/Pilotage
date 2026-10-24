@@ -127,10 +127,13 @@ impl Output {
         } else {
             Self::json(&json!({
                 "event": "draft",
-                "lane": instruction.lane,
                 "understood": instruction.understood,
                 "describes": instruction.describe(),
-                "command": instruction.command,
+                "steps": instruction
+                    .steps
+                    .iter()
+                    .map(|s| json!({"lane": s.lane, "action": s.action, "command": s.command()}))
+                    .collect::<Vec<_>>(),
             }));
         }
     }

@@ -1,20 +1,24 @@
-//! Instructions in a person's words, interpreted into one [`MissionCommand`]
-//! for one lane of the chain of command (ADR-0052, instruction
-//! interpretation). The interpreter is a language model behind an
-//! OpenAI-style chat endpoint; this module builds its request from the
-//! lanes the client follows and checks its reply against them. It does no
-//! I/O: the caller sends the request.
+//! Instructions in a person's words, interpreted into steps for the lanes of the chain
+//! of command (ADR-0052, instruction interpretation). The interpreter is a language
+//! model behind an OpenAI-style chat endpoint; this module builds its request from the
+//! lanes the client follows and the action [`catalog`], and checks its reply against
+//! both. It does no I/O: the caller sends the request.
 //!
-//! What an instruction may become is limited to what the lanes offer and
-//! what changes the plan only through review: hold, resume, a drafted move
-//! of unflown lines, and a drafted finish. An instruction never approves,
-//! starts or aborts, and a drafted change never applies at once, so the
-//! person who reads the draft decides.
+//! An instruction becomes one or more steps, each one catalog action for one lane, in
+//! the order the words ask. What a step may be is limited to what the catalog holds and
+//! what the lane offers now. An instruction never approves, starts or aborts, a drafted
+//! change never applies at once, and a step that names a place waits for the client to
+//! find it on its map, so the person who reads the draft decides.
 
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
-use super::{ApprovalPolicy, MissionCommand, MissionDesk, Reassign};
+use super::{ApprovalPolicy, MissionCommand, MissionDesk};
+
+pub mod catalog;
+mod prompt;
+
+use catalog::Action;
 
 /// One lane the client can send to, as the interpreter sees it.
 #[derive(Clone, Debug, PartialEq)]
@@ -27,7 +31,7 @@ pub struct ChainLane {
     pub offers: Offers,
 }
 
-/// The instruction actions a lane offers now.
+/// What a lane offers now.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Offers {
     /// The run may hold.
@@ -36,6 +40,8 @@ pub struct Offers {
     pub resume: bool,
     /// A change to the plan may be drafted.
     pub revise: bool,
+    /// A new objective may be proposed: the lane is idle or its run ended.
+    pub propose: bool,
 }
 
 impl ChainLane {
@@ -51,29 +57,59 @@ impl ChainLane {
                 hold: offered.hold,
                 resume: offered.resume,
                 revise: offered.revise,
+                propose: offered.propose,
             },
         })
     }
 }
 
-/// An instruction the interpreter understood.
+/// An instruction the interpreter understood: its steps, in order.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Instruction {
-    /// The lane the command goes to.
-    pub lane: String,
     /// The interpreter's restatement, for the person to check.
     pub understood: String,
-    /// The command.
-    pub command: MissionCommand,
+    /// The steps, in the order the words ask.
+    pub steps: Vec<Step>,
 }
 
-impl Instruction {
-    /// What sending the command does, in fixed words built from the command
-    /// itself, so the person reads what is sent and not only the
-    /// interpreter's restatement.
+/// One catalog action for one lane.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Step {
+    /// The lane it goes to.
+    pub lane: String,
+    /// The catalog action's name.
+    pub action: String,
+    /// What it became.
+    pub drafted: Drafted,
+}
+
+/// What a step became.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Drafted {
+    /// A command the lane can take as it is.
+    Command(MissionCommand),
+    /// A new survey of the area the words name, which the client finds on its
+    /// map, as a drawn area or a named place, before it proposes it.
+    Survey {
+        /// The area as the words name it.
+        area: String,
+    },
+}
+
+impl Step {
+    /// What sending the step does, in fixed words built from the step itself, so the
+    /// person reads what is sent and not only the interpreter's restatement.
     pub fn describe(&self) -> String {
         let lane = &self.lane;
-        match &self.command {
+        let command = match &self.drafted {
+            Drafted::Survey { area } => {
+                return format!(
+                    "survey \"{area}\" with {lane}: the area is found on the map first, then {lane} proposes a plan for approval"
+                );
+            }
+            Drafted::Command(command) => command,
+        };
+        match command {
             MissionCommand::Hold {} => format!("{lane} holds in place and keeps its plan"),
             MissionCommand::Resume {} => format!("{lane} resumes its held plan"),
             MissionCommand::Revise {
@@ -90,6 +126,22 @@ impl Instruction {
             other => format!("{lane}: {other:?}"),
         }
     }
+
+    /// The command to send, when the step needs nothing more.
+    pub fn command(&self) -> Option<&MissionCommand> {
+        match &self.drafted {
+            Drafted::Command(command) => Some(command),
+            Drafted::Survey { .. } => None,
+        }
+    }
+}
+
+impl Instruction {
+    /// Every step's description, in order.
+    pub fn describe(&self) -> String {
+        let steps: Vec<String> = self.steps.iter().map(Step::describe).collect();
+        steps.join("; then ")
+    }
 }
 
 /// Why a reply is not an instruction the lanes can take.
@@ -101,13 +153,12 @@ pub enum InstructionError {
     /// The interpreter found no command for the instruction.
     #[error("no command fits: {0}")]
     Unable(String),
-    /// The reply names a lane this client does not follow, so it cannot
-    /// send the command there.
+    /// A step names a lane this client does not follow, so it cannot send it there.
     #[error(
         "{0} is not a lane this client follows; send the instruction from a client that follows it"
     )]
     UnknownLane(String),
-    /// The lane does not offer the action now.
+    /// The lane does not offer the action now, or the catalog holds no such action.
     #[error("{lane} does not offer {action} now")]
     NotOffered {
         /// The lane.
@@ -129,15 +180,23 @@ pub enum InstructionError {
     /// moves, so the interpreter never supplies the number.
     #[error("say how much moves: a number, a percentage, or a word such as half or all")]
     NeedsAmount,
+    /// A new survey names no area.
+    #[error("say which area to survey: a place on the map or an area drawn on it")]
+    NeedsArea,
+    /// The lane runs a plan, and only an idle lane takes a new survey now.
+    #[error("{0} is running a plan; a new survey waits until it ends, or abort it first")]
+    Busy(String),
     /// A move's fraction is outside (0, 1].
     #[error("a move needs a fraction above 0 and at most 1, not {0}")]
     Fraction(f64),
 }
 
-/// The chain of command an instruction is interpreted against.
+/// The chain of command an instruction is interpreted against, with the actions the
+/// instruction may become.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Chain {
     lanes: Vec<ChainLane>,
+    actions: Vec<Action>,
 }
 
 /// The reply the request's schema asks for.
@@ -145,17 +204,17 @@ pub struct Chain {
 #[serde(deny_unknown_fields)]
 struct Reply {
     understood: String,
-    action: String,
-    lane: String,
-    from: String,
-    to: String,
-    fraction: f64,
+    steps: Vec<Map<String, Value>>,
 }
 
 impl Chain {
-    /// The chain the lanes `lanes` form; each is one the client can send to.
+    /// The chain the lanes `lanes` form, each one the client can send to, with the
+    /// [`catalog::standard`] actions.
     pub fn new(lanes: Vec<ChainLane>) -> Self {
-        Self { lanes }
+        Self {
+            lanes,
+            actions: catalog::standard(),
+        }
     }
 
     /// The lanes, as given.
@@ -163,8 +222,13 @@ impl Chain {
         &self.lanes
     }
 
-    /// The chat request that asks the interpreter for one command for
-    /// `instruction`, with `selected` naming what the person has selected.
+    /// The actions an instruction may become.
+    pub fn actions(&self) -> &[Action] {
+        &self.actions
+    }
+
+    /// The chat request that asks the interpreter for the steps of `instruction`, with
+    /// `selected` naming what the person has selected.
     pub fn request(&self, instruction: &str, selected: &[String]) -> Value {
         json!({
             "temperature": 0,
@@ -179,14 +243,13 @@ impl Chain {
         })
     }
 
-    /// The instruction the chat `response` to `instruction` holds, checked
-    /// against the chain and against the instruction's own words.
+    /// The instruction the chat `response` to `instruction` holds, every step checked
+    /// against the chain, the catalog and the instruction's own words.
     ///
     /// # Errors
     ///
-    /// Returns [`InstructionError`] when the response holds no reply of the
-    /// requested form, the reply names something the chain cannot take, or
-    /// it states an amount the instruction does not.
+    /// Returns [`InstructionError`] for the first step the lanes cannot take, or when the
+    /// response holds no reply of the requested form.
     pub fn parse(
         &self,
         instruction: &str,
@@ -198,138 +261,57 @@ impl Chain {
             .ok_or_else(|| InstructionError::Malformed("no message content".to_owned()))?;
         let reply: Reply = serde_json::from_str(content)
             .map_err(|e| InstructionError::Malformed(e.to_string()))?;
-        if reply.action == "move_lines" && !states_an_amount(instruction) {
-            return Err(InstructionError::NeedsAmount);
+        if reply.steps.is_empty() || reply.steps.len() > prompt::MAX_STEPS {
+            return Err(InstructionError::Malformed(format!(
+                "{} steps",
+                reply.steps.len()
+            )));
         }
-        self.check(reply)
+        let steps = reply
+            .steps
+            .iter()
+            .map(|step| self.step(step, instruction, &reply.understood))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Instruction {
+            understood: reply.understood,
+            steps,
+        })
     }
 
-    fn check(&self, reply: Reply) -> Result<Instruction, InstructionError> {
-        if reply.action == "unable" {
-            return Err(InstructionError::Unable(reply.understood));
+    fn step(
+        &self,
+        args: &Map<String, Value>,
+        words: &str,
+        understood: &str,
+    ) -> Result<Step, InstructionError> {
+        let field = |name: &str| {
+            args.get(name)
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned()
+        };
+        let (name, lane_name) = (field("action"), field("lane"));
+        if name == "unable" {
+            return Err(InstructionError::Unable(understood.to_owned()));
         }
         let lane = self
             .lanes
             .iter()
-            .find(|l| l.lane == reply.lane)
-            .ok_or_else(|| InstructionError::UnknownLane(reply.lane.clone()))?;
-        let not_offered = || InstructionError::NotOffered {
-            lane: lane.lane.clone(),
-            action: reply.action.clone(),
-        };
-        let command = match reply.action.as_str() {
-            "hold" if lane.offers.hold => MissionCommand::Hold {},
-            "resume" if lane.offers.resume => MissionCommand::Resume {},
-            "finish" if lane.offers.revise => revise(None, true),
-            "move_lines" if lane.offers.revise => {
-                let led = |m: &str| lane.members.iter().any(|x| x == m);
-                if reply.from == reply.to || !led(&reply.from) || !led(&reply.to) {
-                    return Err(InstructionError::Members {
-                        lane: lane.lane.clone(),
-                        from: reply.from,
-                        to: reply.to,
-                    });
-                }
-                if !(reply.fraction > 0.0 && reply.fraction <= 1.0) {
-                    return Err(InstructionError::Fraction(reply.fraction));
-                }
-                revise(
-                    Some(Reassign {
-                        from: reply.from,
-                        to: reply.to,
-                        fraction: reply.fraction,
-                    }),
-                    false,
-                )
-            }
-            _ => return Err(not_offered()),
-        };
-        Ok(Instruction {
-            lane: lane.lane.clone(),
-            understood: reply.understood,
-            command,
-        })
-    }
-
-    /// The actions any lane offers now, always with `unable`.
-    fn actions(&self) -> Vec<&'static str> {
-        let any = |f: fn(&Offers) -> bool| self.lanes.iter().any(|l| f(&l.offers));
-        let mut actions = Vec::new();
-        if any(|o| o.hold) {
-            actions.push("hold");
-        }
-        if any(|o| o.resume) {
-            actions.push("resume");
-        }
-        if any(|o| o.revise) {
-            actions.extend(["finish", "move_lines"]);
-        }
-        actions.push("unable");
-        actions
-    }
-
-    fn schema(&self) -> Value {
-        // Every lane the chain names may receive the command in the reply, so
-        // an instruction about a lane this client does not follow is refused
-        // rather than sent to the lead above it.
-        let mut lanes: Vec<&str> = self
-            .lanes
+            .find(|l| l.lane == lane_name)
+            .ok_or_else(|| InstructionError::UnknownLane(lane_name.clone()))?;
+        let action = self
+            .actions
             .iter()
-            .flat_map(|l| {
-                std::iter::once(l.lane.as_str()).chain(l.members.iter().map(String::as_str))
-            })
-            .collect();
-        lanes.sort_unstable();
-        lanes.dedup();
-        let mut names = lanes.clone();
-        names.push("");
-        json!({
-            "type": "object",
-            "properties": {
-                "understood": {"type": "string"},
-                "action": {"type": "string", "enum": self.actions()},
-                "lane": {"type": "string", "enum": lanes},
-                "from": {"type": "string", "enum": names},
-                "to": {"type": "string", "enum": names},
-                "fraction": {"type": "number"},
-            },
-            "required": ["understood", "action", "lane", "from", "to", "fraction"],
-            "additionalProperties": false,
+            .find(|a| a.name == name)
+            .ok_or_else(|| InstructionError::NotOffered {
+                lane: lane_name.clone(),
+                action: name.clone(),
+            })?;
+        Ok(Step {
+            lane: lane_name,
+            action: name,
+            drafted: catalog::build(action, lane, args, words)?,
         })
-    }
-
-    fn prompt(&self, selected: &[String]) -> String {
-        let mut text = String::from(
-            "You turn an operator's instruction into one command for one lane of a chain of command of uncrewed aircraft.\nChain:\n",
-        );
-        for lane in &self.lanes {
-            let leads = if lane.members.is_empty() {
-                String::new()
-            } else {
-                format!(" leads {}", lane.members.join(", "))
-            };
-            text.push_str(&format!("- {}{leads}\n", lane.lane));
-        }
-        text.push_str("Actions:\n");
-        for action in self.actions() {
-            text.push_str(match action {
-                "hold" => "- hold: stop in place and keep the plan.\n",
-                "resume" => "- resume: continue a held plan.\n",
-                "finish" => "- finish: end after the lines in progress and return home.\n",
-                "move_lines" => "- move_lines: move a fraction (0..1] of the unflown lines of member \"from\" to member \"to\"; both are members \"lane\" leads.\n",
-                _ => "- unable: no action fits, for example a new kind of mission; say why in \"understood\".\n",
-            });
-        }
-        text.push_str(
-            "\"lane\" receives the command: the lowest lane that leads everything the instruction names. Use \"\" and 0 for fields an action does not use. Restate the command in \"understood\".\n",
-        );
-        if !selected.is_empty() {
-            text.push_str(&format!(
-                "The operator has selected: {}. Words such as \"these\" or \"them\" mean the selection.\n",
-                selected.join(", ")
-            ));
-        }
-        text
     }
 }
 
@@ -350,16 +332,6 @@ fn states_an_amount(instruction: &str) -> bool {
         || lower
             .split(|c: char| !c.is_alphanumeric())
             .any(|word| WORDS.iter().any(|w| word.starts_with(w)))
-}
-
-fn revise(reassign: Option<Reassign>, finish: bool) -> MissionCommand {
-    MissionCommand::Revise {
-        objective: None,
-        reassign,
-        finish,
-        // A person reads every draft before it applies.
-        within_envelope: false,
-    }
 }
 
 #[cfg(test)]
