@@ -1,7 +1,7 @@
 use pilotage_protocol::wire;
 use wire::mission_intent::Action;
 
-use super::{ApprovalPolicy, DeskRefusal, IntentKind, MissionCommand, MissionDesk, SurveyFile};
+use super::{ApprovalPolicy, DeskRefusal, MissionCommand, MissionDesk, SurveyFile};
 
 /// The objective with every field named.
 const FILE: &str = r#"{"title": "Battlefield to Nassau Hall",
@@ -132,7 +132,8 @@ fn approve_takes_the_held_proposal_under_the_default_policy() {
     let empty = MissionDesk::new("test", 7);
     let refused = empty.resolve(&command, 1_000).unwrap_err();
     assert_eq!(refused, DeskRefusal::NoProposal);
-    // A proposal another client made is approved only under a stated ceiling.
+    // A proposal this client has not seen is never approved, whatever ceiling
+    // the policy states.
     let unseen = MissionCommand::Approve {
         digest: Some("abce".to_owned()),
         policy: ApprovalPolicy {
@@ -140,81 +141,61 @@ fn approve_takes_the_held_proposal_under_the_default_policy() {
             ..ApprovalPolicy::default()
         },
     };
-    let Ok(Action::Approve(approval)) = empty.resolve(&unseen, 1_000) else {
-        panic!("an approval");
+    assert_eq!(
+        empty.resolve(&unseen, 1_000),
+        Err(DeskRefusal::UnknownDigest("abce".to_owned()))
+    );
+}
+
+/// Sends a fetch through `desk` and files the lane's answer, the proposal
+/// `digest`.
+fn fetched(desk: &mut MissionDesk, digest: &[u8]) {
+    let mut engine = crate::tests::engine();
+    crate::tests::admit(&mut engine, 1, 1);
+    let Ok(action) = desk.resolve(&MissionCommand::Fetch {}, 0) else {
+        panic!("a fetch");
     };
-    assert_eq!(approval.proposal_digest, b"\xab\xce");
-    assert_eq!(approval.envelope.unwrap().max_height_m, 120.0);
-}
-
-#[test]
-fn start_names_the_lanes_proposal_and_offers_follow_the_state() {
-    let mut desk = proposed(b"\x01");
-    let policy = ApprovalPolicy::default();
-    let offered = desk.offered(true, &policy);
-    assert_eq!(offered.approve, Some(70.0));
-    assert!(offered.propose && !offered.start && !offered.hold);
-    assert_eq!(desk.offered(false, &policy), super::Offered::default());
-
-    desk.on_status(status(wire::MissionLaneState::Admitted, b"\x01"));
-    let start = desk.resolve(&MissionCommand::Start { digest: None }, 0);
     assert_eq!(
-        start,
-        Ok(Action::Start(wire::MissionStart {
-            proposal_digest: vec![1]
-        }))
+        action,
+        Action::Fetch(wire::MissionFetch {
+            digest: digest.to_vec()
+        })
     );
-    desk.on_status(status(wire::MissionLaneState::Running, b"\x01"));
-    let view = desk.view(true, &policy).unwrap();
-    assert_eq!(view.state, "running");
-    assert_eq!(
-        view.offered,
-        vec![IntentKind::Hold, IntentKind::Abort, IntentKind::Revise]
-    );
-    let json = serde_json::to_value(&view).unwrap();
-    assert_eq!(
-        json["offered"],
-        serde_json::json!(["hold", "abort", "revise"])
-    );
-    assert_eq!(json["proposal"]["digest"], "01");
-}
-
-#[test]
-fn a_receipt_for_an_intent_this_desk_did_not_send_changes_nothing() {
-    let mut desk = proposed(b"\x01");
-    let stray = wire::MissionReceipt {
-        request_id: "someone-else-1".to_owned(),
-        outcome: wire::MissionReceiptOutcome::Refused as i32,
+    let (request_id, _) = desk.send(&engine, action).unwrap();
+    desk.on_receipt(wire::MissionReceipt {
+        request_id,
+        outcome: wire::MissionReceiptOutcome::Accepted as i32,
+        proposal: Some(proposal(digest)),
         ..wire::MissionReceipt::default()
-    };
-    assert!(desk.on_receipt(stray).is_none());
-    assert!(desk.receipt().unwrap().accepted());
+    })
+    .unwrap();
 }
 
 #[test]
-fn a_proposal_another_client_made_is_approved_from_the_lanes_status() {
+fn a_proposal_another_client_made_is_approved_only_once_fetched() {
     let mut desk = MissionDesk::new("person", 7);
     let mut named = status(wire::MissionLaneState::Proposed, b"\x42");
     named.height_m = 110.0;
     desk.on_status(named);
-    assert_eq!(
-        desk.offered(true, &ApprovalPolicy::default()).approve,
-        Some(120.0)
-    );
     let command = MissionCommand::Approve {
         digest: None,
         policy: ApprovalPolicy::default(),
     };
+    // The lane's summary does not stand for the plan.
+    assert_eq!(desk.offered(true, &ApprovalPolicy::default()).approve, None);
+    assert_eq!(desk.resolve(&command, 0), Err(DeskRefusal::NotHeld));
+    assert_eq!(desk.unseen_proposal(), Some(b"\x42".to_vec()));
+    fetched(&mut desk, b"\x42");
+    assert_eq!(desk.unseen_proposal(), None);
+    assert_eq!(
+        desk.offered(true, &ApprovalPolicy::default()).approve,
+        Some(70.0),
+        "sized by the fetched plan's own height"
+    );
     let Ok(Action::Approve(approval)) = desk.resolve(&command, 0) else {
         panic!("an approval");
     };
     assert_eq!(approval.proposal_digest, b"\x42");
-    assert_eq!(approval.envelope.unwrap().max_height_m, 120.0);
-    // Without a height the lane states, the policy must state one.
-    let mut unbounded = status(wire::MissionLaneState::Proposed, b"\x42");
-    unbounded.height_m = 0.0;
-    desk.on_status(unbounded);
-    assert_eq!(desk.resolve(&command, 0), Err(DeskRefusal::NoHeight));
 }
 
 #[test]
@@ -243,21 +224,23 @@ fn a_revision_continues_the_lanes_plan_and_its_draft_is_what_approve_names() {
     let both: MissionCommand = serde_json::from_str(both).unwrap();
     assert_eq!(desk.resolve(&both, 0), Err(DeskRefusal::RevisionShape));
 
-    // A drafted revision is what an approval names, sized by the lane.
+    // A drafted revision is what an approval names, once this client holds it.
     running.successor = Some(wire::MissionSuccessor {
         digest: b"\x02".to_vec(),
         state: wire::MissionSuccessorState::Drafted as i32,
         ..wire::MissionSuccessor::default()
     });
     desk.on_status(running);
-    assert_eq!(
-        desk.offered(true, &ApprovalPolicy::default()).approve,
-        Some(120.0)
-    );
     let approve = MissionCommand::Approve {
         digest: None,
         policy: ApprovalPolicy::default(),
     };
+    assert_eq!(desk.resolve(&approve, 0), Err(DeskRefusal::NotHeld));
+    fetched(&mut desk, b"\x02");
+    assert_eq!(
+        desk.offered(true, &ApprovalPolicy::default()).approve,
+        Some(70.0)
+    );
     let Ok(Action::Approve(approval)) = desk.resolve(&approve, 0) else {
         panic!("an approval");
     };

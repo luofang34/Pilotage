@@ -76,6 +76,8 @@ pub enum MissionCommand {
         /// The member.
         member: String,
     },
+    /// Ask the lane for the full proposal this client has not seen.
+    Fetch {},
 }
 
 /// Part of one member's unflown lines, flown by another member.
@@ -112,6 +114,8 @@ pub enum IntentKind {
     Revise,
     /// State that a lost member is down.
     MemberDown,
+    /// Ask for a full proposal.
+    Fetch,
 }
 
 impl MissionCommand {
@@ -126,6 +130,8 @@ impl MissionCommand {
             Self::Hold {} => IntentKind::Hold,
             Self::Resume {} => IntentKind::Resume,
             Self::Abort {} => IntentKind::Abort,
+            Self::MemberDown { .. } => IntentKind::MemberDown,
+            Self::Fetch {} => IntentKind::Fetch,
         }
     }
 }
@@ -145,6 +151,7 @@ impl IntentKind {
             Action::Skip(_) => Self::Skip,
             Action::Revise(_) => Self::Revise,
             Action::MemberDown(_) => Self::MemberDown,
+            Action::Fetch(_) => Self::Fetch,
         }
     }
 
@@ -161,6 +168,7 @@ impl IntentKind {
             Self::Skip => "Skip",
             Self::Revise => "Revise",
             Self::MemberDown => "MemberDown",
+            Self::Fetch => "Fetch",
         }
     }
 }

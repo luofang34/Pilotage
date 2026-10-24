@@ -236,6 +236,13 @@ message MissionMemberDown {
   string member = 1;
 }
 
+// A request for the full proposal that `digest` names: the lane's plan or
+// a drafted revision; empty names the lane's plan. The receipt carries it.
+// A client approves only a proposal that it holds in full.
+message MissionFetch {
+  bytes digest = 1;
+}
+
 // A request from a principal to a lane. Every intent gets one receipt.
 message MissionIntent {
   // Chosen by the sender; the receipt echoes it.
@@ -250,6 +257,7 @@ message MissionIntent {
     MissionSkip skip = 16;
     MissionRevise revise = 17;
     MissionMemberDown member_down = 18;
+    MissionFetch fetch = 19;
   }
 }
 
@@ -265,7 +273,8 @@ message MissionReceipt {
   string request_id = 1;
   MissionReceiptOutcome outcome = 2;
   string reason = 3;
-  // The proposal a `propose` intent compiled.
+  // The proposal a `propose` or `revise` intent compiled, or the one a
+  // `fetch` intent names.
   MissionProposal proposal = 4;
   string lane = 5;
 }

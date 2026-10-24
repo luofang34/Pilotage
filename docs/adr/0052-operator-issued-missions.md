@@ -62,6 +62,10 @@ the digest of its predecessor, validity, and releasability.
   during a run, the lane applies that recovery one time. Then the run does
   not resume, and an admitted revision does not apply, until a new
   approval of the plan replaces the expired approval.
+  revise, to allocate work, and to change the objective. A client approves
+  only a proposal that it holds in full. The lane's status names a
+  proposal only by its digest and a summary, so a client that did not
+  make the proposal fetches it from the lane before it approves it.
 - **Plan.** The executable `MissionDocument`
   ([ADR-0041](0041-one-mission-sequencing-core.md)): immutable,
   digest-identified, bound to a verified execution strategy and its

@@ -179,6 +179,7 @@ impl Lane {
             Some(Action::MemberDown(_)) => {
                 Err("a vehicle lane has no members; send it to the team".to_owned())
             }
+            Some(Action::Fetch(fetch)) => self.fetch(&fetch.digest),
             Some(Action::Skip(_)) => Err(
                 "skipping a task needs a successor plan, which this lane does not compile yet"
                     .to_owned(),
@@ -284,6 +285,22 @@ impl Lane {
             }))),
             None,
         ))
+    }
+
+    /// The full proposal `digest` names: the plan, or a drafted revision;
+    /// an empty digest names the plan.
+    fn fetch(
+        &self,
+        digest: &[u8],
+    ) -> Result<(Option<LaneEffect>, Option<wire::MissionProposal>), String> {
+        let plan = self.proposal.as_ref().map(|c| &c.proposal);
+        let revision = self.successor.as_ref().map(|s| &s.compiled.proposal);
+        [plan, revision]
+            .into_iter()
+            .flatten()
+            .find(|p| digest.is_empty() || p.digest == digest)
+            .map(|p| (None, Some(p.clone())))
+            .ok_or_else(|| "the lane holds no proposal with that digest".to_owned())
     }
 
     fn abort(&mut self) -> Result<(Option<LaneEffect>, Option<wire::MissionProposal>), String> {
