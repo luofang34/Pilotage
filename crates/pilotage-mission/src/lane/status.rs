@@ -62,6 +62,7 @@ impl Lane {
             holds: self.hold_reasons(),
             released: self.released.clone(),
             handovers: Vec::new(),
+            approvals_needed: self.approval_needs(),
             predecessor_run_id: self
                 .run
                 .as_ref()

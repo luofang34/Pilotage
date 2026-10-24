@@ -343,6 +343,7 @@ pub(super) fn team_status(team: &TeamLane) -> wire::MissionStatus {
         .map(|t| t.name.clone())
         .collect::<Vec<_>>()
         .join(", ");
+    let holds = hold_reasons(team, state);
     wire::MissionStatus {
         lane: team.config.name.clone(),
         state: state as i32,
@@ -370,7 +371,8 @@ pub(super) fn team_status(team: &TeamLane) -> wire::MissionStatus {
             .collect(),
         member_link: wire::MemberLink::Unspecified as i32,
         execution: None,
-        holds: hold_reasons(team, state),
+        approvals_needed: team.approval_needs(&holds),
+        holds,
         released: Vec::new(),
         handovers: team.handovers(),
         predecessor_run_id: String::new(),

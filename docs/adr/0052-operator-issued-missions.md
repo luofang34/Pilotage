@@ -92,6 +92,13 @@ the digest of its predecessor, validity, and releasability.
   after its members answered. A team reports `Held` only when each member
   that can still fly reports that it holds, and it reports the reasons of
   all those members.
+  Each lane status lists the approvals that the lane needs: its plan
+  before the start, a drafted successor, and the renewal of an expired
+  approval. A team names itself on each approval that it passes down to a
+  member. When that approval is in force, the team owes the approval of
+  its own share of a revision and the renewal of what it granted, and the
+  need names the team. A client raises a need for a person only when no
+  lane owes it. It does not find this from the name of a session.
   A client approves only a proposal that it holds in full. The lane's status names a
   proposal only by its digest and a summary, so a client that did not
   make the proposal fetches it from the lane before it approves it.

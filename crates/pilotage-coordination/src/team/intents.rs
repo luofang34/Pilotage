@@ -279,6 +279,7 @@ pub(super) fn delegate(
         envelope: Some(envelope),
         approved_unix_ms: team.approved_unix_ms,
         run_id: String::new(),
+        delegated_by: issuer.to_owned(),
         proposal_format: wire::MissionProposalFormat::V1 as i32,
     }
 }
