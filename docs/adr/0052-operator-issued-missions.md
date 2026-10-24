@@ -207,8 +207,11 @@ assignment. A new coordinator fences the old one at the vehicle's control
 endpoint; a new name alone is insufficient. The work and the space
 reserved for an aircraft that cannot be contacted are not reassigned as if
 it had stopped; reassignment needs a release acknowledgement, a valid
-expiry with fencing, or work preallocated as disjoint. Loss of progress is
-preferred to conflicting control. Deadlines bind to a host's boot and
+expiry with fencing, or work preallocated as disjoint. A team lane keeps
+the work of a member with a lost link, and its line in progress, reserved
+to that member until the member reports again or an approver states, as a
+separate act, that the member is down. Loss of progress is preferred to
+conflicting control. Deadlines bind to a host's boot and
 clock identity, and schedules across vehicles record their synchronization
 uncertainty. A host restart reconciles state; it does not replay commands.
 When an endpoint dies or loses its aircraft link, its adapter reports the

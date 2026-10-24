@@ -116,8 +116,8 @@ pub struct TeamLane {
     run_id: Option<String>,
     reflies: Vec<Refly>,
     revision: Option<revision::Revision>,
-    /// Members whose link is lost, and whether a person released one:
-    /// its lines went to others and the team no longer waits for it.
+    /// Members whose link is lost, and whether a person stated one down:
+    /// its lines may go to others and the team no longer waits for it.
     lost: BTreeMap<String, bool>,
     requests: u64,
     detail: String,
@@ -185,6 +185,7 @@ impl TeamLane {
                 Action::Abort(wire::MissionAbort {}),
             ),
             Some(Action::Revise(revise)) => return self.on_revise(id, revise, context),
+            Some(Action::MemberDown(down)) => self.member_down(&down.member),
             Some(Action::Skip(_)) => {
                 Err("a team skips a task through a revision; draft one instead".to_owned())
             }

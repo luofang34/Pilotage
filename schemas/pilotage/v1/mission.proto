@@ -216,6 +216,13 @@ message MissionSkip {
   string task_id = 1;
 }
 
+// A person states that a team member whose link is lost is down: it no
+// longer flies. Until a member reports that it stopped or a person states
+// this, its work and its line in progress stay reserved to it.
+message MissionMemberDown {
+  string member = 1;
+}
+
 // A request from a principal to a lane. Every intent gets one receipt.
 message MissionIntent {
   // Chosen by the sender; the receipt echoes it.
@@ -229,6 +236,7 @@ message MissionIntent {
     MissionAbort abort = 15;
     MissionSkip skip = 16;
     MissionRevise revise = 17;
+    MissionMemberDown member_down = 18;
   }
 }
 

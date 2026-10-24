@@ -71,6 +71,11 @@ pub enum MissionCommand {
     Resume {},
     /// End the plan; each vehicle stops in place for its pilot to take it home.
     Abort {},
+    /// State that a team member whose link is lost is down, so its work may move.
+    MemberDown {
+        /// The member.
+        member: String,
+    },
 }
 
 /// Part of one member's unflown lines, flown by another member.
@@ -105,6 +110,8 @@ pub enum IntentKind {
     Skip,
     /// Draft a change to the plan in progress.
     Revise,
+    /// State that a lost member is down.
+    MemberDown,
 }
 
 impl IntentKind {
@@ -121,6 +128,7 @@ impl IntentKind {
             Action::Abort(_) => Self::Abort,
             Action::Skip(_) => Self::Skip,
             Action::Revise(_) => Self::Revise,
+            Action::MemberDown(_) => Self::MemberDown,
         }
     }
 
@@ -136,6 +144,7 @@ impl IntentKind {
             Self::Abort => "Abort",
             Self::Skip => "Skip",
             Self::Revise => "Revise",
+            Self::MemberDown => "MemberDown",
         }
     }
 }

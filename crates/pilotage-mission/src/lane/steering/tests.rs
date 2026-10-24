@@ -82,3 +82,16 @@ fn an_approvers_hold_waits_for_an_approver() {
     steering.accepted(&hold, &agent());
     steering.admit(&mut resume, &agent()).unwrap();
 }
+
+#[test]
+fn only_an_approver_states_that_a_member_is_down() {
+    let steering = Steering::default();
+    let down = || {
+        intent(Action::MemberDown(wire::MissionMemberDown {
+            member: "SIM-3".to_owned(),
+        }))
+    };
+    let refused = steering.admit(&mut down(), &agent());
+    assert!(refused.is_err_and(|reason| reason.contains("approver secret")));
+    assert!(steering.admit(&mut down(), &human()).is_ok());
+}
