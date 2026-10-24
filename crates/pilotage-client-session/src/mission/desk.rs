@@ -99,7 +99,8 @@ pub struct MissionDesk {
     next: u64,
     outstanding: Vec<(String, IntentKind)>,
     status: Option<Box<wire::MissionStatus>>,
-    receipt: Option<FiledReceipt>,
+    /// The lane's latest answers, newest last.
+    answers: Vec<FiledReceipt>,
     proposal: Option<Box<wire::MissionProposal>>,
 }
 
@@ -114,7 +115,7 @@ impl MissionDesk {
             next: 0,
             outstanding: Vec::new(),
             status: None,
-            receipt: None,
+            answers: Vec::new(),
             proposal: None,
         }
     }
@@ -131,10 +132,35 @@ impl MissionDesk {
         self.status.as_deref()
     }
 
+    /// The request id the desk gives the intent it sends next.
+    #[must_use]
+    pub fn next_request(&self) -> String {
+        format!("{}-{}", self.prefix, self.next.wrapping_add(1))
+    }
+
+    /// The kind of the intent `request_id` names, when the desk sent it and remembers it.
+    #[must_use]
+    pub fn sent(&self, request_id: &str) -> Option<IntentKind> {
+        self.outstanding
+            .iter()
+            .find(|(id, _)| id == request_id)
+            .map(|(_, kind)| *kind)
+            .or_else(|| self.receipt_for(request_id).map(|r| r.kind))
+    }
+
     /// The answer to this client's latest intent.
     #[must_use]
     pub fn receipt(&self) -> Option<&FiledReceipt> {
-        self.receipt.as_ref()
+        self.answers.last()
+    }
+
+    /// The answer to the intent `request_id` names, while the desk remembers it.
+    #[must_use]
+    pub fn receipt_for(&self, request_id: &str) -> Option<&FiledReceipt> {
+        self.answers
+            .iter()
+            .rev()
+            .find(|r| r.request_id == request_id)
     }
 
     /// The lane's state, unspecified until the lane publishes one.
@@ -372,8 +398,11 @@ impl MissionDesk {
         if matches!(kind, IntentKind::Propose | IntentKind::Revise) && filed.accepted() {
             self.proposal = receipt.proposal.map(Box::new);
         }
-        self.receipt = Some(filed);
-        self.receipt.as_ref()
+        if self.answers.len() >= TRACKED_INTENTS {
+            self.answers.remove(0);
+        }
+        self.answers.push(filed);
+        self.answers.last()
     }
 
     /// Takes the lane's newest status.

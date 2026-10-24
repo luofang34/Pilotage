@@ -258,6 +258,52 @@ followed by runtime monitoring with trusted invariant templates that are
 independent of any model-generated specification. A model provider is
 replaceable, and no model class is tied to a level of autonomy.
 
+### Instructions in a person's words become drafts
+
+A person or an agent can give the chain of command an instruction in
+words. The shared client library (`pilotage-client-session`,
+`mission::instruction`) makes the request to the instruction interpreter
+and checks its reply. The App and the command-line operator use the same
+library, so a person and an agent get the same result from the same
+words.
+
+The actions are data in an action catalog (`mission::instruction::catalog`).
+Each action has these items:
+
+- A name and a description in words.
+- Typed parameters: a member lane, an amount, or an area reference.
+- The lane state that offers the action.
+- The effect of the action: the lane acts at once, or the lane drafts the
+  change and it waits for an approval.
+
+The library makes the interpreter request from the catalog and from the
+lanes that the client follows. An instruction becomes one or more steps.
+Each step is one action for one lane, in the order of the words. To add an
+action, add its descriptor and the function that builds its command. The
+descriptors serialize in the form that a lane can publish later, or that a
+tool server can give to an agent.
+
+The catalog does not contain approve, start or abort. A drafted change
+does not apply at once. The library refuses these replies:
+
+- A step that names a lane that the client does not follow. The library
+  does not send the step to the lead above that lane.
+- A move that names a member that the lane does not lead.
+- A move whose amount is not in the words of the person. When the words
+  state more than one amount, each amount applies only to the member that
+  it is nearest to. If the words do not tie one amount to the member, the
+  person must state it again.
+- A step that the lane does not offer in its current state.
+
+An area reference is the name of a place or of an area that a person drew.
+The client finds the area on its map before the step becomes a command.
+The interpreter does not give coordinates. The client shows each step in
+fixed words that the library makes from the step, and it sends the steps
+only when a person or an agent confirms them. The client sends one step
+at a time. It sends a step only after the lane accepts the step before
+it. If a lane refuses a step, the client does not send the steps after
+it. A drafted change then waits for an approval, as other drafts do.
+
 ### Capability, authority, resources and conditions are separate axes
 
 A vehicle's verified capability, the authority delegated to a principal,

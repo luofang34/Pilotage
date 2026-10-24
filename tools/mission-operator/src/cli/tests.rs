@@ -65,3 +65,12 @@ fn survey_agent_reads_its_objective_and_name() {
         "the objective is required"
     );
 }
+
+#[test]
+fn agent_mode_names_the_instruction_interpreter() {
+    let url = "http://127.0.0.1:8761/v1/chat/completions";
+    let command = parse(&args(&["--instruction-model", url, "agent"])).unwrap();
+    assert_eq!(command.action, Action::Agent);
+    assert_eq!(command.instruction_model.as_deref(), Some(url));
+    assert_eq!(parse(&args(&["agent"])).unwrap().instruction_model, None);
+}

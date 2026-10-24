@@ -1,8 +1,11 @@
 //! Agent mode: commands arrive on standard input, one JSON object per
 //! line, and are sent without waiting for their receipts. Receipts and
 //! status changes go out as they arrive. `{"command": "status"}` prints
-//! the lane's full view, with every task's path and evidence. The session
-//! ends when standard input closes.
+//! the lane's full view, with every task's path and evidence.
+//! `{"command": "instruct", "text": "..."}`, or for a person any line that
+//! is not JSON, interprets an instruction into a draft command, which
+//! `{"command": "confirm"}`, or for a person `y`, sends. The session ends
+//! when standard input closes.
 
 use pilotage_client_session::mission::MissionCommand;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -23,6 +26,7 @@ impl Session {
                             None => self.output.refused("desk", "the lane has published no status yet"),
                         }
                     }
+                    Some(line) if self.instruction_line(&line).await? => {}
                     Some(line) => match serde_json::from_str::<MissionCommand>(&line) {
                         Ok(command) => {
                             if let Some(request) = self.submit(&command).await? {
