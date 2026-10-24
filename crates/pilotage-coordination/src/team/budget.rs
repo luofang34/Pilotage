@@ -11,6 +11,7 @@
 use pilotage_protocol::wire;
 
 use super::TeamLane;
+use super::refly::ReflyState;
 
 impl TeamLane {
     /// Whether `member` is a team: its proposal binds member proposals.
@@ -68,8 +69,14 @@ impl TeamLane {
         member: &str,
         mut approval: wire::MissionApproval,
     ) -> wire::MissionApproval {
+        // A member flying an extra flight the team pays for spends nothing of
+        // its own in it, whatever approval reaches it there, such as a renewal.
+        let extra = self
+            .reflies
+            .iter()
+            .any(|r| r.member == member && r.in_progress() && r.state != ReflyState::Queued);
         if let Some(envelope) = approval.envelope.as_mut() {
-            envelope.max_refly_lines = self.refly_share(member);
+            envelope.max_refly_lines = if extra { 0 } else { self.refly_share(member) };
         }
         approval
     }

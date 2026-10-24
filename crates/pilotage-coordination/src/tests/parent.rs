@@ -295,4 +295,32 @@ fn a_member_team_flying_its_parents_re_flight_gets_no_budget_for_it() {
         [0],
         "TEAM flies the parent's re-flight with no budget"
     );
+    // A renewal while TEAM flies that extra flight gives it no budget either.
+    let status = parent.status();
+    let mut renewal = approval(&status.proposal_digest, 3);
+    renewal.run_id.clone_from(&status.run_id);
+    if let Some(envelope) = renewal.envelope.as_mut() {
+        envelope.bound = approved_bound();
+    }
+    let reply = parent.on_intent(&intent("r", Action::Approve(renewal)), &context("r"));
+    let renewed: Vec<u32> = reply
+        .intents
+        .iter()
+        .filter(|i| i.member == "TEAM")
+        .filter_map(|i| match &i.intent.action {
+            Some(Action::Approve(a)) => a.envelope.as_ref().map(|e| e.max_refly_lines),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(renewed, [0], "{}", parent.status().detail);
+}
+
+/// A bound around the area and every launch point.
+fn approved_bound() -> Vec<wire::GeoPoint> {
+    vec![
+        point(40.3300, -74.6760),
+        point(40.3300, -74.6610),
+        point(40.3400, -74.6610),
+        point(40.3400, -74.6760),
+    ]
 }
