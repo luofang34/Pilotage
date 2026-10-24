@@ -1,0 +1,161 @@
+{
+  "objective": {
+    "title": "Princeton Battlefield to Nassau Hall",
+    "area": [
+      [
+        40.331086,
+        -74.682164
+      ],
+      [
+        40.350486,
+        -74.661164
+      ],
+      [
+        40.347514,
+        -74.656436
+      ],
+      [
+        40.328114,
+        -74.677436
+      ]
+    ],
+    "launch": [
+      40.3393,
+      -74.6693,
+      40.0
+    ],
+    "height_m": 110,
+    "cruise_mps": 12,
+    "sidelap": 0.6,
+    "fov_deg": 69.6,
+    "min_usable_frames_per_line": 2,
+    "line_bearing_deg": 129.526
+  },
+  "command": {
+    "name": "COMMAND",
+    "launch": [
+      40.3393,
+      -74.6693,
+      40.0
+    ]
+  },
+  "sections": [
+    {
+      "name": "BATTLEFIELD",
+      "landmark": "Princeton Battlefield State Park",
+      "launch": [
+        40.3324,
+        -74.676476,
+        40.0
+      ],
+      "aircraft": [
+        {
+          "id": "B1",
+          "launch": [
+            40.3312,
+            -74.677738,
+            40.0
+          ]
+        },
+        {
+          "id": "B2",
+          "launch": [
+            40.3336,
+            -74.675213,
+            40.0
+          ]
+        }
+      ]
+    },
+    {
+      "name": "MERCER",
+      "landmark": "Einstein House, 112 Mercer Street",
+      "launch": [
+        40.3372,
+        -74.671425,
+        40.0
+      ],
+      "aircraft": [
+        {
+          "id": "M1",
+          "launch": [
+            40.336,
+            -74.672687,
+            40.0
+          ]
+        },
+        {
+          "id": "M2",
+          "launch": [
+            40.3384,
+            -74.670163,
+            40.0
+          ]
+        }
+      ]
+    },
+    {
+      "name": "SEMINARY",
+      "landmark": "Princeton Theological Seminary",
+      "launch": [
+        40.342,
+        -74.666375,
+        40.0
+      ],
+      "aircraft": [
+        {
+          "id": "S1",
+          "launch": [
+            40.3408,
+            -74.667637,
+            40.0
+          ]
+        },
+        {
+          "id": "S2",
+          "launch": [
+            40.3432,
+            -74.665113,
+            40.0
+          ]
+        }
+      ]
+    },
+    {
+      "name": "CAMPUS",
+      "landmark": "Nassau Hall",
+      "launch": [
+        40.3468,
+        -74.661325,
+        40.0
+      ],
+      "aircraft": [
+        {
+          "id": "C1",
+          "launch": [
+            40.3456,
+            -74.662588,
+            40.0
+          ]
+        },
+        {
+          "id": "C2",
+          "launch": [
+            40.348,
+            -74.660062,
+            40.0
+          ]
+        }
+      ]
+    }
+  ],
+  "airframe": {
+    "energy_wh": 77,
+    "cruise_power_w": 180
+  },
+  "fault": {
+    "aircraft": "B2",
+    "line": "line-06",
+    "kind": "dark"
+  }
+}
