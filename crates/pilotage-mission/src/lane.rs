@@ -11,6 +11,7 @@ mod compile;
 mod evidence;
 mod expiry;
 mod hold;
+mod needs;
 mod run;
 mod settle;
 mod status;
