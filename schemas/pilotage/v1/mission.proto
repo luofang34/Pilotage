@@ -281,6 +281,9 @@ enum MissionLaneState {
   MISSION_LANE_STATE_COMPLETE = 7;
   MISSION_LANE_STATE_ABORTED = 8;
   MISSION_LANE_STATE_FAILED = 9;
+  // A hold was accepted; the vehicle has not yet reported that it holds
+  // in place.
+  MISSION_LANE_STATE_HOLD_REQUESTED = 10;
 }
 
 enum MissionTaskState {
@@ -288,7 +291,8 @@ enum MissionTaskState {
   MISSION_TASK_STATE_PENDING = 1;
   MISSION_TASK_STATE_ACTIVE = 2;
   MISSION_TASK_STATE_DONE = 3;
-  // Flown, without the completion evidence the objective needs.
+  // Begun or flown, without the completion the objective needs: flown
+  // without enough evidence, or cut short by an abort.
   MISSION_TASK_STATE_INCOMPLETE = 4;
   MISSION_TASK_STATE_SKIPPED = 5;
 }

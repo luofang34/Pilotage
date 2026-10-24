@@ -163,7 +163,9 @@ impl TeamLane {
         self.statuses.get(member).is_some_and(|s| {
             matches!(
                 wire::MissionLaneState::try_from(s.state),
-                Ok(wire::MissionLaneState::Running | wire::MissionLaneState::Held)
+                Ok(wire::MissionLaneState::Running
+                    | wire::MissionLaneState::HoldRequested
+                    | wire::MissionLaneState::Held)
             )
         })
     }

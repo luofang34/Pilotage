@@ -58,7 +58,10 @@ impl Lane {
             };
             return self.propose(objective, context);
         }
-        if !matches!(self.state, State::Running | State::Held) {
+        if !matches!(
+            self.state,
+            State::Running | State::HoldRequested | State::Held
+        ) {
             return Err(format!("nothing to revise; the lane is {:?}", self.state));
         }
         let run = self.run.as_ref().ok_or("no run to revise")?;
@@ -201,7 +204,7 @@ impl Lane {
             .run
             .as_ref()
             .is_some_and(super::run::RunTracker::on_line);
-        if self.state == State::Held || !on_line {
+        if matches!(self.state, State::Held | State::HoldRequested) || !on_line {
             return self.switch();
         }
         self.detail = "revision admitted; it applies at the end of the line in progress".to_owned();
@@ -264,7 +267,9 @@ impl Lane {
     pub(super) fn successor_status(&self) -> Option<wire::MissionSuccessor> {
         let successor = self.successor.as_ref()?;
         let applies_after = match successor.stage {
-            Stage::Admitted if self.state == State::Held => "now: the run is held".to_owned(),
+            Stage::Admitted if matches!(self.state, State::Held | State::HoldRequested) => {
+                "now: the run is held".to_owned()
+            }
             Stage::Drafted | Stage::Admitted => self
                 .run
                 .as_ref()

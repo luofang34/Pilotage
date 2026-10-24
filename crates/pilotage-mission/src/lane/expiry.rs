@@ -18,7 +18,12 @@ impl Lane {
     /// applies the recovery it names and returns the effect for the host.
     pub fn on_clock(&mut self, now_unix_ms: u64) -> Option<LaneEffect> {
         self.clock_unix_ms = self.clock_unix_ms.max(now_unix_ms);
-        if self.expired || !matches!(self.state, State::Running | State::Held) {
+        if self.expired
+            || !matches!(
+                self.state,
+                State::Running | State::HoldRequested | State::Held
+            )
+        {
             return None;
         }
         let approval = self.approval.as_ref()?;
@@ -37,7 +42,7 @@ impl Lane {
         self.detail =
             "the approval expired; the run holds until its plan is approved again".to_owned();
         if self.state == State::Running {
-            self.state = State::Held;
+            self.state = State::HoldRequested;
             return Some(LaneEffect::Hold);
         }
         None
@@ -54,7 +59,7 @@ impl Lane {
 
     /// Resumes a held run under an approval still valid at `context`'s time.
     pub(super) fn resume(&mut self, context: &IntentContext) -> Outcome {
-        if self.state != State::Held {
+        if !matches!(self.state, State::Held | State::HoldRequested) {
             return Err(format!("not possible while the lane is {:?}", self.state));
         }
         let approval = self

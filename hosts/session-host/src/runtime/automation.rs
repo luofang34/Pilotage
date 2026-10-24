@@ -103,6 +103,9 @@ pub struct AutomationStatus {
     /// The vehicle disarmed or landed on its own during a flown phase, and
     /// the run ended for that reason.
     pub ended_by_vehicle: Option<&'static str>,
+    /// An operator's hold or an abort holds the vehicle, and the vehicle
+    /// reports that it is still.
+    pub holding: bool,
 }
 
 /// Where the plan comes from: a navdata snapshot the route expands

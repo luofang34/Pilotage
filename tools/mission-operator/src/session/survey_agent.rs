@@ -59,7 +59,7 @@ impl Session {
         let mut asked_for_this_hold = false;
         loop {
             match self.desk.state() {
-                Lane::Held if !asked_for_this_hold => {
+                Lane::Held | Lane::HoldRequested if !asked_for_this_hold => {
                     asked_for_this_hold = true;
                     self.output.note("the run is held; asking to resume it");
                     let resumed = self.ask(&MissionCommand::Resume {}).await?;
@@ -68,7 +68,7 @@ impl Session {
                             .note("not mine to resume; waiting for the person who held it");
                     }
                 }
-                Lane::Held => {}
+                Lane::Held | Lane::HoldRequested => {}
                 state => {
                     asked_for_this_hold = false;
                     if let Some(ended) = terminal(state) {
