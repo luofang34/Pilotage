@@ -111,6 +111,7 @@ pub fn approval(
                 on_expiry: policy.on_expiry.wire() as i32,
             }),
             approved_unix_ms: now_ms,
+            proposal_format: wire::MissionProposalFormat::V1 as i32,
         },
     ))
 }

@@ -32,7 +32,7 @@ pub use error::MissionBuildError;
 pub use lane::{
     FrameAssessment, FrameTicket, HOST_ISSUER, IntentContext, Lane, LaneConfig, LaneEffect,
     LaneReply, Requester, RunExecution, RunOrder, RunPlan, RunProgress, Steering, SurveyDefaults,
-    VerdictRefused, proposal_digest,
+    VerdictRefused,
 };
 pub use ownship::{OwnshipAltitude, OwnshipSample, TruthRole};
 pub use pilotage_mission_core::ExecutionTarget;

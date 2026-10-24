@@ -3,6 +3,9 @@
 //! its latest intent, and the intents not yet answered. A team lane and a
 //! vehicle's lane speak the same messages, so one desk serves both.
 
+use pilotage_protocol::proposal_record::{
+    FEATURE_RETURN_HOME, FEATURE_SURVEY_LINE, FEATURE_TEAM, SealedProposal,
+};
 use pilotage_protocol::wire;
 use wire::MissionLaneState as Lane;
 
@@ -14,6 +17,17 @@ mod resolve;
 /// Intents the desk remembers until the lane answers them; an answer to
 /// an older one is not attributed.
 const TRACKED_INTENTS: usize = 16;
+
+/// The execution features this client can show for review.
+const KNOWN_FEATURES: &[&str] = &[FEATURE_SURVEY_LINE, FEATURE_RETURN_HOME, FEATURE_TEAM];
+
+/// The proposal a receipt's record carries, when the record's digest names
+/// its body; the desk keeps nothing it cannot verify.
+fn opened(record: Option<wire::MissionProposalRecord>) -> Option<wire::MissionProposal> {
+    SealedProposal::open(record?)
+        .ok()
+        .map(|sealed| sealed.into_parts().0)
+}
 
 /// Why the desk built no intent.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -33,6 +47,10 @@ pub enum DeskRefusal {
     /// The text is not a hexadecimal digest.
     #[error("{0:?} is not a hexadecimal digest")]
     BadDigest(String),
+    /// The proposal needs execution features this client does not know, so
+    /// it cannot review it.
+    #[error("the proposal needs {0:?}, which this client does not know; it does not approve it")]
+    UnknownFeatures(Vec<String>),
     /// Neither the policy nor the objective states a height.
     #[error("no height bounds the approval: state policy.max_height_m")]
     NoHeight,
@@ -341,9 +359,9 @@ impl MissionDesk {
             lane: receipt.lane,
         };
         if kind == IntentKind::Fetch && filed.accepted() {
-            self.fetched = receipt.proposal.map(Box::new);
+            self.fetched = opened(receipt.proposal_record).map(Box::new);
         } else if matches!(kind, IntentKind::Propose | IntentKind::Revise) && filed.accepted() {
-            self.proposal = receipt.proposal.map(Box::new);
+            self.proposal = opened(receipt.proposal_record).map(Box::new);
         }
         if self.answers.len() >= TRACKED_INTENTS {
             self.answers.remove(0);

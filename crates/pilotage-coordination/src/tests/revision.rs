@@ -48,8 +48,9 @@ pub(super) fn running_fleet(permit_allocate: bool) -> (Fleet, usize) {
         &context("team-proposal"),
     );
     let proposal = fleet.route(reply.intents)[0]
-        .proposal
+        .proposal_record
         .clone()
+        .and_then(open_record)
         .expect("proposal");
     let planned = proposal
         .tasks
@@ -112,7 +113,7 @@ fn half_of_a_members_unflown_lines_move_and_are_flown_once() {
     let receipt = receipt.expect("answered at once");
     assert!(accepted(&receipt), "{}", receipt.reason);
     assert!(intents.is_empty(), "a draft changes nothing yet");
-    let draft = receipt.proposal.expect("the draft for review");
+    let draft = opened(&receipt).expect("the draft for review");
     assert!(draft.summary.contains("to SIM-2"), "{}", draft.summary);
     let successor = fleet.team.status().successor.expect("drafted");
     assert_eq!(successor.state, wire::MissionSuccessorState::Drafted as i32);
@@ -261,7 +262,7 @@ fn a_parents_strip_keeps_exactly_the_lines_inside_it() {
     let (receipt, _) = team_intent(&mut fleet, revise);
     let receipt = receipt.expect("answered");
     assert!(accepted(&receipt), "{}", receipt.reason);
-    let draft = receipt.proposal.expect("the draft");
+    let draft = opened(&receipt).expect("the draft");
     assert_eq!(draft.tasks.len(), 3, "{}", draft.summary);
 }
 
@@ -308,7 +309,7 @@ fn a_lost_member_keeps_its_work_until_it_reports_or_a_person_states_it_down() {
     fleet.team.on_member_status(&sim3, &context("back"));
     let give = reassign(&fleet, "SIM-3", "SIM-1", 1.0, false);
     let (receipt, _) = team_intent(&mut fleet, give);
-    let draft = receipt.expect("answered").proposal.expect("a draft");
+    let draft = opened(&receipt.expect("answered")).expect("a draft");
     let line_in_progress = sim3
         .tasks
         .iter()
@@ -343,7 +344,7 @@ fn a_person_states_a_lost_member_down_and_the_team_completes_without_it() {
     assert_eq!(link_of(&fleet, "SIM-3"), wire::MemberLink::Down);
     let give = reassign(&fleet, "SIM-3", "SIM-1", 1.0, false);
     let (receipt, intents) = team_intent(&mut fleet, give);
-    let draft = receipt.expect("answered").proposal.expect("a draft");
+    let draft = opened(&receipt.expect("answered")).expect("a draft");
     assert!(intents.is_empty());
     let (receipt, intents) = team_intent(&mut fleet, Action::Approve(approval(&draft.digest, 0)));
     assert!(receipt.is_some_and(|r| accepted(&r)));
@@ -413,14 +414,43 @@ fn a_fetch_returns_the_team_plan_or_its_drafted_revision() {
         })
     };
     let (receipt, _) = team_intent(&mut fleet, fetch(&plan));
-    let fetched = receipt.expect("answered").proposal.expect("the plan");
+    let fetched = opened(&receipt.expect("answered")).expect("the plan");
     assert_eq!(fetched.digest, plan);
     let give = reassign(&fleet, "SIM-2", "SIM-1", 0.5, false);
     let (receipt, _) = team_intent(&mut fleet, give);
-    let draft = receipt.expect("answered").proposal.expect("a draft");
+    let draft = opened(&receipt.expect("answered")).expect("a draft");
     let (receipt, _) = team_intent(&mut fleet, fetch(&draft.digest));
     assert_eq!(
-        receipt.expect("answered").proposal.map(|p| p.digest),
+        opened(&receipt.expect("answered")).map(|p| p.digest),
         Some(draft.digest)
     );
+}
+
+#[test]
+fn a_team_proposal_carries_each_member_record_unchanged() {
+    let mut fleet = Fleet::new();
+    let reply = fleet.team.on_intent(
+        &wire::MissionIntent {
+            request_id: "op-1".to_owned(),
+            action: Some(Action::Propose(objective())),
+        },
+        &context("team-proposal"),
+    );
+    let decided = fleet.route(reply.intents);
+    let record = decided[0].proposal_record.clone().expect("a team record");
+    let team = open_record(record).expect("the team record verifies");
+    assert!(team.requires.iter().any(|f| f.contains("team-of-lanes")));
+    for member in &team.members {
+        let embedded = member.record.clone().expect("the member's record");
+        let lane = fleet.members.get_mut(&member.member).expect("member");
+        let fetch = wire::MissionIntent {
+            request_id: "fetch".to_owned(),
+            action: Some(Action::Fetch(wire::MissionFetch { digest: Vec::new() })),
+        };
+        let own = lane
+            .on_intent(&fetch, &context("f"))
+            .receipt
+            .proposal_record;
+        assert_eq!(Some(embedded), own, "{}'s bytes, unchanged", member.member);
+    }
 }

@@ -55,7 +55,7 @@ fn an_approved_revision_waits_for_the_line_in_progress_to_end() {
 
     let drafted = lane.on_intent(&revise(&status, finish(), false), &context("rev-1"));
     assert!(accepted(&drafted), "{}", drafted.receipt.reason);
-    let draft = drafted.receipt.proposal.expect("the draft for review");
+    let draft = opened(&drafted.receipt).expect("the draft for review");
     assert_eq!(draft.predecessor_digest, status.proposal_digest);
     assert!(draft.summary.contains("return to the launch point"));
     let successor = lane.status().successor.expect("drafted");
@@ -143,7 +143,8 @@ fn inside_the_envelope_a_revision_applies_without_a_new_approval() {
     let proposal = lane
         .on_intent(&intent(Action::Propose(objective())), &context("p"))
         .receipt
-        .proposal
+        .proposal_record
+        .and_then(open_record)
         .expect("a proposal");
     let mut permissive = approval(&proposal.digest, 120.0);
     if let Some(envelope) = permissive.envelope.as_mut() {
@@ -188,7 +189,7 @@ fn before_a_start_a_revised_objective_replaces_the_draft() {
         &context("p2"),
     );
     assert!(accepted(&reply), "{}", reply.receipt.reason);
-    let replaced = reply.receipt.proposal.expect("the new draft");
+    let replaced = opened(&reply.receipt).expect("the new draft");
     assert_ne!(replaced.digest, status.proposal_digest);
     assert_eq!(lane.state(), wire::MissionLaneState::Proposed);
     let finish_before_start =
@@ -205,7 +206,8 @@ fn between_lines_a_revision_applies_at_once() {
     let draft = lane
         .on_intent(&revise(&status, finish(), false), &context("rev-1"))
         .receipt
-        .proposal
+        .proposal_record
+        .and_then(open_record)
         .expect("the draft");
     let admitted = lane.on_intent(
         &intent(Action::Approve(approval(&draft.digest, 120.0))),
@@ -220,4 +222,21 @@ fn between_lines_a_revision_applies_at_once() {
         task_state(&status, "line-01"),
         Some(wire::MissionTaskState::Skipped)
     );
+}
+
+#[test]
+fn an_approval_that_names_no_record_format_is_refused() {
+    let mut lane = Lane::new(config());
+    let reply = lane.on_intent(&intent(Action::Propose(objective())), &context("p"));
+    let digest = opened(&reply.receipt).expect("a proposal").digest;
+    let mut unformatted = approval(&digest, 120.0);
+    unformatted.proposal_format = wire::MissionProposalFormat::Unspecified as i32;
+    let refused = lane.on_intent(&intent(Action::Approve(unformatted)), &context("a"));
+    assert!(!accepted(&refused));
+    assert!(
+        refused.receipt.reason.contains("proposal record format"),
+        "{}",
+        refused.receipt.reason
+    );
+    assert_eq!(lane.state(), wire::MissionLaneState::Proposed);
 }

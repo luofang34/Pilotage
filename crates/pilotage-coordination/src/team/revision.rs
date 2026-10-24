@@ -36,10 +36,12 @@ pub(super) struct Revision {
     pub change: Change,
     pub stage: Stage,
     pub proposal: wire::MissionProposal,
+    /// The draft as it travels.
+    pub record: wire::MissionProposalRecord,
     pub drafted_by: String,
 }
 
-type Drafted = Result<(wire::MissionProposal, Vec<MemberIntent>), String>;
+type Drafted = Result<(wire::MissionProposalRecord, Vec<MemberIntent>), String>;
 
 impl TeamLane {
     pub(super) fn revise(
@@ -73,11 +75,14 @@ impl TeamLane {
             Asked::Finish(_) => self.draft_keep_none(),
             Asked::Objective(objective) => self.draft_keep(objective)?,
         };
-        let proposal = self.revision_proposal(&change, summary, context);
+        let (draft, proposal) = self
+            .revision_proposal(&change, summary, context)
+            .into_parts();
         self.revision = Some(Revision {
             change,
             stage: Stage::Drafted,
-            proposal: proposal.clone(),
+            proposal: draft,
+            record: proposal.clone(),
             drafted_by: revise
                 .drafted_by
                 .as_ref()
@@ -181,6 +186,7 @@ impl TeamLane {
             .as_ref()
             .filter(|r| r.stage == Stage::Drafted && r.proposal.digest == approval.proposal_digest)
             .ok_or("no drafted revision has that digest")?;
+        super::intents::bound_format(approval)?;
         if let Change::Reassign { from, .. } = &drafted.change
             && self.lost.get(from) == Some(&wire::MemberLink::Lost)
         {
@@ -309,7 +315,14 @@ impl TeamLane {
         if op != Op::Revise {
             return Vec::new();
         }
-        let (Some(draft), Some(team)) = (receipt.proposal.clone(), self.approval.clone()) else {
+        let draft = match super::opened(receipt) {
+            Ok(sealed) => sealed.proposal().clone(),
+            Err(reason) => {
+                self.detail = format!("{member}'s share of the revision: {reason}");
+                return Vec::new();
+            }
+        };
+        let Some(team) = self.approval.clone() else {
             return Vec::new();
         };
         let band: Vec<wire::GeoPoint> = draft.tasks.iter().flat_map(|t| t.path.clone()).collect();
@@ -379,12 +392,12 @@ impl TeamLane {
     /// Answers a fetch with the full proposal `digest` names: the team
     /// plan, or a drafted revision; an empty digest names the plan.
     pub(super) fn on_fetch(&self, id: String, digest: &[u8]) -> super::TeamReply {
-        let plan = self.proposal.as_ref();
-        let revision = self.revision.as_ref().map(|r| &r.proposal);
+        let plan = self.proposal_record.as_ref();
+        let revision = self.revision.as_ref().map(|r| &r.record);
         let found = [plan, revision]
             .into_iter()
             .flatten()
-            .find(|p| digest.is_empty() || p.digest == digest)
+            .find(|r| digest.is_empty() || r.digest == digest)
             .cloned();
         let receipt = match found {
             Some(proposal) => self.receipt(id, true, String::new(), Some(proposal)),

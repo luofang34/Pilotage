@@ -6,7 +6,6 @@ use super::{
     SurveyDefaults,
 };
 use crate::config::{MissionConfig, OwnshipSource};
-use crate::lane::proposal_digest;
 
 const NOW: u64 = 1_800_000_000_000;
 
@@ -88,8 +87,20 @@ fn approval(digest: &[u8], max_height_m: f64) -> wire::MissionApproval {
             permit_execute: true,
             ..wire::AdaptationEnvelope::default()
         }),
+        proposal_format: wire::MissionProposalFormat::V1 as i32,
         ..wire::MissionApproval::default()
     }
+}
+
+/// The proposal `record` carries, opened and verified.
+fn open_record(record: wire::MissionProposalRecord) -> Option<wire::MissionProposal> {
+    let sealed = pilotage_protocol::proposal_record::SealedProposal::open(record).ok()?;
+    Some(sealed.into_parts().0)
+}
+
+/// The proposal a receipt's record carries, opened and verified.
+fn opened(receipt: &wire::MissionReceipt) -> Option<wire::MissionProposal> {
+    open_record(receipt.proposal_record.clone()?)
 }
 
 fn accepted(reply: &super::LaneReply) -> bool {
@@ -109,7 +120,7 @@ fn running_lane_with(config: LaneConfig) -> (Lane, usize) {
         &intent(Action::Propose(objective())),
         &context("proposal-1"),
     );
-    let proposal = reply.receipt.proposal.expect("a proposal");
+    let proposal = opened(&reply.receipt).expect("a proposal");
     let digest = proposal.digest.clone();
     let lines = proposal
         .tasks
@@ -140,15 +151,18 @@ fn a_proposal_is_grounded_and_its_digest_binds_its_content() {
     );
     assert!(accepted(&reply), "{}", reply.receipt.reason);
     assert!(reply.effect.is_none(), "a proposal starts nothing");
-    let proposal = reply.receipt.proposal.expect("a proposal");
-    assert_eq!(proposal.digest, proposal_digest(&proposal).to_vec());
+    let proposal = opened(&reply.receipt).expect("a proposal");
+    let record = reply.receipt.proposal_record.clone().expect("a record");
+    assert_eq!(
+        proposal.digest,
+        pilotage_protocol::proposal_record::body_digest(&record.body).to_vec(),
+        "the digest names the record's bytes"
+    );
+    assert!(proposal.requires.iter().any(|f| f.contains("survey-line")));
     let estimates = proposal.estimates.expect("estimates");
     assert!(estimates.lines >= 2 && estimates.path_length_m > 300.0);
     assert!(estimates.energy_wh > 0.0);
     assert_eq!(proposal.tasks.last().map(|t| t.name.as_str()), Some("home"));
-    let mut changed = proposal.clone();
-    changed.tasks.pop();
-    assert_ne!(proposal_digest(&changed).to_vec(), proposal.digest);
     assert_eq!(lane.state(), wire::MissionLaneState::Proposed);
 }
 
@@ -159,7 +173,8 @@ fn nothing_starts_without_an_approval_that_covers_the_plan() {
     let digest = lane
         .on_intent(&intent(Action::Propose(objective())), &context("p"))
         .receipt
-        .proposal
+        .proposal_record
+        .and_then(open_record)
         .expect("proposal")
         .digest;
     let start = intent(Action::Start(wire::MissionStart {
@@ -447,7 +462,7 @@ fn a_fetch_returns_the_full_plan_the_digest_names() {
     };
     let reply = lane.on_intent(&fetch(&digest), &context("f"));
     assert!(accepted(&reply));
-    let plan = reply.receipt.proposal.expect("the plan");
+    let plan = opened(&reply.receipt).expect("the plan");
     assert_eq!(plan.digest, digest);
     assert!(!plan.tasks.is_empty(), "the full plan, not a summary");
     assert!(!accepted(&lane.on_intent(&fetch(b"other"), &context("g"))));

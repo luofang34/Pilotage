@@ -51,7 +51,7 @@ fn a_parent_team_counts_the_lines_its_member_team_flew_again() {
     let reply = parent.on_intent(&intent("p", Action::Propose(objective())), &context("p"));
     let proposal = relay(&mut parent, &mut fleet, reply.intents)
         .first()
-        .and_then(|r| r.proposal.clone())
+        .and_then(opened)
         .expect("the parent proposal");
     let approve = Action::Approve(approval(&proposal.digest, 2));
     let reply = parent.on_intent(&intent("a", approve), &context("a"));

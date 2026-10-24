@@ -50,9 +50,20 @@ the digest of its predecessor, validity, and releasability.
 - **Proposal.** A compiled plan with its estimates and the assumptions it
   rests on: navigation data revision, vehicle capability snapshot, energy
   model, execution strategy. A proposal is grounded and reviewable, and
-  has a digest. It grants nothing.
+  has a digest. It grants nothing. A proposal travels as an immutable
+  record: the lane that compiles it encodes it one time, and the record
+  carries these bytes, their format, and the digest of these bytes
+  (ADR-0014). Each receiver checks the digest against the bytes that it
+  received. It never hashes a new encoding of the decoded proposal. A team
+  proposal carries the record of each member, with the bytes of the
+  member unchanged. Two proposals with the same meaning can have
+  different bytes, and then they have different digests; no canonical
+  encoding is defined. A receiver refuses a record format that it does not
+  know. A proposal lists the execution features that it needs, and an
+  approver that does not know one of them does not approve the proposal.
 - **Approval.** The operator's or a delegate's permission, bound to one
-  proposal digest and its assumptions. It carries an adaptation envelope:
+  proposal digest, the format of its record, and its assumptions. A lane
+  refuses an approval that names no record format. It carries an adaptation envelope:
   the permitted vehicles, the area and height bounds, the minimum energy
   reserve, the permitted payload uses, the expiry, and the kinds of
   revision it allows. It states the permissions separately: to execute, to

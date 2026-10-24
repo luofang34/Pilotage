@@ -8,7 +8,6 @@
 
 mod approval;
 mod compile;
-mod digest;
 mod evidence;
 mod expiry;
 mod run;
@@ -25,7 +24,6 @@ use crate::config::MissionConfig;
 use crate::survey::SurveyRequest;
 
 pub use compile::SurveyDefaults;
-pub use digest::proposal_digest;
 pub use run::{FrameAssessment, RunExecution, RunProgress};
 pub use steering::{HOST_ISSUER, Requester, Steering};
 
@@ -196,7 +194,7 @@ impl Lane {
             None => Err("the intent names no action".to_owned()),
         };
         self.changed = true;
-        let (outcome, reason, effect, proposal) = match result {
+        let (outcome, reason, effect, record) = match result {
             Ok((effect, proposal)) => (
                 wire::MissionReceiptOutcome::Accepted,
                 String::new(),
@@ -210,8 +208,9 @@ impl Lane {
                 request_id: intent.request_id.clone(),
                 outcome: outcome as i32,
                 reason,
-                proposal,
                 lane: self.config.name.clone(),
+                proposal_record: record,
+                ..wire::MissionReceipt::default()
             },
             effect,
         }
@@ -221,12 +220,12 @@ impl Lane {
         &mut self,
         objective: &wire::MissionObjective,
         context: &IntentContext,
-    ) -> Result<(Option<LaneEffect>, Option<wire::MissionProposal>), String> {
+    ) -> Result<(Option<LaneEffect>, Option<wire::MissionProposalRecord>), String> {
         if self.is_flying() {
             return Err("a run is in progress; revise it instead".to_owned());
         }
         let compiled = compile::compile(objective, &self.config, context.fresh_id.clone())?;
-        let proposal = compiled.proposal.clone();
+        let record = compiled.record.clone();
         self.proposal = Some(compiled);
         self.approval = None;
         self.run = None;
@@ -235,14 +234,14 @@ impl Lane {
         self.history.clear();
         self.state = wire::MissionLaneState::Proposed;
         self.detail = "proposed; waiting for an approval".to_owned();
-        Ok((None, Some(proposal)))
+        Ok((None, Some(record)))
     }
 
     fn approve(
         &mut self,
         approval: &wire::MissionApproval,
         context: &IntentContext,
-    ) -> Result<(Option<LaneEffect>, Option<wire::MissionProposal>), String> {
+    ) -> Result<(Option<LaneEffect>, Option<wire::MissionProposalRecord>), String> {
         if self.is_flying() {
             let current = self.proposal.as_ref().map(|c| &c.proposal.digest);
             if current == Some(&approval.proposal_digest) {
@@ -268,7 +267,7 @@ impl Lane {
         &mut self,
         start: &wire::MissionStart,
         context: &IntentContext,
-    ) -> Result<(Option<LaneEffect>, Option<wire::MissionProposal>), String> {
+    ) -> Result<(Option<LaneEffect>, Option<wire::MissionProposalRecord>), String> {
         if self.state != wire::MissionLaneState::Admitted {
             return Err(format!(
                 "a start needs an approved proposal; the lane is {:?}",
@@ -300,23 +299,25 @@ impl Lane {
         ))
     }
 
-    /// The full proposal `digest` names: the plan, or a drafted revision;
-    /// an empty digest names the plan.
+    /// The record of the proposal `digest` names: the plan, or a drafted
+    /// revision; an empty digest names the plan.
     fn fetch(
         &self,
         digest: &[u8],
-    ) -> Result<(Option<LaneEffect>, Option<wire::MissionProposal>), String> {
-        let plan = self.proposal.as_ref().map(|c| &c.proposal);
-        let revision = self.successor.as_ref().map(|s| &s.compiled.proposal);
+    ) -> Result<(Option<LaneEffect>, Option<wire::MissionProposalRecord>), String> {
+        let plan = self.proposal.as_ref().map(|c| &c.record);
+        let revision = self.successor.as_ref().map(|s| &s.compiled.record);
         [plan, revision]
             .into_iter()
             .flatten()
-            .find(|p| digest.is_empty() || p.digest == digest)
-            .map(|p| (None, Some(p.clone())))
+            .find(|r| digest.is_empty() || r.digest == digest)
+            .map(|r| (None, Some(r.clone())))
             .ok_or_else(|| "the lane holds no proposal with that digest".to_owned())
     }
 
-    fn abort(&mut self) -> Result<(Option<LaneEffect>, Option<wire::MissionProposal>), String> {
+    fn abort(
+        &mut self,
+    ) -> Result<(Option<LaneEffect>, Option<wire::MissionProposalRecord>), String> {
         if !self.is_flying() {
             return Err(format!("nothing to abort; the lane is {:?}", self.state));
         }
@@ -334,7 +335,7 @@ impl Lane {
         from: &[wire::MissionLaneState],
         to: wire::MissionLaneState,
         effect: LaneEffect,
-    ) -> Result<(Option<LaneEffect>, Option<wire::MissionProposal>), String> {
+    ) -> Result<(Option<LaneEffect>, Option<wire::MissionProposalRecord>), String> {
         if !from.contains(&self.state) {
             return Err(format!("not possible while the lane is {:?}", self.state));
         }

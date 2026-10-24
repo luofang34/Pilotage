@@ -1,3 +1,4 @@
+use pilotage_protocol::proposal_record::{FEATURE_SURVEY_LINE, SealedProposal};
 use pilotage_protocol::wire;
 use wire::mission_intent::Action;
 
@@ -13,26 +14,34 @@ fn survey() -> SurveyFile {
     SurveyFile::parse(FILE).unwrap()
 }
 
-fn proposal(digest: &[u8]) -> wire::MissionProposal {
-    wire::MissionProposal {
-        digest: digest.to_vec(),
+/// The record of a test proposal that `tag` tells apart from the others.
+fn proposal(tag: &[u8]) -> wire::MissionProposalRecord {
+    let proposal = wire::MissionProposal {
+        proposal_id: format!("{tag:02x?}"),
         objective: Some(survey().objective("test", 1)),
+        requires: vec![FEATURE_SURVEY_LINE.to_owned()],
         ..wire::MissionProposal::default()
-    }
+    };
+    SealedProposal::seal(proposal).into_parts().1
 }
 
-fn status(state: wire::MissionLaneState, digest: &[u8]) -> Box<wire::MissionStatus> {
+/// The digest of the test proposal `tag`.
+fn digest(tag: &[u8]) -> Vec<u8> {
+    proposal(tag).digest
+}
+
+fn status(state: wire::MissionLaneState, tag: &[u8]) -> Box<wire::MissionStatus> {
     Box::new(wire::MissionStatus {
         lane: "COMMAND".to_owned(),
         state: state as i32,
-        proposal_digest: digest.to_vec(),
+        proposal_digest: digest(tag),
         ..wire::MissionStatus::default()
     })
 }
 
-/// A desk holding an accepted proposal `digest`, as if its propose was
+/// A desk holding the accepted test proposal `tag`, as if its propose was
 /// answered.
-fn proposed(digest: &[u8]) -> MissionDesk {
+fn proposed(tag: &[u8]) -> MissionDesk {
     let mut desk = MissionDesk::new("test", 7);
     let mut engine = crate::tests::engine();
     let refused = desk.send(&engine, Action::Hold(wire::MissionHold {}));
@@ -45,11 +54,11 @@ fn proposed(digest: &[u8]) -> MissionDesk {
     desk.on_receipt(wire::MissionReceipt {
         request_id,
         outcome: wire::MissionReceiptOutcome::Accepted as i32,
-        proposal: Some(proposal(digest)),
+        proposal_record: Some(proposal(tag)),
         ..wire::MissionReceipt::default()
     })
     .unwrap();
-    desk.on_status(status(wire::MissionLaneState::Proposed, digest));
+    desk.on_status(status(wire::MissionLaneState::Proposed, tag));
     desk
 }
 
@@ -113,7 +122,7 @@ fn approve_takes_the_held_proposal_under_the_default_policy() {
     let Ok(Action::Approve(approval)) = desk.resolve(&command, 1_000) else {
         panic!("an approval");
     };
-    assert_eq!(approval.proposal_digest, b"\xab\xcd");
+    assert_eq!(approval.proposal_digest, digest(b"\xab\xcd"));
     assert!(approval.approver.is_none(), "the host names the approver");
     let envelope = approval.envelope.unwrap();
     assert_eq!(envelope.max_height_m, 70.0);
@@ -147,9 +156,9 @@ fn approve_takes_the_held_proposal_under_the_default_policy() {
     );
 }
 
-/// Sends a fetch through `desk` and files the lane's answer, the proposal
-/// `digest`.
-fn fetched(desk: &mut MissionDesk, digest: &[u8]) {
+/// Sends a fetch through `desk` and files the lane's answer, the test
+/// proposal `tag`.
+fn fetched(desk: &mut MissionDesk, tag: &[u8]) {
     let mut engine = crate::tests::engine();
     crate::tests::admit(&mut engine, 1, 1);
     let Ok(action) = desk.resolve(&MissionCommand::Fetch {}, 0) else {
@@ -158,14 +167,14 @@ fn fetched(desk: &mut MissionDesk, digest: &[u8]) {
     assert_eq!(
         action,
         Action::Fetch(wire::MissionFetch {
-            digest: digest.to_vec()
+            digest: digest(tag)
         })
     );
     let (request_id, _) = desk.send(&engine, action).unwrap();
     desk.on_receipt(wire::MissionReceipt {
         request_id,
         outcome: wire::MissionReceiptOutcome::Accepted as i32,
-        proposal: Some(proposal(digest)),
+        proposal_record: Some(proposal(tag)),
         ..wire::MissionReceipt::default()
     })
     .unwrap();
@@ -184,7 +193,7 @@ fn a_proposal_another_client_made_is_approved_only_once_fetched() {
     // The lane's summary does not stand for the plan.
     assert_eq!(desk.offered(true, &ApprovalPolicy::default()).approve, None);
     assert_eq!(desk.resolve(&command, 0), Err(DeskRefusal::NotHeld));
-    assert_eq!(desk.unseen_proposal(), Some(b"\x42".to_vec()));
+    assert_eq!(desk.unseen_proposal(), Some(digest(b"\x42")));
     fetched(&mut desk, b"\x42");
     assert_eq!(desk.unseen_proposal(), None);
     assert_eq!(
@@ -195,7 +204,7 @@ fn a_proposal_another_client_made_is_approved_only_once_fetched() {
     let Ok(Action::Approve(approval)) = desk.resolve(&command, 0) else {
         panic!("an approval");
     };
-    assert_eq!(approval.proposal_digest, b"\x42");
+    assert_eq!(approval.proposal_digest, digest(b"\x42"));
 }
 
 #[test]
@@ -210,7 +219,7 @@ fn a_revision_continues_the_lanes_plan_and_its_draft_is_what_approve_names() {
     let Ok(Action::Revise(revise)) = desk.resolve(&command, 0) else {
         panic!("a revision");
     };
-    assert_eq!(revise.base_digest, b"\x01");
+    assert_eq!(revise.base_digest, digest(b"\x01"));
     assert_eq!(revise.run_id, "run-1");
     assert!(!revise.within_envelope);
     let Some(wire::mission_revise::Change::Reassign(reassign)) = revise.change else {
@@ -226,7 +235,7 @@ fn a_revision_continues_the_lanes_plan_and_its_draft_is_what_approve_names() {
 
     // A drafted revision is what an approval names, once this client holds it.
     running.successor = Some(wire::MissionSuccessor {
-        digest: b"\x02".to_vec(),
+        digest: digest(b"\x02"),
         state: wire::MissionSuccessorState::Drafted as i32,
         ..wire::MissionSuccessor::default()
     });
@@ -244,7 +253,7 @@ fn a_revision_continues_the_lanes_plan_and_its_draft_is_what_approve_names() {
     let Ok(Action::Approve(approval)) = desk.resolve(&approve, 0) else {
         panic!("an approval");
     };
-    assert_eq!(approval.proposal_digest, b"\x02");
+    assert_eq!(approval.proposal_digest, digest(b"\x02"));
 }
 
 #[test]
@@ -257,7 +266,7 @@ fn a_proposal_is_approvable_as_soon_as_its_receipt_arrives_before_any_status() {
     desk.on_receipt(wire::MissionReceipt {
         request_id,
         outcome: wire::MissionReceiptOutcome::Accepted as i32,
-        proposal: Some(proposal(&[7; 32])),
+        proposal_record: Some(proposal(&[7; 32])),
         ..wire::MissionReceipt::default()
     })
     .unwrap();
@@ -279,11 +288,65 @@ fn a_client_renews_the_approval_of_a_held_run_it_never_saw_by_fetching_its_plan(
     };
     // No proposal is under review, but the plan in progress may be approved again.
     assert_eq!(desk.unseen_proposal(), None);
-    assert_eq!(desk.unseen_approvable(), Some(b"\x51".to_vec()));
+    assert_eq!(desk.unseen_approvable(), Some(digest(b"\x51")));
     assert!(desk.resolve(&approve, 0).is_err());
     fetched(&mut desk, b"\x51");
     let Ok(Action::Approve(approval)) = desk.resolve(&approve, 0) else {
         panic!("a renewal");
     };
-    assert_eq!(approval.proposal_digest, b"\x51");
+    assert_eq!(approval.proposal_digest, digest(b"\x51"));
+}
+
+#[test]
+fn a_proposal_that_needs_an_unknown_feature_is_not_approved() {
+    let mut desk = MissionDesk::new("test", 7);
+    let mut engine = crate::tests::engine();
+    crate::tests::admit(&mut engine, 1, 1);
+    let objective = survey().objective("test", 1);
+    let (request_id, _) = desk.send(&engine, Action::Propose(objective)).unwrap();
+    let later = wire::MissionProposal {
+        objective: Some(survey().objective("test", 1)),
+        requires: vec!["pilotage.task.inspect-tower/3".to_owned()],
+        ..wire::MissionProposal::default()
+    };
+    desk.on_receipt(wire::MissionReceipt {
+        request_id,
+        outcome: wire::MissionReceiptOutcome::Accepted as i32,
+        proposal_record: Some(SealedProposal::seal(later).into_parts().1),
+        ..wire::MissionReceipt::default()
+    })
+    .unwrap();
+    let command = MissionCommand::Approve {
+        digest: None,
+        policy: ApprovalPolicy::default(),
+    };
+    assert_eq!(
+        desk.resolve(&command, 1),
+        Err(DeskRefusal::UnknownFeatures(vec![
+            "pilotage.task.inspect-tower/3".to_owned()
+        ]))
+    );
+}
+
+#[test]
+fn a_record_whose_digest_does_not_name_its_body_is_not_kept() {
+    let mut desk = MissionDesk::new("test", 7);
+    let mut engine = crate::tests::engine();
+    crate::tests::admit(&mut engine, 1, 1);
+    let objective = survey().objective("test", 1);
+    let (request_id, _) = desk.send(&engine, Action::Propose(objective)).unwrap();
+    let mut forged = proposal(b"\x01");
+    forged.digest = digest(b"\x02");
+    desk.on_receipt(wire::MissionReceipt {
+        request_id,
+        outcome: wire::MissionReceiptOutcome::Accepted as i32,
+        proposal_record: Some(forged),
+        ..wire::MissionReceipt::default()
+    })
+    .unwrap();
+    let command = MissionCommand::Approve {
+        digest: None,
+        policy: ApprovalPolicy::default(),
+    };
+    assert_eq!(desk.resolve(&command, 1), Err(DeskRefusal::NoProposal));
 }

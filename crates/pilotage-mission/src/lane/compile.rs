@@ -4,11 +4,13 @@
 use navigate_contract::GeodeticPosition;
 use pilotage_protocol::wire;
 
-use super::digest::proposal_digest;
 use super::{LaneConfig, RunPlan};
 use crate::config::MissionConfig;
 use crate::engine::MissionEngine;
 use crate::survey::{SurveyPlan, SurveyRequest, plan_survey};
+use pilotage_protocol::proposal_record::{
+    FEATURE_RETURN_HOME, FEATURE_SURVEY_LINE, SealedProposal,
+};
 
 /// The values an objective's zero fields take.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -37,7 +39,10 @@ impl Default for SurveyDefaults {
 /// A compiled proposal and what executes it.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct Compiled {
+    /// The decoded proposal; its digest is the record's.
     pub proposal: wire::MissionProposal,
+    /// The proposal as it travels: its bytes are encoded once, here.
+    pub record: wire::MissionProposalRecord,
     pub plan: RunPlan,
     pub config: MissionConfig,
     pub height_m: f64,
@@ -101,7 +106,7 @@ pub(super) fn compile(
         plan_revision: record.mission_identity.revision_id.clone(),
         usable_energy_wh: lane.usable_energy_wh.unwrap_or(0.0),
     };
-    let mut proposal = wire::MissionProposal {
+    let proposal = wire::MissionProposal {
         proposal_id,
         objective_id: objective.objective_id.clone(),
         digest: Vec::new(),
@@ -112,10 +117,12 @@ pub(super) fn compile(
         objective: Some(objective.clone()),
         predecessor_digest: Vec::new(),
         summary: String::new(),
+        requires: Vec::new(),
     };
-    proposal.digest = proposal_digest(&proposal).to_vec();
+    let (proposal, record) = seal(proposal);
     Ok(Compiled {
         proposal,
+        record,
         plan: RunPlan::Survey(request),
         config,
         height_m,
@@ -133,7 +140,7 @@ pub(super) fn home(base: &Compiled, proposal_id: String) -> Compiled {
     };
     let home_id = task_id(&proposal_id, "home");
     let task_ids = vec![home_id.clone()];
-    let mut proposal = wire::MissionProposal {
+    let proposal = wire::MissionProposal {
         proposal_id,
         objective_id: base.proposal.objective_id.clone(),
         digest: Vec::new(),
@@ -151,10 +158,12 @@ pub(super) fn home(base: &Compiled, proposal_id: String) -> Compiled {
         objective: base.proposal.objective.clone(),
         predecessor_digest: Vec::new(),
         summary: String::new(),
+        requires: Vec::new(),
     };
-    proposal.digest = proposal_digest(&proposal).to_vec();
+    let (proposal, record) = seal(proposal);
     Compiled {
         proposal,
+        record,
         plan: RunPlan::Home,
         config: MissionConfig {
             task_ids,
@@ -168,9 +177,28 @@ pub(super) fn home(base: &Compiled, proposal_id: String) -> Compiled {
 /// Makes `compiled` the successor of `predecessor`: its digest binds the predecessor and
 /// the summary. Its tasks keep their identities, unique to its own proposal.
 pub(super) fn succeed(compiled: &mut Compiled, predecessor: &[u8], summary: String) {
-    compiled.proposal.predecessor_digest = predecessor.to_vec();
-    compiled.proposal.summary = summary;
-    compiled.proposal.digest = proposal_digest(&compiled.proposal).to_vec();
+    let mut proposal = compiled.proposal.clone();
+    proposal.predecessor_digest = predecessor.to_vec();
+    proposal.summary = summary;
+    (compiled.proposal, compiled.record) = seal(proposal);
+}
+
+/// Encodes `proposal` once into its record, with the features its tasks
+/// need.
+fn seal(
+    mut proposal: wire::MissionProposal,
+) -> (wire::MissionProposal, wire::MissionProposalRecord) {
+    let mut requires = Vec::new();
+    for (kind, feature) in [
+        (wire::MissionTaskKind::SurveyLine, FEATURE_SURVEY_LINE),
+        (wire::MissionTaskKind::ReturnHome, FEATURE_RETURN_HOME),
+    ] {
+        if proposal.tasks.iter().any(|t| t.kind == kind as i32) {
+            requires.push(feature.to_owned());
+        }
+    }
+    proposal.requires = requires;
+    SealedProposal::seal(proposal).into_parts()
 }
 
 fn pick(value: f64, default: f64) -> f64 {

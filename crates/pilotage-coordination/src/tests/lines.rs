@@ -14,10 +14,7 @@ fn each_member_plans_exactly_the_lines_the_team_gave_it() {
     };
     let reply = fleet.team.on_intent(&propose, &context("team-proposal"));
     let decided = fleet.route(reply.intents);
-    let proposal = decided
-        .first()
-        .and_then(|r| r.proposal.clone())
-        .expect("a team proposal");
+    let proposal = decided.first().and_then(opened).expect("a team proposal");
     let d = defaults();
     let Some(wire::mission_objective::Kind::Survey(survey)) = objective().kind else {
         panic!("a survey");
@@ -118,7 +115,8 @@ fn planned_lines(
     );
     reply
         .receipt
-        .proposal
+        .proposal_record
+        .and_then(open_record)
         .map_or(0, |p| p.estimates.map_or(0, |e| e.lines as usize))
 }
 

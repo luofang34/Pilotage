@@ -11,12 +11,22 @@ mod revision;
 use std::collections::BTreeMap;
 
 use pilotage_mission::{IntentContext, SurveyDefaults};
+use pilotage_protocol::proposal_record::SealedProposal;
 use pilotage_protocol::wire;
 
 use crate::allocation::{Assignment, Sweep};
 use aggregate::TaskBook;
 use intents::delegate;
 use refly::Refly;
+
+/// The proposal a member's receipt carries, opened from its record.
+pub(super) fn opened(receipt: &wire::MissionReceipt) -> Result<SealedProposal, String> {
+    let record = receipt
+        .proposal_record
+        .clone()
+        .ok_or("the receipt carries no proposal record")?;
+    SealedProposal::open(record).map_err(|refused| refused.to_string())
+}
 
 /// One member lane: a vehicle's or another team's.
 #[derive(Debug, Clone, PartialEq)]
@@ -108,7 +118,11 @@ pub struct TeamLane {
     height_m: f64,
     assignments: Vec<Assignment>,
     member_proposals: BTreeMap<String, wire::MissionProposal>,
+    /// The member proposals as their members' records, unchanged.
+    member_records: BTreeMap<String, wire::MissionProposalRecord>,
     proposal: Option<wire::MissionProposal>,
+    /// The team proposal as it travels.
+    proposal_record: Option<wire::MissionProposalRecord>,
     approval: Option<wire::MissionApproval>,
     statuses: BTreeMap<String, wire::MissionStatus>,
     book: TaskBook,
@@ -141,7 +155,9 @@ impl TeamLane {
             height_m: 0.0,
             assignments: Vec::new(),
             member_proposals: BTreeMap::new(),
+            member_records: BTreeMap::new(),
             proposal: None,
+            proposal_record: None,
             approval: None,
             statuses: BTreeMap::new(),
             book: TaskBook::default(),
@@ -301,7 +317,9 @@ impl TeamLane {
 
     fn reset_plan(&mut self) {
         self.member_proposals.clear();
+        self.member_records.clear();
         self.proposal = None;
+        self.proposal_record = None;
         self.approval = None;
         self.statuses.clear();
         self.book = TaskBook::default();
@@ -318,7 +336,7 @@ impl TeamLane {
         request_id: String,
         accepted: bool,
         reason: String,
-        proposal: Option<wire::MissionProposal>,
+        proposal: Option<wire::MissionProposalRecord>,
     ) -> wire::MissionReceipt {
         let outcome = if accepted {
             wire::MissionReceiptOutcome::Accepted
@@ -329,8 +347,9 @@ impl TeamLane {
             request_id,
             outcome: outcome as i32,
             reason,
-            proposal,
             lane: self.config.name.clone(),
+            proposal_record: proposal,
+            ..wire::MissionReceipt::default()
         }
     }
 

@@ -81,8 +81,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
             request_id,
             outcome: wire::MissionReceiptOutcome::Refused as i32,
             reason: reason.to_owned(),
-            proposal: None,
-            lane: String::new(),
+            ..wire::MissionReceipt::default()
         };
         self.publish_mission(
             Some(client),

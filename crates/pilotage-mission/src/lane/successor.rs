@@ -26,7 +26,7 @@ pub(super) struct Successor {
     pub recovery: bool,
 }
 
-type Outcome = Result<(Option<LaneEffect>, Option<wire::MissionProposal>), String>;
+type Outcome = Result<(Option<LaneEffect>, Option<wire::MissionProposalRecord>), String>;
 
 fn short(digest: &[u8]) -> String {
     digest.iter().take(4).map(|b| format!("{b:02x}")).collect()
@@ -75,7 +75,7 @@ impl Lane {
         let (mut compiled, summary) = self.compile_change(change, current, context)?;
         self.revisions = self.revisions.wrapping_add(1);
         compile::succeed(&mut compiled, &current.proposal.digest, summary);
-        let proposal = compiled.proposal.clone();
+        let proposal = compiled.record.clone();
         self.successor = Some(Successor {
             compiled,
             stage: Stage::Drafted,
