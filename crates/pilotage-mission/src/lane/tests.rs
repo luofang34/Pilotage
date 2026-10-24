@@ -26,6 +26,7 @@ fn config() -> LaneConfig {
         usable_energy_wh: Some(30.0),
         cruise_power_w: Some(150.0),
         recovery_policy: "hold in place".to_owned(),
+        judged: true,
     }
 }
 
@@ -97,8 +98,13 @@ fn accepted(reply: &super::LaneReply) -> bool {
 
 /// Proposes, approves and starts; returns the lane and the line count.
 fn running_lane() -> (Lane, usize) {
+    running_lane_with(config())
+}
+
+/// [`running_lane`] under `config`.
+fn running_lane_with(config: LaneConfig) -> (Lane, usize) {
     use wire::mission_intent::Action;
-    let mut lane = Lane::new(config());
+    let mut lane = Lane::new(config);
     let reply = lane.on_intent(
         &intent(Action::Propose(objective())),
         &context("proposal-1"),
@@ -213,28 +219,32 @@ fn a_line_is_done_only_with_usable_pictures() {
         ..RunProgress::default()
     });
     for usable in [true, true, false] {
-        let task = lane.on_frame().expect("line 1 is active");
+        let ticket = lane.on_frame().expect("line 1 is active");
+        lane.on_sent(&ticket);
         lane.on_assessment(
-            &task,
-            FrameAssessment {
+            &ticket,
+            Some(FrameAssessment {
                 usable,
                 hazard: false,
-            },
-        );
+            }),
+        )
+        .unwrap();
     }
     // Along line 2: one picture, judged unusable.
     lane.on_progress(&RunProgress {
         target_waypoint: Some(3),
         ..RunProgress::default()
     });
-    let task = lane.on_frame().expect("line 2 is active");
+    let ticket = lane.on_frame().expect("line 2 is active");
+    lane.on_sent(&ticket);
     lane.on_assessment(
-        &task,
-        FrameAssessment {
+        &ticket,
+        Some(FrameAssessment {
             usable: false,
             hazard: true,
-        },
-    );
+        }),
+    )
+    .unwrap();
     lane.on_progress(&RunProgress {
         target_waypoint: Some(2 * lines),
         ..RunProgress::default()
@@ -306,7 +316,6 @@ fn hold_resume_and_abort_follow_the_lifecycle() {
     assert!(status.sequence > 0 && lane.take_changed().is_none());
 }
 
-mod expiry;
 fn task_states(lane: &Lane) -> Vec<(String, wire::MissionTaskState)> {
     lane.status()
         .tasks
@@ -332,14 +341,16 @@ fn an_abort_leaves_the_line_in_progress_and_the_rest_unfinished() {
         ..RunProgress::default()
     });
     for _ in 0..3 {
-        let task = lane.on_frame().expect("line 1 is active");
+        let ticket = lane.on_frame().expect("line 1 is active");
+        lane.on_sent(&ticket);
         lane.on_assessment(
-            &task,
-            FrameAssessment {
+            &ticket,
+            Some(FrameAssessment {
                 usable: true,
                 hazard: false,
-            },
-        );
+            }),
+        )
+        .unwrap();
     }
     lane.on_intent(&intent(Action::Abort(wire::MissionAbort {})), &context("x"));
     let states = task_states(&lane);
@@ -371,6 +382,8 @@ fn an_abort_on_the_way_home_does_not_complete_the_way_home() {
     );
 }
 
+mod evidence;
+mod expiry;
 mod successor;
 
 #[test]

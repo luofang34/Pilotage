@@ -135,11 +135,14 @@ impl LaneTask {
                     None => break,
                 },
                 result = judge::next(&mut judged) => {
-                    if let Some((task, judgment)) = result {
-                        self.lane.on_assessment(&task, FrameAssessment {
+                    if let Some((ticket, judgment)) = result {
+                        let assessment = judgment.map(|judgment| FrameAssessment {
                             usable: judgment.usable >= 0.5,
                             hazard: judgment.hazard >= 0.5,
                         });
+                        if let Err(refused) = self.lane.on_assessment(&ticket, assessment) {
+                            warn!(%refused, "judgment refused");
+                        }
                     }
                 },
                 _ = ticker.tick() => {
@@ -268,10 +271,11 @@ impl LaneTask {
     }
 
     fn on_frame(&mut self, frame: Arc<RawVideoFrame>) {
-        if let Some(task) = self.lane.on_frame()
+        if let Some(ticket) = self.lane.on_frame()
             && let Some(judge) = self.judge.as_mut()
+            && judge.offer(ticket.clone(), frame)
         {
-            judge.offer(task, frame);
+            self.lane.on_sent(&ticket);
         }
     }
 

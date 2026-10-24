@@ -9,6 +9,7 @@
 mod approval;
 mod compile;
 mod digest;
+mod evidence;
 mod expiry;
 mod run;
 mod steering;
@@ -28,6 +29,7 @@ pub use run::{FrameAssessment, RunProgress};
 pub use steering::{HOST_ISSUER, Requester, Steering};
 
 use compile::Compiled;
+pub use evidence::{FrameTicket, VerdictRefused};
 use run::RunTracker;
 
 /// What a lane is configured with for every proposal it compiles.
@@ -51,6 +53,9 @@ pub struct LaneConfig {
     pub cruise_power_w: Option<f64>,
     /// The recovery the lane applies when it cannot continue.
     pub recovery_policy: String,
+    /// A judgment service judges the run's pictures, so a survey line is
+    /// done only with enough pictures judged usable.
+    pub judged: bool,
 }
 
 /// What the host supplies with an intent: the civil time and a fresh,
@@ -274,7 +279,11 @@ impl Lane {
         approval::still_valid(approval, context.now_unix_ms)?;
         self.expired = false;
         let run_id = context.fresh_id.clone();
-        self.run = Some(RunTracker::new(run_id.clone(), compiled));
+        self.run = Some(RunTracker::new(
+            run_id.clone(),
+            compiled,
+            self.config.judged,
+        ));
         self.state = wire::MissionLaneState::Running;
         self.detail = "running".to_owned();
         Ok((
@@ -376,23 +385,47 @@ impl Lane {
     }
 
     /// Counts a captured picture against the active survey line. Returns
-    /// the line's task identifier when one is active.
-    pub fn on_frame(&mut self) -> Option<String> {
+    /// its ticket, for a judgment, when a line is active.
+    pub fn on_frame(&mut self) -> Option<FrameTicket> {
         if !self.is_flying() {
             return None;
         }
-        let task = self.run.as_mut()?.on_frame()?;
+        let ticket = self.run.as_mut()?.on_frame()?;
         self.changed = true;
-        Some(task)
+        Some(ticket)
     }
 
-    /// Records a judgment of a picture captured on `task_id`.
-    pub fn on_assessment(&mut self, task_id: &str, assessment: FrameAssessment) {
+    /// Notes the picture `ticket` names as sent for judgment: the line's
+    /// evidence is pending until its verdict or the news that it was not
+    /// judged.
+    pub fn on_sent(&mut self, ticket: &FrameTicket) {
         if let Some(run) = self.run.as_mut()
-            && run.on_assessment(task_id, assessment)
+            && run.on_sent(ticket)
         {
             self.changed = true;
         }
+    }
+
+    /// Records the judgment of the picture `ticket` names; `None` when the
+    /// service did not judge it.
+    ///
+    /// # Errors
+    ///
+    /// [`VerdictRefused`] for a verdict of another run, of a picture never
+    /// sent, or a second verdict of one picture; the lane changes nothing.
+    pub fn on_assessment(
+        &mut self,
+        ticket: &FrameTicket,
+        assessment: Option<FrameAssessment>,
+    ) -> Result<(), VerdictRefused> {
+        let run = self.run.as_mut().ok_or_else(|| VerdictRefused::OtherRun {
+            run_id: ticket.run_id.clone(),
+            task_id: ticket.task_id.clone(),
+        })?;
+        if run.on_assessment(ticket, assessment)? {
+            self.changed = true;
+        }
+        Ok(())
     }
 
     /// The status as it stands, with the sequence of the last change.

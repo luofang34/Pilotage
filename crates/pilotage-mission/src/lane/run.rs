@@ -5,6 +5,7 @@
 use pilotage_protocol::wire;
 
 use super::compile::Compiled;
+use super::evidence::{FrameTicket, Judgments, VerdictRefused};
 
 /// The executor's progress, as the host reads it from the mission engine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -36,6 +37,9 @@ struct TaskTrack {
     plan: wire::MissionTaskPlan,
     state: wire::MissionTaskState,
     evidence: wire::MissionTaskEvidence,
+    judgments: Judgments,
+    /// The task's attempt in this run; a run flies each task once.
+    attempt: u32,
 }
 
 /// The run of one approved proposal.
@@ -46,10 +50,12 @@ pub(super) struct RunTracker {
     lines: usize,
     min_usable: u32,
     active: Option<usize>,
+    /// A judgment service judges the run's pictures.
+    judged: bool,
 }
 
 impl RunTracker {
-    pub(super) fn new(run_id: String, compiled: &Compiled) -> Self {
+    pub(super) fn new(run_id: String, compiled: &Compiled, judged: bool) -> Self {
         let tasks: Vec<TaskTrack> = compiled
             .proposal
             .tasks
@@ -58,6 +64,8 @@ impl RunTracker {
                 plan: plan.clone(),
                 state: wire::MissionTaskState::Pending,
                 evidence: wire::MissionTaskEvidence::default(),
+                judgments: Judgments::default(),
+                attempt: 1,
             })
             .collect();
         let lines = tasks.iter().filter(|t| is_line(&t.plan)).count();
@@ -67,6 +75,7 @@ impl RunTracker {
             lines,
             min_usable: compiled.min_usable_per_line,
             active: None,
+            judged,
         }
     }
 
@@ -101,7 +110,7 @@ impl RunTracker {
                 if task.state != wire::MissionTaskState::Incomplete {
                     changed = true;
                 }
-                task.state = verdict(&task.evidence, self.min_usable);
+                task.state = verdict(task, self.judged, self.min_usable);
             } else if Some(index) == active && task.state == wire::MissionTaskState::Pending {
                 task.state = wire::MissionTaskState::Active;
                 changed = true;
@@ -111,34 +120,74 @@ impl RunTracker {
         changed
     }
 
-    pub(super) fn on_frame(&mut self) -> Option<String> {
+    pub(super) fn on_frame(&mut self) -> Option<FrameTicket> {
         let task = self.tasks.get_mut(self.active?)?;
         if !is_line(&task.plan) {
             return None;
         }
         task.evidence.frames = task.evidence.frames.wrapping_add(1);
-        Some(task.plan.task_id.clone())
+        Some(FrameTicket {
+            run_id: self.run_id.clone(),
+            task_id: task.plan.task_id.clone(),
+            attempt: task.attempt,
+            frame: task.evidence.frames,
+        })
     }
 
-    pub(super) fn on_assessment(&mut self, task_id: &str, assessment: FrameAssessment) -> bool {
-        let Some(task) = self.tasks.iter_mut().find(|t| t.plan.task_id == task_id) else {
-            return false;
-        };
-        let evidence = &mut task.evidence;
-        evidence.assessed = evidence.assessed.wrapping_add(1);
-        if assessment.usable {
-            evidence.usable = evidence.usable.wrapping_add(1);
+    /// Notes the picture `ticket` names as sent for judgment.
+    pub(super) fn on_sent(&mut self, ticket: &FrameTicket) -> bool {
+        match self.task_of(ticket) {
+            Ok(task) => {
+                task.judgments.sent(ticket.frame);
+                true
+            }
+            Err(_) => false,
         }
-        if assessment.hazard {
-            evidence.hazards = evidence.hazards.wrapping_add(1);
+    }
+
+    /// Takes the verdict for the picture `ticket` names, or the news that
+    /// it was not judged. Returns whether the task changed.
+    pub(super) fn on_assessment(
+        &mut self,
+        ticket: &FrameTicket,
+        assessment: Option<FrameAssessment>,
+    ) -> Result<bool, VerdictRefused> {
+        let (judged, min_usable) = (self.judged, self.min_usable);
+        let task = self.task_of(ticket)?;
+        task.judgments.answer(ticket)?;
+        let evidence = &mut task.evidence;
+        if let Some(assessment) = assessment {
+            evidence.assessed = evidence.assessed.wrapping_add(1);
+            if assessment.usable {
+                evidence.usable = evidence.usable.wrapping_add(1);
+            }
+            if assessment.hazard {
+                evidence.hazards = evidence.hazards.wrapping_add(1);
+            }
         }
         if matches!(
             task.state,
             wire::MissionTaskState::Done | wire::MissionTaskState::Incomplete
         ) {
-            task.state = verdict(evidence, self.min_usable);
+            task.state = verdict(task, judged, min_usable);
         }
-        true
+        Ok(true)
+    }
+
+    fn task_of(&mut self, ticket: &FrameTicket) -> Result<&mut TaskTrack, VerdictRefused> {
+        if ticket.run_id != self.run_id {
+            return Err(VerdictRefused::OtherRun {
+                run_id: ticket.run_id.clone(),
+                task_id: ticket.task_id.clone(),
+            });
+        }
+        self.tasks
+            .iter_mut()
+            .find(|t| t.plan.task_id == ticket.task_id && t.attempt == ticket.attempt)
+            .ok_or_else(|| VerdictRefused::UnknownTask {
+                task_id: ticket.task_id.clone(),
+                attempt: ticket.attempt,
+            })
     }
 
     /// Ends the run: lines already flown get their verdict, the way home
@@ -147,7 +196,7 @@ impl RunTracker {
         for (index, task) in self.tasks.iter_mut().enumerate() {
             if task.state == wire::MissionTaskState::Active {
                 task.state = if is_line(&task.plan) {
-                    verdict(&task.evidence, self.min_usable)
+                    verdict(task, self.judged, self.min_usable)
                 } else {
                     wire::MissionTaskState::Done
                 };
@@ -213,6 +262,12 @@ impl RunTracker {
             ) {
                 status.state = wire::MissionTaskState::Skipped as i32;
             }
+            // A replaced run takes no more verdicts.
+            if let Some(evidence) = status.evidence.as_mut()
+                && evidence.state == wire::MissionEvidenceState::Pending as i32
+            {
+                evidence.state = wire::MissionEvidenceState::NotJudged as i32;
+            }
         }
         statuses
     }
@@ -228,7 +283,13 @@ impl RunTracker {
                 task_id: task.plan.task_id.clone(),
                 kind: task.plan.kind,
                 state: task.state as i32,
-                evidence: Some(task.evidence.clone()),
+                evidence: Some(wire::MissionTaskEvidence {
+                    state: task
+                        .judgments
+                        .state(&task.evidence, self.judged, self.min_usable)
+                        as i32,
+                    ..task.evidence.clone()
+                }),
                 progress: match task.state {
                     wire::MissionTaskState::Done | wire::MissionTaskState::Incomplete => 1.0,
                     _ => 0.0,
@@ -275,15 +336,17 @@ fn is_line(plan: &wire::MissionTaskPlan) -> bool {
     plan.kind == wire::MissionTaskKind::SurveyLine as i32
 }
 
-/// A flown line is done with enough usable pictures: judged usable when a
-/// judgment service assessed any, otherwise captured.
-fn verdict(evidence: &wire::MissionTaskEvidence, min_usable: u32) -> wire::MissionTaskState {
-    let usable = if evidence.assessed > 0 {
-        evidence.usable
+/// A flown line is done with its evidence. A run with a judgment service
+/// needs enough pictures judged usable, every sent picture answered; a
+/// line nobody judged is not usable. A run without one counts captured
+/// pictures, and its evidence reads as not judged.
+fn verdict(task: &TaskTrack, judged: bool, min_usable: u32) -> wire::MissionTaskState {
+    let done = if judged {
+        task.judgments.state(&task.evidence, judged, min_usable) == wire::MissionEvidenceState::Met
     } else {
-        evidence.frames
+        task.evidence.frames >= min_usable
     };
-    if usable >= min_usable {
+    if done {
         wire::MissionTaskState::Done
     } else {
         wire::MissionTaskState::Incomplete

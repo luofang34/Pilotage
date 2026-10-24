@@ -9,6 +9,7 @@ use std::time::Duration;
 use pilotage_adapter_api::RawVideoFrame;
 use pilotage_decision::survey::{FrameContext, FrameJudgment, frame_request, read_frame};
 use pilotage_decision::{DecisionClient, Provider};
+use pilotage_mission::FrameTicket;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tracing::{debug, warn};
@@ -18,7 +19,9 @@ const JUDGMENT_TIMEOUT: Duration = Duration::from_secs(20);
 /// JPEG quality of the picture the service sees.
 const JPEG_QUALITY: u8 = 85;
 
-type Judged = (String, FrameJudgment);
+/// A picture's ticket and its judgment, or `None` when the service did not
+/// judge it.
+type Judged = (FrameTicket, Option<FrameJudgment>);
 
 /// Sends sampled pictures for judgment, one at a time.
 pub(super) struct Judge {
@@ -50,12 +53,13 @@ impl Judge {
         self.receiver.take().unwrap_or_else(|| mpsc::channel(1).1)
     }
 
-    /// Sends `frame` of `task` when the period passed and none is in flight.
-    pub(super) fn offer(&mut self, task: String, frame: Arc<RawVideoFrame>) {
+    /// Sends the picture `ticket` names when the period passed and none is
+    /// in flight; whether it was sent. A sent picture always gets an answer.
+    pub(super) fn offer(&mut self, ticket: FrameTicket, frame: Arc<RawVideoFrame>) -> bool {
         if self.last.is_some_and(|at| at.elapsed() < self.every)
             || self.busy.swap(true, Ordering::AcqRel)
         {
-            return;
+            return false;
         }
         self.last = Some(Instant::now());
         let (client, busy, results) = (
@@ -64,7 +68,7 @@ impl Judge {
             self.results.clone(),
         );
         let context = FrameContext {
-            task_id: task.clone(),
+            task_id: ticket.task_id.clone(),
             height_m: self.height_m,
             nadir: true,
         };
@@ -80,14 +84,22 @@ impl Judge {
                     })
             });
             busy.store(false, Ordering::Release);
-            match outcome {
+            let judgment = match outcome {
                 Ok(judgment) => {
-                    debug!(task = %task, usable = judgment.usable, hazard = judgment.hazard, cover = ?judgment.cover, "picture judged");
-                    results.try_send((task, judgment)).ok();
+                    debug!(task = %ticket.task_id, frame = ticket.frame, usable = judgment.usable, hazard = judgment.hazard, cover = ?judgment.cover, "picture judged");
+                    Some(judgment)
                 }
-                Err(error) => warn!(%error, "picture not judged"),
+                Err(error) => {
+                    warn!(%error, task = %ticket.task_id, frame = ticket.frame, "picture not judged");
+                    None
+                }
+            };
+            // One picture is in flight at a time, so the channel has room.
+            if results.try_send((ticket, judgment)).is_err() {
+                warn!("the lane no longer takes judgments");
             }
         });
+        true
     }
 }
 

@@ -4,7 +4,7 @@
 //! A re-flight is adaptation within the envelope, decided mid-run from the
 //! judge's verdicts: a line a member flew without enough usable pictures
 //! is flown again, without a new operator approval, once the verdict has
-//! settled (the member flew past the next line, or completed). A member
+//! settled (every picture sent for its judgment has an answer). A member
 //! that already completed flies it at once; otherwise the line's own
 //! member flies it after its plan. Each line is flown again at most once,
 //! the envelope's `max_refly_lines` bounds the total, and only the team
@@ -96,7 +96,7 @@ impl TeamLane {
                     .reflies
                     .iter()
                     .any(|r| r.owner == owner && r.line == line);
-                if tried || !self.book.settled(&owner, &line, self.statuses.get(&owner)) {
+                if tried || !self.book.settled(&owner, &line) {
                     continue;
                 }
                 // Another member flies it, so the second look does not come

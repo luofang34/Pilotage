@@ -247,7 +247,11 @@ impl Lane {
         if let Some(run) = previous {
             self.history.extend(run.superseded_statuses());
         }
-        self.run = Some(super::run::RunTracker::new(run_id.clone(), &compiled));
+        self.run = Some(super::run::RunTracker::new(
+            run_id.clone(),
+            &compiled,
+            self.config.judged,
+        ));
         self.state = State::Running;
         self.detail = format!(
             "flying revision {}: {}",

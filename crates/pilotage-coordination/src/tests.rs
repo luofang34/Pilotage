@@ -53,6 +53,7 @@ fn vehicle_lane(name: &str) -> Lane {
         usable_energy_wh: None,
         cruise_power_w: None,
         recovery_policy: "hold".to_owned(),
+        judged: true,
     })
 }
 
@@ -183,15 +184,17 @@ impl Fleet {
                     ..RunProgress::default()
                 });
                 for _ in 0..3 {
-                    if let Some(task) = lane.on_frame() {
-                        let usable = !bad.contains(&(name.as_str(), task.as_str()));
+                    if let Some(ticket) = lane.on_frame() {
+                        let usable = !bad.contains(&(name.as_str(), ticket.task_id.as_str()));
+                        lane.on_sent(&ticket);
                         lane.on_assessment(
-                            &task,
-                            FrameAssessment {
+                            &ticket,
+                            Some(FrameAssessment {
                                 usable,
                                 hazard: false,
-                            },
-                        );
+                            }),
+                        )
+                        .unwrap();
                     }
                 }
             }
