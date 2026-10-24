@@ -90,9 +90,14 @@ A request has these parts:
   `equirectangular`. A panorama is one equirectangular frame or a set of rectilinear
   frames with different source identities.
 
-A request does not contain vehicle state or earlier messages. The measurements
-above are the reason. An adapter that needs them for one model is a change to the
-port, and not a field of the request.
+For the direct-instruction interpreter, a request does not contain vehicle state
+or earlier messages. The measurements above are the reason, and they apply to that
+configuration only. This is not a limit of the model port. A use of the port that
+needs other context, such as a mission state or earlier messages, gets each item
+with its source, its age and its access scope through the one context port
+([ADR-0047](0047-agents-read-one-context-port-and-act-through-intents.md)). Each
+adapter declares the context that it accepts. A request carries no context that the
+adapter did not declare.
 
 A reply has one directive, a probability for each slot when the model has one, and
 the model time. A model can reply `unable`. An adapter must reply `unable` when the
