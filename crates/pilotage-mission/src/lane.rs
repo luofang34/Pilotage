@@ -357,6 +357,16 @@ impl Lane {
         Some(ticket)
     }
 
+    /// Whether the line `ticket` names still needs pictures sent for
+    /// judgment to meet its evidence: the host sends such a picture without
+    /// waiting for its sampling period, so a short line is judged too.
+    #[must_use]
+    pub fn wants_judgment(&self, ticket: &FrameTicket) -> bool {
+        self.run
+            .as_ref()
+            .is_some_and(|run| run.wants_judgment(ticket))
+    }
+
     /// Notes the picture `ticket` names as sent for judgment: the line's
     /// evidence is pending until its verdict or the news that it was not
     /// judged.

@@ -70,6 +70,11 @@ impl Judgments {
         self.sent.insert(frame);
     }
 
+    /// Pictures sent for judgment that have no answer yet.
+    pub(super) fn outstanding(&self) -> usize {
+        self.sent.len().saturating_sub(self.answered.len())
+    }
+
     /// Takes the answer for `frame`, refusing a picture never sent or one
     /// already answered.
     pub(super) fn answer(&mut self, ticket: &FrameTicket) -> Result<(), VerdictRefused> {

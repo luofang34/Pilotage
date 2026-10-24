@@ -273,7 +273,7 @@ impl LaneTask {
     fn on_frame(&mut self, frame: Arc<RawVideoFrame>) {
         if let Some(ticket) = self.lane.on_frame()
             && let Some(judge) = self.judge.as_mut()
-            && judge.offer(ticket.clone(), frame)
+            && judge.offer(ticket.clone(), frame, self.lane.wants_judgment(&ticket))
         {
             self.lane.on_sent(&ticket);
         }

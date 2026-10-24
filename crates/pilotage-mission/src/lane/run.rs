@@ -130,6 +130,20 @@ impl RunTracker {
         })
     }
 
+    /// Whether the task `ticket` names needs more pictures judged: its
+    /// usable pictures and the ones awaiting an answer fall short of what
+    /// its evidence needs.
+    pub(super) fn wants_judgment(&self, ticket: &FrameTicket) -> bool {
+        let need = usize::try_from(self.min_usable).unwrap_or(usize::MAX);
+        self.judged
+            && ticket.run_id == self.run_id
+            && self.tasks.iter().any(|t| {
+                let usable = usize::try_from(t.evidence.usable).unwrap_or(usize::MAX);
+                t.plan.task_id == ticket.task_id
+                    && usable.saturating_add(t.judgments.outstanding()) < need
+            })
+    }
+
     /// Notes the picture `ticket` names as sent for judgment.
     pub(super) fn on_sent(&mut self, ticket: &FrameTicket) -> bool {
         match self.task_of(ticket) {

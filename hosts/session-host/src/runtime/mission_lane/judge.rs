@@ -53,10 +53,16 @@ impl Judge {
         self.receiver.take().unwrap_or_else(|| mpsc::channel(1).1)
     }
 
-    /// Sends the picture `ticket` names when the period passed and none is
-    /// in flight; whether it was sent. A sent picture always gets an answer.
-    pub(super) fn offer(&mut self, ticket: FrameTicket, frame: Arc<RawVideoFrame>) -> bool {
-        if self.last.is_some_and(|at| at.elapsed() < self.every)
+    /// Sends the picture `ticket` names when none is in flight and the
+    /// period passed, or at once when `needed`; whether it was sent. A sent
+    /// picture always gets an answer.
+    pub(super) fn offer(
+        &mut self,
+        ticket: FrameTicket,
+        frame: Arc<RawVideoFrame>,
+        needed: bool,
+    ) -> bool {
+        if (!needed && self.last.is_some_and(|at| at.elapsed() < self.every))
             || self.busy.swap(true, Ordering::AcqRel)
         {
             return false;
