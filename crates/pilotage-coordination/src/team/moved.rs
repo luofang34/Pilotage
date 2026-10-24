@@ -28,6 +28,7 @@ impl TeamLane {
             proposal: None,
             run_id: None,
             moved,
+            prior_run: None,
         });
         let complete = self
             .statuses

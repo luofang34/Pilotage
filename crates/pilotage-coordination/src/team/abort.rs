@@ -6,33 +6,39 @@
 //! work that its receiver had not started is released and unassigned. A
 //! release fact that arrives later is recorded, but it starts nothing.
 
-use super::TeamLane;
 use super::refly::ReflyState;
+use super::{Op, TeamLane};
 use pilotage_protocol::wire::MissionHandoverState as State;
 
 impl TeamLane {
     /// Ends the work an abort of the team leaves pending.
     pub(super) fn end_pending_work(&mut self) {
-        self.pending.clear();
+        // Only the answer to a start already sent still tells something:
+        // whether the member began the flight.
+        let reflies = &self.reflies;
+        self.pending.retain(|_, p| {
+            p.op == Op::Start
+                && p.refly
+                    .and_then(|i| reflies.get(i))
+                    .is_some_and(|r| r.state == ReflyState::Starting)
+        });
         self.renewal = None;
+        let mut cancelled = Vec::new();
         for refly in &mut self.reflies {
             refly.state = match refly.state {
                 ReflyState::Queued | ReflyState::Proposing | ReflyState::Approving => {
+                    if !refly.moved.is_empty() {
+                        cancelled.push((refly.member.clone(), refly.owner.clone()));
+                    }
                     ReflyState::Cancelled
                 }
                 ReflyState::Starting => ReflyState::Uncertain,
                 other => other,
             };
         }
-        let flying: Vec<(String, String)> = self
-            .reflies
-            .iter()
-            .filter(|r| r.in_progress())
-            .map(|r| (r.member.clone(), r.owner.clone()))
-            .collect();
         for handover in &mut self.handovers {
-            let started = flying.contains(&(handover.to.clone(), handover.from.clone()));
-            if handover.state == State::Committed && !started {
+            let never_started = cancelled.contains(&(handover.to.clone(), handover.from.clone()));
+            if handover.state == State::Committed && never_started {
                 handover.state = State::Unassigned;
                 handover.basis = format!(
                     "the team aborted before {} started the moved lines; an operator gives them to a member",

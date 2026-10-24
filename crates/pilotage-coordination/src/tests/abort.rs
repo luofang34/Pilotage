@@ -126,3 +126,86 @@ fn a_receipt_of_the_aborted_run_takes_no_step_of_the_next_plan() {
         "{late:?}"
     );
 }
+
+#[test]
+fn an_abort_keeps_moved_lines_that_were_flown() {
+    let (mut fleet, _) = running_fleet(true);
+    let first = released_to_idle_sim2(&mut fleet);
+    fleet.route(vec![first]);
+    // SIM-2 flies the moved lines to the end; SIM-1 still flies its own.
+    complete(&mut fleet, "SIM-2");
+    abort(&mut fleet);
+    assert_ne!(
+        handover(&fleet).state,
+        State::Unassigned as i32,
+        "{}",
+        handover(&fleet).basis
+    );
+}
+
+#[test]
+fn a_start_refused_after_an_abort_leaves_the_work_unassigned() {
+    let (mut fleet, _) = running_fleet(true);
+    let propose = released_to_idle_sim2(&mut fleet);
+    let receipt = deliver(&mut fleet, &propose);
+    let approve = fleet
+        .team
+        .on_member_receipt("SIM-2", &receipt, &context("r"))
+        .intents
+        .remove(0);
+    let receipt = deliver(&mut fleet, &approve);
+    let start = fleet
+        .team
+        .on_member_receipt("SIM-2", &receipt, &context("r"))
+        .intents
+        .remove(0);
+    abort(&mut fleet);
+    assert_eq!(
+        handover(&fleet).state,
+        State::Committed as i32,
+        "SIM-2 may fly"
+    );
+    let refused = wire::MissionReceipt {
+        request_id: start.intent.request_id.clone(),
+        outcome: wire::MissionReceiptOutcome::Refused as i32,
+        reason: "aborted".to_owned(),
+        lane: "SIM-2".to_owned(),
+        ..wire::MissionReceipt::default()
+    };
+    let reply = fleet
+        .team
+        .on_member_receipt("SIM-2", &refused, &context("late"));
+    assert!(reply.intents.is_empty());
+    assert_eq!(
+        handover(&fleet).state,
+        State::Unassigned as i32,
+        "it never started"
+    );
+}
+
+#[test]
+fn a_late_release_unassigns_only_the_lines_it_released() {
+    let (mut fleet, _) = running_fleet(true);
+    complete(&mut fleet, "SIM-2");
+    let intents = move_sim1_to_sim2(&mut fleet);
+    let moving = handover(&fleet).task_ids;
+    // SIM-1 begins line 2, which moves, before its revision arrives.
+    let lane = fleet.members.get_mut("SIM-1").expect("SIM-1");
+    lane.on_progress(&toward(lane, 3));
+    fleet.route(intents);
+    let lane = fleet.members.get_mut("SIM-1").expect("SIM-1");
+    assert!(matches!(
+        lane.on_progress(&toward(lane, 4)),
+        Some(LaneEffect::Start(_))
+    ));
+    let status = lane.take_changed().expect("changed");
+    abort(&mut fleet);
+    fleet.team.on_member_status(&status, &context("late"));
+    let recorded = handover(&fleet);
+    assert_eq!(recorded.state, State::Unassigned as i32);
+    assert_eq!(
+        recorded.task_ids.len(),
+        moving.len() - 1,
+        "the line SIM-1 began stays its own"
+    );
+}

@@ -56,6 +56,9 @@ pub(super) struct Refly {
     pub run_id: Option<String>,
     /// The paths of lines moved to the member; empty for a re-flight.
     pub moved: Vec<Vec<wire::GeoPoint>>,
+    /// The member's run when the team sent the start: a later run is this
+    /// flight.
+    pub prior_run: Option<String>,
 }
 
 impl Refly {
@@ -130,6 +133,7 @@ impl TeamLane {
                     proposal: None,
                     run_id: None,
                     moved: Vec::new(),
+                    prior_run: None,
                 });
             }
         }
@@ -286,11 +290,13 @@ impl TeamLane {
         let Some(refly) = self.reflies.get_mut(index) else {
             return Vec::new();
         };
-        // A receipt takes the next step only of a step still waiting for it.
-        if !matches!(
+        // A receipt takes the next step only of a step still waiting for it;
+        // after an abort, only the answer to a start already sent counts.
+        let waiting = matches!(
             refly.state,
             ReflyState::Proposing | ReflyState::Approving | ReflyState::Starting
-        ) {
+        ) || (refly.state == ReflyState::Uncertain && op == Op::Start);
+        if !waiting {
             return Vec::new();
         }
         if !accepted {
@@ -318,6 +324,7 @@ impl TeamLane {
             }
             Op::Approve => {
                 refly.state = ReflyState::Starting;
+                refly.prior_run = self.statuses.get(&member).map(|s| s.run_id.clone());
                 let digest = refly
                     .proposal
                     .as_ref()
@@ -381,10 +388,13 @@ impl TeamLane {
         }) else {
             return;
         };
-        if refly.run_id.is_none()
-            && !status.run_id.is_empty()
-            && status.state == wire::MissionLaneState::Running as i32
-        {
+        // The first run after the start is this flight, whatever state its
+        // first report shows; a member that has no earlier run starts fresh.
+        let later_run = match refly.prior_run.as_deref() {
+            Some(prior) => status.run_id != prior,
+            None => status.state == wire::MissionLaneState::Running as i32,
+        };
+        if refly.run_id.is_none() && !status.run_id.is_empty() && later_run {
             refly.run_id = Some(status.run_id.clone());
             if !refly.moved.is_empty() {
                 // Moved lines are new work: the book follows their run.
