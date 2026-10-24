@@ -56,7 +56,10 @@ the digest of its predecessor, validity, and releasability.
   the permitted vehicles, the area and height bounds, the minimum energy
   reserve, the permitted payload uses, the expiry, and the kinds of
   revision it allows. It states the permissions separately: to execute, to
-  revise, to allocate work, and to change the objective.
+  revise, to allocate work, and to change the objective. A client approves
+  only a proposal that it holds in full. The lane's status names a
+  proposal only by its digest and a summary, so a client that did not
+  make the proposal fetches it from the lane before it approves it.
 - **Plan.** The executable `MissionDocument`
   ([ADR-0041](0041-one-mission-sequencing-core.md)): immutable,
   digest-identified, bound to a verified execution strategy and its

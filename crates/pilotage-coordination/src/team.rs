@@ -185,6 +185,7 @@ impl TeamLane {
                 Action::Abort(wire::MissionAbort {}),
             ),
             Some(Action::Revise(revise)) => return self.on_revise(id, revise, context),
+            Some(Action::Fetch(fetch)) => return self.on_fetch(id, &fetch.digest),
             Some(Action::Skip(_)) => {
                 Err("a team skips a task through a revision; draft one instead".to_owned())
             }

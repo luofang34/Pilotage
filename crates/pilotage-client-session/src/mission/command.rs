@@ -71,6 +71,8 @@ pub enum MissionCommand {
     Resume {},
     /// End the plan; each vehicle stops in place for its pilot to take it home.
     Abort {},
+    /// Ask the lane for the full proposal this client has not seen.
+    Fetch {},
 }
 
 /// Part of one member's unflown lines, flown by another member.
@@ -105,6 +107,8 @@ pub enum IntentKind {
     Skip,
     /// Draft a change to the plan in progress.
     Revise,
+    /// Ask for a full proposal.
+    Fetch,
 }
 
 impl IntentKind {
@@ -121,6 +125,7 @@ impl IntentKind {
             Action::Abort(_) => Self::Abort,
             Action::Skip(_) => Self::Skip,
             Action::Revise(_) => Self::Revise,
+            Action::Fetch(_) => Self::Fetch,
         }
     }
 
@@ -136,6 +141,7 @@ impl IntentKind {
             Self::Abort => "Abort",
             Self::Skip => "Skip",
             Self::Revise => "Revise",
+            Self::Fetch => "Fetch",
         }
     }
 }

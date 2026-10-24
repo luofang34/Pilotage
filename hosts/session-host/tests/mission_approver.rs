@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use pilotage_client_link::Link;
 use pilotage_client_session::mission::{
-    ApprovalPolicy, FiledReceipt, MissionCommand, MissionDesk, SurveyFile,
+    ApprovalPolicy, DeskRefusal, FiledReceipt, MissionCommand, MissionDesk, SurveyFile,
 };
 use pilotage_client_session::{
     ClientAction, ClientConfig, ClientEngine, ModuleEvent, ReconnectPolicy, TransportEvent,
@@ -141,7 +141,7 @@ fn only_the_approver_secret_approves_a_proposal() {
         );
 
         // The person approves the agent's proposal as the App's button does:
-        // no digest and the default policy, sized from the lane's status.
+        // no digest and the default policy, once it holds the full proposal.
         while person
             .desk
             .status()
@@ -149,6 +149,22 @@ fn only_the_approver_secret_approves_a_proposal() {
         {
             person.step().await;
         }
+        let approve = MissionCommand::Approve {
+            digest: None,
+            policy: ApprovalPolicy::default(),
+        };
+        assert_eq!(
+            person.desk.resolve(&approve, 0),
+            Err(DeskRefusal::NotHeld),
+            "the lane's summary does not stand for the plan"
+        );
+        let fetched = person.ask(MissionCommand::Fetch {}).await;
+        assert!(fetched.accepted(), "{}", fetched.reason);
+        assert_eq!(
+            person.desk.approvable().map(|p| p.tasks.len()),
+            agent.desk.current_proposal().map(|p| p.tasks.len()),
+            "the person holds the plan the agent proposed"
+        );
         let approved = person
             .ask(MissionCommand::Approve {
                 digest: None,

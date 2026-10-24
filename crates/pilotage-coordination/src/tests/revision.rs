@@ -324,3 +324,25 @@ fn a_person_releases_a_lost_member_and_the_team_completes_without_it() {
         "every line flown once"
     );
 }
+
+#[test]
+fn a_fetch_returns_the_team_plan_or_its_drafted_revision() {
+    let (mut fleet, _) = running_fleet(false);
+    let plan = fleet.team.status().proposal_digest;
+    let fetch = |digest: &[u8]| {
+        Action::Fetch(wire::MissionFetch {
+            digest: digest.to_vec(),
+        })
+    };
+    let (receipt, _) = team_intent(&mut fleet, fetch(&plan));
+    let fetched = receipt.expect("answered").proposal.expect("the plan");
+    assert_eq!(fetched.digest, plan);
+    let give = reassign(&fleet, "SIM-2", "SIM-1", 0.5, false);
+    let (receipt, _) = team_intent(&mut fleet, give);
+    let draft = receipt.expect("answered").proposal.expect("a draft");
+    let (receipt, _) = team_intent(&mut fleet, fetch(&draft.digest));
+    assert_eq!(
+        receipt.expect("answered").proposal.map(|p| p.digest),
+        Some(draft.digest)
+    );
+}

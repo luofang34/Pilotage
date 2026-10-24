@@ -22,12 +22,12 @@ pub enum DeskRefusal {
     /// The desk holds no proposal to approve.
     #[error("no proposal to approve: propose first")]
     NoProposal,
-    /// The named digest is not the proposal the desk holds, and no
-    /// stated height ceiling bounds an approval of it.
-    #[error(
-        "the proposal {0} is not the one this client holds; state policy.max_height_m to approve it"
-    )]
+    /// The named digest is not a proposal the desk holds in full.
+    #[error("the proposal {0} is not one this client holds; fetch it before approving it")]
     UnknownDigest(String),
+    /// The lane names a proposal this client has not seen in full.
+    #[error("this client has not seen the proposal the lane holds; fetch it before approving it")]
+    NotHeld,
     /// The text is not a hexadecimal digest.
     #[error("{0:?} is not a hexadecimal digest")]
     BadDigest(String),
@@ -101,6 +101,8 @@ pub struct MissionDesk {
     status: Option<Box<wire::MissionStatus>>,
     receipt: Option<FiledReceipt>,
     proposal: Option<Box<wire::MissionProposal>>,
+    /// The proposal a fetch brought, when another client made it.
+    fetched: Option<Box<wire::MissionProposal>>,
 }
 
 impl MissionDesk {
@@ -116,6 +118,7 @@ impl MissionDesk {
             status: None,
             receipt: None,
             proposal: None,
+            fetched: None,
         }
     }
 
@@ -169,43 +172,45 @@ impl MissionDesk {
             .filter(|s| s.state == wire::MissionSuccessorState::Drafted as i32)
     }
 
-    /// The proposal an approval names: a drafted revision first, else the
-    /// plan the lane proposed. It is the record this client holds when it
-    /// drafted or proposed it, else one sized from the lane's status, which
-    /// carries the objective's height, for a draft another client made.
-    #[must_use]
-    pub fn approvable(&self) -> Option<wire::MissionProposal> {
+    /// The digest an approval names: a drafted revision first, else the
+    /// plan the lane proposed.
+    fn under_review(&self) -> Option<Vec<u8>> {
         let digest = match self.drafted_successor() {
             Some(successor) => successor.digest.clone(),
-            None => {
-                // The proposal this client asked for is approvable as soon as its
-                // receipt arrives, whether or not a status came first.
-                if let Some(held) = self.current_proposal() {
-                    return Some(held.clone());
-                }
-                self.status.as_ref()?.proposal_digest.clone()
-            }
+            None => self.status.as_ref()?.proposal_digest.clone(),
         };
-        let status = self.status.as_ref()?;
-        if digest.is_empty() {
-            return None;
-        }
-        if let Some(held) = self.proposal.as_deref().filter(|p| p.digest == digest) {
-            return Some(held.clone());
-        }
-        Some(wire::MissionProposal {
-            digest,
-            objective: Some(wire::MissionObjective {
-                kind: Some(wire::mission_objective::Kind::Survey(
-                    wire::SurveyObjective {
-                        height_m: status.height_m,
-                        ..wire::SurveyObjective::default()
-                    },
-                )),
-                ..wire::MissionObjective::default()
-            }),
-            ..wire::MissionProposal::default()
-        })
+        (!digest.is_empty()).then_some(digest)
+    }
+
+    /// The full proposal `digest` names, when this client holds it.
+    fn held(&self, digest: &[u8]) -> Option<&wire::MissionProposal> {
+        [self.proposal.as_deref(), self.fetched.as_deref()]
+            .into_iter()
+            .flatten()
+            .find(|p| p.digest == digest)
+    }
+
+    /// The proposal an approval names, when this client holds it in full: a
+    /// drafted revision first, else the plan the lane proposed. A client
+    /// approves nothing it has not seen; [`MissionDesk::unseen_proposal`]
+    /// names what to fetch.
+    #[must_use]
+    pub fn approvable(&self) -> Option<wire::MissionProposal> {
+        let Some(digest) = self.under_review() else {
+            // The proposal this client asked for is approvable as soon as its
+            // receipt arrives, whether or not a status came first.
+            return self.current_proposal().cloned();
+        };
+        self.held(&digest).cloned()
+    }
+
+    /// The digest of the proposal under review that this client has not
+    /// seen in full, for a [`MissionCommand::Fetch`].
+    #[must_use]
+    pub fn unseen_proposal(&self) -> Option<Vec<u8>> {
+        let reviewing = self.state() == Lane::Proposed || self.drafted_successor().is_some();
+        self.under_review()
+            .filter(|digest| reviewing && self.held(digest).is_none())
     }
 
     /// The commands the lane's state offers under `policy`, none before
@@ -271,22 +276,19 @@ impl MissionDesk {
                 let named = digest.as_deref().map(parse_hex).transpose()?;
                 let proposal = match (self.approvable(), named) {
                     (Some(held), None) => held,
-                    (Some(held), Some(named)) if held.digest == named => held,
-                    // Another client proposed: only a stated ceiling bounds
-                    // the approval, as this client never saw the objective.
-                    (None, Some(named)) if policy.max_height_m.is_some() => wire::MissionProposal {
-                        digest: named,
-                        ..wire::MissionProposal::default()
-                    },
-                    (None, None) => return Err(DeskRefusal::NoProposal),
-                    (_, Some(_)) => {
-                        return Err(DeskRefusal::UnknownDigest(
-                            digest.clone().unwrap_or_default(),
-                        ));
+                    (_, Some(named)) => self.held(&named).cloned().ok_or_else(|| {
+                        DeskRefusal::UnknownDigest(digest.clone().unwrap_or_default())
+                    })?,
+                    (None, None) if self.unseen_proposal().is_some() => {
+                        return Err(DeskRefusal::NotHeld);
                     }
+                    (None, None) => return Err(DeskRefusal::NoProposal),
                 };
                 approval(&proposal, policy, now_ms).ok_or(DeskRefusal::NoHeight)
             }
+            MissionCommand::Fetch {} => Ok(Action::Fetch(wire::MissionFetch {
+                digest: self.unseen_proposal().ok_or(DeskRefusal::NoProposal)?,
+            })),
             MissionCommand::Start { digest } => {
                 let proposal_digest = match digest {
                     Some(named) => parse_hex(named)?,
@@ -364,7 +366,9 @@ impl MissionDesk {
             reason: receipt.reason,
             lane: receipt.lane,
         };
-        if matches!(kind, IntentKind::Propose | IntentKind::Revise) && filed.accepted() {
+        if kind == IntentKind::Fetch && filed.accepted() {
+            self.fetched = receipt.proposal.map(Box::new);
+        } else if matches!(kind, IntentKind::Propose | IntentKind::Revise) && filed.accepted() {
             self.proposal = receipt.proposal.map(Box::new);
         }
         self.receipt = Some(filed);
