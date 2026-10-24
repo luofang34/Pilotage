@@ -126,6 +126,7 @@ impl MissionCommand {
             Self::Hold {} => IntentKind::Hold,
             Self::Resume {} => IntentKind::Resume,
             Self::Abort {} => IntentKind::Abort,
+            Self::MemberDown { .. } => IntentKind::MemberDown,
         }
     }
 }
