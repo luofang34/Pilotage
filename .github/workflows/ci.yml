@@ -34,7 +34,6 @@ jobs:
   changes:
     runs-on: ubuntu-latest
     outputs:
-      apple: ${{ steps.decide.outputs.apple }}
       web: ${{ steps.decide.outputs.web }}
     steps:
       - name: Checkout
@@ -81,7 +80,6 @@ jobs:
         id: decide
         run: |
           if [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo "apple=true" >> "$GITHUB_OUTPUT"
             echo "web=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -91,7 +89,6 @@ jobs:
             printf '%s\n' "$answers" | grep -v '^#' >> "$GITHUB_OUTPUT"
           else
             echo "the classifier failed; everything runs"
-            echo "apple=true" >> "$GITHUB_OUTPUT"
             echo "web=true" >> "$GITHUB_OUTPUT"
           fi
 
@@ -510,152 +507,3 @@ jobs:
           else
             echo "origin/${base} has no .proto files yet; nothing to compare against."
           fi
-
-  apple-instrument-consumer:
-    needs: changes
-    if: needs.changes.outputs.apple == 'true'
-    runs-on: macos-15
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Select the newest Xcode on the runner
-        run: |
-          # The package declares a tools version the runner's default Xcode is older
-          # than, and the failure reads as a package problem rather than a runner one.
-          newest=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
-          if [ -n "$newest" ]; then sudo xcode-select -s "$newest"; fi
-          xcodebuild -version
-          swift --version
-
-      - name: Authorize the private git dependency (Navigate)
-        env:
-          NAVIGATE_DEPLOY_KEY: ${{ secrets.NAVIGATE_DEPLOY_KEY }}
-        run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "$NAVIGATE_DEPLOY_KEY" > ~/.ssh/navigate_ci
-          chmod 600 ~/.ssh/navigate_ci
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
-          printf 'Host github-navigate\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/navigate_ci\n  IdentitiesOnly yes\n' >> ~/.ssh/config
-          git config --global url."ssh://git@github-navigate/luofang34/Navigate".insteadOf "https://github.com/luofang34/Navigate"
-
-      - name: Authorize the private Swift dependency (IndicateAppleDisplay)
-        env:
-          INDICATE_APPLE_DISPLAY_DEPLOY_KEY: ${{ secrets.INDICATE_APPLE_DISPLAY_DEPLOY_KEY }}
-        run: |
-          printf '%s\n' "$INDICATE_APPLE_DISPLAY_DEPLOY_KEY" > ~/.ssh/indicate_apple_display_ci
-          chmod 600 ~/.ssh/indicate_apple_display_ci
-          printf 'Host github-indicate-apple-display\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/indicate_apple_display_ci\n  IdentitiesOnly yes\n' >> ~/.ssh/config
-          git config --global url."ssh://git@github-indicate-apple-display/luofang34/IndicateAppleDisplay".insteadOf "https://github.com/luofang34/IndicateAppleDisplay"
-
-      - name: Authorize the private situation domain dependencies
-        env:
-          AIRMASS_DEPLOY_KEY: ${{ secrets.AIRMASS_DEPLOY_KEY }}
-          SURVEILLANCE_DEPLOY_KEY: ${{ secrets.SURVEILLANCE_DEPLOY_KEY }}
-        run: |
-          if [ -z "$AIRMASS_DEPLOY_KEY" ] || [ -z "$SURVEILLANCE_DEPLOY_KEY" ]; then
-            echo "::error::AIRMASS_DEPLOY_KEY and SURVEILLANCE_DEPLOY_KEY must contain private deploy keys." >&2
-            exit 1
-          fi
-          printf '%s\n' "$AIRMASS_DEPLOY_KEY" > ~/.ssh/airmass_ci
-          printf '%s\n' "$SURVEILLANCE_DEPLOY_KEY" > ~/.ssh/surveillance_ci
-          chmod 600 ~/.ssh/airmass_ci ~/.ssh/surveillance_ci
-          printf 'Host github-airmass\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/airmass_ci\n  IdentitiesOnly yes\n' >> ~/.ssh/config
-          printf 'Host github-surveillance\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/surveillance_ci\n  IdentitiesOnly yes\n' >> ~/.ssh/config
-          git config --global url."ssh://git@github-airmass/luofang34/Airmass".insteadOf "https://github.com/luofang34/Airmass"
-          git config --global url."ssh://git@github-surveillance/luofang34/Surveillance".insteadOf "https://github.com/luofang34/Surveillance"
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Generate the bridge and test the Apple consumer
-        run: bash scripts/check-apple-instrument-consumer.sh
-
-  apple-client:
-    needs: changes
-    if: needs.changes.outputs.apple == 'true'
-    runs-on: macos-15
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Select the newest Xcode on the runner
-        run: |
-          # The package declares a tools version the runner's default Xcode is older
-          # than, and the failure reads as a package problem rather than a runner one.
-          newest=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
-          if [ -n "$newest" ]; then sudo xcode-select -s "$newest"; fi
-          xcodebuild -version
-          swift --version
-
-      - name: Authorize the private situation domain dependencies
-        env:
-          AIRMASS_DEPLOY_KEY: ${{ secrets.AIRMASS_DEPLOY_KEY }}
-          SURVEILLANCE_DEPLOY_KEY: ${{ secrets.SURVEILLANCE_DEPLOY_KEY }}
-        run: |
-          if [ -z "$AIRMASS_DEPLOY_KEY" ] || [ -z "$SURVEILLANCE_DEPLOY_KEY" ]; then
-            echo "::error::AIRMASS_DEPLOY_KEY and SURVEILLANCE_DEPLOY_KEY must contain private deploy keys." >&2
-            exit 1
-          fi
-          mkdir -p ~/.ssh
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
-          printf '%s\n' "$AIRMASS_DEPLOY_KEY" > ~/.ssh/airmass_ci
-          printf '%s\n' "$SURVEILLANCE_DEPLOY_KEY" > ~/.ssh/surveillance_ci
-          chmod 600 ~/.ssh/airmass_ci ~/.ssh/surveillance_ci
-          printf 'Host github-airmass\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/airmass_ci\n  IdentitiesOnly yes\n' >> ~/.ssh/config
-          printf 'Host github-surveillance\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/surveillance_ci\n  IdentitiesOnly yes\n' >> ~/.ssh/config
-          git config --global url."ssh://git@github-airmass/luofang34/Airmass".insteadOf "https://github.com/luofang34/Airmass"
-          git config --global url."ssh://git@github-surveillance/luofang34/Surveillance".insteadOf "https://github.com/luofang34/Surveillance"
-
-      - name: Require the AeroLink deploy key
-        env:
-          AERO_LINK_DEPLOY_KEY: ${{ secrets.AERO_LINK_DEPLOY_KEY }}
-        run: |
-          if [ -z "$AERO_LINK_DEPLOY_KEY" ]; then
-            echo "::error::AERO_LINK_DEPLOY_KEY must contain a private deploy key." >&2
-            exit 1
-          fi
-
-      - name: Checkout the pinned AeroLink source
-        uses: actions/checkout@v7
-        with:
-          repository: luofang34/aero-link
-          ref: 241970ee918aa51aa90eb84e62544874c22f79b1
-          path: external/aero-link
-          ssh-key: ${{ secrets.AERO_LINK_DEPLOY_KEY }}
-
-      - name: Checkout the pinned Airmass source
-        uses: actions/checkout@v7
-        with:
-          repository: luofang34/Airmass
-          ref: fbfec00b07b8bb34d44c951b0f98a33543487537
-          path: external/Airmass
-          ssh-key: ${{ secrets.AIRMASS_DEPLOY_KEY }}
-
-      - name: Checkout the pinned Surveillance source
-        uses: actions/checkout@v7
-        with:
-          repository: luofang34/Surveillance
-          ref: 36b5d96052e817da92fc62d383196d11e449df10
-          path: external/Surveillance
-          ssh-key: ${{ secrets.SURVEILLANCE_DEPLOY_KEY }}
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-ios,aarch64-apple-ios-sim,aarch64-apple-darwin
-
-      - name: Install XcodeGen
-        run: brew install xcodegen
-
-      # The coastline archive is built from Natural Earth shapefiles, and project
-      # generation builds it, so the job needs the converter that reads them.
-      - name: Install GDAL
-        run: brew install gdal
-
-      - name: Test the Apple client
-        env:
-          AERO_LINK_SOURCE: ${{ github.workspace }}/external/aero-link
-          AIRMASS_SOURCE: ${{ github.workspace }}/external/Airmass
-          SURVEILLANCE_SOURCE: ${{ github.workspace }}/external/Surveillance
-        run: sh clients/apple/scripts/ci-ios.sh

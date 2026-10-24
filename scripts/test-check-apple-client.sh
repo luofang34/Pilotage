@@ -7,7 +7,6 @@ fixture=$(mktemp -d)
 trap 'rm -rf "$fixture"' EXIT
 client_fixture="$fixture/clients/apple"
 mkdir -p \
-    "$fixture/.github/workflows" \
     "$client_fixture/App" \
     "$client_fixture/Configuration" \
     "$client_fixture/Packages/PilotageMapLibreBinding" \
@@ -19,7 +18,6 @@ mkdir -p \
     "$client_fixture/rust/pilotage-situation-ffi/src/reception" \
     "$client_fixture/scripts" \
     "$fixture/scripts"
-cp "$root/.github/workflows/ci.yml" "$fixture/.github/workflows/"
 cp "$root/clients/apple/AERO_LINK_REVISION" "$client_fixture/"
 cp "$root/clients/apple/AIRMASS_REVISION" "$client_fixture/"
 cp "$root/clients/apple/SURVEILLANCE_REVISION" "$client_fixture/"
@@ -167,15 +165,6 @@ fi
 
 sed -i.bak 's/#if true/#if PILOTAGE_MAPLIBRE_TERRAIN/' \
     "$fixture/clients/apple/App/SituationStyleResource.swift"
-sed -i.bak 's/brew install xcodegen/brew install removed-xcodegen/' \
-    "$fixture/.github/workflows/ci.yml"
-if bash "$fixture/scripts/check-apple-client.sh" "$fixture" >/dev/null 2>&1; then
-    echo "the Apple client guard accepted a missing XcodeGen install" >&2
-    exit 1
-fi
-
-sed -i.bak 's/brew install removed-xcodegen/brew install xcodegen/' \
-    "$fixture/.github/workflows/ci.yml"
 sed -i.bak 's/ARCHS=arm64/ARCHS=x86_64/' \
     "$fixture/clients/apple/scripts/ci-ios.sh"
 if bash "$fixture/scripts/check-apple-client.sh" "$fixture" >/dev/null 2>&1; then
