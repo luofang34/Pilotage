@@ -248,6 +248,13 @@ permission of the approver for that draft, so this check applies only to
 admission inside the envelope. Task-by-task consent is an
 optional workflow inside this rule, not a separate level.
 
+A team that passes its approval down divides a consumable budget; it
+does not copy it. A member team gets an even part of the re-flight budget,
+and the first member teams get one more line each until the remainder is
+gone. When the team has vehicle members too, it keeps one part for their
+lines. A vehicle member decides no re-flight, so it gets no part. The parts
+never add up to more than the approval of the team allows.
+
 Bounds copied into a plan grant nothing. The lane verifies a plan against
 the issuer's grant at admission and again during execution. A delegation
 that must hold without a connection has an expiry and a preauthorized

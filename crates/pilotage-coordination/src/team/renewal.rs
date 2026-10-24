@@ -99,6 +99,7 @@ impl TeamLane {
                 &self.config.name,
             );
             renewed.run_id.clone_from(&status.run_id);
+            let renewed = self.with_share(&member, renewed);
             intents.push(self.request(
                 &member,
                 Op::Renew,

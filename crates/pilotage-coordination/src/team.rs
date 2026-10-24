@@ -2,6 +2,7 @@
 //! and steer by fan-out, and adapt within the team's approval envelope.
 
 mod aggregate;
+mod budget;
 mod handover;
 mod intents;
 mod members;
