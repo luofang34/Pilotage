@@ -50,7 +50,16 @@ The mission document contains ordered phases. Each phase contains:
 - one action;
 - its completion conditions;
 - its abort conditions; and
-- its maximum simulator time.
+- an optional deadline on the clock that it names.
+
+A phase deadline is on the mission clock or on the simulator clock. The host
+supplies the mission clock. It is monotonic, and it stops while the mission is
+held. Only a simulator supplies the simulator clock. A phase needs the simulator
+clock, and declares the simulator-time capability, only when its deadline or a
+condition uses that clock. A phase without a deadline, such as a phase that
+waits for a person, continues until its conditions end it. A flight-plan
+reference names its own navigation data, so a document names navigation data
+only when one data set applies to all of the document.
 
 The action vocabulary uses nested enums. `MissionAction::Flight(FlightAction)`
 contains operational flight actions. `MissionAction::Trial(TrialAction)`
@@ -70,7 +79,8 @@ The core owns:
 - mission admission and capability checks;
 - the active phase index and all phase transitions;
 - caller-supplied logical time;
-- simulator-time and wall-time deadlines;
+- phase deadlines on the mission or simulator clock, and the wall-time
+  deadline;
 - action IDs and correlated receipts;
 - retries and typed refusals;
 - abort behavior and cleanup inside one mission;

@@ -11,9 +11,9 @@ use pilotage_mission::policy::{
 use pilotage_mission::{MissionConfig, MissionEngine, decode_snapshot};
 use pilotage_mission_core::{
     DirectiveReceipt, EngineStart, EngineState, ExecutionTarget, FlightAction, MissionAction,
-    MissionCondition, MissionEngine as CoreMissionEngine, MissionObservation, MissionTerminal,
-    NavigationCondition, NavigationObservation, ReceiptResult, TickInput, VehicleObservation,
-    WallDeadline,
+    MissionCapability, MissionCondition, MissionEngine as CoreMissionEngine, MissionObservation,
+    MissionTerminal, NavigationCondition, NavigationObservation, PhaseClock, PhaseDeadline,
+    ReceiptResult, TickInput, VehicleObservation, WallDeadline,
 };
 
 const ANCHOR: GeoPointDegrees = GeoPointDegrees {
@@ -61,18 +61,27 @@ fn route_config_produces_the_three_bounded_action_phases() {
     assert_eq!(document.phases[0].id, "arm");
     assert_eq!(document.phases[1].id, "climb");
     assert_eq!(document.phases[2].id, "follow-plan");
+    // An operational mission runs on the mission clock and needs no simulator time.
+    let mission = |duration_ns| {
+        Some(PhaseDeadline {
+            clock: PhaseClock::Mission,
+            duration_ns,
+        })
+    };
+    assert_eq!(document.phases[0].deadline, mission(ARM_PHASE_DEADLINE_NS));
     assert_eq!(
-        document.phases[0].simulator_time_deadline_ns,
-        ARM_PHASE_DEADLINE_NS
+        document.phases[1].deadline,
+        mission(CLIMB_PHASE_DEADLINE_NS)
     );
     assert_eq!(
-        document.phases[1].simulator_time_deadline_ns,
-        CLIMB_PHASE_DEADLINE_NS
+        document.phases[2].deadline,
+        mission(FOLLOW_PLAN_PHASE_DEADLINE_NS)
     );
-    assert_eq!(
-        document.phases[2].simulator_time_deadline_ns,
-        FOLLOW_PLAN_PHASE_DEADLINE_NS
-    );
+    assert!(document.phases.iter().all(|phase| {
+        !phase
+            .required_capabilities
+            .contains(&MissionCapability::SimulatorTime)
+    }));
     assert!(document.phases.iter().all(|phase| {
         !matches!(
             phase.action,
@@ -133,7 +142,7 @@ fn built_plan_and_navdata_identities_bind_the_document() {
     );
     assert_eq!(
         first_document.identity.navigation_data_identity,
-        first_plan.navigation_data_identity
+        Some(first_plan.navigation_data_identity.clone())
     );
     assert!(!first_plan.plan_content_digest.is_zero());
     assert_ne!(
@@ -155,7 +164,8 @@ fn plan_completion_before_the_follow_deadline_is_complete() {
         document.clone(),
         EngineStart {
             host_target: ExecutionTarget::Simulator,
-            simulator_time_ns: start_ns,
+            mission_time_ns: start_ns,
+            simulator_time_ns: Some(start_ns),
             wall_time_ns: start_ns,
             wall_deadline: WallDeadline {
                 mission_content_digest: document.identity.content_digest,
@@ -230,7 +240,8 @@ fn tick_core(
 ) -> pilotage_mission_core::TickOutput {
     engine
         .tick(TickInput {
-            simulator_time_ns: now_ns,
+            mission_time_ns: now_ns,
+            simulator_time_ns: Some(now_ns),
             wall_time_ns: now_ns,
             observation,
             receipts: receipt.into_iter().collect(),

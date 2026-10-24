@@ -127,7 +127,7 @@ fn canonical_source_digest_is_fixed() {
         .expect("verify evidence");
     assert_eq!(
         verified.source_digest().to_string(),
-        "077f3df8c005b63f27802e10c7ab249ba4004216d4d5f29037336e5a24950c5c"
+        "5f070f065f9fb769676709081e89a30467120408b94439801cf2fb27c21707fe"
     );
 }
 

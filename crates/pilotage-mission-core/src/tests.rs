@@ -1,5 +1,6 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
+mod decoding;
 mod flight_vectors;
 mod stimulus;
 
@@ -12,17 +13,17 @@ use crate::{
 };
 
 const CANONICAL_FIXTURE: &[u8] = concat!(
-    "{\"identity\":{\"revision_id\":\"mission-1\",\"schema_version\":3,",
-    "\"content_digest\":\"f1a8b82556d74cebf50216fd1d20cd01504d5e4ba22ec439bcad33f8ff1b08d9\",",
+    "{\"identity\":{\"revision_id\":\"mission-1\",\"schema_version\":4,",
+    "\"content_digest\":\"b2f20981980cf16e5bd4709f288e066976026842b18c46ea296df473f47b9eaa\",",
     "\"navigation_data_identity\":{\"cycle\":\"2608\",\"snapshot_id\":\"nav-1\",",
     "\"snapshot_digest\":\"0101010101010101010101010101010101010101010101010101010101010101\"}},",
     "\"execution_policy\":{\"target\":\"real_vehicle\",\"retry_limit\":2,",
     "\"receipt_timeout_ns\":500000},\"phases\":[{\"id\":\"phase-1\",",
-    "\"required_capabilities\":[\"simulator_time\",\"arm_disarm\"],\"entry_conditions\":[],",
+    "\"required_capabilities\":[\"arm_disarm\"],\"entry_conditions\":[],",
     "\"action\":{\"domain\":\"flight\",\"action\":{\"kind\":\"arm\"}},",
     "\"cleanup_actions\":[],",
     "\"completion_conditions\":[],\"abort_conditions\":[],",
-    "\"simulator_time_deadline_ns\":1000000}]}"
+    "\"deadline\":{\"clock\":\"mission\",\"duration_ns\":1000000}}]}"
 )
 .as_bytes();
 
@@ -39,21 +40,18 @@ fn navigation_data(byte: u8) -> NavigationDataIdentity {
 }
 
 fn phase(id: &str, action: MissionAction) -> MissionPhase {
-    let mut required_capabilities = vec![MissionCapability::SimulatorTime];
-    if let Some(capability) = action.required_capability()
-        && capability != MissionCapability::SimulatorTime
-    {
-        required_capabilities.push(capability);
-    }
     MissionPhase {
         id: id.to_owned(),
-        required_capabilities,
+        required_capabilities: action.required_capability().into_iter().collect(),
         entry_conditions: Vec::new(),
         action,
         cleanup_actions: Vec::new(),
         completion_conditions: Vec::new(),
         abort_conditions: Vec::new(),
-        simulator_time_deadline_ns: 1_000_000,
+        deadline: Some(crate::PhaseDeadline {
+            clock: crate::PhaseClock::Mission,
+            duration_ns: 1_000_000,
+        }),
     }
 }
 
@@ -63,7 +61,7 @@ fn document_for(
 ) -> Result<MissionDocument, CodecError> {
     MissionDocument::new(
         "mission-1".to_owned(),
-        navigation_data(1),
+        Some(navigation_data(1)),
         ExecutionPolicy {
             target,
             retry_limit: 2,
@@ -164,7 +162,9 @@ fn identity_and_policy_field_groups_change_digest() {
     schema.identity.schema_version = crate::MISSION_SCHEMA_VERSION.wrapping_add(1);
     assert_ne!(schema.calculate_content_digest().expect("digest"), original);
     let mut navdata = document.clone();
-    navdata.identity.navigation_data_identity.cycle = "2609".to_owned();
+    if let Some(identity) = navdata.identity.navigation_data_identity.as_mut() {
+        identity.cycle = "2609".to_owned();
+    }
     assert_ne!(
         navdata.calculate_content_digest().expect("digest"),
         original
@@ -249,7 +249,7 @@ fn each_phase_field_group_changes_digest() {
         original
     );
     changed = document;
-    changed.phases[0].simulator_time_deadline_ns += 1;
+    lengthen(&mut changed.phases[0]);
     assert_ne!(
         changed.calculate_content_digest().expect("digest"),
         original
@@ -328,7 +328,10 @@ fn validation_rejects_empty_and_repeated_phases() {
 #[test]
 fn validation_rejects_missing_deadline_and_capability() {
     let mut document = valid_document();
-    document.phases[0].simulator_time_deadline_ns = 0;
+    document.phases[0].deadline = Some(crate::PhaseDeadline {
+        clock: crate::PhaseClock::Simulator,
+        duration_ns: 0,
+    });
     assert!(matches!(
         document.validate(),
         Err(ValidationError::MissingDeadline { .. })
@@ -383,7 +386,7 @@ fn real_vehicle_admission_rejects_a_trial_cleanup_action() {
 fn phase_order_is_preserved_by_canonical_serialization() {
     let document = MissionDocument::new(
         "mission-ordered".to_owned(),
-        navigation_data(1),
+        Some(navigation_data(1)),
         ExecutionPolicy {
             target: ExecutionTarget::RealVehicle,
             retry_limit: 2,
@@ -450,24 +453,13 @@ fn decoder_rejects_unknown_fields_and_digest_changes() {
         Err(CodecError::Decode { .. })
     ));
     let mut changed = document;
-    changed.phases[0].simulator_time_deadline_ns += 1;
+    lengthen(&mut changed.phases[0]);
     assert!(matches!(
         changed.to_canonical_json(),
         Err(CodecError::Validation(
             ValidationError::ContentDigestMismatch { .. }
         ))
     ));
-}
-
-#[test]
-fn decoder_rejects_unknown_nested_fields() {
-    let document = valid_document();
-    assert_unknown_field_rejected(&document, |value| {
-        value["phases"][0]["unknown"] = serde_json::Value::Bool(true);
-    });
-    assert_unknown_field_rejected(&document, |value| {
-        value["phases"][0]["action"]["action"]["unknown"] = serde_json::Value::Bool(true);
-    });
 }
 
 fn assert_unknown_field_rejected(
@@ -487,9 +479,16 @@ fn assert_unknown_field_rejected(
 #[test]
 fn recalculated_digest_validates_changed_content() {
     let mut document = valid_document();
-    document.phases[0].simulator_time_deadline_ns += 1;
+    lengthen(&mut document.phases[0]);
     recalculate(&mut document);
     document
         .to_canonical_json()
         .expect("recalculated content must validate");
+}
+
+/// Lengthens `phase`'s deadline by a nanosecond.
+fn lengthen(phase: &mut MissionPhase) {
+    if let Some(deadline) = phase.deadline.as_mut() {
+        deadline.duration_ns = deadline.duration_ns.wrapping_add(1);
+    }
 }

@@ -26,18 +26,21 @@ pub(super) fn phase(id: &str) -> MissionPhase {
         cleanup_actions: Vec::new(),
         completion_conditions: Vec::new(),
         abort_conditions: Vec::new(),
-        simulator_time_deadline_ns: PHASE_DEADLINE_NS,
+        deadline: Some(crate::PhaseDeadline {
+            clock: crate::PhaseClock::Simulator,
+            duration_ns: PHASE_DEADLINE_NS,
+        }),
     }
 }
 
 pub(super) fn document(phases: Vec<MissionPhase>) -> MissionDocument {
     MissionDocument::new(
         "engine-mission-1".to_owned(),
-        NavigationDataIdentity {
+        Some(NavigationDataIdentity {
             cycle: "2608".to_owned(),
             snapshot_id: "nav-engine-1".to_owned(),
             snapshot_digest: digest(7),
-        },
+        }),
         ExecutionPolicy {
             target: ExecutionTarget::Simulator,
             retry_limit: 1,
@@ -54,7 +57,8 @@ pub(super) fn engine(document: MissionDocument) -> MissionEngine {
         document,
         EngineStart {
             host_target: ExecutionTarget::Simulator,
-            simulator_time_ns: 0,
+            mission_time_ns: 0,
+            simulator_time_ns: Some(0),
             wall_time_ns: 0,
             wall_deadline: WallDeadline {
                 mission_content_digest,
@@ -65,6 +69,8 @@ pub(super) fn engine(document: MissionDocument) -> MissionEngine {
     .expect("start test mission")
 }
 
+/// One tick at `simulator_time_ns` on both the mission and the simulator clock, as a
+/// simulator trial supplies them.
 pub(super) fn tick(
     engine: &mut MissionEngine,
     simulator_time_ns: u64,
@@ -74,7 +80,8 @@ pub(super) fn tick(
 ) -> TickOutput {
     engine
         .tick(TickInput {
-            simulator_time_ns,
+            mission_time_ns: simulator_time_ns,
+            simulator_time_ns: Some(simulator_time_ns),
             wall_time_ns,
             observation,
             receipts,

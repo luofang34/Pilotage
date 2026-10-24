@@ -8,12 +8,14 @@ use crate::{ActionId, DirectiveContext, MissionDirective, ReceiptResult};
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "class", rename_all = "snake_case", deny_unknown_fields)]
 pub enum DeadlineClass {
-    /// The active phase used all of its simulator-time duration.
-    PhaseSimulatorTime {
+    /// The active phase used all of its duration on the clock its deadline names.
+    Phase {
         /// The phase index.
         phase_index: usize,
         /// The stable phase identifier.
         phase_id: String,
+        /// The clock the deadline is measured on.
+        clock: crate::PhaseClock,
         /// The configured phase duration.
         limit_ns: u64,
         /// The observed duration when the engine stopped the phase.
@@ -204,8 +206,8 @@ pub enum EngineEvent {
         phase_index: usize,
         /// The stable phase identifier.
         phase_id: String,
-        /// The caller simulator clock.
-        simulator_time_ns: u64,
+        /// The caller mission clock.
+        mission_time_ns: u64,
     },
     /// All completion conditions completed a phase.
     PhaseCompleted {
@@ -213,8 +215,8 @@ pub enum EngineEvent {
         phase_index: usize,
         /// The stable phase identifier.
         phase_id: String,
-        /// The caller simulator clock.
-        simulator_time_ns: u64,
+        /// The caller mission clock.
+        mission_time_ns: u64,
     },
     /// One abort condition matched.
     AbortConditionMatched {

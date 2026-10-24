@@ -69,8 +69,8 @@ pub enum ValidationError {
         /// The repeated capability.
         capability: MissionCapability,
     },
-    /// A phase has no simulator-time deadline.
-    #[error("phase {phase_id} must have a simulator-time deadline")]
+    /// A phase deadline has no duration.
+    #[error("phase {phase_id} has a deadline of zero")]
     MissingDeadline {
         /// The phase identifier.
         phase_id: String,

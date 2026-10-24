@@ -107,7 +107,9 @@ impl MissionEngine {
             return None;
         }
         let input = TickInput {
-            simulator_time_ns: self.sequencing_time(now).as_nanos(),
+            mission_time_ns: self.sequencing_time(now).as_nanos(),
+            // An operational mission runs on its own clock; no simulator supplies one.
+            simulator_time_ns: None,
             wall_time_ns: now.as_nanos(),
             observation,
             receipts: self.pending_receipt.take().into_iter().collect(),
@@ -127,7 +129,8 @@ impl MissionEngine {
         let expires_at_ns = now_ns.saturating_add(OPERATIONAL_WALL_DEADLINE_NS);
         let start = EngineStart {
             host_target: self.config.execution_target,
-            simulator_time_ns: self.sequencing_time(now).as_nanos(),
+            mission_time_ns: self.sequencing_time(now).as_nanos(),
+            simulator_time_ns: None,
             wall_time_ns: now_ns,
             wall_deadline: WallDeadline {
                 mission_content_digest: self.document.identity.content_digest,

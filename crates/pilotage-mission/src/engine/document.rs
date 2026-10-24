@@ -4,7 +4,7 @@ use navigate_contract::{AltitudeConstraint, FlightPlan, PlanRole, TurnType, Wayp
 use pilotage_mission_core::{
     Comparison, Digest, ExecutionPolicy, ExecutionTarget, FlightAction, FlightPlanReference,
     MissionAction, MissionCapability, MissionCondition, MissionDocument, MissionPhase,
-    NavigationCondition, NavigationDataIdentity,
+    NavigationCondition, NavigationDataIdentity, PhaseClock, PhaseDeadline,
 };
 use sha2::{Digest as _, Sha256};
 
@@ -45,7 +45,7 @@ pub(super) fn build_document(
     let revision_id = format!("{revision_prefix}:{plan_content_digest}");
     let document = MissionDocument::new(
         revision_id,
-        navigation_data_identity,
+        Some(navigation_data_identity),
         ExecutionPolicy {
             target: config.execution_target,
             retry_limit: OPERATIONAL_RETRY_LIMIT,
@@ -75,7 +75,6 @@ fn arm_phase() -> MissionPhase {
     MissionPhase {
         id: ARM_PHASE_ID.to_owned(),
         required_capabilities: vec![
-            MissionCapability::SimulatorTime,
             MissionCapability::ArmDisarm,
             MissionCapability::NavigationState,
         ],
@@ -86,7 +85,10 @@ fn arm_phase() -> MissionPhase {
         cleanup_actions: Vec::new(),
         completion_conditions: vec![MissionCondition::Always {}],
         abort_conditions: Vec::new(),
-        simulator_time_deadline_ns: ARM_PHASE_DEADLINE_NS,
+        deadline: Some(PhaseDeadline {
+            clock: PhaseClock::Mission,
+            duration_ns: ARM_PHASE_DEADLINE_NS,
+        }),
     }
 }
 
@@ -100,7 +102,6 @@ fn climb_phase(config: &MissionConfig, first: bool) -> MissionPhase {
     MissionPhase {
         id: CLIMB_PHASE_ID.to_owned(),
         required_capabilities: vec![
-            MissionCapability::SimulatorTime,
             MissionCapability::FlightControl,
             MissionCapability::NavigationState,
         ],
@@ -114,7 +115,10 @@ fn climb_phase(config: &MissionConfig, first: bool) -> MissionPhase {
             },
         )],
         abort_conditions: Vec::new(),
-        simulator_time_deadline_ns: CLIMB_PHASE_DEADLINE_NS,
+        deadline: Some(PhaseDeadline {
+            clock: PhaseClock::Mission,
+            duration_ns: CLIMB_PHASE_DEADLINE_NS,
+        }),
     }
 }
 
@@ -122,7 +126,6 @@ fn follow_plan_phase(plan: FlightPlanReference) -> MissionPhase {
     MissionPhase {
         id: FOLLOW_PLAN_PHASE_ID.to_owned(),
         required_capabilities: vec![
-            MissionCapability::SimulatorTime,
             MissionCapability::FlightPlan,
             MissionCapability::NavigationState,
         ],
@@ -133,7 +136,10 @@ fn follow_plan_phase(plan: FlightPlanReference) -> MissionPhase {
             NavigationCondition::PlanComplete { expected: true },
         )],
         abort_conditions: Vec::new(),
-        simulator_time_deadline_ns: FOLLOW_PLAN_PHASE_DEADLINE_NS,
+        deadline: Some(PhaseDeadline {
+            clock: PhaseClock::Mission,
+            duration_ns: FOLLOW_PLAN_PHASE_DEADLINE_NS,
+        }),
     }
 }
 
