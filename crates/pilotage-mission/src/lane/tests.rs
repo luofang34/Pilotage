@@ -255,6 +255,7 @@ fn a_line_is_done_only_with_usable_pictures() {
         ended: false,
         ended_because: None,
         holding: false,
+        execution: None,
     });
     let status = lane.take_changed().expect("changed");
     assert_eq!(status.state, wire::MissionLaneState::Complete as i32);
@@ -299,6 +300,7 @@ fn hold_resume_and_abort_follow_the_lifecycle() {
     assert_eq!(lane.state(), wire::MissionLaneState::HoldRequested);
     lane.on_progress(&RunProgress {
         holding: true,
+        execution: None,
         ..RunProgress::default()
     });
     assert_eq!(lane.state(), wire::MissionLaneState::Held);
@@ -380,6 +382,26 @@ fn an_abort_on_the_way_home_does_not_complete_the_way_home() {
         home.is_some_and(|(_, s)| *s == wire::MissionTaskState::Incomplete),
         "{states:?}"
     );
+}
+
+#[test]
+fn a_run_reports_what_it_does_while_its_lane_flies() {
+    let (mut lane, _) = running_lane();
+    lane.on_progress(&RunProgress {
+        execution: Some(super::RunExecution::LeaseHeldElsewhere(Some(7))),
+        ..RunProgress::default()
+    });
+    let execution = lane.status().execution.expect("a run");
+    assert_eq!(
+        execution.state,
+        wire::MissionExecutionState::LeaseHeldElsewhere as i32
+    );
+    assert_eq!(execution.lease_holder, 7);
+    lane.on_intent(
+        &intent(wire::mission_intent::Action::Abort(wire::MissionAbort {})),
+        &context("x"),
+    );
+    assert_eq!(lane.status().execution, None, "no run, nothing to report");
 }
 
 mod evidence;

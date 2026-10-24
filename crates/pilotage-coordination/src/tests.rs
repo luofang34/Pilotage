@@ -204,6 +204,7 @@ impl Fleet {
                 ended: false,
                 ended_because: None,
                 holding: false,
+                execution: None,
             });
             if let Some(status) = lane.take_changed() {
                 intents.extend(self.team.on_member_status(&status, &context("fly")));

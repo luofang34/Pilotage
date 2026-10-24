@@ -225,7 +225,7 @@ impl TaskBook {
 fn members_hold(team: &TeamLane) -> bool {
     team.member_proposals
         .keys()
-        .filter(|m| team.lost.get(*m) != Some(&true))
+        .filter(|m| !team.stated_down(m))
         .all(|m| {
             !team.lost.contains_key(m)
                 && team.statuses.get(m).is_some_and(|s| {
@@ -280,7 +280,16 @@ pub(super) fn team_status(team: &TeamLane) -> wire::MissionStatus {
         estimates: proposal.and_then(|p| p.estimates),
         simulated: simulated(team),
         detail: team.detail.clone(),
-        members: team.statuses.values().cloned().collect(),
+        members: team
+            .statuses
+            .iter()
+            .map(|(member, status)| wire::MissionStatus {
+                member_link: team.link(member) as i32,
+                ..status.clone()
+            })
+            .collect(),
+        member_link: wire::MemberLink::Unspecified as i32,
+        execution: None,
         sequence: team.sequence,
         area: survey.map(|s| s.area.clone()).unwrap_or_default(),
         height_m: survey.map_or(0.0, |s| s.height_m),

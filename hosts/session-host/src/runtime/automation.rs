@@ -106,6 +106,9 @@ pub struct AutomationStatus {
     /// An operator's hold or an abort holds the vehicle, and the vehicle
     /// reports that it is still.
     pub holding: bool,
+    /// The principal that holds the motion lease when another one does, as
+    /// the welcome or an authority event named it.
+    pub lease_holder: Option<u64>,
 }
 
 /// Where the plan comes from: a navdata snapshot the route expands

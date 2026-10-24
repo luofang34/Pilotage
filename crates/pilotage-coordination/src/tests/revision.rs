@@ -258,6 +258,18 @@ fn a_parents_strip_keeps_exactly_the_lines_inside_it() {
     assert_eq!(draft.tasks.len(), 3, "{}", draft.summary);
 }
 
+/// How the team reports `member`'s link.
+fn link_of(fleet: &Fleet, member: &str) -> wire::MemberLink {
+    fleet
+        .team
+        .status()
+        .members
+        .iter()
+        .find(|m| m.lane == member)
+        .and_then(|m| wire::MemberLink::try_from(m.member_link).ok())
+        .unwrap_or(wire::MemberLink::Unspecified)
+}
+
 fn member_down(member: &str) -> Action {
     Action::MemberDown(wire::MissionMemberDown {
         member: member.to_owned(),
@@ -267,8 +279,10 @@ fn member_down(member: &str) -> Action {
 #[test]
 fn a_lost_member_keeps_its_work_until_it_reports_or_a_person_states_it_down() {
     let (mut fleet, _) = running_fleet(false);
+    assert_eq!(link_of(&fleet, "SIM-3"), wire::MemberLink::Reporting);
     // SIM-3 is only partitioned: it keeps flying its line 1.
     fleet.team.on_member_lost("SIM-3");
+    assert_eq!(link_of(&fleet, "SIM-3"), wire::MemberLink::Lost);
     let give = reassign(&fleet, "SIM-3", "SIM-1", 1.0, false);
     let (receipt, intents) = team_intent(&mut fleet, give);
     let receipt = receipt.expect("answered");
@@ -319,6 +333,7 @@ fn a_person_states_a_lost_member_down_and_the_team_completes_without_it() {
     fleet.members.remove("SIM-3");
     let (receipt, _) = team_intent(&mut fleet, member_down("SIM-3"));
     assert!(receipt.is_some_and(|r| accepted(&r)));
+    assert_eq!(link_of(&fleet, "SIM-3"), wire::MemberLink::Down);
     let give = reassign(&fleet, "SIM-3", "SIM-1", 1.0, false);
     let (receipt, intents) = team_intent(&mut fleet, give);
     let draft = receipt.expect("answered").proposal.expect("a draft");
@@ -329,6 +344,7 @@ fn a_person_states_a_lost_member_down_and_the_team_completes_without_it() {
         intents.iter().all(|i| i.member != "SIM-3"),
         "nothing goes to a member that cannot hear it"
     );
+    assert_eq!(link_of(&fleet, "SIM-3"), wire::MemberLink::Released);
     assert!(
         fleet.team.status().detail.contains("SIM-3 is down"),
         "{}",

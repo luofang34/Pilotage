@@ -51,6 +51,7 @@ impl MissionTask {
         if !our_pair(granted.vehicle.as_ref(), granted.scope.as_ref()) || self.fenced {
             return;
         }
+        self.note_holder(granted.principal.as_ref());
         if self.our_principal(granted.principal.as_ref()) {
             if let Some(generation) = granted.generation.as_ref() {
                 self.take_generation(Generation::new(generation.value));
@@ -68,9 +69,13 @@ impl MissionTask {
             if self.generation.is_some() {
                 self.hold("the motion lease was revoked");
             }
-        } else if self.held && self.lease_wanted && !self.awaiting_launch {
-            // The human who held the scope released it: ask at once.
-            self.lease_due = true;
+        } else {
+            // Revoked from another principal, the lease is free.
+            self.note_holder(None);
+            if self.held && self.lease_wanted && !self.awaiting_launch {
+                // The human who held the scope released it: ask at once.
+                self.lease_due = true;
+            }
         }
     }
 
@@ -89,6 +94,7 @@ impl MissionTask {
         if !our_pair(committed.vehicle.as_ref(), committed.scope.as_ref()) || self.fenced {
             return;
         }
+        self.note_holder(committed.to_principal.as_ref());
         if self.our_principal(committed.to_principal.as_ref()) {
             if let Some(generation) = committed.generation.as_ref() {
                 self.take_generation(Generation::new(generation.value));
@@ -225,6 +231,16 @@ impl MissionTask {
             status.held = false;
             status.lease_generation = None;
         });
+    }
+}
+
+impl MissionTask {
+    /// Notes who holds the motion lease now: none when it is this principal.
+    fn note_holder(&self, holder: Option<&wire::PrincipalId>) {
+        let holder = holder
+            .filter(|h| !self.our_principal(Some(h)))
+            .map(|h| h.value);
+        self.update(|status| status.lease_holder = holder);
     }
 }
 

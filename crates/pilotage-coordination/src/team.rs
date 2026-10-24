@@ -116,9 +116,10 @@ pub struct TeamLane {
     run_id: Option<String>,
     reflies: Vec<Refly>,
     revision: Option<revision::Revision>,
-    /// Members whose link is lost, and whether a person stated one down:
-    /// its lines may go to others and the team no longer waits for it.
-    lost: BTreeMap<String, bool>,
+    /// Members whose link is lost, stated down or released; a member
+    /// missing here reports. One stated down may give its lines to others,
+    /// and the team no longer waits for it.
+    lost: BTreeMap<String, wire::MemberLink>,
     requests: u64,
     detail: String,
     sequence: u64,
@@ -391,11 +392,11 @@ impl TeamLane {
         let states: Vec<i32> = self
             .member_proposals
             .keys()
-            .filter(|m| self.lost.get(*m) != Some(&true))
+            .filter(|m| !self.stated_down(m))
             .filter_map(|m| self.statuses.get(m))
             .map(|s| s.state)
             .collect();
-        let released = self.lost.values().filter(|r| **r).count();
+        let released = self.lost.keys().filter(|m| self.stated_down(m)).count();
         if states.len() + released < self.member_proposals.len() {
             return;
         }

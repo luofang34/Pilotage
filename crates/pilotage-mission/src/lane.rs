@@ -12,6 +12,7 @@ mod digest;
 mod evidence;
 mod expiry;
 mod run;
+mod status;
 mod steering;
 mod successor;
 
@@ -25,7 +26,7 @@ use crate::survey::SurveyRequest;
 
 pub use compile::SurveyDefaults;
 pub use digest::proposal_digest;
-pub use run::{FrameAssessment, RunProgress};
+pub use run::{FrameAssessment, RunExecution, RunProgress};
 pub use steering::{HOST_ISSUER, Requester, Steering};
 
 use compile::Compiled;
@@ -132,6 +133,8 @@ pub struct Lane {
     clock_unix_ms: u64,
     /// The active approval expired during the run and its recovery applied.
     expired: bool,
+    /// What the run does now, as the host last said.
+    execution: Option<RunExecution>,
 }
 
 impl Lane {
@@ -152,6 +155,7 @@ impl Lane {
             changed: true,
             clock_unix_ms: 0,
             expired: false,
+            execution: None,
         }
     }
 
@@ -354,6 +358,10 @@ impl Lane {
     /// successor's run, the effect returned.
     pub fn on_progress(&mut self, progress: &RunProgress) -> Option<LaneEffect> {
         let flying = self.is_flying();
+        if progress.execution != self.execution {
+            self.execution = progress.execution;
+            self.changed = true;
+        }
         let run = self.run.as_mut()?;
         if run.on_progress(progress) {
             self.changed = true;
@@ -436,55 +444,6 @@ impl Lane {
             self.changed = true;
         }
         Ok(())
-    }
-
-    /// The status as it stands, with the sequence of the last change.
-    #[must_use]
-    pub fn status(&self) -> wire::MissionStatus {
-        let proposal = self.proposal.as_ref().map(|compiled| &compiled.proposal);
-        let survey = proposal
-            .and_then(|p| p.objective.as_ref())
-            .and_then(|o| o.kind.as_ref())
-            .map(|wire::mission_objective::Kind::Survey(survey)| survey);
-        wire::MissionStatus {
-            lane: self.config.name.clone(),
-            state: self.state as i32,
-            objective_id: proposal.map(|p| p.objective_id.clone()).unwrap_or_default(),
-            proposal_digest: proposal.map(|p| p.digest.clone()).unwrap_or_default(),
-            plan_digest: proposal
-                .and_then(|p| p.assumptions.as_ref())
-                .map(|a| a.plan_digest.clone())
-                .unwrap_or_default(),
-            run_id: self
-                .run
-                .as_ref()
-                .map(RunTracker::run_id)
-                .unwrap_or_default(),
-            tasks: self
-                .history
-                .iter()
-                .cloned()
-                .chain(match (self.run.as_ref(), proposal) {
-                    (Some(run), _) => run.task_statuses(),
-                    (None, Some(p)) => run::planned_statuses(&p.tasks),
-                    (None, None) => Vec::new(),
-                })
-                .collect(),
-            active_task: self
-                .run
-                .as_ref()
-                .and_then(RunTracker::active_task)
-                .unwrap_or_default(),
-            recovery_policy: self.config.recovery_policy.clone(),
-            estimates: proposal.and_then(|p| p.estimates),
-            simulated: self.config.simulated,
-            detail: self.detail.clone(),
-            members: Vec::new(),
-            sequence: self.sequence,
-            area: survey.map(|s| s.area.clone()).unwrap_or_default(),
-            height_m: survey.map_or(0.0, |s| s.height_m),
-            successor: self.successor_status(),
-        }
     }
 
     /// The status when it changed since the last call, with a new

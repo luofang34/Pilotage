@@ -229,8 +229,12 @@ it had stopped; reassignment needs a release acknowledgement, a valid
 expiry with fencing, or work preallocated as disjoint. A team lane keeps
 the work of a member with a lost link, and its line in progress, reserved
 to that member until the member reports again or an approver states, as a
-separate act, that the member is down. Loss of progress is preferred to
-conflicting control. Deadlines bind to a host's boot and
+separate act, that the member is down. The team reports each member's
+link as a typed state (`Reporting`, `Lost`, `Down` or `Released`), and a
+vehicle's lane reports what its run does now: flying, waiting for a
+launch, waiting for a lease that another principal holds, holding, or
+stopped. Clients act on these states; the detail text is for display
+only. Loss of progress is preferred to conflicting control. Deadlines bind to a host's boot and
 clock identity, and schedules across vehicles record their synchronization
 uncertainty. A host restart reconciles state; it does not replay commands.
 When an endpoint dies or loses its aircraft link, its adapter reports the
