@@ -218,6 +218,13 @@ impl TeamLane {
         }) else {
             return Vec::new();
         };
+        if !matches!(self.phase, super::Phase::Running | super::Phase::Held) {
+            // The release happened; the abort ended the work it was for.
+            handover.state = State::Unassigned;
+            handover.basis =
+                format!("{member} released the work after the team aborted; nobody flies it");
+            return Vec::new();
+        }
         let (kept, moved): (Vec<_>, Vec<_>) = handover
             .moved
             .drain(..)

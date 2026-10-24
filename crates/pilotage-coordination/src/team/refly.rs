@@ -33,6 +33,10 @@ pub(super) enum ReflyState {
     Flying,
     Done,
     Failed,
+    /// The team aborted before the flight started: it never flies.
+    Cancelled,
+    /// The team aborted after it sent the start: the member may fly it.
+    Uncertain,
 }
 
 /// One line flown again.
@@ -56,7 +60,10 @@ pub(super) struct Refly {
 
 impl Refly {
     pub(super) fn in_progress(&self) -> bool {
-        !matches!(self.state, ReflyState::Done | ReflyState::Failed)
+        !matches!(
+            self.state,
+            ReflyState::Done | ReflyState::Failed | ReflyState::Cancelled
+        )
     }
 }
 
@@ -279,6 +286,13 @@ impl TeamLane {
         let Some(refly) = self.reflies.get_mut(index) else {
             return Vec::new();
         };
+        // A receipt takes the next step only of a step still waiting for it.
+        if !matches!(
+            refly.state,
+            ReflyState::Proposing | ReflyState::Approving | ReflyState::Starting
+        ) {
+            return Vec::new();
+        }
         if !accepted {
             refly.state = ReflyState::Failed;
             self.detail = format!(
@@ -362,11 +376,9 @@ impl TeamLane {
     /// Follows a flying re-flight in its member's status; when it ends, the
     /// original line takes the re-flight's verdict.
     pub(super) fn refly_progress(&mut self, member: &str, status: &wire::MissionStatus) {
-        let Some(refly) = self
-            .reflies
-            .iter_mut()
-            .find(|r| r.member == member && r.state == ReflyState::Flying)
-        else {
+        let Some(refly) = self.reflies.iter_mut().find(|r| {
+            r.member == member && matches!(r.state, ReflyState::Flying | ReflyState::Uncertain)
+        }) else {
             return;
         };
         if refly.run_id.is_none()
