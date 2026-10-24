@@ -185,7 +185,31 @@ inside the approval's adaptation envelope is admitted locally, by the lane
 or by a coordinator, without another operator action. A successor outside
 the envelope needs a new approval. When no approval can be obtained, the
 lane applies the recovery behaviour the approval already authorized; it
-never changes the objective to declare success. Task-by-task consent is an
+never changes the objective to declare success.
+
+A successor is inside the envelope only when the envelope permits each
+class of change that the successor makes. The lane or the coordinator finds
+the classes when it compares the old content with the new content. It never
+uses the kind of request as the class. The classes are:
+
+| Class | What it changes | Permission |
+|---|---|---|
+| Plan | How the work is done: the tasks, their order, the speed, the height when no constraint fixes it | `permit_revise` |
+| Assignment | Who holds the work | `permit_allocate` |
+| Objective | What the work must achieve | `permit_change_objective` |
+
+One successor can make changes of more than one class. Then each of the
+permissions is necessary, and a refusal names each missing permission. A
+vehicle lane and a team use the same check. The task kind gives the meaning
+of its fields. For a survey, the area, the return to the launch point and
+the evidence that each line needs are objective fields. The height is a
+plan field, but it is an objective field when the objective holds the
+height (`hold_height`). The height bound of the envelope applies to all
+plans. The title, the identity and the revision number of an objective are
+not content: an objective with the same identity and different content is
+an objective change. An explicit approval of the digest of a draft is the
+permission of the approver for that draft, so this check applies only to
+admission inside the envelope. Task-by-task consent is an
 optional workflow inside this rule, not a separate level.
 
 Bounds copied into a plan grant nothing. The lane verifies a plan against

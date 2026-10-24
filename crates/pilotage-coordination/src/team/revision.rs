@@ -8,6 +8,8 @@
 //! completes its own plan.
 
 use pilotage_mission::IntentContext;
+use pilotage_mission::change::{ChangeClass, ChangeSet, authorize};
+use pilotage_mission::survey::objective_change;
 use pilotage_protocol::wire;
 use wire::MissionSuccessorState as Stage;
 
@@ -64,15 +66,16 @@ impl TeamLane {
         if self.run_id.as_deref() != Some(revise.run_id.as_str()) {
             return Err("the revision continues another team run".to_owned());
         }
-        let (change, summary) = match revise
+        let asked = revise
             .change
             .as_ref()
-            .ok_or("the revision names no change")?
-        {
+            .ok_or("the revision names no change")?;
+        let (change, summary) = match asked {
             Asked::Reassign(reassign) => self.draft_reassign(reassign)?,
             Asked::Finish(_) => self.draft_keep_none(),
             Asked::Objective(objective) => self.draft_keep(objective)?,
         };
+        let changes = self.changes(asked, &change);
         let proposal = self.revision_proposal(&change, summary, context);
         self.revision = Some(Revision {
             change,
@@ -92,16 +95,12 @@ impl TeamLane {
             .approval
             .clone()
             .ok_or("the team runs without an approval")?;
-        let reassigns = matches!(
-            self.revision.as_ref().map(|r| &r.change),
-            Some(Change::Reassign { .. })
-        );
         let permitted = valid_envelope(&approval, context.now_unix_ms)
-            .map(|e| e.permit_revise && (e.permit_allocate || !reassigns));
+            .map(|e| authorize(e, &changes).map_err(|unpermitted| unpermitted.to_string()));
         match permitted {
-            Ok(true) => Ok((proposal, self.apply_revision(context))),
-            Ok(false) => {
-                self.detail = "the approval does not permit this change inside its envelope; the draft waits for an approval".to_owned();
+            Ok(Ok(())) => Ok((proposal, self.apply_revision(context))),
+            Ok(Err(unpermitted)) => {
+                self.detail = format!("{unpermitted}; the draft waits for an approval");
                 Ok((proposal, Vec::new()))
             }
             Err(reason) => {
@@ -109,6 +108,29 @@ impl TeamLane {
                 Ok((proposal, Vec::new()))
             }
         }
+    }
+
+    /// Every change the drafted `change` makes, from comparing the team's
+    /// work before and after it, not from the kind of request.
+    fn changes(&self, asked: &wire::mission_revise::Change, change: &Change) -> ChangeSet {
+        use wire::mission_revise::Change as Asked;
+        let mut set = ChangeSet::default();
+        if let (Asked::Objective(after), Some(before)) = (asked, self.objective.as_ref()) {
+            set.extend(objective_change::classify(before, after));
+        }
+        match change {
+            Change::Reassign {
+                from, to, moved, ..
+            } => {
+                set.add(
+                    ChangeClass::Assignment,
+                    format!("{} lines move from {from} to {to}", moved.len()),
+                );
+                set.add(ChangeClass::Plan, "the members' lines");
+            }
+            Change::Keep(_) => set.add(ChangeClass::Plan, "the members' lines"),
+        }
+        set
     }
 
     /// Answers a revise intent: before a start a revised objective is a

@@ -415,6 +415,7 @@ fn an_idle_team_of_simulated_members_reports_simulated() {
     assert!(status.simulated, "every member is simulated");
 }
 
+mod authorize;
 mod hold;
 mod parent;
 mod progress;

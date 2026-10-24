@@ -9,6 +9,7 @@
 //! planner does not split a line at a concavity.
 
 mod geometry;
+pub mod objective_change;
 #[cfg(test)]
 mod tests;
 

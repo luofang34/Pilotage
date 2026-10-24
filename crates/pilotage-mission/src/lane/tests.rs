@@ -420,6 +420,7 @@ pub(super) fn toward(lane: &Lane, waypoint: usize) -> RunProgress {
     }
 }
 
+mod authorize;
 mod evidence;
 mod expiry;
 mod outcome;

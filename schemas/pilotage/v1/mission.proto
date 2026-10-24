@@ -49,6 +49,10 @@ message SurveyObjective {
   // Line bearing, degrees clockwise from true north. Absent follows the
   // area's longest edge. A team fixes it, so its members' lines align.
   optional double line_bearing_deg = 10;
+  // The operator requires `height_m`: a revision that changes the height
+  // changes the objective. Without it, the height is part of the plan, and
+  // only the envelope's `max_height_m` bounds it.
+  bool hold_height = 11;
 }
 
 // What the operator wants. A route is one way to satisfy it.
