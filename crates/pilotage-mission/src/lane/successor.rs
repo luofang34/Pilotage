@@ -22,6 +22,8 @@ pub(super) struct Successor {
     pub drafted_by: String,
     /// Lines flown when it was drafted; one more is the checkpoint.
     pub flown_at_draft: usize,
+    /// The recovery an expired approval names, which applies under it.
+    pub recovery: bool,
 }
 
 type Outcome = Result<(Option<LaneEffect>, Option<wire::MissionProposal>), String>;
@@ -85,6 +87,7 @@ impl Lane {
                 .map(|origin| origin.subject.clone())
                 .unwrap_or_default(),
             flown_at_draft: run.flown_lines(),
+            recovery: false,
         });
         self.detail = "revision drafted; waiting for review".to_owned();
         if !revise.within_envelope {
@@ -182,10 +185,14 @@ impl Lane {
             &self.config,
             context.now_unix_ms,
         )?;
+        self.expired = false;
         Ok((self.admit_successor(approval.clone()), None))
     }
 
-    fn admit_successor(&mut self, approval: wire::MissionApproval) -> Option<LaneEffect> {
+    pub(super) fn admit_successor(
+        &mut self,
+        approval: wire::MissionApproval,
+    ) -> Option<LaneEffect> {
         self.approval = Some(approval);
         if let Some(successor) = self.successor.as_mut() {
             successor.stage = Stage::Admitted;
@@ -208,6 +215,11 @@ impl Lane {
             .successor
             .as_ref()
             .filter(|s| s.stage == Stage::Admitted)?;
+        // A revision does not apply under an expired approval; the
+        // expiry's own recovery does.
+        if !successor.recovery && self.approval_expired() {
+            return None;
+        }
         let run = self.run.as_ref()?;
         let reached = plan_complete
             || run.flying_home()

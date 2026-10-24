@@ -1,8 +1,9 @@
 //! The approval a client grants a proposal, and the adaptation envelope it
 //! carries. Every client starts from the same default policy: a little
 //! height above the plan's, an hour, execution with revision and
-//! allocation but no change of objective, a few re-flown lines, and a fifth
-//! of the battery kept in reserve.
+//! allocation but no change of objective, a few re-flown lines, a fifth of
+//! the battery kept in reserve, and a hold in place if the hour ends during
+//! the run.
 
 use pilotage_protocol::wire;
 use serde::{Deserialize, Serialize};
@@ -25,6 +26,28 @@ pub struct ApprovalPolicy {
     pub permit_revise: bool,
     /// The least battery fraction at which the plan must end.
     pub min_reserve_fraction: f64,
+    /// What a run does when the approval expires while it flies.
+    pub on_expiry: OnExpiry,
+}
+
+/// What a run does when its approval expires while it flies.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OnExpiry {
+    /// Stop in place and wait for a new approval.
+    #[default]
+    Hold,
+    /// End after the line in progress and return to the launch point.
+    ReturnHome,
+}
+
+impl OnExpiry {
+    fn wire(self) -> wire::MissionExpiryPolicy {
+        match self {
+            Self::Hold => wire::MissionExpiryPolicy::Hold,
+            Self::ReturnHome => wire::MissionExpiryPolicy::ReturnHome,
+        }
+    }
 }
 
 impl Default for ApprovalPolicy {
@@ -36,6 +59,7 @@ impl Default for ApprovalPolicy {
             max_refly_lines: 4,
             permit_revise: true,
             min_reserve_fraction: 0.2,
+            on_expiry: OnExpiry::Hold,
         }
     }
 }
@@ -84,6 +108,7 @@ pub fn approval(
                 permit_allocate: true,
                 permit_change_objective: false,
                 max_refly_lines: policy.max_refly_lines,
+                on_expiry: policy.on_expiry.wire() as i32,
             }),
             approved_unix_ms: now_ms,
         },

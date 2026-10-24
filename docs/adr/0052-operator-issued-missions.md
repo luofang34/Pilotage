@@ -56,7 +56,12 @@ the digest of its predecessor, validity, and releasability.
   the permitted vehicles, the area and height bounds, the minimum energy
   reserve, the permitted payload uses, the expiry, and the kinds of
   revision it allows. It states the permissions separately: to execute, to
-  revise, to allocate work, and to change the objective.
+  revise, to allocate work, and to change the objective. It also names
+  the recovery for its expiry: hold in place, or end after the line in
+  progress and return to the launch point. When the approval expires
+  during a run, the lane applies that recovery one time. Then the run does
+  not resume, and an admitted revision does not apply, until a new
+  approval of the plan replaces the expired approval.
 - **Plan.** The executable `MissionDocument`
   ([ADR-0041](0041-one-mission-sequencing-core.md)): immutable,
   digest-identified, bound to a verified execution strategy and its
