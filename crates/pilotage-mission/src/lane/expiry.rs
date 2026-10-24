@@ -99,7 +99,6 @@ impl Lane {
         self.revisions = self.revisions.wrapping_add(1);
         compile::succeed(
             &mut compiled,
-            self.revisions,
             &current.proposal.digest,
             "the approval expired: end after the line in progress and return to the launch point"
                 .to_owned(),

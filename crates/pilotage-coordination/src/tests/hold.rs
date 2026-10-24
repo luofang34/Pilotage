@@ -24,10 +24,9 @@ fn a_team_holds_only_once_every_member_holds() {
     for (index, name) in names.iter().enumerate() {
         let lane = fleet.members.get_mut(name).expect("member");
         lane.on_progress(&RunProgress {
-            target_waypoint: Some(1),
             holding: true,
             execution: None,
-            ..RunProgress::default()
+            ..toward(lane, 1)
         });
         if let Some(status) = lane.take_changed() {
             fleet.team.on_member_status(&status, &context("held"));

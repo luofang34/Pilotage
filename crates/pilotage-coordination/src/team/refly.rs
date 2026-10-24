@@ -413,11 +413,10 @@ impl TeamLane {
     /// Follows a flying re-flight in its member's status; when it ends, the
     /// original line takes the re-flight's verdict.
     pub(super) fn refly_progress(&mut self, member: &str, status: &wire::MissionStatus) {
-        let Some((index, refly)) = self
+        let Some(refly) = self
             .reflies
             .iter_mut()
-            .enumerate()
-            .find(|(_, r)| r.member == member && r.state == ReflyState::Flying)
+            .find(|r| r.member == member && r.state == ReflyState::Flying)
         else {
             return;
         };
@@ -428,8 +427,7 @@ impl TeamLane {
             refly.run_id = Some(status.run_id.clone());
             if !refly.moved.is_empty() {
                 // Moved lines are new work: the book follows their run.
-                self.book
-                    .adopt(member, &status.run_id, &format!("moved{index}-"));
+                self.book.adopt(member, &status.run_id);
                 self.book.record(status, &[]);
             }
         }

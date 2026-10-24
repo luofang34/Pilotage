@@ -24,18 +24,15 @@ fn finish() -> wire::mission_revise::Change {
     wire::mission_revise::Change::Finish(wire::MissionFinish {})
 }
 
-fn progress(target: usize) -> RunProgress {
-    RunProgress {
-        target_waypoint: Some(target),
-        ..RunProgress::default()
-    }
+fn progress(lane: &Lane, target: usize) -> RunProgress {
+    toward(lane, target)
 }
 
 fn task_state(status: &wire::MissionStatus, id: &str) -> Option<wire::MissionTaskState> {
     status
         .tasks
         .iter()
-        .find(|t| t.task_id == id)
+        .find(|t| t.name == id)
         .and_then(|t| wire::MissionTaskState::try_from(t.state).ok())
 }
 
@@ -43,7 +40,7 @@ fn task_state(status: &wire::MissionStatus, id: &str) -> Option<wire::MissionTas
 fn an_approved_revision_waits_for_the_line_in_progress_to_end() {
     let (mut lane, lines) = running_lane();
     assert!(lines >= 2);
-    lane.on_progress(&progress(1));
+    lane.on_progress(&progress(&lane, 1));
     let status = lane.status();
 
     let mut stale = status.clone();
@@ -77,12 +74,12 @@ fn an_approved_revision_waits_for_the_line_in_progress_to_end() {
     );
     assert_eq!(successor.applies_after, "line-01");
     assert!(
-        lane.on_progress(&progress(1)).is_none(),
+        lane.on_progress(&progress(&lane, 1)).is_none(),
         "line 1 still flies"
     );
 
     // Line 1 ends: the vehicle turns for line 2, and the revision applies.
-    let Some(LaneEffect::Start(order)) = lane.on_progress(&progress(2)) else {
+    let Some(LaneEffect::Start(order)) = lane.on_progress(&progress(&lane, 2)) else {
         panic!("the switch at the line's end");
     };
     assert_eq!(order.plan, RunPlan::Home);
@@ -97,21 +94,26 @@ fn an_approved_revision_waits_for_the_line_in_progress_to_end() {
         task_state(&status, "line-02"),
         Some(wire::MissionTaskState::Skipped)
     );
-    assert_eq!(
-        task_state(&status, "rev1-home"),
-        Some(wire::MissionTaskState::Pending)
+    // The way home is a task of the new run, which names the run it continues.
+    assert!(
+        status
+            .tasks
+            .iter()
+            .any(|t| { t.name == "home" && t.state == wire::MissionTaskState::Pending as i32 })
     );
+    assert!(!status.predecessor_run_id.is_empty());
+    assert_ne!(status.predecessor_run_id, status.run_id);
     assert_eq!(
         status.successor.map(|s| s.state),
         Some(wire::MissionSuccessorState::Applied as i32)
     );
     lane.on_progress(&RunProgress {
-        target_waypoint: Some(0),
         plan_complete: true,
         ended: false,
         ended_because: None,
         holding: false,
         execution: None,
+        ..toward(&lane, 0)
     });
     assert_eq!(lane.state(), wire::MissionLaneState::Complete);
 }
@@ -119,7 +121,7 @@ fn an_approved_revision_waits_for_the_line_in_progress_to_end() {
 #[test]
 fn inside_the_envelope_a_revision_applies_without_a_new_approval() {
     let (mut lane, _) = running_lane();
-    lane.on_progress(&progress(1));
+    lane.on_progress(&progress(&lane, 1));
     // The running lane's approval does not permit revisions: a draft stays.
     let status = lane.status();
     let reply = lane.on_intent(&revise(&status, finish(), true), &context("rev-1"));
@@ -156,7 +158,7 @@ fn inside_the_envelope_a_revision_applies_without_a_new_approval() {
         })),
         &context("run-1"),
     );
-    lane.on_progress(&progress(1));
+    lane.on_progress(&progress(&lane, 1));
     lane.on_intent(&intent(Action::Hold(wire::MissionHold {})), &context("h"));
     let status = lane.status();
     let reply = lane.on_intent(&revise(&status, finish(), true), &context("rev-2"));
@@ -198,7 +200,7 @@ fn before_a_start_a_revised_objective_replaces_the_draft() {
 fn between_lines_a_revision_applies_at_once() {
     let (mut lane, _) = running_lane();
     // Toward the start of line 1: no line is in progress.
-    lane.on_progress(&progress(0));
+    lane.on_progress(&progress(&lane, 0));
     let status = lane.status();
     let draft = lane
         .on_intent(&revise(&status, finish(), false), &context("rev-1"))

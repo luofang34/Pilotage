@@ -23,8 +23,11 @@ pub struct WallDeadline {
 pub struct EngineStart {
     /// The host execution target.
     pub host_target: ExecutionTarget,
-    /// The simulator clock at mission admission.
-    pub simulator_time_ns: u64,
+    /// The mission clock at admission: the caller's monotonic sequencing clock, paused
+    /// while the mission is held.
+    pub mission_time_ns: u64,
+    /// The simulator clock at admission; none outside a simulator.
+    pub simulator_time_ns: Option<u64>,
     /// The wall clock at mission admission.
     pub wall_time_ns: u64,
     /// The identity-bound wall deadline.
@@ -39,6 +42,9 @@ pub struct NavigationObservation {
     pub guidance_valid: Option<bool>,
     /// The active-plan completion state, when available.
     pub plan_complete: Option<bool>,
+    /// How many waypoints of the active plan are captured, from its first, when available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waypoints_captured: Option<u32>,
     /// The observed altitude in meters, when available.
     pub altitude_m: Option<f64>,
 }
@@ -85,8 +91,11 @@ pub struct MissionObservation {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TickInput {
-    /// The current simulator clock.
-    pub simulator_time_ns: u64,
+    /// The current mission clock: the caller's monotonic sequencing clock, paused while
+    /// the mission is held.
+    pub mission_time_ns: u64,
+    /// The current simulator clock; none outside a simulator.
+    pub simulator_time_ns: Option<u64>,
     /// The current wall clock.
     pub wall_time_ns: u64,
     /// The current observation frame.

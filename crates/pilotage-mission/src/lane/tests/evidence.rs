@@ -9,19 +9,13 @@ use super::*;
 use crate::lane::{FrameTicket, VerdictRefused};
 
 fn along(lane: &mut Lane, line: usize) {
-    lane.on_progress(&RunProgress {
-        target_waypoint: Some(2 * line - 1),
-        ..RunProgress::default()
-    });
+    let progress = toward(lane, 2 * line - 1);
+    lane.on_progress(&progress);
 }
 
 fn evidence(lane: &Lane, task: &str) -> (wire::MissionTaskState, wire::MissionEvidenceState) {
     let status = lane.status();
-    let task = status
-        .tasks
-        .iter()
-        .find(|t| t.task_id == task)
-        .expect("task");
+    let task = status.tasks.iter().find(|t| t.name == task).expect("task");
     let evidence = task.evidence.clone().unwrap_or_default();
     (
         wire::MissionTaskState::try_from(task.state).unwrap(),
@@ -68,11 +62,7 @@ fn a_verdict_for_another_run_or_a_second_verdict_changes_nothing() {
         Err(VerdictRefused::NotSent { .. })
     ));
     let status = lane.status();
-    let line = status
-        .tasks
-        .iter()
-        .find(|t| t.task_id == "line-01")
-        .unwrap();
+    let line = status.tasks.iter().find(|t| t.name == "line-01").unwrap();
     assert_eq!(line.evidence.as_ref().map(|e| e.assessed), Some(1));
 }
 
@@ -143,11 +133,7 @@ fn without_a_judge_a_line_reads_as_not_judged() {
         "captured, and said to be unjudged rather than usable"
     );
     let status = lane.status();
-    let line = status
-        .tasks
-        .iter()
-        .find(|t| t.task_id == "line-01")
-        .unwrap();
+    let line = status.tasks.iter().find(|t| t.name == "line-01").unwrap();
     assert_eq!(line.evidence.as_ref().map(|e| e.usable), Some(0));
 }
 

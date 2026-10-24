@@ -145,6 +145,7 @@ impl MissionEngine {
             config,
             provenance.navigation_data_identity.clone(),
             document::ROUTE_REVISION_PREFIX,
+            &[],
         )?;
         let record = MissionPlanRecord {
             provenance,
@@ -183,11 +184,13 @@ impl MissionEngine {
             .collect();
         let execution =
             PlanExecution::new(survey.plan, ExecutionConfig::new(survey.capture_radius_m))?;
+        let segments = document::survey_segments(survey.line_count, idents.len(), &config.task_ids);
         let mut engine = Self::from_execution(
             execution,
             config,
             identity,
             document::SURVEY_REVISION_PREFIX,
+            &segments,
         )?;
         // A survey line is flown at cruise speed to its end; the arrival
         // slowdown of a route would crawl the last 30 m of every line.
@@ -213,9 +216,15 @@ impl MissionEngine {
         config: MissionConfig,
         identity: NavigationDataIdentity,
         revision_prefix: &str,
+        segments: &[document::Segment],
     ) -> Result<Self, MissionBuildError> {
-        let (document, plan_reference) =
-            document::build_document(execution.plan(), &config, identity, revision_prefix)?;
+        let (document, plan_reference) = document::build_document(
+            execution.plan(),
+            &config,
+            identity,
+            revision_prefix,
+            segments,
+        )?;
         let plane = LocalTangentPlane::new(config.anchor)?;
         let filter = NavigationFilter::new(FusionConfig::default(), config.clock);
         let guidance = guidance_config(&config);
@@ -395,17 +404,14 @@ impl MissionEngine {
                     MissionState::Climb
                 }
             },
-            CoreEngineState::Running { phase_id, .. }
-                if phase_id == document::FOLLOW_PLAN_PHASE_ID =>
-            {
-                MissionState::Enroute
-            }
+            // The plan, whole or one of its tasks.
+            CoreEngineState::Running { .. } => MissionState::Enroute,
             CoreEngineState::Terminal {
                 result: CoreMissionTerminal::Complete { .. },
             } => MissionState::Complete,
-            CoreEngineState::CleaningUp { .. }
-            | CoreEngineState::Running { .. }
-            | CoreEngineState::Terminal { .. } => MissionState::Failed,
+            CoreEngineState::CleaningUp { .. } | CoreEngineState::Terminal { .. } => {
+                MissionState::Failed
+            }
         }
     }
 

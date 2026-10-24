@@ -72,6 +72,16 @@ pub enum MissionEvent {
         /// to the rule rather than read as a skipped waypoint.
         reason: SequenceReason,
     },
+    /// The mission core entered the phase of a task.
+    TaskStarted {
+        /// The task's phase identifier.
+        task: String,
+    },
+    /// The mission core completed the phase of a task.
+    TaskFinished {
+        /// The task's phase identifier.
+        task: String,
+    },
     /// The final waypoint captured; emitted exactly once.
     MissionComplete,
     /// The host held the mission: a human took the motion scope.

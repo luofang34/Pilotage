@@ -399,11 +399,24 @@ impl MissionTask {
             .await
     }
 
+    /// Logs the tick's events and folds its task events into the status, the lane's
+    /// record of which task the run flies.
     fn log_events(&self, events: &[MissionEvent]) {
         for event in events {
             match event {
                 MissionEvent::GuidanceRefused { reason } => {
                     warn!(?reason, "mission guidance refused");
+                }
+                MissionEvent::TaskStarted { task } => {
+                    info!(%task, "task started");
+                    self.update(|status| status.active_task = Some(task.clone()));
+                }
+                MissionEvent::TaskFinished { task } => {
+                    info!(%task, "task finished");
+                    self.update(|status| {
+                        status.active_task = None;
+                        status.finished_tasks.push(task.clone());
+                    });
                 }
                 MissionEvent::MissionComplete => info!("mission complete"),
                 other => info!(event = ?other, "mission event"),

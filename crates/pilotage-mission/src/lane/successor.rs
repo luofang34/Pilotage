@@ -74,12 +74,7 @@ impl Lane {
         }
         let (mut compiled, summary) = self.compile_change(change, current, context)?;
         self.revisions = self.revisions.wrapping_add(1);
-        compile::succeed(
-            &mut compiled,
-            self.revisions,
-            &current.proposal.digest,
-            summary,
-        );
+        compile::succeed(&mut compiled, &current.proposal.digest, summary);
         let proposal = compiled.proposal.clone();
         self.successor = Some(Successor {
             compiled,
@@ -236,6 +231,7 @@ impl Lane {
         successor.stage = Stage::Applied;
         let compiled = successor.compiled.clone();
         let previous = self.run.take();
+        let predecessor = previous.as_ref().map(super::run::RunTracker::run_id);
         let run_id = format!(
             "{}-rev{}",
             previous
@@ -247,11 +243,9 @@ impl Lane {
         if let Some(run) = previous {
             self.history.extend(run.superseded_statuses());
         }
-        self.run = Some(super::run::RunTracker::new(
-            run_id.clone(),
-            &compiled,
-            self.config.judged,
-        ));
+        let mut run = super::run::RunTracker::new(run_id.clone(), &compiled, self.config.judged);
+        run.predecessor = predecessor;
+        self.run = Some(run);
         self.state = State::Running;
         self.detail = format!(
             "flying revision {}: {}",

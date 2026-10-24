@@ -49,12 +49,34 @@ The mission document contains ordered phases. Each phase contains:
 - its entry conditions;
 - one action;
 - its completion conditions;
-- its abort conditions; and
-- its maximum simulator time.
+- its abort conditions;
+- an optional deadline on the clock that it names; and
+- the phases that it depends on, if any.
+
+The engine runs one phase at a time. It starts the first phase in list order
+whose dependencies have all completed. A document is refused when a dependency
+names a phase that the document does not have, names the phase itself, or
+makes a cycle.
+
+A phase deadline is on the mission clock or on the simulator clock. The host
+supplies the mission clock. It is monotonic, and it stops while the mission is
+held. Only a simulator supplies the simulator clock. A phase needs the simulator
+clock, and declares the simulator-time capability, only when its deadline or a
+condition uses that clock. A phase without a deadline, such as a phase that
+waits for a person, continues until its conditions end it. A flight-plan
+reference names its own navigation data, so a document names navigation data
+only when one data set applies to all of the document.
 
 The action vocabulary uses nested enums. `MissionAction::Flight(FlightAction)`
 contains operational flight actions. `MissionAction::Trial(TrialAction)`
-contains calibration actions. An implementation can recognize an action before
+contains calibration actions. `MissionAction::Bound(BoundAction)` names a host
+executor, an operation, and its parameters, for a task that is not flight,
+such as a wait for a person or a reading. A host that does not have the
+executor refuses the action. `FlightAction::FollowSegment` flies part of one
+plan, so that a survey compiles into one phase for each task: toward a line,
+along the line, and home. The vehicle flies the one plan continuously. The
+acquisition requirement of a line stays with the mission lane, which reads it
+from the task that the phase identifier names. An implementation can recognize an action before
 it implements that action. It returns a typed refusal for an action that it
 does not implement.
 
@@ -70,7 +92,8 @@ The core owns:
 - mission admission and capability checks;
 - the active phase index and all phase transitions;
 - caller-supplied logical time;
-- simulator-time and wall-time deadlines;
+- phase deadlines on the mission or simulator clock, and the wall-time
+  deadline;
 - action IDs and correlated receipts;
 - retries and typed refusals;
 - abort behavior and cleanup inside one mission;

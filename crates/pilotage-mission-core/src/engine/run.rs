@@ -1,9 +1,11 @@
 //! Active-phase sequencing and terminal-cause selection.
 
+use crate::PhaseClock;
+
 use super::cleanup::start_cleanup;
 use super::runtime::{
-    PendingDirective, PendingTerminal, PhaseProgress, RunState, RunningState, TickContext, emit,
-    new_pending, terminal_state,
+    Clocks, PendingDirective, PendingTerminal, PhaseProgress, RunState, RunningState, TickContext,
+    emit, new_pending, terminal_state,
 };
 use super::{
     AbortCause, DeadlineClass, DirectivePurpose, EngineEvent, MissionTerminal, ReceiptResult,
@@ -32,22 +34,21 @@ pub(super) fn tick_running(
         ));
     }
     let phase = &context.document.phases[state.phase_index];
-    let elapsed = context
-        .input
-        .simulator_time_ns
-        .saturating_sub(state.phase_started_at_ns);
-    if elapsed >= phase.simulator_time_deadline_ns {
-        return Some(phase_deadline(state.phase_index, elapsed, &mut context));
+    if let Some(deadline) = phase.deadline {
+        let elapsed = Clocks::of(context.input).since(state.phase_started, deadline.clock);
+        if elapsed >= deadline.duration_ns {
+            return Some(phase_deadline(state.phase_index, elapsed, &mut context));
+        }
     }
     if let Some(index) = abort_condition(state.phase_index, &context) {
         return Some(abort(state.phase_index, index, &mut context));
     }
-    let phase_started_at_ns = state.phase_started_at_ns;
+    let phase_started = state.phase_started;
     match &mut state.progress {
         PhaseProgress::Entry => enter_if_ready(state, &mut context),
         PhaseProgress::Receipt(pending) => process_receipt(
             state.phase_index,
-            phase_started_at_ns,
+            phase_started,
             pending.as_mut(),
             &mut context,
         ),
@@ -70,7 +71,7 @@ fn enter_if_ready(state: &mut RunningState, context: &mut TickContext<'_>) -> Op
     context.collector.events.push(EngineEvent::PhaseEntered {
         phase_index: state.phase_index,
         phase_id,
-        simulator_time_ns: context.input.simulator_time_ns,
+        mission_time_ns: context.input.mission_time_ns,
     });
     let pending = new_pending(
         context,
@@ -86,7 +87,7 @@ fn enter_if_ready(state: &mut RunningState, context: &mut TickContext<'_>) -> Op
 
 fn process_receipt(
     phase_index: usize,
-    phase_started_at_ns: u64,
+    phase_started: Clocks,
     pending: &mut PendingDirective,
     context: &mut TickContext<'_>,
 ) -> Option<RunState> {
@@ -100,9 +101,7 @@ fn process_receipt(
         result: result.clone(),
     });
     match result {
-        ReceiptResult::Succeeded {} => {
-            complete_after_receipt(phase_index, phase_started_at_ns, context)
-        }
+        ReceiptResult::Succeeded {} => complete_after_receipt(phase_index, phase_started, context),
         ReceiptResult::Retryable { detail } => retry_action(phase_index, pending, &detail, context),
         ReceiptResult::Refused { detail } => Some(refused(
             phase_index,
@@ -117,12 +116,12 @@ fn process_receipt(
 
 fn complete_after_receipt(
     phase_index: usize,
-    phase_started_at_ns: u64,
+    phase_started: Clocks,
     context: &mut TickContext<'_>,
 ) -> Option<RunState> {
     let mut state = RunningState {
         phase_index,
-        phase_started_at_ns,
+        phase_started,
         progress: PhaseProgress::Completion,
     };
     complete_if_ready(&mut state, context).or(Some(RunState::Running(state)))
@@ -210,19 +209,19 @@ fn complete_if_ready(state: &mut RunningState, context: &mut TickContext<'_>) ->
     context.collector.events.push(EngineEvent::PhaseCompleted {
         phase_index: state.phase_index,
         phase_id: phase.id.clone(),
-        simulator_time_ns: context.input.simulator_time_ns,
+        mission_time_ns: context.input.mission_time_ns,
     });
-    let next = state.phase_index.wrapping_add(1);
-    if next == context.document.phases.len() {
+    // Every entered phase has completed: a phase is left only by completing it.
+    let Some(next) = context.document.next_ready(context.entered_phases) else {
         return Some(terminal_state(
             MissionTerminal::Complete {
                 completed_phases: context.document.phases.len(),
             },
             context.collector,
         ));
-    }
+    };
     state.phase_index = next;
-    state.phase_started_at_ns = context.input.simulator_time_ns;
+    state.phase_started = Clocks::of(context.input);
     state.progress = PhaseProgress::Entry;
     activate_new_phase(state, context)
 }
@@ -244,10 +243,14 @@ fn abort_condition(phase_index: usize, context: &TickContext<'_>) -> Option<usiz
 
 fn phase_deadline(phase_index: usize, elapsed_ns: u64, context: &mut TickContext<'_>) -> RunState {
     let phase = &context.document.phases[phase_index];
-    let deadline = DeadlineClass::PhaseSimulatorTime {
+    let (clock, limit_ns) = phase
+        .deadline
+        .map_or((PhaseClock::Mission, 0), |d| (d.clock, d.duration_ns));
+    let deadline = DeadlineClass::Phase {
         phase_index,
         phase_id: phase.id.clone(),
-        limit_ns: phase.simulator_time_deadline_ns,
+        clock,
+        limit_ns,
         elapsed_ns,
     };
     context

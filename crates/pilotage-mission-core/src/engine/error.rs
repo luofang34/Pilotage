@@ -45,6 +45,20 @@ pub enum EngineInputError {
     /// A caller tick followed a terminal result.
     #[error("the mission engine is terminal")]
     Terminal {},
+    /// The mission clock moved backwards.
+    #[error("mission clock moved backwards from {previous_ns} to {current_ns}")]
+    MissionClockRegressed {
+        /// The last accepted mission clock.
+        previous_ns: u64,
+        /// The supplied mission clock.
+        current_ns: u64,
+    },
+    /// A phase reads the simulator's clock, and the input carries none.
+    #[error("phase {phase_id} reads the simulator clock, and the input carries none")]
+    SimulatorTimeMissing {
+        /// The phase identifier.
+        phase_id: String,
+    },
     /// The simulator clock moved backwards.
     #[error("simulator clock moved backwards from {previous_ns} to {current_ns}")]
     SimulatorClockRegressed {

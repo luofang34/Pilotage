@@ -114,7 +114,7 @@ fn running_lane_with(config: LaneConfig) -> (Lane, usize) {
     let lines = proposal
         .tasks
         .iter()
-        .filter(|t| t.task_id.starts_with("line"))
+        .filter(|t| t.kind == wire::MissionTaskKind::SurveyLine as i32)
         .count();
     assert!(accepted(&lane.on_intent(
         &intent(Action::Approve(approval(&digest, 120.0))),
@@ -145,10 +145,7 @@ fn a_proposal_is_grounded_and_its_digest_binds_its_content() {
     let estimates = proposal.estimates.expect("estimates");
     assert!(estimates.lines >= 2 && estimates.path_length_m > 300.0);
     assert!(estimates.energy_wh > 0.0);
-    assert_eq!(
-        proposal.tasks.last().map(|t| t.task_id.as_str()),
-        Some("home")
-    );
+    assert_eq!(proposal.tasks.last().map(|t| t.name.as_str()), Some("home"));
     let mut changed = proposal.clone();
     changed.tasks.pop();
     assert_ne!(proposal_digest(&changed).to_vec(), proposal.digest);
@@ -208,16 +205,10 @@ fn a_line_is_done_only_with_usable_pictures() {
     let (mut lane, lines) = running_lane();
     assert!(lines >= 2);
     // Toward the start of line 1: a transit, no task takes pictures.
-    lane.on_progress(&RunProgress {
-        target_waypoint: Some(0),
-        ..RunProgress::default()
-    });
+    lane.on_progress(&RunProgress { ..toward(&lane, 0) });
     assert!(lane.on_frame().is_none());
     // Along line 1: three pictures, two judged usable.
-    lane.on_progress(&RunProgress {
-        target_waypoint: Some(1),
-        ..RunProgress::default()
-    });
+    lane.on_progress(&RunProgress { ..toward(&lane, 1) });
     for usable in [true, true, false] {
         let ticket = lane.on_frame().expect("line 1 is active");
         lane.on_sent(&ticket);
@@ -231,10 +222,7 @@ fn a_line_is_done_only_with_usable_pictures() {
         .unwrap();
     }
     // Along line 2: one picture, judged unusable.
-    lane.on_progress(&RunProgress {
-        target_waypoint: Some(3),
-        ..RunProgress::default()
-    });
+    lane.on_progress(&RunProgress { ..toward(&lane, 3) });
     let ticket = lane.on_frame().expect("line 2 is active");
     lane.on_sent(&ticket);
     lane.on_assessment(
@@ -246,26 +234,19 @@ fn a_line_is_done_only_with_usable_pictures() {
     )
     .unwrap();
     lane.on_progress(&RunProgress {
-        target_waypoint: Some(2 * lines),
-        ..RunProgress::default()
+        ..toward(&lane, 2 * lines)
     });
     lane.on_progress(&RunProgress {
-        target_waypoint: Some(2 * lines),
         plan_complete: true,
         ended: false,
         ended_because: None,
         holding: false,
         execution: None,
+        ..toward(&lane, 2 * lines)
     });
     let status = lane.take_changed().expect("changed");
     assert_eq!(status.state, wire::MissionLaneState::Complete as i32);
-    let state = |id: &str| {
-        status
-            .tasks
-            .iter()
-            .find(|t| t.task_id == id)
-            .map(|t| t.state)
-    };
+    let state = |id: &str| status.tasks.iter().find(|t| t.name == id).map(|t| t.state);
     assert_eq!(state("line-01"), Some(wire::MissionTaskState::Done as i32));
     assert_eq!(
         state("line-02"),
@@ -275,7 +256,7 @@ fn a_line_is_done_only_with_usable_pictures() {
     let line2 = status
         .tasks
         .iter()
-        .find(|t| t.task_id == "line-02")
+        .find(|t| t.name == "line-02")
         .and_then(|t| t.evidence.clone());
     assert_eq!(line2.map(|e| (e.frames, e.hazards)), Some((1, 1)));
 }
@@ -324,7 +305,7 @@ fn task_states(lane: &Lane) -> Vec<(String, wire::MissionTaskState)> {
         .iter()
         .filter_map(|t| {
             Some((
-                t.task_id.clone(),
+                t.name.clone(),
                 wire::MissionTaskState::try_from(t.state).ok()?,
             ))
         })
@@ -338,10 +319,7 @@ fn an_abort_leaves_the_line_in_progress_and_the_rest_unfinished() {
     assert!(lines >= 2);
     // Along line 1 with enough pictures for its evidence: cut short, it
     // is still not done.
-    lane.on_progress(&RunProgress {
-        target_waypoint: Some(1),
-        ..RunProgress::default()
-    });
+    lane.on_progress(&RunProgress { ..toward(&lane, 1) });
     for _ in 0..3 {
         let ticket = lane.on_frame().expect("line 1 is active");
         lane.on_sent(&ticket);
@@ -372,8 +350,7 @@ fn an_abort_on_the_way_home_does_not_complete_the_way_home() {
     let (mut lane, lines) = running_lane();
     // Every line flown; the vehicle flies home.
     lane.on_progress(&RunProgress {
-        target_waypoint: Some(2 * lines + 1),
-        ..RunProgress::default()
+        ..toward(&lane, 2 * lines + 1)
     });
     lane.on_intent(&intent(Action::Abort(wire::MissionAbort {})), &context("x"));
     let states = task_states(&lane);
@@ -404,6 +381,42 @@ fn a_run_reports_what_it_does_while_its_lane_flies() {
     assert_eq!(lane.status().execution, None, "no run, nothing to report");
 }
 
+/// What `lane`'s mission core reports while the vehicle flies toward waypoint `waypoint`
+/// of the survey plan: line `k` is flown toward waypoint `2k + 1` after its transit toward
+/// `2k`, and the way home follows the last line. The phases carry the lane's own task
+/// identities.
+pub(super) fn toward(lane: &Lane, waypoint: usize) -> RunProgress {
+    let status = lane.status();
+    let is_line = |id: &String| {
+        status
+            .tasks
+            .iter()
+            .any(|t| &t.task_id == id && t.kind == wire::MissionTaskKind::SurveyLine as i32)
+    };
+    let ids = lane.task_ids();
+    let line_ids: Vec<String> = ids.iter().filter(|id| is_line(id)).cloned().collect();
+    let lines = line_ids.len();
+    if waypoint >= 2 * lines {
+        return RunProgress {
+            active_task: ids.iter().find(|id| !is_line(id)).cloned(),
+            finished_tasks: line_ids,
+            ..RunProgress::default()
+        };
+    }
+    let flown = waypoint / 2;
+    RunProgress {
+        active_task: line_ids.get(flown).map(|id| {
+            if waypoint % 2 == 1 {
+                id.clone()
+            } else {
+                format!("transit:{id}")
+            }
+        }),
+        finished_tasks: line_ids[..flown].to_vec(),
+        ..RunProgress::default()
+    }
+}
+
 mod evidence;
 mod expiry;
 mod successor;
@@ -411,15 +424,11 @@ mod successor;
 #[test]
 fn a_run_the_vehicle_ended_fails_with_its_reason() {
     let (mut lane, _) = running_lane();
+    lane.on_progress(&RunProgress { ..toward(&lane, 0) });
     lane.on_progress(&RunProgress {
-        target_waypoint: Some(0),
-        ..RunProgress::default()
-    });
-    lane.on_progress(&RunProgress {
-        target_waypoint: Some(0),
         ended: true,
         ended_because: Some("the vehicle landed outside the plan"),
-        ..RunProgress::default()
+        ..toward(&lane, 0)
     });
     let status = lane.take_changed().expect("changed");
     assert_eq!(status.state, wire::MissionLaneState::Failed as i32);
@@ -442,4 +451,28 @@ fn a_fetch_returns_the_full_plan_the_digest_names() {
     assert_eq!(plan.digest, digest);
     assert!(!plan.tasks.is_empty(), "the full plan, not a summary");
     assert!(!accepted(&lane.on_intent(&fetch(b"other"), &context("g"))));
+}
+
+#[test]
+fn tasks_follow_the_core_task_events_not_waypoint_indices() {
+    let (mut lane, lines) = running_lane();
+    assert!(lines >= 2);
+    let ids = lane.task_ids();
+    // However many waypoints a line has, the core names the task it flies.
+    lane.on_progress(&RunProgress {
+        active_task: Some(ids[1].clone()),
+        finished_tasks: vec![format!("transit:{}", ids[0]), ids[0].clone()],
+        ..RunProgress::default()
+    });
+    let states = task_states(&lane);
+    assert!(states.contains(&("line-01".to_owned(), wire::MissionTaskState::Incomplete)));
+    assert!(states.contains(&("line-02".to_owned(), wire::MissionTaskState::Active)));
+    assert!(lane.on_frame().is_some(), "line 2 takes pictures");
+    // A transit is no task: between lines nothing takes pictures.
+    lane.on_progress(&RunProgress {
+        active_task: Some(format!("transit:{}", ids[1])),
+        finished_tasks: vec![ids[0].clone()],
+        ..RunProgress::default()
+    });
+    assert!(lane.on_frame().is_none());
 }

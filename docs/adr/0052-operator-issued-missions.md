@@ -99,7 +99,13 @@ them.
 
 A node is a bounded task with its preconditions, its outcomes, its
 deadline, its resource claims, and its cancellation behaviour. One survey
-line with its acquisition is one task. A route leg is not a task: Navigate
+line with its acquisition is one task. A task has an opaque identity that
+is unique in its proposal, and a name for display. No behaviour follows the
+name or the position of a task in a list. The mission core runs each task
+as a phase with the identity of the task, and the lane follows the task
+events of the core. A run that a revision starts names the run that it
+continues, so a team follows the work of a member through its revisions
+without the use of the names of runs or tasks. A route leg is not a task: Navigate
 keeps the sequencing of legs inside the task, and flight and camera
 acquisition run together under it. A task is complete only when its
 completion evidence exists; for a survey line, the acquired pictures with

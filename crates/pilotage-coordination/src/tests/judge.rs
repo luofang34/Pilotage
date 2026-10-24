@@ -26,8 +26,7 @@ fn fly_lines(
         .count();
     for line in from..=to.min(lines) {
         lane.on_progress(&RunProgress {
-            target_waypoint: Some(2 * line - 1),
-            ..RunProgress::default()
+            ..toward(lane, 2 * line - 1)
         });
         for _ in 0..3 {
             if let Some(ticket) = lane.on_frame() {
@@ -44,12 +43,12 @@ fn fly_lines(
         }
     }
     lane.on_progress(&RunProgress {
-        target_waypoint: Some(2 * to.min(lines)),
         plan_complete: to >= lines,
         ended: false,
         ended_because: None,
         holding: false,
         execution: None,
+        ..toward(lane, 2 * to.min(lines))
     });
     match lane.take_changed() {
         Some(status) => fleet.team.on_member_status(&status, &context("fly")),
@@ -62,8 +61,7 @@ fn fly_lines(
 fn fly_unanswered(fleet: &mut Fleet, member: &str, line: usize) -> Vec<FrameTicket> {
     let lane = fleet.members.get_mut(member).expect("member");
     lane.on_progress(&RunProgress {
-        target_waypoint: Some(2 * line - 1),
-        ..RunProgress::default()
+        ..toward(lane, 2 * line - 1)
     });
     let tickets: Vec<FrameTicket> = (0..3).filter_map(|_| lane.on_frame()).collect();
     for ticket in &tickets {
@@ -76,8 +74,7 @@ fn fly_unanswered(fleet: &mut Fleet, member: &str, line: usize) -> Vec<FrameTick
 fn advance(fleet: &mut Fleet, member: &str, target: usize) -> Vec<MemberIntent> {
     let lane = fleet.members.get_mut(member).expect("member");
     lane.on_progress(&RunProgress {
-        target_waypoint: Some(target),
-        ..RunProgress::default()
+        ..toward(lane, target)
     });
     match lane.take_changed() {
         Some(status) => fleet.team.on_member_status(&status, &context("fly")),
@@ -149,7 +146,7 @@ fn a_finished_member_flies_a_bad_line_again_while_its_owner_flies_on() {
         .status()
         .tasks
         .into_iter()
-        .find(|t| t.task_id == "SIM-2/line-01")
+        .find(|t| t.name == "SIM-2/line-01")
         .expect("SIM-2's line 1");
     assert_eq!(line.state, wire::MissionTaskState::Done as i32);
     assert_eq!(line.reflown, 1);
@@ -162,7 +159,7 @@ fn a_finished_member_flies_a_bad_line_again_while_its_owner_flies_on() {
         .status()
         .tasks
         .into_iter()
-        .find(|t| t.task_id == "SIM-2/line-01")
+        .find(|t| t.name == "SIM-2/line-01")
         .expect("SIM-2's line 1");
     assert_eq!(
         line.state,
@@ -182,4 +179,29 @@ fn of_several_finished_members_one_other_than_the_owner_takes_it() {
     let decided = fly_lines(&mut fleet, "SIM-2", (1, 2), &[1]);
     assert_eq!(decided.len(), 1);
     assert_ne!(decided[0].member, "SIM-2");
+}
+
+#[test]
+fn tasks_named_in_other_words_change_nothing_the_team_decides() {
+    let outcome = |renamed: bool| {
+        let (mut fleet, _) = super::revision::running_fleet(false);
+        fleet.renamed = renamed;
+        let finished = fly_lines(&mut fleet, "SIM-1", (1, 99), &[]);
+        fleet.route(finished);
+        let refly = fly_lines(&mut fleet, "SIM-2", (1, 99), &[1]);
+        let decided: Vec<String> = refly.iter().map(|i| i.member.clone()).collect();
+        fleet.route(refly);
+        let after = fly_lines(&mut fleet, "SIM-1", (1, 99), &[]);
+        fleet.route(after);
+        let status = fleet.team.status();
+        let states: Vec<(String, i32, u32)> = status
+            .tasks
+            .iter()
+            .map(|t| (t.task_id.clone(), t.state, t.reflown))
+            .collect();
+        (decided, status.state, states)
+    };
+    let renamed = outcome(true);
+    assert!(!renamed.0.is_empty(), "the team flies the bad line again");
+    assert_eq!(renamed, outcome(false));
 }

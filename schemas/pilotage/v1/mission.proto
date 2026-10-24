@@ -76,6 +76,8 @@ enum MissionTaskKind {
 
 // One bounded task of a plan.
 message MissionTaskPlan {
+  // The task's identity: opaque, unique in its proposal, and never derived
+  // from its name or its position. Behaviour follows it.
   string task_id = 1;
   MissionTaskKind kind = 2;
   // The task's path, in fly order.
@@ -84,6 +86,8 @@ message MissionTaskPlan {
   // The lane that executes the task, for a team proposal; empty for a
   // vehicle's own proposal.
   string member = 5;
+  // The task's name, for display only, such as "line-03".
+  string name = 6;
 }
 
 message MissionEstimates {
@@ -348,6 +352,8 @@ message MissionTaskStatus {
   uint32 reflown = 7;
   // The task's path, so any client draws the task without the proposal.
   repeated GeoPoint path = 8;
+  // The task's name, for display only.
+  string name = 9;
 }
 
 // One lane's state, published on the reliable stream when it changes and
@@ -360,6 +366,7 @@ message MissionStatus {
   bytes plan_digest = 5;
   string run_id = 6;
   repeated MissionTaskStatus tasks = 7;
+  // The name of the task in progress, for display.
   string active_task = 8;
   // The recovery the lane applies when it cannot continue.
   string recovery_policy = 9;
@@ -383,6 +390,9 @@ message MissionStatus {
   MemberLink member_link = 18;
   // How a vehicle's run executes now; absent without a run.
   MissionExecution execution = 19;
+  // The run this run continues, when a revision replaced it; empty for a
+  // run of a first plan.
+  string predecessor_run_id = 20;
 }
 
 // How a team sees one member.
