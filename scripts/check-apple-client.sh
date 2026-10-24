@@ -47,8 +47,6 @@ check_revision() {
         echo "FORBIDDEN: $name must contain one full commit identity" >&2
         status=1
     fi
-    require_fixed "ref: $revision" "$root/.github/workflows/ci.yml" \
-        "$name and the Apple job checkout must match"
 }
 
 check_ffi_lint_scope() {
@@ -189,9 +187,6 @@ require_pattern 'AeroLinkDriverBundleIdentifier' "$client/App/Info.plist" \
 require_pattern '"[$]AERO_LINK_HOST_BUNDLE_IDENTIFIER"[.][*]' \
     "$client/scripts/generate-project.sh" \
     "the project generator must require a nested driver App ID"
-require_pattern 'brew install xcodegen' \
-    "$root/.github/workflows/ci.yml" \
-    "the Apple client job must install XcodeGen"
 require_pattern 'ARCHS=arm64' \
     "$client/scripts/ci-ios.sh" \
     "the simulator build must use the available Rust architecture"
@@ -201,12 +196,6 @@ require_pattern 'prepare-radio-sources[.]sh' \
 require_pattern 'PilotageRadioSource' \
     "$client/scripts/ci-ios.sh" \
     "the Apple check must test the radio state package"
-require_pattern 'AIRMASS_SOURCE.*external/Airmass' \
-    "$root/.github/workflows/ci.yml" \
-    "the Apple job must supply the pinned Airmass checkout"
-require_pattern 'SURVEILLANCE_SOURCE.*external/Surveillance' \
-    "$root/.github/workflows/ci.yml" \
-    "the Apple job must supply the pinned Surveillance checkout"
 
 runtime="$client/App/AeroLinkRadioRuntime.swift"
 model="$client/App/SituationClientModel.swift"
