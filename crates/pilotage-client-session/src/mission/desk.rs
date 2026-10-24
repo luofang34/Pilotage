@@ -175,16 +175,18 @@ impl MissionDesk {
     /// carries the objective's height, for a draft another client made.
     #[must_use]
     pub fn approvable(&self) -> Option<wire::MissionProposal> {
-        let status = self.status.as_ref()?;
         let digest = match self.drafted_successor() {
             Some(successor) => successor.digest.clone(),
             None => {
+                // The proposal this client asked for is approvable as soon as its
+                // receipt arrives, whether or not a status came first.
                 if let Some(held) = self.current_proposal() {
                     return Some(held.clone());
                 }
-                status.proposal_digest.clone()
+                self.status.as_ref()?.proposal_digest.clone()
             }
         };
+        let status = self.status.as_ref()?;
         if digest.is_empty() {
             return None;
         }
