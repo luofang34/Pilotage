@@ -181,7 +181,13 @@ impl TeamLane {
             .as_ref()
             .filter(|r| r.stage == Stage::Drafted && r.proposal.digest == approval.proposal_digest)
             .ok_or("no drafted revision has that digest")?;
-        let _ = drafted;
+        if let Change::Reassign { from, .. } = &drafted.change
+            && self.lost.get(from) == Some(&false)
+        {
+            return Err(format!(
+                "{from}'s link is lost and its state is unknown; its work stays reserved until it reports again or a person states that it is down"
+            ));
+        }
         let envelope = valid_envelope(approval, context.now_unix_ms)?;
         if self.height_m > envelope.max_height_m + 1e-6 {
             return Err(format!(
@@ -210,16 +216,15 @@ impl TeamLane {
                 kept,
                 moved,
             } => {
-                if self.lost.contains_key(&from) {
-                    // A lost member hears nothing: its lines are skipped
-                    // here, and the team no longer waits for it.
+                if self.lost.get(&from) == Some(&true) {
+                    // A member a person stated down hears nothing: its lines
+                    // are skipped here, and the team no longer waits for it.
                     self.book.skip_paths(&from, &moved);
-                    self.lost.insert(from.clone(), true);
                     if let Some(status) = self.statuses.get_mut(&from) {
-                        status.detail = format!("link lost; released, {to} flies its lines");
+                        status.detail = format!("down; {to} flies its lines");
                     }
                     self.detail = format!(
-                        "{from} released: its link is lost and its state unknown; {to} flies its {} unfinished lines",
+                        "{from} is down; {to} flies its {} unfinished lines",
                         moved.len()
                     );
                 } else {
@@ -316,10 +321,35 @@ impl TeamLane {
         )]
     }
 
-    /// A member's link is gone: its state is unknown, and its work stays
-    /// reserved to it until a person reassigns that work, which releases
-    /// the member. A released member stays released however often its
-    /// host is found gone again.
+    /// A person states that `member`, whose link is lost, is down. Only then
+    /// may its unfinished work move, its line in progress included; until
+    /// then the work stays reserved, as the member may still fly it. A
+    /// member that is down stays down, and its later reports are not taken.
+    pub(super) fn member_down(
+        &mut self,
+        member: &str,
+    ) -> Result<(Vec<MemberIntent>, bool), String> {
+        match self.lost.get(member) {
+            None if self.member(member).is_none() => {
+                Err(format!("{member} is not a member of {}", self.config.name))
+            }
+            None => Err(format!(
+                "{member} reports; only a member whose link is lost can be stated down"
+            )),
+            Some(_) => {
+                self.lost.insert(member.to_owned(), true);
+                if let Some(status) = self.statuses.get_mut(member) {
+                    status.detail = "down, as a person stated; its work may move".to_owned();
+                }
+                self.detail = format!("{member} is down; reassign its lines to another member");
+                Ok((Vec::new(), false))
+            }
+        }
+    }
+
+    /// A member's link is gone: its state is unknown, and its work and its
+    /// line in progress stay reserved to it until it reports again or a
+    /// person states that it is down.
     pub fn on_member_lost(&mut self, member: &str) {
         if self.lost.get(member) == Some(&true) {
             return;
@@ -332,8 +362,8 @@ impl TeamLane {
     }
 
     /// Whether the team takes `member`'s report: a member that reports
-    /// again is no longer lost, unless a person released it, whose lines
-    /// others now fly.
+    /// again is no longer lost, unless a person stated it down, as others
+    /// may fly its lines.
     pub(super) fn reporting(&mut self, member: &str) -> bool {
         if self.lost.get(member) == Some(&true) {
             return false;

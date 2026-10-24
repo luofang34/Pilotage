@@ -313,6 +313,11 @@ impl MissionDesk {
                 };
                 approval(&proposal, policy, now_ms).ok_or(DeskRefusal::NoHeight)
             }
+            MissionCommand::MemberDown { member } => {
+                Ok(Action::MemberDown(wire::MissionMemberDown {
+                    member: member.clone(),
+                }))
+            }
             MissionCommand::Start { digest } => {
                 let proposal_digest = match digest {
                     Some(named) => parse_hex(named)?,

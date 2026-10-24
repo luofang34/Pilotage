@@ -176,6 +176,9 @@ impl Lane {
             Some(Action::Resume(_)) => self.resume(context),
             Some(Action::Abort(_)) => self.abort(),
             Some(Action::Revise(revise)) => self.revise(revise, context),
+            Some(Action::MemberDown(_)) => {
+                Err("a vehicle lane has no members; send it to the team".to_owned())
+            }
             Some(Action::Skip(_)) => Err(
                 "skipping a task needs a successor plan, which this lane does not compile yet"
                     .to_owned(),
