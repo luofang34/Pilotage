@@ -407,6 +407,7 @@ impl MissionDesk {
             run_id: status.run_id.clone(),
             within_envelope,
             drafted_by: None,
+            release: None,
             change: Some(change),
         }))
     }

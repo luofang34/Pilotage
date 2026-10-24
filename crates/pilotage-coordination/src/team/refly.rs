@@ -284,6 +284,10 @@ impl TeamLane {
                 "{} refused to fly {} again: {}",
                 refly.member, refly.line, receipt.reason
             );
+            if !refly.moved.is_empty() {
+                let (member, owner) = (refly.member.clone(), refly.owner.clone());
+                self.unassign_moved(&member, &owner, &receipt.reason);
+            }
             return Vec::new();
         }
         let member = refly.member.clone();
