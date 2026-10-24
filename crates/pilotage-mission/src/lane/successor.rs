@@ -274,6 +274,9 @@ impl Lane {
         let release = successor.release.clone();
         // The successor's approval is now the run's.
         let admitted_under = successor.approval.take();
+        // The recovery an expiry names runs under the expired approval: the
+        // expiry stays applied, so it is not applied again.
+        let recovery = successor.basis == Basis::ExpiryRecovery;
         let previous = self.run.take();
         let predecessor = previous.as_ref().map(super::run::RunTracker::run_id);
         let run_id = format!(
@@ -303,7 +306,7 @@ impl Lane {
         if let Some(approval) = admitted_under {
             self.approval = Some(approval);
         }
-        self.expired = false;
+        self.expired = recovery;
         // The successor's run starts flying, as a switch while held does.
         self.holds.clear();
         self.state = State::Running;
