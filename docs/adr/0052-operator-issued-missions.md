@@ -90,8 +90,8 @@ lane has a lifecycle: `Idle`, `Admitted`, `Running`, `HoldRequested`,
 `Held`, `Uncertain`, `Complete`, `Aborted`. An accepted hold makes the lane
 `HoldRequested`; the lane becomes `Held` only when the vehicle reports that
 it holds in place. An abort keeps each task that did not finish as
-unfinished: the task in progress becomes `Incomplete`, and a pending task
-stays pending. The environment variables remain a bootstrap source
+unfinished: the execution of the task in progress becomes `Cancelled`, and
+a pending task stays pending. The environment variables remain a bootstrap source
 that issues the first plan into an `Idle` lane; an issued plan supersedes
 them.
 
@@ -107,16 +107,36 @@ events of the core. A run that a revision starts names the run that it
 continues, so a team follows the work of a member through its revisions
 without the use of the names of runs or tasks. A route leg is not a task: Navigate
 keeps the sequencing of legs inside the task, and flight and camera
-acquisition run together under it. A task is complete only when its
-completion evidence exists; for a survey line, the acquired pictures with
-their placements. Each picture that a lane sends for judgment carries its
-run, its task, the attempt and the picture number. The lane refuses a
-verdict for another run, for a picture that it did not send, or a second
-verdict for one picture. The evidence of a task is `Pending` until each
-sent picture has an answer, then `Met` or `Missing`; it is `NotJudged`
-when no judgment service judged it. On a lane with a judgment service, a
-survey line is complete only with `Met`. A display may show progress inside a task from the
-remaining waypoints, and that view is not a second execution truth. The
+acquisition run together under it.
+
+A task status has three facts, and each fact has one source:
+
+| Fact | Values | Source |
+|---|---|---|
+| Execution | `Pending`, `Active`, `Completed`, `Cancelled`, `Failed`, `Skipped` | Run events: a task finishes, an abort, an unplanned end of the run, a revision |
+| Evidence collection | `Open`, `Settled` | The pictures of the task and the answers to them |
+| Judgment | `Undetermined`, `Met`, `NotMet` | The rule of the task kind, from the execution and the evidence |
+
+Evidence never changes the execution. A verdict that arrives after the
+execution ended can change the evidence and the judgment. It cannot make a
+cancelled or failed execution complete. A survey line is `Met` only when
+its execution is `Completed` and its evidence meets the minimum, because a
+line cut short does not cover its swath. On a lane with a judgment service,
+the minimum is a number of pictures judged usable, and a line that nobody
+judged is not usable. The way home is `Met` when its execution is
+`Completed`. A display state (`Done`, `Incomplete` and the others) comes
+from the three facts. A lane, a team, a client or an agent makes its
+decisions from the three facts, never from the display state. A step that
+waits for a task names the fact that it waits for: the next survey line
+waits for the end of the execution of the line before it, and a report
+waits for the judgment.
+
+Each picture that a lane sends for judgment carries its run, its task, the
+attempt and the picture number. The lane refuses a verdict for another run,
+for a picture that it did not send, or a second verdict for one picture.
+The evidence of a task is `Open` while the task takes pictures and while a
+sent picture has no answer. A display may show progress inside a task from
+the remaining waypoints, and that view is not a second execution truth. The
 first delivery uses a sequence of tasks per vehicle. A team task graph and
 concurrent tasks within a bound come later; a linear list is not promised
 to cover every mission.

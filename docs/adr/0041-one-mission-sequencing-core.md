@@ -54,7 +54,11 @@ The mission document contains ordered phases. Each phase contains:
 - the phases that it depends on, if any.
 
 The engine runs one phase at a time. It starts the first phase in list order
-whose dependencies have all completed. A document is refused when a dependency
+whose dependencies have all completed. A phase completes when its completion
+conditions hold. This is the end of its execution only. It does not mean that
+the evidence of the task is settled, or that the task meets its objective. A
+step that needs the evidence or the judgment of a task waits for that fact on
+the mission lane (ADR-0052). A document is refused when a dependency
 names a phase that the document does not have, names the phase itself, or
 makes a cycle.
 

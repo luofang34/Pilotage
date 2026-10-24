@@ -419,6 +419,7 @@ pub(super) fn toward(lane: &Lane, waypoint: usize) -> RunProgress {
 
 mod evidence;
 mod expiry;
+mod outcome;
 mod successor;
 
 #[test]
