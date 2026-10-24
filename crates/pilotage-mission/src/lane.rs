@@ -324,7 +324,7 @@ impl Lane {
         self.successor = None;
         self.detail = "aborted by intent; the vehicle stops in place".to_owned();
         if let Some(run) = self.run.as_mut() {
-            run.close_aborted();
+            run.close(wire::MissionTaskExecution::Cancelled);
         }
         Ok((Some(LaneEffect::Abort), None))
     }
@@ -393,12 +393,12 @@ impl Lane {
         }
         let run = self.run.as_mut()?;
         if progress.plan_complete && flying {
-            run.close();
+            run.close(wire::MissionTaskExecution::Completed);
             self.state = wire::MissionLaneState::Complete;
             self.detail = run.summary();
             self.changed = true;
         } else if progress.ended && flying {
-            run.close();
+            run.close(wire::MissionTaskExecution::Failed);
             self.state = wire::MissionLaneState::Failed;
             self.detail = progress
                 .ended_because
