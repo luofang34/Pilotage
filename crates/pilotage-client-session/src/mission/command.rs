@@ -111,6 +111,22 @@ pub enum IntentKind {
     Fetch,
 }
 
+impl MissionCommand {
+    /// The kind of intent the command sends.
+    #[must_use]
+    pub fn kind(&self) -> IntentKind {
+        match self {
+            Self::Propose { .. } => IntentKind::Propose,
+            Self::Approve { .. } => IntentKind::Approve,
+            Self::Start { .. } => IntentKind::Start,
+            Self::Revise { .. } => IntentKind::Revise,
+            Self::Hold {} => IntentKind::Hold,
+            Self::Resume {} => IntentKind::Resume,
+            Self::Abort {} => IntentKind::Abort,
+        }
+    }
+}
+
 impl IntentKind {
     /// The kind of `action`.
     #[must_use]
