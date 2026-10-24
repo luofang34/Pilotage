@@ -20,6 +20,9 @@ pub struct MissionArgs {
     /// Seconds between an aircraft's picture assessments
     /// (`--decision-every`).
     pub decision_every_s: Option<f64>,
+    /// The chat endpoint that interprets instructions in words, which the
+    /// printed App and agent commands name (`--instruction-model`).
+    pub instruction_model: Option<String>,
     /// Leave the fleet file's camera fault out (`--no-fault`).
     pub no_fault: bool,
     /// How long each host may take to listen, s (`--ready-timeout`).
@@ -31,6 +34,7 @@ pub(super) fn parse_mission(args: &[String]) -> Result<MissionArgs, XtaskError> 
         plan: PathBuf::from(DEFAULT_PLAN),
         decision: None,
         decision_every_s: None,
+        instruction_model: None,
         no_fault: false,
         ready_timeout_s: 60,
     };
@@ -51,6 +55,9 @@ pub(super) fn parse_mission(args: &[String]) -> Result<MissionArgs, XtaskError> 
                 mission.decision_every_s = Some(seconds);
             }
             "--no-fault" => mission.no_fault = true,
+            "--instruction-model" => {
+                mission.instruction_model = Some(required_value(&mut iter, "--instruction-model")?);
+            }
             "--ready-timeout" => mission.ready_timeout_s = required_timeout(&mut iter)?,
             other => {
                 return Err(XtaskError::Usage {
