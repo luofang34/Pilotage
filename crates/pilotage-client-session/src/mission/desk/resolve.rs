@@ -56,6 +56,7 @@ impl MissionDesk {
             MissionCommand::MemberDown { member } => {
                 Ok(Action::MemberDown(wire::MissionMemberDown {
                     member: member.clone(),
+                    stated_by: None,
                 }))
             }
             MissionCommand::Fetch {} => Ok(Action::Fetch(wire::MissionFetch {

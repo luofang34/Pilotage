@@ -140,6 +140,8 @@ pub struct Lane {
     execution: Option<RunExecution>,
     /// Why the run holds, when it does.
     holds: Vec<wire::MissionHoldReason>,
+    /// Work the plan's revisions released, for the team that asked.
+    released: Vec<wire::WorkReleased>,
 }
 
 impl Lane {
@@ -162,6 +164,7 @@ impl Lane {
             expired: false,
             execution: None,
             holds: Vec::new(),
+            released: Vec::new(),
         }
     }
 
@@ -235,6 +238,7 @@ impl Lane {
         self.successor = None;
         self.revisions = 0;
         self.holds.clear();
+        self.released.clear();
         self.history.clear();
         self.state = wire::MissionLaneState::Proposed;
         self.detail = "proposed; waiting for an approval".to_owned();

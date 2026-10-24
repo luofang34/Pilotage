@@ -349,6 +349,8 @@ pub(super) fn team_status(team: &TeamLane) -> wire::MissionStatus {
         member_link: wire::MemberLink::Unspecified as i32,
         execution: None,
         holds: hold_reasons(team, state),
+        released: Vec::new(),
+        handovers: team.handovers(),
         predecessor_run_id: String::new(),
         sequence: team.sequence,
         area: survey.map(|s| s.area.clone()).unwrap_or_default(),

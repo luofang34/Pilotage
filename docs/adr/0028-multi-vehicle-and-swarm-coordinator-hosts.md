@@ -50,7 +50,12 @@ advertising one vehicle, and the client drives one vehicle.
   each member vehicle's host, over the ordinary client protocol. Fencing
   applies end to end: member hosts fence the coordinator exactly like any
   client, and displacing the coordinator on one member affects exactly that
-  member.
+  member. Fencing makes an old generation invalid at one control endpoint.
+  It does not stop another vehicle that flies the same work, so a move of
+  work between members needs the release of the giving member
+  ([ADR-0052](0052-operator-issued-missions.md)). A person's statement that
+  a member is down is an override with a source, not a proof that the
+  member stopped.
 - **Aggregate semantics are coordinator implementation, not wire
   vocabulary.** Formation geometry, role assignment, and member selection
   live in the coordinator; the wire stays per-vehicle frames plus aggregate

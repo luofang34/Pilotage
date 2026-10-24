@@ -100,6 +100,7 @@ impl Lane {
             drafted_by: "the approval's expiry".to_owned(),
             flown_at_draft: flown,
             recovery: true,
+            release: None,
         });
         self.detail =
             "the approval expired; the run returns home after the line in progress".to_owned();

@@ -89,6 +89,7 @@ fn only_an_approver_states_that_a_member_is_down() {
     let down = || {
         intent(Action::MemberDown(wire::MissionMemberDown {
             member: "SIM-3".to_owned(),
+            stated_by: None,
         }))
     };
     let refused = steering.admit(&mut down(), &agent());

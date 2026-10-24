@@ -215,6 +215,10 @@ message MissionRevise {
   bool within_envelope = 3;
   // Who drafted the change; the host writes the admitted session.
   RecordOrigin drafted_by = 4;
+  // Work the revision releases: a team asks it of a member before another
+  // member gets the work. When the revision applies, the member's status
+  // reports the release in `released`.
+  WorkRelease release = 5;
   oneof change {
     // A new revision of the objective. A vehicle lane flies it from the
     // checkpoint; a team takes only a strip on its own line grid.
@@ -237,6 +241,74 @@ message MissionReassign {
 
 message MissionFinish {}
 
+// The work a team asks a member to release: one assignment, in one
+// generation.
+message WorkRelease {
+  // The assignment's identity; it includes the team's run, so a restarted
+  // coordinator never reuses one.
+  string assignment_id = 1;
+  uint64 generation = 2;
+}
+
+// A member's report that a revision released work: the old run no longer
+// flies the released tasks, and the lane refuses any intent for the plan
+// that the revision replaced.
+message WorkReleased {
+  string assignment_id = 1;
+  uint64 generation = 2;
+  // The digest of the revision that released the work.
+  bytes digest = 3;
+  // The run that flies the revision.
+  string run_id = 4;
+  // The run the revision replaced.
+  string superseded_run_id = 5;
+  // The tasks of the replaced run that it did not begin; none of them is
+  // flown by that run.
+  repeated string task_ids = 6;
+}
+
+// Work that moves from one team member to another.
+message MissionHandover {
+  string assignment_id = 1;
+  // The generation of the assignment now: the giving member's while the
+  // release is open, one more once the work is committed to the receiving
+  // member.
+  uint64 generation = 2;
+  string from_member = 3;
+  string to_member = 4;
+  MissionHandoverState state = 5;
+  // The moved tasks, as the giving member names them.
+  repeated string task_ids = 6;
+  // What the commit rests on: the giving member's release, or a person's
+  // statement that it is down. A statement is an override; it does not
+  // prove that the member stopped or that its airspace is clear.
+  string basis = 7;
+}
+
+enum MissionHandoverState {
+  MISSION_HANDOVER_STATE_UNSPECIFIED = 0;
+  // Waiting for the giving member's release. The work and its space stay
+  // with the giving member, and the receiving member gets nothing.
+  MISSION_HANDOVER_STATE_RELEASING = 1;
+  // Committed to the receiving member.
+  MISSION_HANDOVER_STATE_COMMITTED = 2;
+  // The giving member refused, so it keeps the work.
+  MISSION_HANDOVER_STATE_WITHDRAWN = 3;
+  // Released by the giving member, and not taken by the receiving member:
+  // nobody holds the work until an operator gives it to a member.
+  MISSION_HANDOVER_STATE_UNASSIGNED = 4;
+  // The coordinator restarted while the handover was open or committed. It
+  // is not known whether a member flies the work; an operator checks both
+  // members and gives the work to one.
+  MISSION_HANDOVER_STATE_UNRECONCILED = 5;
+}
+
+// A coordinator's handovers as it writes them to durable storage before it
+// sends work to a member, so a restart does not lose them.
+message MissionHandoverJournal {
+  repeated MissionHandover handovers = 1;
+}
+
 message MissionSkip {
   string task_id = 1;
 }
@@ -246,6 +318,8 @@ message MissionSkip {
 // this, its work and its line in progress stay reserved to it.
 message MissionMemberDown {
   string member = 1;
+  // Who stated it; the host writes the admitted session.
+  RecordOrigin stated_by = 2;
 }
 
 // A request for the full proposal that `digest` names: the lane's plan or
@@ -404,6 +478,10 @@ message MissionStatus {
   // Why the run holds or is asked to hold; empty when it does not. A team
   // lists every reason of its members that may still fly.
   repeated MissionHoldReason holds = 21;
+  // Work this lane's revisions released, for the team that asked.
+  repeated WorkReleased released = 22;
+  // A team's work moving between its members.
+  repeated MissionHandover handovers = 23;
 }
 
 // One reason a run holds. A renewal of the approval removes only
@@ -462,6 +540,8 @@ enum MissionSuccessorState {
   MISSION_SUCCESSOR_STATE_ADMITTED = 2;
   // The lane flies it.
   MISSION_SUCCESSOR_STATE_APPLIED = 3;
+  // A member refused its share, so the revision does not apply.
+  MISSION_SUCCESSOR_STATE_WITHDRAWN = 4;
 }
 
 // A successor as a lane's status reports it.

@@ -228,14 +228,19 @@ impl TeamLane {
                         "{from} is down; {to} flies its {} unfinished lines",
                         moved.len()
                     );
+                    self.override_handover(&from, &to, &moved);
+                    intents.extend(self.queue_moved(&to, &from, moved, context));
                 } else {
-                    intents.extend(self.member_revision(&from, &kept, context));
+                    // The moved lines go to `to` only once `from` reports
+                    // that it released them.
+                    let release = self.open_handover(&from, &to, &moved);
+                    intents.extend(self.member_revision(&from, &kept, context, Some(release)));
+                    self.detail = format!("waiting for {from} to release the moved lines");
                 }
-                intents.extend(self.queue_moved(&to, &from, moved, context));
             }
             Change::Keep(keep) => {
                 for (member, kept) in keep {
-                    intents.extend(self.member_revision(&member, &kept, context));
+                    intents.extend(self.member_revision(&member, &kept, context, None));
                 }
             }
         }
@@ -249,6 +254,7 @@ impl TeamLane {
         member: &str,
         kept: &[Vec<wire::GeoPoint>],
         context: &IntentContext,
+        release: Option<wire::WorkRelease>,
     ) -> Vec<MemberIntent> {
         use wire::mission_revise::Change as Asked;
         let Some(status) = self.statuses.get(member).cloned() else {
@@ -281,6 +287,7 @@ impl TeamLane {
             run_id: status.run_id.clone(),
             within_envelope: false,
             drafted_by: None,
+            release,
             change: Some(change),
         };
         vec![self.request_revision(
@@ -304,6 +311,7 @@ impl TeamLane {
                 "{member} refused its share of the revision: {}",
                 receipt.reason
             );
+            self.withdraw_handover(member, &receipt.reason);
             return Vec::new();
         }
         if op != Op::Revise {
@@ -312,6 +320,12 @@ impl TeamLane {
         let (Some(draft), Some(team)) = (receipt.proposal.clone(), self.approval.clone()) else {
             return Vec::new();
         };
+        if self.keeps_moved_work(member, &draft) {
+            self.detail = format!("{member}'s share still flies the moved lines; not approved");
+            self.withdraw_handover(member, "its share still flies the moved lines");
+            return Vec::new();
+        }
+        self.approving_release(member, &draft.digest);
         let band: Vec<wire::GeoPoint> = draft.tasks.iter().flat_map(|t| t.path.clone()).collect();
         let launch = self.member(member).map(|m| m.launch);
         let approval = delegate(
@@ -335,8 +349,9 @@ impl TeamLane {
     /// member that is down stays down, and its later reports are not taken.
     pub(super) fn member_down(
         &mut self,
-        member: &str,
+        down: &wire::MissionMemberDown,
     ) -> Result<(Vec<MemberIntent>, bool), String> {
+        let member = down.member.as_str();
         match self.lost.get(member) {
             None if self.member(member).is_none() => {
                 Err(format!("{member} is not a member of {}", self.config.name))
@@ -347,6 +362,12 @@ impl TeamLane {
             Some(wire::MemberLink::Released) => Ok((Vec::new(), false)),
             Some(_) => {
                 self.lost.insert(member.to_owned(), wire::MemberLink::Down);
+                let stated_by = down
+                    .stated_by
+                    .as_ref()
+                    .map_or_else(|| "a person".to_owned(), |o| o.subject.clone());
+                self.stated_by.insert(member.to_owned(), stated_by);
+                self.unassign_queued_for(member);
                 if let Some(status) = self.statuses.get_mut(member) {
                     status.detail = "down, as a person stated; its work may move".to_owned();
                 }

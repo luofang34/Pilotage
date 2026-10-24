@@ -15,6 +15,7 @@ use crate::readiness::{Readiness, ReadySignal, await_ready};
 use crate::session::fleet::{FleetEntry, FleetManifest};
 use crate::session::{SUPERVISE_INTERVAL, prepared_log_dir, repo_root, spawn_cancel_listener};
 
+mod journal;
 mod plan;
 mod rehearse;
 
@@ -228,6 +229,7 @@ async fn start_lead(
             context: "writing a lead's member list",
             source,
         })?;
+    journal::forget_blocking(&path)?;
     let env = vec![
         (
             "PILOTAGE_COORDINATOR_MEMBERS".to_owned(),
