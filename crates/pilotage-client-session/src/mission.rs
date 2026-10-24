@@ -17,7 +17,7 @@ mod instruction;
 mod survey_file;
 mod view;
 
-pub use approval::{ApprovalPolicy, approval, approved_height_m};
+pub use approval::{ApprovalPolicy, OnExpiry, approval, approved_height_m};
 pub use command::{IntentKind, MissionCommand, Reassign};
 pub use desk::{DeskRefusal, FiledReceipt, MissionDesk, Offered};
 pub use instruction::{

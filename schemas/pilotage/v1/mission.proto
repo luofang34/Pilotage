@@ -153,6 +153,19 @@ message AdaptationEnvelope {
   bool permit_change_objective = 8;
   // Survey lines a lane may fly again without a new approval.
   uint32 max_refly_lines = 9;
+  // What a run does when the approval expires while it flies. A held or
+  // expired run resumes only under a new approval of its plan.
+  MissionExpiryPolicy on_expiry = 10;
+}
+
+// The recovery a run applies when its approval expires.
+enum MissionExpiryPolicy {
+  // The same as HOLD.
+  MISSION_EXPIRY_POLICY_UNSPECIFIED = 0;
+  // Stop in place and wait for a new approval.
+  MISSION_EXPIRY_POLICY_HOLD = 1;
+  // End after the line in progress and return to the launch point.
+  MISSION_EXPIRY_POLICY_RETURN_HOME = 2;
 }
 
 // A permission bound to one proposal digest.
