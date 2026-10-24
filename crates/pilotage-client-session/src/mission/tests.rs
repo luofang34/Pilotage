@@ -268,3 +268,22 @@ fn a_proposal_is_approvable_as_soon_as_its_receipt_arrives_before_any_status() {
     };
     assert!(matches!(desk.resolve(&command, 1), Ok(Action::Approve(_))));
 }
+
+#[test]
+fn a_client_renews_the_approval_of_a_held_run_it_never_saw_by_fetching_its_plan() {
+    let mut desk = MissionDesk::new("person", 7);
+    desk.on_status(status(wire::MissionLaneState::Held, b"\x51"));
+    let approve = MissionCommand::Approve {
+        digest: None,
+        policy: ApprovalPolicy::default(),
+    };
+    // No proposal is under review, but the plan in progress may be approved again.
+    assert_eq!(desk.unseen_proposal(), None);
+    assert_eq!(desk.unseen_approvable(), Some(b"\x51".to_vec()));
+    assert!(desk.resolve(&approve, 0).is_err());
+    fetched(&mut desk, b"\x51");
+    let Ok(Action::Approve(approval)) = desk.resolve(&approve, 0) else {
+        panic!("a renewal");
+    };
+    assert_eq!(approval.proposal_digest, b"\x51");
+}

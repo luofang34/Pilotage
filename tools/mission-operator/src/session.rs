@@ -141,7 +141,7 @@ impl Session {
         command: &MissionCommand,
     ) -> Result<Option<FiledReceipt>, OperatorError> {
         if matches!(command, MissionCommand::Approve { .. })
-            && self.desk.unseen_proposal().is_some()
+            && self.desk.unseen_approvable().is_some()
         {
             let fetched = Box::pin(self.ask(&MissionCommand::Fetch {})).await?;
             if !fetched.as_ref().is_some_and(FiledReceipt::accepted) {
