@@ -243,6 +243,7 @@ fn a_line_is_done_only_with_usable_pictures() {
         target_waypoint: Some(2 * lines),
         plan_complete: true,
         ended: false,
+        ended_because: None,
     });
     let status = lane.take_changed().expect("changed");
     assert_eq!(status.state, wire::MissionLaneState::Complete as i32);
@@ -295,3 +296,21 @@ fn hold_resume_and_abort_follow_the_lifecycle() {
 
 mod expiry;
 mod successor;
+
+#[test]
+fn a_run_the_vehicle_ended_fails_with_its_reason() {
+    let (mut lane, _) = running_lane();
+    lane.on_progress(&RunProgress {
+        target_waypoint: Some(0),
+        ..RunProgress::default()
+    });
+    lane.on_progress(&RunProgress {
+        target_waypoint: Some(0),
+        ended: true,
+        ended_because: Some("the vehicle landed outside the plan"),
+        ..RunProgress::default()
+    });
+    let status = lane.take_changed().expect("changed");
+    assert_eq!(status.state, wire::MissionLaneState::Failed as i32);
+    assert_eq!(status.detail, "the vehicle landed outside the plan");
+}

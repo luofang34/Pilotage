@@ -16,6 +16,8 @@ pub struct RunProgress {
     pub plan_complete: bool,
     /// The run ended without completing its plan.
     pub ended: bool,
+    /// Why it ended, when the host knows.
+    pub ended_because: Option<&'static str>,
 }
 
 /// One judgment of one picture.

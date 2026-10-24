@@ -340,7 +340,10 @@ impl Lane {
         } else if progress.ended && flying {
             run.close();
             self.state = wire::MissionLaneState::Failed;
-            self.detail = "the run ended before its plan completed".to_owned();
+            self.detail = progress
+                .ended_because
+                .unwrap_or("the run ended before its plan completed")
+                .to_owned();
             self.changed = true;
         }
         None
