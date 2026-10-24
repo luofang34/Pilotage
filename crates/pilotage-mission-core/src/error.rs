@@ -7,6 +7,24 @@ use crate::{Digest, ExecutionTarget, MissionCapability};
 /// An error in mission document content.
 #[derive(Debug, Error, PartialEq)]
 pub enum ValidationError {
+    /// A plan segment ends before it starts.
+    #[error("{field} follows waypoints {first} to {last}, which end before they start")]
+    InvalidSegment {
+        /// The field path.
+        field: String,
+        /// The first waypoint.
+        first: u32,
+        /// The last waypoint.
+        last: u32,
+    },
+    /// A phase depends on a phase the document does not have, on itself, or in a cycle.
+    #[error("phase {phase_id} depends on {depends_on}, which it cannot")]
+    InvalidDependency {
+        /// The phase.
+        phase_id: String,
+        /// The dependency.
+        depends_on: String,
+    },
     /// The schema version is not supported.
     #[error("mission schema version {actual} is not supported; expected {expected}")]
     UnsupportedSchemaVersion {

@@ -212,6 +212,7 @@ fn observation(guidance_valid: bool, altitude_m: f64, plan_complete: bool) -> Mi
         navigation: NavigationObservation {
             guidance_valid: Some(guidance_valid),
             plan_complete: Some(plan_complete),
+            waypoints_captured: None,
             altitude_m: Some(altitude_m),
         },
         vehicle: VehicleObservation::default(),

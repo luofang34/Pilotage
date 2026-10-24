@@ -12,7 +12,9 @@ mod signal;
 mod trial;
 mod validation;
 
-pub use action::{FlightAction, MissionAction, TransportLane, TrialAction, TurnDirection};
+pub use action::{
+    BoundAction, FlightAction, MissionAction, TransportLane, TrialAction, TurnDirection,
+};
 pub use condition::{
     Comparison, MissionCondition, NavigationCondition, SignalCondition, SimulatorCondition,
     VehicleCondition, VehicleLifecycleState,
@@ -23,9 +25,9 @@ pub use document::{
     PhaseDeadline,
 };
 pub use engine::{
-    AbortCause, ActionId, CleanupFailure, CleanupFailureKind, DeadlineClass, DirectiveContext,
-    DirectivePurpose, DirectiveReceipt, EngineEvent, EngineInputError, EngineStart,
-    EngineStartError, EngineState, FlightDirective, MissionDirective, MissionEngine,
+    AbortCause, ActionId, BoundDirective, CleanupFailure, CleanupFailureKind, DeadlineClass,
+    DirectiveContext, DirectivePurpose, DirectiveReceipt, EngineEvent, EngineInputError,
+    EngineStart, EngineStartError, EngineState, FlightDirective, MissionDirective, MissionEngine,
     MissionObservation, MissionTerminal, NavigationObservation, ObservedSignal, PhaseStage,
     ReceiptResult, TickInput, TickOutput, TrialDirective, VehicleObservation, WallDeadline,
 };

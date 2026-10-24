@@ -48,6 +48,7 @@ fn phase(id: &str, action: MissionAction) -> MissionPhase {
         cleanup_actions: Vec::new(),
         completion_conditions: Vec::new(),
         abort_conditions: Vec::new(),
+        depends_on: Vec::new(),
         deadline: Some(crate::PhaseDeadline {
             clock: crate::PhaseClock::Mission,
             duration_ns: 1_000_000,

@@ -167,6 +167,7 @@ fn the_mission_core_admits_each_lowered_action() {
                 cleanup_actions: Vec::new(),
                 completion_conditions: Vec::new(),
                 abort_conditions: Vec::new(),
+                depends_on: Vec::new(),
                 deadline: Some(pilotage_mission_core::PhaseDeadline {
                     clock: pilotage_mission_core::PhaseClock::Simulator,
                     duration_ns: 1_000_000,

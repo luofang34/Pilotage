@@ -42,6 +42,9 @@ pub struct NavigationObservation {
     pub guidance_valid: Option<bool>,
     /// The active-plan completion state, when available.
     pub plan_complete: Option<bool>,
+    /// How many waypoints of the active plan are captured, from its first, when available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waypoints_captured: Option<u32>,
     /// The observed altitude in meters, when available.
     pub altitude_m: Option<f64>,
 }

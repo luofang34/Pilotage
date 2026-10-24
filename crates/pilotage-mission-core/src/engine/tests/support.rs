@@ -26,6 +26,7 @@ pub(super) fn phase(id: &str) -> MissionPhase {
         cleanup_actions: Vec::new(),
         completion_conditions: Vec::new(),
         abort_conditions: Vec::new(),
+        depends_on: Vec::new(),
         deadline: Some(crate::PhaseDeadline {
             clock: crate::PhaseClock::Simulator,
             duration_ns: PHASE_DEADLINE_NS,

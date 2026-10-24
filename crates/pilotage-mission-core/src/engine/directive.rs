@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{FlightAction, MissionAction, TrialAction};
+use crate::{BoundAction, FlightAction, MissionAction, TrialAction};
 
 /// A nonzero identifier for one directive attempt.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -66,6 +66,16 @@ pub struct TrialDirective {
     pub action: TrialAction,
 }
 
+/// One bound action with its correlation context.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BoundDirective {
+    /// The correlation context.
+    pub context: DirectiveContext,
+    /// The executor's operation.
+    pub action: BoundAction,
+}
+
 /// A typed directive on one transport lane.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "lane", content = "directive", rename_all = "snake_case")]
@@ -74,6 +84,8 @@ pub enum MissionDirective {
     Flight(FlightDirective),
     /// A directive for the simulator-only command path.
     Trial(TrialDirective),
+    /// A bound executor's operation for the host to carry out.
+    Bound(BoundDirective),
 }
 
 /// The host result for one directive attempt.
@@ -114,6 +126,7 @@ impl MissionDirective {
         match action {
             MissionAction::Flight(action) => Self::Flight(FlightDirective { context, action }),
             MissionAction::Trial(action) => Self::Trial(TrialDirective { context, action }),
+            MissionAction::Bound(action) => Self::Bound(BoundDirective { context, action }),
         }
     }
 
@@ -123,6 +136,7 @@ impl MissionDirective {
         match self {
             Self::Flight(directive) => &directive.context,
             Self::Trial(directive) => &directive.context,
+            Self::Bound(directive) => &directive.context,
         }
     }
 
@@ -130,6 +144,7 @@ impl MissionDirective {
         match self {
             Self::Flight(directive) => directive.action.name(),
             Self::Trial(directive) => directive.action.name(),
+            Self::Bound(_) => "bound",
         }
     }
 
@@ -137,6 +152,7 @@ impl MissionDirective {
         match self {
             Self::Flight(directive) => MissionAction::Flight(directive.action.clone()),
             Self::Trial(directive) => MissionAction::Trial(directive.action.clone()),
+            Self::Bound(directive) => MissionAction::Bound(directive.action.clone()),
         }
     }
 }

@@ -89,6 +89,10 @@ pub struct MissionPhase {
     /// How long the phase may run, on the clock it names; a phase without one, such as
     /// one that waits for a person, runs until its conditions end it.
     pub deadline: Option<PhaseDeadline>,
+    /// The phases, by identifier, that complete before this one may start. The engine
+    /// runs the first phase in list order whose dependencies have all completed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub depends_on: Vec<String>,
 }
 
 /// The clock a phase deadline is measured on.
@@ -233,7 +237,54 @@ impl MissionDocument {
                 });
             }
         }
+        self.validate_dependencies()
+    }
+
+    /// Every dependency names another phase of the document, and no phase depends on
+    /// itself through others: some phase is always ready until every one has run.
+    fn validate_dependencies(&self) -> Result<(), ValidationError> {
+        let index_of = |id: &str| self.phases.iter().position(|phase| phase.id == id);
+        for phase in &self.phases {
+            for dependency in &phase.depends_on {
+                if dependency == &phase.id || index_of(dependency).is_none() {
+                    return Err(ValidationError::InvalidDependency {
+                        phase_id: phase.id.clone(),
+                        depends_on: dependency.clone(),
+                    });
+                }
+            }
+        }
+        let mut done = Vec::with_capacity(self.phases.len());
+        while let Some(next) = self.next_ready(&done) {
+            done.push(next);
+        }
+        if let Some(stuck) = self
+            .phases
+            .iter()
+            .enumerate()
+            .find(|(i, _)| !done.contains(i))
+        {
+            return Err(ValidationError::InvalidDependency {
+                phase_id: stuck.1.id.clone(),
+                depends_on: stuck.1.depends_on.join(", "),
+            });
+        }
         Ok(())
+    }
+
+    /// The first phase in list order that has not run and whose dependencies have all
+    /// completed, `completed` naming phases by index.
+    pub(crate) fn next_ready(&self, completed: &[usize]) -> Option<usize> {
+        let done = |id: &String| {
+            completed
+                .iter()
+                .any(|index| self.phases.get(*index).is_some_and(|phase| &phase.id == id))
+        };
+        self.phases
+            .iter()
+            .enumerate()
+            .find(|(index, phase)| !completed.contains(index) && phase.depends_on.iter().all(done))
+            .map(|(index, _)| index)
     }
 
     fn validate_admission(&self, target: ExecutionTarget) -> Result<(), ValidationError> {
