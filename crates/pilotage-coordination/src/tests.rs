@@ -54,6 +54,7 @@ fn vehicle_lane(name: &str) -> Lane {
         cruise_power_w: None,
         recovery_policy: "hold".to_owned(),
         judged: true,
+        evidence_window_ms: 60_000,
     })
 }
 

@@ -2,6 +2,12 @@
 //! evidence can still change, and whether the evidence meets the objective.
 //! Run events set the execution; evidence never changes it. The judgment
 //! and the display state follow from the two.
+//!
+//! The evidence window of a task opens when its execution ends: from then
+//! on the task takes no pictures, so the pictures awaiting an answer are
+//! all it can still get. When the window closes with answers outstanding,
+//! the task is sealed: the judgment uses the answers that arrived, and an
+//! answer after that is only counted as late.
 
 use pilotage_protocol::wire;
 use wire::MissionTaskExecution as Execution;
@@ -17,6 +23,12 @@ pub(in crate::lane) struct TaskTrack {
     pub judgments: Judgments,
     /// The task's attempt in this run; a run flies each task once.
     pub attempt: u32,
+    /// When its execution ended, on the host's monotonic clock, milliseconds.
+    pub ended_at_ms: Option<u64>,
+    /// The evidence window closed; the task takes no more answers.
+    pub sealed: bool,
+    /// The window closed with answers outstanding.
+    closed: bool,
 }
 
 /// What the evidence of a run's lines is held to.
@@ -36,6 +48,9 @@ impl TaskTrack {
             evidence: wire::MissionTaskEvidence::default(),
             judgments: Judgments::default(),
             attempt: 1,
+            ended_at_ms: None,
+            sealed: false,
+            closed: false,
         }
     }
 
@@ -51,20 +66,51 @@ impl TaskTrack {
         )
     }
 
-    /// Ends the execution with `outcome` when it has not ended yet; a task
-    /// not begun stays pending. Returns whether it changed.
-    pub(in crate::lane) fn end_active(&mut self, outcome: Execution) -> bool {
-        if self.execution == Execution::Active {
-            self.execution = outcome;
-            return true;
+    /// Ends the execution with `outcome` at `now_ms` when it has not ended
+    /// yet. Returns whether it changed.
+    pub(in crate::lane) fn end(&mut self, outcome: Execution, now_ms: u64) -> bool {
+        if self.ended() || self.execution == Execution::Skipped {
+            return false;
         }
-        false
+        self.execution = outcome;
+        self.ended_at_ms = Some(now_ms);
+        true
+    }
+
+    /// Ends the task in progress with `outcome`; a task not begun stays
+    /// pending. Returns whether it changed.
+    pub(in crate::lane) fn end_active(&mut self, outcome: Execution, now_ms: u64) -> bool {
+        self.execution == Execution::Active && self.end(outcome, now_ms)
+    }
+
+    /// Closes the evidence window when `window_ms` passed since the
+    /// execution ended at `now_ms`, or at once when `force`. Returns whether
+    /// answers were outstanding.
+    pub(in crate::lane) fn seal(&mut self, now_ms: u64, window_ms: u64, force: bool) -> bool {
+        let Some(ended) = self.ended_at_ms else {
+            return false;
+        };
+        if self.sealed || !(force || now_ms >= ended.saturating_add(window_ms)) {
+            return false;
+        }
+        self.sealed = true;
+        self.closed = self.judgments.outstanding() > 0;
+        self.closed
+    }
+
+    /// The task still waits for answers inside its window.
+    pub(in crate::lane) fn settling(&self) -> bool {
+        !self.sealed && self.ended() && self.judgments.outstanding() > 0
     }
 
     /// Whether the task can still get evidence: it takes pictures, or a
-    /// picture sent for a judgment has no answer.
+    /// picture sent for a judgment has no answer inside the window.
     pub(in crate::lane) fn collection(&self) -> wire::MissionEvidenceCollection {
-        if !self.ended() || self.judgments.outstanding() > 0 {
+        if self.closed {
+            wire::MissionEvidenceCollection::Closed
+        } else if self.execution == Execution::Skipped {
+            wire::MissionEvidenceCollection::Settled
+        } else if !self.ended() || self.judgments.outstanding() > 0 {
             wire::MissionEvidenceCollection::Open
         } else {
             wire::MissionEvidenceCollection::Settled
@@ -97,13 +143,20 @@ impl TaskTrack {
     /// pictures.
     fn evidence_met(&self, rule: EvidenceRule) -> bool {
         if rule.judged {
-            self.evidence_state(rule) == wire::MissionEvidenceState::Met
+            self.evidence.assessed > 0 && self.evidence.usable >= rule.min_usable
         } else {
             self.evidence.frames >= rule.min_usable
         }
     }
 
     fn evidence_state(&self, rule: EvidenceRule) -> wire::MissionEvidenceState {
+        if self.closed {
+            return if self.evidence_met(rule) {
+                wire::MissionEvidenceState::Met
+            } else {
+                wire::MissionEvidenceState::Missing
+            };
+        }
         self.judgments
             .state(&self.evidence, rule.judged, rule.min_usable)
     }

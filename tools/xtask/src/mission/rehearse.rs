@@ -223,5 +223,6 @@ fn vehicle(name: &str, airframe: Airframe) -> Lane {
         cruise_power_w: Some(airframe.cruise_power_w),
         recovery_policy: "hold".to_owned(),
         judged: false,
+        evidence_window_ms: 0,
     })
 }
