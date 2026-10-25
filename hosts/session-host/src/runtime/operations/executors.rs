@@ -65,6 +65,26 @@ pub(super) fn write_report_blocking(
     Ok(name)
 }
 
+/// The file name of the report of the operation `operation_id` in
+/// `reports`, when it exists. The report is renamed into place whole, so
+/// once the host that wrote it stopped, a report that does not exist was
+/// not written.
+///
+/// # Errors
+/// When the directory cannot be read, so whether the report exists is not
+/// known.
+pub(super) fn report_of_blocking(
+    reports: &Path,
+    operation_id: &str,
+) -> Result<Option<String>, String> {
+    let name = format!("{}.txt", file_name(operation_id));
+    let path = reports.join(&name);
+    let exists = path
+        .try_exists()
+        .map_err(|e| format!("cannot tell whether {} exists: {e}", path.display()))?;
+    Ok(exists.then_some(name))
+}
+
 /// The operation identity as a file name, one name for one identity: a
 /// letter, a digit or a hyphen stays, and any other byte becomes `_` and
 /// its two hexadecimal digits.

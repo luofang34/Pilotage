@@ -10,8 +10,8 @@ use sha2::{Digest, Sha256};
 use tokio::sync::{mpsc, watch};
 use tracing::{info, warn};
 
-use super::OperationHost;
 use super::executors::{read_value_blocking, write_report_blocking};
+use super::{OperationHost, RunInputs};
 use crate::runtime::automation::{AutomationStatus, RunControl};
 
 /// How one operation ended.
@@ -34,6 +34,11 @@ pub(super) struct OperationRun {
     results: BTreeMap<String, Vec<wire::MissionValue>>,
     /// An abort came while an operation that runs to its end ran.
     abort_after: bool,
+    /// How many of the run's tasks the lane journal holds as ended: an
+    /// operation begins only once it holds every task that ended before.
+    recorded: watch::Receiver<usize>,
+    /// The run's tasks that ended before this run started.
+    ended_before: usize,
 }
 
 impl OperationRun {
@@ -42,6 +47,7 @@ impl OperationRun {
         host: OperationHost,
         controls: mpsc::Receiver<RunControl>,
         status: watch::Sender<AutomationStatus>,
+        inputs: RunInputs,
     ) -> Self {
         Self {
             run_id,
@@ -49,8 +55,10 @@ impl OperationRun {
             controls,
             status,
             now: AutomationStatus::default(),
-            results: BTreeMap::new(),
+            ended_before: inputs.results.len(),
+            results: inputs.results.into_iter().collect(),
             abort_after: false,
+            recorded: inputs.recorded,
         }
     }
 
@@ -62,7 +70,7 @@ impl OperationRun {
             let task_id = planned.task_id.clone();
             self.now.active_task = Some(task_id.clone());
             self.publish();
-            let operation_id = format!("{}/{task_id}/1", self.run_id);
+            let operation_id = pilotage_mission::operation_id(&self.run_id, &task_id);
             match self.carry_out(&operation_id, &planned.operation).await {
                 Step::Done(results) => {
                     // A step whose result does not meet its plan, such as a
@@ -226,7 +234,8 @@ impl OperationRun {
         }
     }
 
-    /// Waits while a hold keeps the run from its next task. Returns `false`
+    /// Waits while a hold, or a lane journal that does not hold how the
+    /// tasks before ended, keeps the run from its next task. Returns `false`
     /// when an abort ends the run instead.
     async fn wait_while_held(&mut self) -> bool {
         loop {
@@ -235,13 +244,35 @@ impl OperationRun {
                     return false;
                 }
                 Ok(control) => self.on_control(control),
-                Err(mpsc::error::TryRecvError::Empty) if !self.now.operator_held => return true,
-                Err(mpsc::error::TryRecvError::Empty) => match self.controls.recv().await {
-                    Some(RunControl::Abort) | None => return false,
-                    Some(control) => self.on_control(control),
-                },
+                Err(mpsc::error::TryRecvError::Empty)
+                    if !self.now.operator_held && self.recorded_all() =>
+                {
+                    return true;
+                }
+                Err(mpsc::error::TryRecvError::Empty) => {
+                    let unrecorded = !self.recorded_all();
+                    // A journal that is gone records nothing more.
+                    if unrecorded && self.recorded.has_changed().is_err() {
+                        return false;
+                    }
+                    tokio::select! {
+                        control = self.controls.recv() => match control {
+                            Some(RunControl::Abort) | None => return false,
+                            Some(control) => self.on_control(control),
+                        },
+                        _ = self.recorded.changed(), if unrecorded => {}
+                    }
+                }
             }
         }
+    }
+
+    /// The journal holds the end of every task that ended before the next.
+    fn recorded_all(&self) -> bool {
+        let ended = self
+            .ended_before
+            .saturating_add(self.now.finished_tasks.len());
+        *self.recorded.borrow() >= ended
     }
 
     /// Takes an abort that came while an operation ran to its end.
