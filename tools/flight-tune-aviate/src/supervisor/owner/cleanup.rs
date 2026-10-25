@@ -11,7 +11,7 @@ use crate::document::{
 };
 use crate::protocol::GateEvent;
 use crate::runtime_files::{PARENT_READY_SOCKET, remove_exact_socket, socket_path};
-use crate::supervisor::process_control::{self, ProcessGroupSignal};
+use crate::supervisor::process_control;
 
 pub(super) fn finish_or_hold(mut owner: PreparedOwner) -> Result<(), AviateSupervisorError> {
     let result = finish(&mut owner);
@@ -271,21 +271,7 @@ fn wait_for_exact_target_absent(owner: &PreparedOwner) -> Result<(), AviateSuper
 fn signal_group(owner: &PreparedOwner) -> Result<(), AviateSupervisorError> {
     validate_gate_lifetime(owner)?;
     validate_target_group(owner)?;
-    let group = owner.process_identity.target_gate.process_group;
-    match process_control::signal_process_group(group)? {
-        ProcessGroupSignal::Delivered => Ok(()),
-        ProcessGroupSignal::GroupMissing
-            if crate::inspection::process_group_snapshot(
-                owner.process_identity.target_gate.process_group,
-            )?
-            .is_quiescent() =>
-        {
-            Ok(())
-        }
-        ProcessGroupSignal::GroupMissing => Err(AviateSupervisorError::RecoveryBlocked {
-            detail: "the target process group disappeared before it became quiescent".to_owned(),
-        }),
-    }
+    process_control::stop_process_group(owner.process_identity.target_gate.process_group)
 }
 
 fn validate_target_group(owner: &PreparedOwner) -> Result<(), AviateSupervisorError> {

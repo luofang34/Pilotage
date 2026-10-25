@@ -71,7 +71,7 @@ allowed_entry_point() {
     case "$relative:$reference" in
         tools/flight-tune-aviate/src/supervisor/gate.rs:process_control::stop_child) return 0 ;;
         tools/flight-tune-aviate/src/supervisor/gate.rs:process_control::signal_current_process_group) return 0 ;;
-        tools/flight-tune-aviate/src/supervisor/owner/cleanup.rs:process_control::signal_process_group) return 0 ;;
+        tools/flight-tune-aviate/src/supervisor/owner/cleanup.rs:process_control::stop_process_group) return 0 ;;
         tools/flight-tune-aviate/src/supervisor/owner/launch.rs:process_control::stop_child) return 0 ;;
         *) return 1 ;;
     esac
