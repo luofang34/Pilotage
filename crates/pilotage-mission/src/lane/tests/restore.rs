@@ -26,6 +26,18 @@ const UNTOLD: &[OperationDescriptor] = &[
     WRITE_REPORT,
 ];
 
+/// A host whose report can neither tell after a restart whether it was
+/// written nor be repeated safely.
+const UNTOLD_REPORT: &[OperationDescriptor] = &[
+    READ_VALUE,
+    WAIT_FOR_PERSON,
+    OperationDescriptor {
+        idempotent: false,
+        status_query: false,
+        ..WRITE_REPORT
+    },
+];
+
 fn report_config(executors: &'static [OperationDescriptor]) -> LaneConfig {
     LaneConfig {
         executors: ExecutorRegistry::new(executors),
@@ -57,35 +69,29 @@ fn an_idle_lane_has_nothing_to_record() {
 
 #[test]
 fn a_restarted_run_asks_what_happened_and_waits_for_a_person() {
-    let (lane, ids) = started();
+    let (mut lane, ids) = started();
+    asking(&mut lane, &ids);
     let mut lane = restarted(&lane, &[READ_VALUE, WAIT_FOR_PERSON, WRITE_REPORT]);
     assert_eq!(lane.state(), State::Uncertain);
-    // The executors that can tell are asked, under the operations' own
-    // identities; the read, safe to repeat, runs again.
-    assert_eq!(queried(&lane), [ids[1].clone(), ids[2].clone()]);
+    // The operation in progress is asked about under its own identity; the
+    // report after it never began.
+    assert_eq!(queried(&lane), [ids[1].clone()]);
     let identities: Vec<String> = lane
         .status_queries()
         .into_iter()
         .map(|q| q.operation_id)
         .collect();
-    assert_eq!(
-        identities,
-        [
-            operation_id("run-1", &ids[1]),
-            operation_id("run-1", &ids[2])
-        ]
-    );
-    assert_eq!(execution(&lane, &ids[0]), Execution::Pending);
-    assert_eq!(execution(&lane, &ids[2]), Execution::Uncertain);
+    assert_eq!(identities, [operation_id("run-1", &ids[1])]);
+    assert_eq!(execution(&lane, &ids[0]), Execution::Completed);
+    assert_eq!(execution(&lane, &ids[2]), Execution::Pending);
     let early = lane.on_intent(
         &intent(Action::Resume(wire::MissionResume {})),
         &context("r"),
     );
     assert!(!accepted(&early), "nothing resumes while it is uncertain");
 
-    for id in &ids[1..] {
-        lane.reconcile(id, Reconciled::DidNotHappen).expect("asked");
-    }
+    lane.reconcile(&ids[1], Reconciled::DidNotHappen)
+        .expect("asked");
     assert_eq!(lane.state(), State::Held);
     assert_eq!(
         lane.status().holds,
@@ -102,7 +108,7 @@ fn a_restarted_run_asks_what_happened_and_waits_for_a_person() {
     let RunPlan::Operations(left) = order.plan else {
         panic!("a plan of operations");
     };
-    assert_eq!(left.len(), 3);
+    assert_eq!(left.len(), 2, "the person's step and the report");
     assert_eq!(lane.state(), State::Running);
 }
 
@@ -115,11 +121,9 @@ fn what_happened_before_the_restart_is_not_done_again() {
     ));
     let mut lane = restarted(&lane, &[READ_VALUE, WAIT_FOR_PERSON, WRITE_REPORT]);
     assert_eq!(execution(&lane, &ids[0]), Execution::Completed);
-    assert_eq!(queried(&lane), [ids[1].clone(), ids[2].clone()]);
+    assert_eq!(queried(&lane), [ids[1].clone()]);
     let confirmed = vec![value("by", "operator"), value("confirmed", "true")];
     lane.reconcile(&ids[1], Reconciled::Happened(confirmed.clone()))
-        .expect("asked");
-    lane.reconcile(&ids[2], Reconciled::DidNotHappen)
         .expect("asked");
     let resumed = lane.on_intent(
         &intent(Action::Resume(wire::MissionResume {})),
@@ -147,12 +151,18 @@ fn what_happened_before_the_restart_is_not_done_again() {
 fn a_run_whose_every_operation_happened_completes() {
     let (mut lane, ids) = started();
     asking(&mut lane, &ids);
+    // The person's step ended, and the report is in progress.
+    lane.on_progress(&RunProgress {
+        active_task: Some(ids[2].clone()),
+        finished_tasks: vec![ids[0].clone(), ids[1].clone()],
+        results: vec![(
+            ids[1].clone(),
+            vec![value("by", "operator"), value("confirmed", "true")],
+        )],
+        ..RunProgress::default()
+    });
     let mut lane = restarted(&lane, &[READ_VALUE, WAIT_FOR_PERSON, WRITE_REPORT]);
-    lane.reconcile(
-        &ids[1],
-        Reconciled::Happened(vec![value("by", "operator"), value("confirmed", "true")]),
-    )
-    .expect("asked");
+    assert_eq!(queried(&lane), [ids[2].clone()]);
     lane.reconcile(
         &ids[2],
         Reconciled::Happened(vec![value("report", "run-1.txt")]),
@@ -171,10 +181,7 @@ fn an_operation_nobody_can_tell_about_stays_uncertain_until_an_abort() {
     });
     let mut lane = restarted(&lane, UNTOLD);
     assert_eq!(execution(&lane, &ids[0]), Execution::Uncertain);
-    assert!(!queried(&lane).contains(&ids[0]));
-    for id in &ids[1..] {
-        lane.reconcile(id, Reconciled::DidNotHappen).expect("asked");
-    }
+    assert!(queried(&lane).is_empty(), "nothing else may have begun");
     assert_eq!(lane.state(), State::Uncertain, "{}", lane.status().detail);
     let resumed = lane.on_intent(
         &intent(Action::Resume(wire::MissionResume {})),
@@ -288,4 +295,85 @@ fn a_run_after_an_aborted_restart_resumes_as_any_run() {
         "{}",
         resumed.receipt.reason
     );
+}
+
+#[test]
+fn an_operation_an_abort_overtook_is_asked_about() {
+    let (mut lane, ids) = started();
+    let question = asking(&mut lane, &ids);
+    assert!(accepted(
+        &lane.on_intent(&answer(&question, true), &context("yes"))
+    ));
+    // The person's step ended; the report may have begun when the abort came.
+    lane.on_progress(&RunProgress {
+        finished_tasks: vec![ids[0].clone(), ids[1].clone()],
+        results: vec![(
+            ids[1].clone(),
+            vec![value("by", "operator"), value("confirmed", "true")],
+        )],
+        ..RunProgress::default()
+    });
+    assert!(accepted(&lane.on_intent(
+        &intent(Action::Abort(wire::MissionAbort {})),
+        &context("x")
+    )));
+    let mut lane = restarted(&lane, &[READ_VALUE, WAIT_FOR_PERSON, WRITE_REPORT]);
+    assert_eq!(lane.state(), State::Aborted);
+    assert_eq!(queried(&lane), [ids[2].clone()]);
+    lane.reconcile(
+        &ids[2],
+        Reconciled::Happened(vec![value("report", "run-1.txt")]),
+    )
+    .expect("asked");
+    assert_eq!(execution(&lane, &ids[2]), Execution::Completed);
+    assert_eq!(lane.state(), State::Aborted, "the run stays as it ended");
+}
+
+#[test]
+fn operations_after_the_one_in_progress_never_began() {
+    let (mut lane, ids) = started();
+    asking(&mut lane, &ids);
+    let mut lane = restarted(&lane, UNTOLD_REPORT);
+    // Only the person's step may have begun; the report never did.
+    assert_eq!(queried(&lane), [ids[1].clone()]);
+    assert_eq!(execution(&lane, &ids[2]), Execution::Pending);
+    lane.reconcile(&ids[1], Reconciled::DidNotHappen)
+        .expect("asked");
+    assert_eq!(lane.state(), State::Held, "{}", lane.status().detail);
+}
+
+#[test]
+fn a_second_restart_keeps_the_uncertain_operation_and_nothing_after_it_began() {
+    let (mut lane, ids) = started();
+    asking(&mut lane, &ids);
+    // The host could not answer the query about the person's step.
+    let first = restarted(&lane, UNTOLD_REPORT);
+    assert_eq!(queried(&first), [ids[1].clone()]);
+    let second = restarted(&first, UNTOLD_REPORT);
+    assert_eq!(queried(&second), [ids[1].clone()]);
+    assert_eq!(execution(&second, &ids[2]), Execution::Pending);
+}
+
+#[test]
+fn a_run_that_ended_without_an_abort_began_nothing_more() {
+    let (mut lane, ids) = started();
+    let question = asking(&mut lane, &ids);
+    assert!(accepted(
+        &lane.on_intent(&answer(&question, false), &context("no"))
+    ));
+    // The person declines: the run ends there, between two operations.
+    lane.on_progress(&RunProgress {
+        finished_tasks: vec![ids[0].clone(), ids[1].clone()],
+        results: vec![(
+            ids[1].clone(),
+            vec![value("by", "operator"), value("confirmed", "false")],
+        )],
+        ended: true,
+        ..RunProgress::default()
+    });
+    let ended = lane.state();
+    let lane = restarted(&lane, &[READ_VALUE, WAIT_FOR_PERSON, WRITE_REPORT]);
+    assert_eq!(lane.state(), ended);
+    assert!(lane.status_queries().is_empty());
+    assert_eq!(execution(&lane, &ids[2]), Execution::Pending);
 }

@@ -40,14 +40,9 @@ impl RunTracker {
             .collect()
     }
 
-    /// The tasks whose execution did not end before the restart.
-    pub(in crate::lane) fn unended(&mut self) -> impl Iterator<Item = &mut TaskTrack> {
-        self.tasks.iter_mut().filter(|task| {
-            matches!(
-                task.execution,
-                Execution::Pending | Execution::Active | Execution::Unspecified
-            )
-        })
+    /// The tasks of the run, in plan order, to change.
+    pub(in crate::lane) fn tasks_mut(&mut self) -> impl Iterator<Item = &mut TaskTrack> {
+        self.tasks.iter_mut()
     }
 
     /// The task `task_id`.

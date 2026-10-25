@@ -70,7 +70,10 @@ impl Lane {
         })
     }
 
-    /// The lane `record` left, under `config`.
+    /// The lane `record` left, under `config`. Its host begins an operation
+    /// only once its journal holds the end of each operation before it, as
+    /// the session host does, so at most one operation of a run may have
+    /// begun.
     ///
     /// # Errors
     ///
@@ -158,30 +161,49 @@ impl Lane {
         Ok(())
     }
 
-    /// Settles each operation that had not ended by what its executor
-    /// declares: queried, run again, or uncertain. A flight's tasks keep
-    /// their execution.
+    /// Settles the operation that may have begun when the host stopped by
+    /// what its executor declares: queried, run again, or uncertain. A
+    /// flight's tasks keep their execution.
     fn settle_operations(&mut self) {
         let flying = self.is_flying();
         let executors = self.config.executors;
         let Some(run) = self.run.as_mut() else {
             return;
         };
-        for task in run.unended() {
-            let Some(operation) = task.plan.operation.as_ref() else {
-                continue;
-            };
-            // An ended run starts nothing more: only an operation it began
-            // may have had its effect.
-            if !flying && task.execution != Execution::Active {
-                continue;
-            }
-            task.execution = match descriptor(&executors, operation) {
-                Some(d) if d.status_query => Execution::Uncertain,
-                Some(d) if d.idempotent && flying => Execution::Pending,
-                _ => Execution::Uncertain,
-            };
+        // Only an abort overtakes an operation as it begins: a run that
+        // ended otherwise ended between two operations. A run that
+        // cancelled or failed a task stopped there.
+        let stopped = run
+            .tasks()
+            .iter()
+            .any(|t| matches!(t.execution, Execution::Cancelled | Execution::Failed));
+        if !flying && (self.state != State::Aborted || stopped) {
+            return;
         }
+        // The host begins an operation only once the journal holds the end
+        // of each one before it, so only the first operation that did not
+        // complete may have begun; the ones after it never did. One left
+        // uncertain by an earlier restart stays as it is.
+        let Some(task) = run
+            .tasks_mut()
+            .find(|t| t.plan.operation.is_some() && t.execution != Execution::Completed)
+        else {
+            return;
+        };
+        if !matches!(
+            task.execution,
+            Execution::Pending | Execution::Active | Execution::Unspecified
+        ) {
+            return;
+        }
+        let Some(operation) = task.plan.operation.as_ref() else {
+            return;
+        };
+        task.execution = match descriptor(&executors, operation) {
+            Some(d) if d.status_query => Execution::Uncertain,
+            Some(d) if d.idempotent && flying => Execution::Pending,
+            _ => Execution::Uncertain,
+        };
     }
 
     /// The tasks the host is asked about: uncertain, and their executor
