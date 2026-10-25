@@ -185,6 +185,21 @@ impl TaskBook {
             .collect()
     }
 
+    /// How many lines still take evidence, of members `heard` says the team
+    /// still takes reports from. A skipped line takes none.
+    pub(super) fn open_evidence(&self, heard: impl Fn(&str) -> bool) -> usize {
+        self.tasks
+            .values()
+            .filter(|t| t.kind == wire::MissionTaskKind::SurveyLine as i32)
+            .filter(|t| heard(&t.member) && t.execution != Execution::Skipped as i32)
+            .filter(|t| {
+                t.evidence
+                    .as_ref()
+                    .is_some_and(|e| e.collection == wire::MissionEvidenceCollection::Open as i32)
+            })
+            .count()
+    }
+
     /// Whether the verdict on the member's `line` has settled: the line's
     /// execution ended and its evidence can no longer change.
     pub(super) fn settled(&self, member: &str, line: &str) -> bool {
@@ -322,7 +337,7 @@ pub(super) fn team_status(team: &TeamLane) -> wire::MissionStatus {
         Phase::Idle | Phase::Proposing => wire::MissionLaneState::Idle,
         Phase::Proposed | Phase::Approving => wire::MissionLaneState::Proposed,
         Phase::Admitted | Phase::Starting => wire::MissionLaneState::Admitted,
-        Phase::Running => members_motion(team),
+        Phase::Running | Phase::Settling => members_motion(team),
         Phase::Held if members_hold(team) => wire::MissionLaneState::Held,
         Phase::Held => wire::MissionLaneState::HoldRequested,
         Phase::Complete => wire::MissionLaneState::Complete,
@@ -370,7 +385,10 @@ pub(super) fn team_status(team: &TeamLane) -> wire::MissionStatus {
             })
             .collect(),
         member_link: wire::MemberLink::Unspecified as i32,
-        execution: None,
+        execution: (team.phase == Phase::Settling).then_some(wire::MissionExecution {
+            state: wire::MissionExecutionState::AwaitingResults as i32,
+            lease_holder: 0,
+        }),
         approvals_needed: team.approval_needs(&holds),
         holds,
         released: Vec::new(),

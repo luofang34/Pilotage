@@ -76,17 +76,29 @@ impl TeamLane {
     /// Decides re-flights from the settled verdicts and starts the extra
     /// flights of members that are free to fly them.
     pub(super) fn adapt(&mut self, context: &IntentContext) -> Vec<MemberIntent> {
-        if !matches!(self.phase, Phase::Running) {
+        if !matches!(self.phase, Phase::Running | Phase::Settling) {
             return Vec::new();
         }
-        self.decide_reflights();
-        self.dispatch(context)
+        self.decide_reflights(context.now_unix_ms);
+        let intents = self.dispatch(context);
+        if !intents.is_empty() {
+            // A late judgment sent a member to fly again.
+            self.phase = Phase::Running;
+        }
+        intents
     }
 
     /// Queues a re-flight for each settled line without enough usable
     /// pictures, while the envelope allows another.
-    fn decide_reflights(&mut self) {
-        let Some(envelope) = self.approval.as_ref().and_then(|a| a.envelope.clone()) else {
+    fn decide_reflights(&mut self, now_unix_ms: u64) {
+        // Bad evidence is recorded whatever the approval; only an approval
+        // valid now flies a line again.
+        let Some(envelope) = self
+            .approval
+            .as_ref()
+            .and_then(|a| pilotage_mission::valid_approval(a, now_unix_ms).ok())
+            .cloned()
+        else {
             return;
         };
         if !envelope.permit_revise {

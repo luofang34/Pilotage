@@ -39,7 +39,7 @@ impl TeamLane {
             .revision
             .as_ref()
             .filter(|r| r.stage == wire::MissionSuccessorState::Drafted)
-            .filter(|_| matches!(self.phase, Phase::Running | Phase::Held))
+            .filter(|_| matches!(self.phase, Phase::Running | Phase::Held | Phase::Settling))
         {
             // The parent team that granted the approval in force approves its own share.
             let owed = if !revision.share_of.is_empty() && revision.share_of == delegated_by {

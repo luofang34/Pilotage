@@ -143,7 +143,7 @@ impl TeamLane {
         approval: &wire::MissionApproval,
         context: &IntentContext,
     ) -> Result<(Vec<MemberIntent>, bool), String> {
-        if matches!(self.phase, Phase::Running | Phase::Held) {
+        if matches!(self.phase, Phase::Running | Phase::Held | Phase::Settling) {
             return self.approve_running(approval, context);
         }
         if self.phase != Phase::Proposed {

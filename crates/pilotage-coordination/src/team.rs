@@ -88,6 +88,9 @@ enum Phase {
     Starting,
     Running,
     Held,
+    /// Every member's run ended; evidence of a line is still open, so the
+    /// team waits to judge it before it ends.
+    Settling,
     Complete,
     Aborted,
     Failed,
@@ -232,6 +235,7 @@ impl TeamLane {
                     Phase::Starting,
                     Phase::Running,
                     Phase::Held,
+                    Phase::Settling,
                 ],
                 Phase::Aborted,
                 Action::Abort(wire::MissionAbort {}),
@@ -289,7 +293,7 @@ impl TeamLane {
     }
 
     fn settle(&mut self) {
-        if !matches!(self.phase, Phase::Running | Phase::Held)
+        if !matches!(self.phase, Phase::Running | Phase::Held | Phase::Settling)
             || self.reflies.iter().any(Refly::in_progress)
         {
             return;
@@ -310,7 +314,15 @@ impl TeamLane {
             wire::MissionLaneState::Failed as i32,
             wire::MissionLaneState::Aborted as i32,
         ];
-        if states.iter().all(|s| *s == complete) {
+        let ended = states.iter().all(|s| *s == complete || failed.contains(s));
+        let open = self.book.open_evidence(|m| !self.stated_down(m));
+        if ended && open > 0 {
+            // The runs ended, but their results did not: a late judgment
+            // may still ask for a re-flight.
+            self.phase = Phase::Settling;
+            self.detail =
+                format!("every member's run ended; waiting for the results of {open} lines");
+        } else if states.iter().all(|s| *s == complete) {
             self.phase = Phase::Complete;
             self.detail = self.book.summary();
         } else if states.iter().all(|s| *s == complete || failed.contains(s)) {
