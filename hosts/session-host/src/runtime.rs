@@ -20,6 +20,7 @@ mod engine_actor;
 mod gazebo_launch;
 mod media;
 mod mission_lane;
+mod operations;
 mod options;
 mod px4_config;
 mod registry;

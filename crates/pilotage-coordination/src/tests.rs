@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use navigate_contract::{ClockDomainId, GeodeticPosition};
 use pilotage_mission::{
-    ExecutionTarget, FrameAssessment, IntentContext, Lane, LaneConfig, LaneEffect, MissionConfig,
-    OwnshipSource, RunPlan, RunProgress, SurveyDefaults,
+    ExecutionTarget, FrameAssessment, FrameTicket, IntentContext, Lane, LaneConfig, LaneEffect,
+    MissionConfig, OwnshipSource, RunPlan, RunProgress, SurveyDefaults,
 };
 use pilotage_protocol::wire;
 
@@ -37,6 +37,24 @@ fn defaults() -> SurveyDefaults {
 }
 
 fn vehicle_lane(name: &str) -> Lane {
+    vehicle_lane_judged(name, true)
+}
+
+/// A member lane whose pictures a judgment service judges, or not.
+fn vehicle_lane_judged(name: &str, judged: bool) -> Lane {
+    member_lane(
+        name,
+        judged,
+        pilotage_mission::executor::ExecutorRegistry::NONE,
+    )
+}
+
+/// A member lane whose host carries out `executors`.
+fn member_lane(
+    name: &str,
+    judged: bool,
+    executors: pilotage_mission::executor::ExecutorRegistry,
+) -> Lane {
     let mut template = MissionConfig::new(
         String::new(),
         GeodeticPosition::new(0.0, 0.0, 0.0),
@@ -53,8 +71,9 @@ fn vehicle_lane(name: &str) -> Lane {
         usable_energy_wh: None,
         cruise_power_w: None,
         recovery_policy: "hold".to_owned(),
-        judged: true,
+        judged,
         evidence_window_ms: 60_000,
+        executors,
     })
 }
 
@@ -129,7 +148,7 @@ impl Fleet {
             if let Some(LaneEffect::Start(order)) = reply.effect.as_ref() {
                 let line_count = match &order.plan {
                     RunPlan::Survey(request) => request.polygon_deg.len().max(1),
-                    RunPlan::Home => 0,
+                    RunPlan::Home | RunPlan::Operations(_) => 0,
                 };
                 self.runs.insert(member.clone(), line_count);
             }
@@ -168,7 +187,18 @@ impl Fleet {
     /// Flies every running member's plan: each survey line gets three
     /// pictures, judged usable unless the line is in `bad`.
     fn fly(&mut self, bad: &[(&str, &str)]) -> Vec<MemberIntent> {
+        self.fly_holding(bad, None).0
+    }
+
+    /// [`Fleet::fly`], except that the pictures of the line `held` are sent
+    /// for a judgment that has not come yet: returns them with the intents.
+    fn fly_holding(
+        &mut self,
+        bad: &[(&str, &str)],
+        held: Option<(&str, &str)>,
+    ) -> (Vec<MemberIntent>, Vec<(String, FrameTicket)>) {
         let mut intents = Vec::new();
+        let mut waiting = Vec::new();
         let names: Vec<String> = self.members.keys().cloned().collect();
         for name in names {
             let Some(lane) = self.members.get_mut(&name) else {
@@ -198,6 +228,10 @@ impl Fleet {
                             .unwrap_or_default();
                         let usable = !bad.contains(&(name.as_str(), line.as_str()));
                         lane.on_sent(&ticket);
+                        if held == Some((name.as_str(), line.as_str())) {
+                            waiting.push((name.clone(), ticket));
+                            continue;
+                        }
                         lane.on_assessment(
                             &ticket,
                             Some(FrameAssessment {
@@ -222,7 +256,7 @@ impl Fleet {
                 intents.extend(self.team.on_member_status(&status, &context("fly")));
             }
         }
-        intents
+        (intents, waiting)
     }
 }
 
@@ -428,14 +462,20 @@ fn an_idle_team_of_simulated_members_reports_simulated() {
 }
 
 mod abort;
+mod admission;
 mod area;
 mod authorize;
 mod handover;
 mod hold;
 mod parent;
 mod progress;
+mod records;
+mod release;
 mod renewal;
+mod results;
 use progress::toward;
 mod judge;
 mod lines;
+mod operations;
 mod revision;
+mod whole;

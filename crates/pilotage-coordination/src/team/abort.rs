@@ -8,7 +8,6 @@
 
 use super::refly::ReflyState;
 use super::{Op, TeamLane};
-use pilotage_protocol::wire::MissionHandoverState as State;
 
 impl TeamLane {
     /// Ends the work an abort of the team leaves pending.
@@ -23,12 +22,13 @@ impl TeamLane {
                     .is_some_and(|r| r.state == ReflyState::Starting)
         });
         self.renewal = None;
+        self.end_operations();
         let mut cancelled = Vec::new();
         for refly in &mut self.reflies {
             refly.state = match refly.state {
                 ReflyState::Queued | ReflyState::Proposing | ReflyState::Approving => {
-                    if !refly.moved.is_empty() {
-                        cancelled.push((refly.member.clone(), refly.owner.clone()));
+                    if let Some(assignment) = &refly.assignment {
+                        cancelled.push(assignment.clone());
                     }
                     ReflyState::Cancelled
                 }
@@ -36,15 +36,8 @@ impl TeamLane {
                 other => other,
             };
         }
-        for handover in &mut self.handovers {
-            let never_started = cancelled.contains(&(handover.to.clone(), handover.from.clone()));
-            if handover.state == State::Committed && never_started {
-                handover.state = State::Unassigned;
-                handover.basis = format!(
-                    "the team aborted before {} started the moved lines; an operator gives them to a member",
-                    handover.to
-                );
-            }
+        for assignment in cancelled {
+            self.unassign_moved(&assignment, "the team aborted before it started them");
         }
     }
 }

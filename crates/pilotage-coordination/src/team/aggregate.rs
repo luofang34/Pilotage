@@ -56,6 +56,8 @@ impl TaskBook {
                         path: task.path.clone(),
                         execution: Execution::Pending as i32,
                         judgment: Judgment::Undetermined as i32,
+                        results: Vec::new(),
+                        question: None,
                     },
                 );
             }
@@ -100,6 +102,8 @@ impl TaskBook {
             entry.judgment = task.judgment;
             entry.evidence.clone_from(&task.evidence);
             entry.progress = task.progress;
+            entry.results.clone_from(&task.results);
+            entry.question.clone_from(&task.question);
             // A member team reports the lines it flew again itself.
             entry.reflown = entry.reflown.max(task.reflown);
         }
@@ -185,6 +189,23 @@ impl TaskBook {
             .collect()
     }
 
+    /// How many lines still take evidence, of members `heard` says the team
+    /// still takes reports from. A skipped line takes none.
+    pub(super) fn open_evidence(&self, heard: impl Fn(&str) -> bool) -> usize {
+        self.tasks
+            .values()
+            .filter(|t| t.kind == wire::MissionTaskKind::SurveyLine as i32)
+            // A line not begun takes no evidence: a member that failed keeps
+            // its unflown lines pending, and they do not keep the team open.
+            .filter(|t| heard(&t.member) && ended(t))
+            .filter(|t| {
+                t.evidence
+                    .as_ref()
+                    .is_some_and(|e| e.collection == wire::MissionEvidenceCollection::Open as i32)
+            })
+            .count()
+    }
+
     /// Whether the verdict on the member's `line` has settled: the line's
     /// execution ended and its evidence can no longer change.
     pub(super) fn settled(&self, member: &str, line: &str) -> bool {
@@ -196,15 +217,19 @@ impl TaskBook {
         })
     }
 
-    /// The original line takes the re-flight's verdict and evidence.
+    /// The original line takes the re-flight's verdict and evidence; the
+    /// re-flight counts once, at its end, and not at a later report.
     pub(super) fn apply_refly(
         &mut self,
         member: &str,
         line: &str,
         flown: &wire::MissionTaskStatus,
+        ended_now: bool,
     ) {
         if let Some(entry) = self.tasks.get_mut(&key(member, line)) {
-            entry.reflown = entry.reflown.wrapping_add(1);
+            if ended_now {
+                entry.reflown = entry.reflown.wrapping_add(1);
+            }
             entry.state = flown.state;
             entry.execution = flown.execution;
             entry.judgment = flown.judgment;
@@ -240,7 +265,7 @@ impl TaskBook {
 }
 
 /// Whether the task's execution ended, whichever way.
-fn ended(task: &wire::MissionTaskStatus) -> bool {
+pub(super) fn ended(task: &wire::MissionTaskStatus) -> bool {
     [
         Execution::Completed,
         Execution::Cancelled,
@@ -322,7 +347,7 @@ pub(super) fn team_status(team: &TeamLane) -> wire::MissionStatus {
         Phase::Idle | Phase::Proposing => wire::MissionLaneState::Idle,
         Phase::Proposed | Phase::Approving => wire::MissionLaneState::Proposed,
         Phase::Admitted | Phase::Starting => wire::MissionLaneState::Admitted,
-        Phase::Running => members_motion(team),
+        Phase::Running | Phase::Settling => members_motion(team),
         Phase::Held if members_hold(team) => wire::MissionLaneState::Held,
         Phase::Held => wire::MissionLaneState::HoldRequested,
         Phase::Complete => wire::MissionLaneState::Complete,
@@ -330,11 +355,7 @@ pub(super) fn team_status(team: &TeamLane) -> wire::MissionStatus {
         Phase::Failed => wire::MissionLaneState::Failed,
     };
     let proposal = team.proposal.as_ref();
-    let survey = team
-        .objective
-        .as_ref()
-        .and_then(|o| o.kind.as_ref())
-        .map(|wire::mission_objective::Kind::Survey(survey)| survey);
+    let survey = team.survey();
     let active = team
         .book
         .statuses()
@@ -370,7 +391,10 @@ pub(super) fn team_status(team: &TeamLane) -> wire::MissionStatus {
             })
             .collect(),
         member_link: wire::MemberLink::Unspecified as i32,
-        execution: None,
+        execution: (team.phase == Phase::Settling).then_some(wire::MissionExecution {
+            state: wire::MissionExecutionState::AwaitingResults as i32,
+            lease_holder: 0,
+        }),
         approvals_needed: team.approval_needs(&holds),
         holds,
         released: Vec::new(),

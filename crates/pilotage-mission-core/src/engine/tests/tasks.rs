@@ -5,10 +5,11 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    BoundAction, CodecError, Digest, EngineEvent, ExecutionPolicy, ExecutionTarget, FlightAction,
-    FlightPlanReference, MissionAction, MissionCapability, MissionCondition, MissionDirective,
-    MissionDocument, MissionObservation, MissionPhase, MissionTerminal, NavigationCondition,
-    NavigationDataIdentity, NavigationObservation, ValidationError,
+    BoundAction, CodecError, Digest, EngineEvent, EngineStartError, ExecutionPolicy,
+    ExecutionTarget, FlightAction, FlightPlanReference, MissionAction, MissionCapability,
+    MissionCondition, MissionDirective, MissionDocument, MissionEngine, MissionObservation,
+    MissionPhase, MissionTerminal, NavigationCondition, NavigationDataIdentity,
+    NavigationObservation, ValidationError,
 };
 
 use super::support::{digest, document, engine, phase, succeeded, terminal, tick};
@@ -52,6 +53,7 @@ fn ask_a_person(id: &str, depends_on: &[&str]) -> MissionPhase {
         action: MissionAction::Bound(BoundAction {
             executor: "person".to_owned(),
             operation: "confirm".to_owned(),
+            version: 1,
             parameters: BTreeMap::from([("question".to_owned(), "is the area clear".to_owned())]),
         }),
         completion_conditions: vec![MissionCondition::Always {}],
@@ -156,4 +158,22 @@ fn a_dependency_on_a_missing_phase_itself_or_a_cycle_is_refused() {
         ask_a_person("a", &[]),
         ask_a_person("b", &["a"])
     ]));
+}
+
+#[test]
+fn a_host_without_the_executor_refuses_the_document_before_the_run() {
+    let document = document(vec![ask_a_person("confirm-clear", &[])]);
+    let refused = MissionEngine::start(document.clone(), super::support::start_of(&document));
+    assert!(matches!(
+        refused,
+        Err(EngineStartError::Executor { ref phase, .. }) if phase == "confirm-clear"
+    ));
+    assert!(
+        MissionEngine::start_with_executors(
+            document.clone(),
+            super::support::start_of(&document),
+            super::support::TEST_EXECUTORS
+        )
+        .is_ok()
+    );
 }

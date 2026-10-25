@@ -30,7 +30,7 @@ fn digest(tag: &[u8]) -> Vec<u8> {
     proposal(tag).digest
 }
 
-fn status(state: wire::MissionLaneState, tag: &[u8]) -> Box<wire::MissionStatus> {
+pub(super) fn status(state: wire::MissionLaneState, tag: &[u8]) -> Box<wire::MissionStatus> {
     Box::new(wire::MissionStatus {
         lane: "COMMAND".to_owned(),
         state: state as i32,
@@ -418,3 +418,5 @@ fn a_survey_planned_over_an_area_takes_its_vertices_and_identity_together() {
         "an area with no identity writes none"
     );
 }
+
+mod operations;

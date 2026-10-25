@@ -52,22 +52,28 @@ pub(super) fn document(phases: Vec<MissionPhase>) -> MissionDocument {
     .expect("test mission")
 }
 
+/// The executors of the test host: a person confirms.
+pub(super) const TEST_EXECUTORS: crate::executor::ExecutorRegistry =
+    crate::executor::ExecutorRegistry::new(&[crate::executor::WAIT_FOR_PERSON]);
+
 pub(super) fn engine(document: MissionDocument) -> MissionEngine {
+    MissionEngine::start_with_executors(document.clone(), start_of(&document), TEST_EXECUTORS)
+        .expect("start test mission")
+}
+
+/// The start of `document`'s run on the test host.
+pub(super) fn start_of(document: &MissionDocument) -> EngineStart {
     let mission_content_digest = document.identity.content_digest;
-    MissionEngine::start(
-        document,
-        EngineStart {
-            host_target: ExecutionTarget::Simulator,
-            mission_time_ns: 0,
-            simulator_time_ns: Some(0),
-            wall_time_ns: 0,
-            wall_deadline: WallDeadline {
-                mission_content_digest,
-                expires_at_ns: WALL_DEADLINE_NS,
-            },
+    EngineStart {
+        host_target: ExecutionTarget::Simulator,
+        mission_time_ns: 0,
+        simulator_time_ns: Some(0),
+        wall_time_ns: 0,
+        wall_deadline: WallDeadline {
+            mission_content_digest,
+            expires_at_ns: WALL_DEADLINE_NS,
         },
-    )
-    .expect("start test mission")
+    }
 }
 
 /// One tick at `simulator_time_ns` on both the mission and the simulator clock, as a

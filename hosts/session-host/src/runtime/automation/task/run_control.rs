@@ -18,7 +18,7 @@ use crate::runtime::HOST_VEHICLE;
 const ABORT_STOP_FRAMES: u8 = 20;
 
 /// One instruction from the mission lane to its run.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RunControl {
     /// Stop in place and pause the sequencing clock.
     Hold,
@@ -26,6 +26,8 @@ pub(crate) enum RunControl {
     Resume,
     /// Stop in place, release the lease and end the run.
     Abort,
+    /// A person's answer to the operation that asked.
+    Answer(pilotage_mission::OperationAnswer),
 }
 
 /// The next control, or never when the run has no lane.
@@ -69,6 +71,8 @@ impl MissionTask {
                     mission.resume(now);
                 }
             }
+            // A flight asks no person anything.
+            RunControl::Answer(_) => {}
             RunControl::Abort => {
                 self.operator_hold = true;
                 self.stopping.get_or_insert(ABORT_STOP_FRAMES);

@@ -16,7 +16,12 @@
 //! - `PILOTAGE_EVIDENCE_WINDOW_S`: seconds a task whose execution ended still
 //!   takes the answers to its pictures; default 120, a deployment default
 //!   sized for a few queued judgments, not a validated value.
+//! - `PILOTAGE_LANE_SOURCES`: a directory whose files `host/read-value`
+//!   reads, by source name; absent, the lane reads no value.
+//! - `PILOTAGE_LANE_REPORTS`: the directory `host/write-report` writes
+//!   reports into; absent, the lane writes no report.
 
+use std::path::PathBuf;
 use std::time::Duration;
 
 use pilotage_decision::Provider;
@@ -24,6 +29,7 @@ use pilotage_mission::{ExecutionTarget, LaneConfig, OwnshipSource, SurveyDefault
 
 use crate::error::HostError;
 use crate::runtime::automation::MissionPlan;
+use crate::runtime::operations::{self, OperationHost};
 use crate::runtime::options::{env_var, parse_execution_target, parse_ownship_source};
 
 /// Default seconds between two judgments of one lane.
@@ -45,6 +51,8 @@ pub(crate) struct LaneRuntimeConfig {
     pub judge_height_m: f64,
     /// Whether unstamped planar poses are simulator state.
     pub planar_pose_is_truth: bool,
+    /// Where the host's executors read and write.
+    pub operations: OperationHost,
 }
 
 impl LaneRuntimeConfig {
@@ -93,6 +101,10 @@ impl LaneRuntimeConfig {
                     .map_err(|error| invalid("PILOTAGE_DECISION", &error.to_string()))
             })
             .transpose()?;
+        let operations = OperationHost {
+            sources: env_var("PILOTAGE_LANE_SOURCES")?.map(PathBuf::from),
+            reports: env_var("PILOTAGE_LANE_REPORTS")?.map(PathBuf::from),
+        };
         let defaults = SurveyDefaults::default();
         let evidence_window = Duration::from_secs_f64(
             positive("PILOTAGE_EVIDENCE_WINDOW_S")?.unwrap_or(DEFAULT_EVIDENCE_WINDOW_S),
@@ -109,6 +121,7 @@ impl LaneRuntimeConfig {
                 recovery_policy: "hold in place; the operator lands".to_owned(),
                 judged: decision.is_some(),
                 evidence_window_ms: duration_ms(evidence_window),
+                executors: operations::registry(&operations),
             },
             decision,
             assess_every: Duration::from_secs_f64(
@@ -116,6 +129,7 @@ impl LaneRuntimeConfig {
             ),
             judge_height_m: defaults.height_m,
             planar_pose_is_truth,
+            operations,
         })
     }
 }

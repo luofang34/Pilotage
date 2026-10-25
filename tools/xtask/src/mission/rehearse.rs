@@ -27,8 +27,8 @@ const FAULT_HALF_DEG: (f64, f64) = (0.000_12, 0.000_16);
 
 /// One lane of the in-memory fleet.
 enum Node {
-    Team(TeamLane, BTreeMap<String, Node>),
-    Vehicle(String, Lane),
+    Team(Box<TeamLane>, BTreeMap<String, Node>),
+    Vehicle(String, Box<Lane>),
 }
 
 impl Node {
@@ -106,7 +106,7 @@ pub(crate) fn rehearse(file: &MissionFile) -> Proposals {
                 .iter()
                 .map(|a| {
                     let lane = a.lane();
-                    let node = Node::Vehicle(lane.clone(), vehicle(&lane, file.airframe));
+                    let node = Node::Vehicle(lane.clone(), Box::new(vehicle(&lane, file.airframe)));
                     (lane, node)
                 })
                 .collect();
@@ -116,7 +116,7 @@ pub(crate) fn rehearse(file: &MissionFile) -> Proposals {
                 .map(|a| member(&a.lane(), a.launch))
                 .collect();
             let team = team(&section.name, members);
-            (section.name.clone(), Node::Team(team, aircraft))
+            (section.name.clone(), Node::Team(Box::new(team), aircraft))
         })
         .collect();
     let members = file
@@ -124,7 +124,7 @@ pub(crate) fn rehearse(file: &MissionFile) -> Proposals {
         .iter()
         .map(|s| member(&s.name, s.launch))
         .collect();
-    let mut root = Node::Team(team(&file.command.name, members), sections);
+    let mut root = Node::Team(Box::new(team(&file.command.name, members)), sections);
     let propose = wire::MissionIntent {
         request_id: "rehearsal".to_owned(),
         action: Some(wire::mission_intent::Action::Propose(
@@ -230,5 +230,6 @@ fn vehicle(name: &str, airframe: Airframe) -> Lane {
         recovery_policy: "hold".to_owned(),
         judged: false,
         evidence_window_ms: 0,
+        executors: pilotage_mission::executor::ExecutorRegistry::NONE,
     })
 }

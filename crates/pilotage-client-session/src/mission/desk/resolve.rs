@@ -65,6 +65,18 @@ impl MissionDesk {
                     stated_by: None,
                 }))
             }
+            MissionCommand::ResolveHandover { assignment_id } => {
+                Ok(Action::ResolveHandover(wire::MissionResolveHandover {
+                    assignment_id: assignment_id.clone(),
+                    resolved_by: None,
+                }))
+            }
+            MissionCommand::ProposeReport { source, question } => Ok(Action::Propose(
+                self.report_objective(source, question, now_ms),
+            )),
+            MissionCommand::Answer { operation, accept } => {
+                self.answer(operation.as_deref(), *accept)
+            }
             MissionCommand::Fetch {} => Ok(Action::Fetch(wire::MissionFetch {
                 digest: self.unseen_approvable().ok_or(DeskRefusal::NoProposal)?,
             })),

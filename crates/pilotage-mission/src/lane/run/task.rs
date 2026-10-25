@@ -29,6 +29,10 @@ pub(in crate::lane) struct TaskTrack {
     pub sealed: bool,
     /// The window closed with answers outstanding.
     closed: bool,
+    /// What the task's operation returned, in name order.
+    pub results: Vec<wire::MissionValue>,
+    /// The question the task's operation asks a person now.
+    pub question: Option<wire::MissionQuestion>,
 }
 
 /// What the evidence of a run's lines is held to.
@@ -51,6 +55,8 @@ impl TaskTrack {
             ended_at_ms: None,
             sealed: false,
             closed: false,
+            results: Vec::new(),
+            question: None,
         }
     }
 
@@ -124,7 +130,7 @@ impl TaskTrack {
     pub(in crate::lane) fn judgment(&self, rule: EvidenceRule) -> Judgment {
         match self.execution {
             Execution::Cancelled | Execution::Failed => Judgment::NotMet,
-            Execution::Completed if !self.is_line() => Judgment::Met,
+            Execution::Completed if !self.is_line() => self.result_judgment(),
             Execution::Completed => {
                 if self.collection() == wire::MissionEvidenceCollection::Open {
                     Judgment::Undetermined
@@ -135,6 +141,20 @@ impl TaskTrack {
                 }
             }
             _ => Judgment::Undetermined,
+        }
+    }
+
+    /// An operation is met when its result has the value its plan names, or
+    /// when it completed and its plan names none; the way home when flown.
+    fn result_judgment(&self) -> Judgment {
+        let wanted = self
+            .plan
+            .operation
+            .as_ref()
+            .and_then(|o| o.met_when.as_ref());
+        match wanted {
+            Some(wanted) if !self.results.contains(wanted) => Judgment::NotMet,
+            _ => Judgment::Met,
         }
     }
 
@@ -194,6 +214,8 @@ impl TaskTrack {
             path: self.plan.path.clone(),
             execution: self.execution as i32,
             judgment: self.judgment(rule) as i32,
+            results: self.results.clone(),
+            question: self.question.clone(),
         }
     }
 }

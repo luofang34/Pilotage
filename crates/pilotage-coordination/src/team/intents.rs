@@ -1,7 +1,7 @@
 //! The operator's propose, approve, start and steering intents: the team
 //! decomposes, delegates and fans out to its members.
 
-use pilotage_mission::IntentContext;
+use pilotage_mission::{Approvable, IntentContext, admit_approval};
 use pilotage_protocol::wire;
 
 use super::{MemberIntent, Op, Phase, TeamLane, refly};
@@ -22,9 +22,28 @@ impl TeamLane {
                 self.phase
             ));
         }
-        let Some(wire::mission_objective::Kind::Survey(survey)) = objective.kind.as_ref() else {
-            return Err("the objective is not a survey".to_owned());
-        };
+        self.orphan_live_handovers();
+        self.refuse_while_unreconciled()?;
+        match objective.kind.as_ref() {
+            Some(wire::mission_objective::Kind::Survey(survey)) => {
+                self.propose_survey(objective, survey, context)
+            }
+            // No area to divide: one member takes the objective whole.
+            Some(wire::mission_objective::Kind::Report(_)) => {
+                self.propose_whole(objective, context)
+            }
+            None => Err("the objective names no kind".to_owned()),
+        }
+    }
+
+    /// Divides the survey `survey` of `objective` into one band for each
+    /// member that can take one, and asks each member to propose its band.
+    fn propose_survey(
+        &mut self,
+        objective: &wire::MissionObjective,
+        survey: &wire::SurveyObjective,
+        context: &IntentContext,
+    ) -> Result<(Vec<MemberIntent>, bool), String> {
         if survey.area.len() < 3 {
             return Err("the survey area needs at least three vertices".to_owned());
         }
@@ -113,12 +132,37 @@ impl TeamLane {
         })
     }
 
+    /// The team's approval, to pass down to a member, when it is valid at
+    /// `now_unix_ms`: nothing is passed down before the check passes.
+    pub(super) fn approval_to_pass_down(
+        &self,
+        now_unix_ms: u64,
+    ) -> Result<wire::MissionApproval, String> {
+        let team = self
+            .approval
+            .as_ref()
+            .ok_or("the team has no approval to pass down")?;
+        pilotage_mission::valid_approval(team, now_unix_ms)?;
+        Ok(team.clone())
+    }
+
+    /// The team's limits of the domain an envelope sets: the height it flies.
+    pub(super) fn within_height(&self, envelope: &wire::AdaptationEnvelope) -> Result<(), String> {
+        if self.height_m > envelope.max_height_m + 1e-6 {
+            return Err(format!(
+                "the team flies at {:.1} m; the envelope allows {:.1} m",
+                self.height_m, envelope.max_height_m
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn approve(
         &mut self,
         approval: &wire::MissionApproval,
         context: &IntentContext,
     ) -> Result<(Vec<MemberIntent>, bool), String> {
-        if matches!(self.phase, Phase::Running | Phase::Held) {
+        if matches!(self.phase, Phase::Running | Phase::Held | Phase::Settling) {
             return self.approve_running(approval, context);
         }
         if self.phase != Phase::Proposed {
@@ -128,17 +172,13 @@ impl TeamLane {
             ));
         }
         let proposal = self.proposal.as_ref().ok_or("no team proposal")?;
-        if approval.proposal_digest != proposal.digest {
-            return Err("the approval binds another proposal digest".to_owned());
-        }
-        bound_format(approval)?;
-        let envelope = valid_envelope(approval, context.now_unix_ms)?;
-        if self.height_m > envelope.max_height_m + 1e-6 {
-            return Err(format!(
-                "the team flies at {:.1} m; the envelope allows {:.1} m",
-                self.height_m, envelope.max_height_m
-            ));
-        }
+        let held = Approvable {
+            plan: &proposal.digest,
+            run: None,
+            drafted: None,
+        };
+        let (_, envelope) = admit_approval(approval, held, context.now_unix_ms)?;
+        self.within_height(envelope)?;
         let mut intents = Vec::new();
         for assignment in self.assignments.clone() {
             let Some(member_proposal) = self.member_proposals.get(&assignment.member) else {
@@ -234,24 +274,6 @@ impl TeamLane {
     }
 }
 
-/// The approval's envelope when it permits execution and has not expired.
-pub(super) fn valid_envelope(
-    approval: &wire::MissionApproval,
-    now_unix_ms: u64,
-) -> Result<&wire::AdaptationEnvelope, String> {
-    let envelope = approval
-        .envelope
-        .as_ref()
-        .ok_or("the approval has no adaptation envelope")?;
-    if !envelope.permit_execute {
-        return Err("the approval does not permit execution".to_owned());
-    }
-    if envelope.expires_unix_ms <= now_unix_ms {
-        return Err("the approval has expired".to_owned());
-    }
-    Ok(envelope)
-}
-
 /// A member's approval inside the team's: the same limits, narrowed to the
 /// member's band, bound to the member's own proposal `id` and its `digest`.
 pub(super) fn delegate(
@@ -287,14 +309,5 @@ pub(super) fn delegate(
         run_id: String::new(),
         delegated_by: issuer.to_owned(),
         proposal_format: wire::MissionProposalFormat::V1 as i32,
-    }
-}
-
-/// The approval names the record format whose digest it binds.
-pub(super) fn bound_format(approval: &wire::MissionApproval) -> Result<(), String> {
-    if approval.proposal_format == wire::MissionProposalFormat::V1 as i32 {
-        Ok(())
-    } else {
-        Err("the approval names no proposal record format; the client must approve a proposal record".to_owned())
     }
 }

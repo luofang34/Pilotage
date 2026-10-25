@@ -85,6 +85,7 @@ message MissionObjective {
   string title = 5;
   oneof kind {
     SurveyObjective survey = 10;
+    ReportObjective report = 12;
   }
   // The team lane that made this objective from its own for one member;
   // the team owes the approval of the plan it compiles to. The host takes
@@ -98,6 +99,8 @@ enum MissionTaskKind {
   MISSION_TASK_KIND_SURVEY_LINE = 1;
   // The way back over the launch point.
   MISSION_TASK_KIND_RETURN_HOME = 2;
+  // One operation of a host executor, named by its `operation`.
+  MISSION_TASK_KIND_OPERATION = 3;
 }
 
 // One bounded task of a plan.
@@ -114,6 +117,74 @@ message MissionTaskPlan {
   string member = 5;
   // The task's name, for display only, such as "line-03".
   string name = 6;
+  // The operation the task carries out, for an operation task.
+  MissionOperation operation = 7;
+}
+
+// An objective that reads a value, asks a person to confirm it, and then
+// writes a report of it.
+message ReportObjective {
+  // Where the value is read, as the host's read executor names its sources.
+  string source = 1;
+  // What the person is asked about the value, for display.
+  string question = 2;
+}
+
+// One operation of a host executor and its parameters. The host refuses a
+// plan with an operation it does not register in this version.
+message MissionOperation {
+  string executor = 1;
+  string operation = 2;
+  uint32 version = 3;
+  // In name order, so that a plan encodes one way.
+  repeated MissionParameter parameters = 4;
+  // The result that must have this value for the task's judgment to be
+  // met; empty when the end of its execution is enough.
+  MissionValue met_when = 5;
+}
+
+// One parameter: a value, or a result of an earlier task of the plan.
+message MissionParameter {
+  string name = 1;
+  oneof source {
+    string value = 2;
+    MissionResultRef result_of = 3;
+  }
+}
+
+// A result of an earlier task.
+message MissionResultRef {
+  string task_id = 1;
+  string result = 2;
+}
+
+message MissionValue {
+  string name = 1;
+  string value = 2;
+}
+
+// What an operation that waits for a person asks.
+message MissionQuestion {
+  // The operation that waits; an answer names it.
+  string operation_id = 1;
+  string prompt = 2;
+  // What the person is asked about, as the operation got it.
+  string subject = 3;
+  // SHA-256 of `subject`; an answer binds it.
+  bytes subject_digest = 4;
+}
+
+// A person's answer to a question. The host takes it only from a session
+// with the approver secret, and writes that session as `answered_by`.
+message MissionAnswer {
+  string operation_id = 1;
+  bytes subject_digest = 2;
+  bool accepted = 3;
+  RecordOrigin answered_by = 4;
+  // The person a relay, such as a team, passes the answer on for, as the
+  // relay's own host wrote it. The relay vouches for it; the record names
+  // both.
+  RecordOrigin relayed_from = 5;
 }
 
 message MissionEstimates {
@@ -367,6 +438,20 @@ enum MissionHandoverState {
   // is not known whether a member flies the work; an operator checks both
   // members and gives the work to one.
   MISSION_HANDOVER_STATE_UNRECONCILED = 5;
+  // The receiving member flew the moved lines to the end of its run.
+  MISSION_HANDOVER_STATE_COMPLETED = 6;
+  // A person checked the members and stated the handover resolved.
+  MISSION_HANDOVER_STATE_RESOLVED = 7;
+}
+
+// A person states that a handover is resolved, after checking which member
+// flies its work, if any. Only a session with the approver secret sends it.
+// A team keeps an unreconciled handover, and refuses new work for its
+// members, until one of these arrives; a new proposal resolves nothing.
+message MissionResolveHandover {
+  string assignment_id = 1;
+  // Who stated it; the host writes the admitted session.
+  RecordOrigin resolved_by = 2;
 }
 
 // A coordinator's handovers as it writes them to durable storage before it
@@ -410,6 +495,8 @@ message MissionIntent {
     MissionRevise revise = 17;
     MissionMemberDown member_down = 18;
     MissionFetch fetch = 19;
+    MissionResolveHandover resolve_handover = 20;
+    MissionAnswer answer = 21;
   }
 }
 
@@ -554,6 +641,10 @@ message MissionTaskStatus {
   string name = 9;
   MissionTaskExecution execution = 10;
   MissionTaskJudgment judgment = 11;
+  // What the task's operation returned, in name order.
+  repeated MissionValue results = 12;
+  // The question the task's operation asks a person now.
+  MissionQuestion question = 13;
 }
 
 // One lane's state, published on the reliable stream when it changes and
@@ -677,6 +768,9 @@ enum MissionExecutionState {
   MISSION_EXECUTION_STATE_HOLDING = 4;
   // The run stopped and released the vehicle.
   MISSION_EXECUTION_STATE_STOPPED = 5;
+  // Every run of a team ended, and the team waits for the evidence of its
+  // tasks before it judges them and decides whether to fly a task again.
+  MISSION_EXECUTION_STATE_AWAITING_RESULTS = 6;
 }
 
 enum MissionSuccessorState {

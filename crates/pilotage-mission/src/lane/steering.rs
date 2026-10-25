@@ -20,6 +20,15 @@ pub struct Requester {
     pub may_approve: bool,
 }
 
+/// The origin the host writes into a record a session sent.
+fn stamp(requester: &Requester) -> wire::RecordOrigin {
+    wire::RecordOrigin {
+        issuer: HOST_ISSUER.to_owned(),
+        subject: requester.subject.clone(),
+        organization: String::new(),
+    }
+}
+
 /// The lane's record of who stopped it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Steering {
@@ -51,11 +60,7 @@ impl Steering {
                         requester.subject
                     ));
                 }
-                approval.approver = Some(wire::RecordOrigin {
-                    issuer: HOST_ISSUER.to_owned(),
-                    subject: requester.subject.clone(),
-                    organization: String::new(),
-                });
+                approval.approver = Some(stamp(requester));
                 Ok(())
             }
             Some(Action::Revise(revise))
@@ -76,11 +81,16 @@ impl Steering {
             }
             Some(Action::Revise(revise)) => {
                 // Anyone may draft; the record names the session that did.
-                revise.drafted_by = Some(wire::RecordOrigin {
-                    issuer: HOST_ISSUER.to_owned(),
-                    subject: requester.subject.clone(),
-                    organization: String::new(),
-                });
+                revise.drafted_by = Some(stamp(requester));
+                Ok(())
+            }
+            Some(Action::ResolveHandover(_)) if !requester.may_approve => Err(format!(
+                "{} may not resolve a handover: it needs the approver secret",
+                requester.subject
+            )),
+            Some(Action::ResolveHandover(resolve)) => {
+                // The record names the session that resolved it.
+                resolve.resolved_by = Some(stamp(requester));
                 Ok(())
             }
             Some(Action::MemberDown(_)) if !requester.may_approve => Err(format!(
@@ -89,11 +99,16 @@ impl Steering {
             )),
             Some(Action::MemberDown(down)) => {
                 // The record names the session that stated it.
-                down.stated_by = Some(wire::RecordOrigin {
-                    issuer: HOST_ISSUER.to_owned(),
-                    subject: requester.subject.clone(),
-                    organization: String::new(),
-                });
+                down.stated_by = Some(stamp(requester));
+                Ok(())
+            }
+            Some(Action::Answer(_)) if !requester.may_approve => Err(format!(
+                "{} may not answer for a person: it needs the approver secret",
+                requester.subject
+            )),
+            Some(Action::Answer(answer)) => {
+                // The record names the session that sent it, whatever it says.
+                answer.answered_by = Some(stamp(requester));
                 Ok(())
             }
             Some(Action::Resume(_)) if self.held_by_approver && !requester.may_approve => {

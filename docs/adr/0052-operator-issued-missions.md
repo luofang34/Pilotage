@@ -79,6 +79,12 @@ the digest of its predecessor, validity, and releasability.
   prevents an approval of one run from renewing another run of the same
   plan. An approval of a drafted successor names the run in progress or no
   run. A vehicle lane and a team find the target with the same rule.
+  At each entry point, for a plan, a renewal or a successor, they also
+  make the same checks before they change anything or pass anything on:
+  the approval names the record format, permits execution and has not
+  expired. Limits of the domain, such as height and area, are checked
+  after these checks, by the domain. A team passes its approval down to a
+  member only when the approval is valid at that time.
   A held run reports each reason why it holds: the operator, or the
   expiry of its approval. A renewal removes only the expiry reason, and an
   operator's resume removes only the operator reason. The lane refuses a
@@ -131,13 +137,47 @@ lane has a lifecycle: `Idle`, `Admitted`, `Running`, `HoldRequested`,
 `HoldRequested`; the lane becomes `Held` only when the vehicle reports that
 it holds in place. An abort keeps each task that did not finish as
 unfinished: the execution of the task in progress becomes `Cancelled`, and
-a pending task stays pending. An abort of a team also ends the work that
+a pending task stays pending. An operation task keeps its execution until
+the host reports how the operation ended, because the operation can still
+have its effect: the host cancels it as its registered cancel semantics
+say, and then reports it cancelled, completed or failed. An abort of a team also ends the work that
 the team was still setting in motion. A re-flight or moved lines that have
 not started are cancelled, and a receipt that arrives later takes no next
 step. When the start was sent, the member may fly, so the work keeps its
 member until the member reports. Committed work that its receiver had not
-started is unassigned. A release fact that arrives after the abort is
-recorded as unassigned work, and it gives no work to the receiver. The environment variables remain a bootstrap source
+started is unassigned when its giving member released it. Work that moved
+on a person's statement, without a release, is unreconciled instead,
+because the giving member may still fly it. A release fact that arrives after the abort is
+recorded as unassigned work, and it gives no work to the receiver.
+
+Each kind of objective plans in its own module, and what follows the plan
+is the same for each kind: its approval, its run, its evidence and its
+judgment. A task that is one operation of a host executor names the
+executor, the operation, its version and its parameters (ADR-0041). A
+parameter is a value or a result of an earlier task of the plan. The lane
+refuses a plan when it is proposed if its host does not register each of
+its operations in that version, with parameters of the declared types. The
+status gives the results of each task and the question that an operation
+asks a person. A person answers with the operation's identity and the
+digest of the subject that the person saw, so the lane refuses an answer
+to a subject that changed. The host takes an answer only from a session
+with the approver secret, and it writes the session that sent it. A relay,
+such as a team, names the person that it passes the answer on for, as its
+own host wrote it, and the record names both. An operation task's
+judgment is met when its execution completed and the result that the plan
+names has its value. A report objective reads a value, asks a person to
+confirm it, and writes a report of it: a person who declines ends the run,
+and the report is not written. The host writes the report of one operation
+once, so a repeat of that operation finds it. A plan of operations has no
+way home: it takes no revision, and an expired approval holds it before
+its next operation. A host that restarts does not keep the runs in
+progress of its lane, so the lane is idle again; a person checks what an
+operation in progress did before a new proposal. A team gives an objective with no area
+to divide, such as a report, to one member whole, as an objective that the
+team made. The team follows that member's run as any other. Its status
+shows the question that the member's run asks. The team gives an answer to
+the member that asks, as an operation, and the operator gets one receipt
+when that member answers. The environment variables remain a bootstrap source
 that issues the first plan into an `Idle` lane; an issued plan supersedes
 them.
 
@@ -213,6 +253,18 @@ while a task runs and switches at the next checkpoint: the completion of
 the running task, or at once while the lane is `Held`. The lane never
 splices a running plan.
 
+The run in progress and an admitted successor each hold their own approval,
+bound to its own digest, run and expiry. A successor is admitted on one of
+three bases: an approval of its own digest, the approval in force inside its
+envelope, or the recovery that an expired approval names. A renewal of the
+run changes only the approval of the run; an approval of a successor changes
+only that of the successor. Each approval expires on its own, so the run
+applies its own expiry policy whatever the approval of the successor. At the
+checkpoint, the lane checks the approval of the successor again against the
+successor. When that approval no longer admits it, the successor waits for a
+new approval. At the switch, the approval of the successor becomes the
+approval of the run.
+
 An urgent action does not wait for a checkpoint. `Hold`, `Return`, `Land`
 and `Abort` are preemptions: the lane requests the stop, observes the
 vehicle's transition, and applies the change only when the transition is
@@ -273,6 +325,18 @@ lines. A vehicle member decides no re-flight, so it gets no part. An extra
 flight that the team pays for, a re-flight or moved lines, goes down with
 no budget, so no part is spent two times. The parts never add up to more
 than the approval of the team allows.
+
+The end of the runs of a team and the settlement of its results are
+different facts. When every member's run ended and the evidence of a line
+is still open, the team waits for its results. It shows the state
+`AWAITING_RESULTS`. A judgment that comes inside the evidence window gets
+the same decision as a judgment that came before the runs ended: the
+team flies the line again when the judgment is not met, the budget
+allows, and the approval is valid at that time. When the approval is not
+valid, the team records the judgment and flies nothing. After an abort,
+the team records results and starts no work. The team ends only when no
+evidence of its lines is open. Evidence of a member that a person stated
+down does not keep the team open.
 
 Bounds copied into a plan grant nothing. The lane verifies a plan against
 the issuer's grant at admission and again during execution. A delegation
@@ -343,6 +407,21 @@ required participants before coordinated execution starts, and the
 proposal states what happens when only some participants admit or start;
 a multi-vehicle start is not atomic.
 
+A coordinator request that waits for its members is an operation. The
+operation records the operator's request, the member requests that it
+sent, and the result of each. Only one operation of a kind is open at a
+time. The coordinator refuses a second operation of that kind as busy,
+because it does not put concurrent operations in order. Each operation
+gets one receipt: when its members answer, when an abort or a new plan
+ends it, or when an answer is lost. A member request that did not go out
+is refused, and the receipt says that it was not sent. An answer that is
+lost, because the link is lost or no answer comes in time, makes the
+receipt uncertain. It does not show that the member did not execute the
+request. Thus an answer that comes after its operation ended still
+changes the team, but it does not give the operator a second receipt.
+The team takes an abort also while it waits for the members' proposals or
+approvals, so that a lost answer does not keep the team in that state.
+
 Three losses are distinct: loss of the internet, loss of contact with the
 operator, and loss of the control link between a coordinator and a
 vehicle. Approved authority and local resources let a coordinator continue
@@ -376,12 +455,17 @@ member gets nothing, and the work and its space stay with the giving
 member. The team does not use a changed run or a shorter list of tasks as
 a release. A moved task that the giving member began before the revision
 applied is not in the release, and it stays with that member. Without a
-release fact, the handover stays open and the status shows it. Nothing is
+release fact, the handover stays open and the status shows it. A team
+that is a member of another team does not make a release fact from
+its members' facts. It refuses a revision that asks for a release before
+it changes anything, and its parent withdraws the handover. A node does
+what an operation asks, or it refuses the operation. Nothing is
 assumed at a time-out. When the giving member refuses its revision, the
 handover is withdrawn and that member keeps the work. When the receiving
 member refuses the released work, or a person states it down before it
 starts the work, the work is unassigned. It does not go back to the giving
-member. A lane refuses an approval or a revision for a plan that a
+member. When the work moved on a person's statement and not on a release,
+it is unreconciled, as the giving member may still fly it. A lane refuses an approval or a revision for a plan that a
 revision replaced, so a late message cannot bring a released plan back.
 Fencing at a control endpoint (ADR-0010) makes an old generation invalid
 at that endpoint only: a lease on the receiving vehicle does not stop the
@@ -391,12 +475,34 @@ A person's statement that a member is down is an override with a source.
 The team records who stated it, and the handover that it causes names it
 as its basis. The statement does not prove that the member stopped, that
 its control is revoked, or that its space is clear. The coordinator host writes the
-handovers to durable storage before it sends work to a member, and it
-sends no intent when it cannot write them. A coordinator that restarts
+handovers to durable storage before it sends work to a member. An intent
+that gives work is prepared, then persisted, then sent, and never sent
+before its record. When a write fails, the prepared intents wait in a
+bounded backlog, the coordinator refuses new work and says so in its
+status, and it tries the write again. When the write succeeds, the waiting
+intents go out one time. A hold and an abort never wait for the journal.
+A hold for a member with waiting work goes out at once, and it also waits
+again after that work. When the write succeeds, the member gets the work
+and then the hold, in the same order as when the journal is written. Thus
+the disk does not change what a hold does. An abort for a member removes
+the waiting work of that member. When the work of one answer does not fit
+in the backlog, all of that work is removed, so that no part of it goes
+out without the rest. The team lane receives each removed intent as
+refused by its member, because the member never received it. Thus the lane
+does not show the work as possibly started. A coordinator that restarts
 reads them back. It shows each handover that was open or committed as
 unreconciled, because it cannot know whether a member flies that work,
-and it moves nothing. An operator checks both members and gives the work
-to one. An assignment identity includes the run of the team, so a
+and it moves nothing. While a handover of its members is unreconciled, the
+team refuses new work. A person checks both members and then resolves the
+handover with an explicit intent; a new proposal does not resolve it.
+Handover records outlive the plan that they came from: a new proposal, a
+failed proposal and the refusal of a member keep every record that is not
+settled. A record is settled when it is withdrawn, when the receiver flew
+the moved lines, or when a person resolved it. Only a settled record is
+dropped. When a team starts new work after its run ended, a handover that
+is still open or committed has no run to follow, so it becomes unreconciled
+too. A flight of moved lines carries the identity of its handover, and the
+team matches the flight to that handover only. An assignment identity includes the run of the team, so a
 restarted coordinator never uses an identity or a generation again. It
 has no run of the team, and it can give work only through a new team
 proposal that each member must accept. A member lane refuses a proposal

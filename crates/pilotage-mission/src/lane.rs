@@ -6,6 +6,7 @@
 //! A proposal grants nothing. A run starts only under an approval bound to
 //! the proposal's digest whose adaptation envelope covers the plan.
 
+mod answer;
 mod approval;
 mod compile;
 mod evidence;
@@ -30,7 +31,7 @@ use crate::survey::SurveyRequest;
 pub use compile::SurveyDefaults;
 pub use run::{FrameAssessment, RunExecution, RunProgress};
 pub use steering::{HOST_ISSUER, Requester, Steering};
-pub use target::{Approvable, ApprovalTarget, approval_target};
+pub use target::{Approvable, ApprovalTarget, admit_approval, approval_target, valid_approval};
 
 use compile::Compiled;
 pub use evidence::{FrameTicket, VerdictRefused};
@@ -67,6 +68,9 @@ pub struct LaneConfig {
     /// pictures, milliseconds on the host's monotonic clock. The clock does
     /// not stop while the run holds.
     pub evidence_window_ms: u64,
+    /// The operations the lane's host carries out: a plan with another one,
+    /// or another version of one, is refused when it is proposed.
+    pub executors: pilotage_mission_core::executor::ExecutorRegistry,
 }
 
 /// What the host supplies with an intent: the civil time and a fresh,
@@ -86,6 +90,17 @@ pub enum RunPlan {
     Survey(SurveyRequest),
     /// Home from wherever the vehicle is: a successor that ends the work.
     Home,
+    /// Operations of host executors, one task each, in order.
+    Operations(Vec<PlannedOperation>),
+}
+
+/// One operation of a plan and the task it carries out.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlannedOperation {
+    /// The task the operation is.
+    pub task_id: String,
+    /// The operation, with parameters that may name results of earlier tasks.
+    pub operation: wire::MissionOperation,
 }
 
 /// A run the host must start: the plan and the config its mission engine
@@ -111,6 +126,19 @@ pub enum LaneEffect {
     Resume,
     /// End the run: the vehicle stops in place and the lane releases it.
     Abort,
+    /// Give a person's answer to the operation that asked.
+    Answer(OperationAnswer),
+}
+
+/// A person's answer to the question of one operation of the run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperationAnswer {
+    /// The operation that asked.
+    pub operation_id: String,
+    /// The person confirms what was asked.
+    pub accepted: bool,
+    /// Who answered, as the host wrote it.
+    pub answered_by: String,
 }
 
 /// The receipt for an intent and the effect, when there is one.
@@ -205,6 +233,10 @@ impl Lane {
                 Err("a vehicle lane has no members; send it to the team".to_owned())
             }
             Some(Action::Fetch(fetch)) => self.fetch(&fetch.digest),
+            Some(Action::ResolveHandover(_)) => {
+                Err("a vehicle lane has no handovers; send it to the team".to_owned())
+            }
+            Some(Action::Answer(answer)) => self.answer(answer),
             Some(Action::Skip(_)) => Err(
                 "skipping a task needs a successor plan, which this lane does not compile yet"
                     .to_owned(),
@@ -279,7 +311,7 @@ impl Lane {
                 run: run.as_deref(),
                 drafted: drafted.as_deref(),
             };
-            return match approval_target(approval, held)? {
+            return match admit_approval(approval, held, context.now_unix_ms)?.0 {
                 ApprovalTarget::Renewal => self.renew(approval, context),
                 ApprovalTarget::Successor | ApprovalTarget::Plan => {
                     self.approve_successor(approval, context)
@@ -298,7 +330,7 @@ impl Lane {
             run: None,
             drafted: None,
         };
-        approval_target(approval, held)?;
+        admit_approval(approval, held, context.now_unix_ms)?;
         approval::admit(approval, compiled, &self.config, context.now_unix_ms)?;
         self.approval = Some(approval.clone());
         self.state = wire::MissionLaneState::Admitted;
@@ -322,7 +354,7 @@ impl Lane {
         if start.proposal_digest != compiled.proposal.digest {
             return Err("the start names another proposal than the approved one".to_owned());
         }
-        approval::still_valid(approval, context.now_unix_ms)?;
+        target::still_valid(approval, context.now_unix_ms)?;
         self.expired = false;
         let run_id = context.fresh_id.clone();
         self.run = Some(RunTracker::new(
@@ -369,7 +401,7 @@ impl Lane {
         self.holds.clear();
         self.detail = "aborted by intent; the vehicle stops in place".to_owned();
         if let Some(run) = self.run.as_mut() {
-            run.close(wire::MissionTaskExecution::Cancelled, self.host_ms);
+            run.abort(self.host_ms);
         }
         Ok((Some(LaneEffect::Abort), None))
     }

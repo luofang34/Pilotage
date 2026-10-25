@@ -10,9 +10,12 @@ mod intents;
 mod members;
 mod moved;
 mod needs;
+mod operations;
+mod reflown;
 mod refly;
 mod renewal;
 mod revision;
+mod whole;
 
 use std::collections::BTreeMap;
 
@@ -87,6 +90,9 @@ enum Phase {
     Starting,
     Running,
     Held,
+    /// Every member's run ended; evidence of a line is still open, so the
+    /// team waits to judge it before it ends.
+    Settling,
     Complete,
     Aborted,
     Failed,
@@ -100,6 +106,8 @@ enum Op {
     Revise,
     /// A renewal of a member's approval of its plan in progress.
     Renew,
+    /// A person's answer to the question a member's run asks.
+    Answer,
 }
 
 /// A member intent awaiting its receipt.
@@ -111,6 +119,8 @@ struct Pending {
     refly: Option<usize>,
     /// It is a member's share of a revision.
     revision: bool,
+    /// The operator request it was sent for.
+    operation: Option<String>,
 }
 
 /// The coordinator's lane.
@@ -135,7 +145,11 @@ pub struct TeamLane {
     statuses: BTreeMap<String, wire::MissionStatus>,
     book: TaskBook,
     pending: BTreeMap<String, Pending>,
-    operator_request: Option<String>,
+    /// Operator requests waiting for their members, by request.
+    operations: BTreeMap<String, operations::Operation>,
+    /// Receipts of operator requests that ended outside an answer to them,
+    /// for the host to send.
+    ended: Vec<wire::MissionReceipt>,
     /// The team's run, once started; a parent team follows it by this id.
     run_id: Option<String>,
     reflies: Vec<Refly>,
@@ -176,7 +190,8 @@ impl TeamLane {
             statuses: BTreeMap::new(),
             book: TaskBook::default(),
             pending: BTreeMap::new(),
-            operator_request: None,
+            operations: BTreeMap::new(),
+            ended: Vec::new(),
             run_id: None,
             reflies: Vec::new(),
             revision: None,
@@ -216,22 +231,33 @@ impl TeamLane {
                 Action::Resume(wire::MissionResume {}),
             ),
             Some(Action::Abort(_)) => self.steer(
-                &[Phase::Starting, Phase::Running, Phase::Held],
+                // From a proposal or an approval that waits for a member too:
+                // an answer that may never come does not keep the team there.
+                &[
+                    Phase::Proposing,
+                    Phase::Approving,
+                    Phase::Starting,
+                    Phase::Running,
+                    Phase::Held,
+                    Phase::Settling,
+                ],
                 Phase::Aborted,
                 Action::Abort(wire::MissionAbort {}),
             ),
             Some(Action::Revise(revise)) => return self.on_revise(id, revise, context),
             Some(Action::MemberDown(down)) => self.member_down(down),
             Some(Action::Fetch(fetch)) => return self.on_fetch(id, &fetch.digest),
+            Some(Action::ResolveHandover(resolve)) => self.resolve_handover(resolve),
             Some(Action::Skip(_)) => {
                 Err("a team skips a task through a revision; draft one instead".to_owned())
             }
+            Some(Action::Answer(answer)) => self.relay_answer(answer),
             None => Err("the intent names no action".to_owned()),
         };
         match result {
             Ok((intents, deferred)) => {
-                if deferred {
-                    self.operator_request = Some(id);
+                // A step that asks no member is answered at once.
+                if deferred && self.open_operation(&id, &intents, context.now_unix_ms) {
                     TeamReply {
                         receipt: None,
                         intents,
@@ -272,7 +298,7 @@ impl TeamLane {
     }
 
     fn settle(&mut self) {
-        if !matches!(self.phase, Phase::Running | Phase::Held)
+        if !matches!(self.phase, Phase::Running | Phase::Held | Phase::Settling)
             || self.reflies.iter().any(Refly::in_progress)
         {
             return;
@@ -288,17 +314,39 @@ impl TeamLane {
         if states.len() + released < self.member_proposals.len() {
             return;
         }
+        if states.is_empty() {
+            // Every member is stated down: nothing shows that the work was done.
+            self.phase = Phase::Failed;
+            self.detail = "every member is stated down; the work is not done".to_owned();
+            return;
+        }
         let complete = wire::MissionLaneState::Complete as i32;
         let failed = [
             wire::MissionLaneState::Failed as i32,
             wire::MissionLaneState::Aborted as i32,
         ];
-        if states.iter().all(|s| *s == complete) {
+        let ended = states.iter().all(|s| *s == complete || failed.contains(s));
+        let open = self.book.open_evidence(|m| !self.stated_down(m));
+        if ended && open > 0 {
+            // The runs ended, but their results did not: a late judgment
+            // may still ask for a re-flight.
+            self.phase = Phase::Settling;
+            self.detail =
+                format!("every member's run ended; waiting for the results of {open} lines");
+        } else if states.iter().all(|s| *s == complete) {
             self.phase = Phase::Complete;
-            self.detail = self.book.summary();
+            self.detail = if self.survey().is_some() {
+                self.book.summary()
+            } else {
+                "complete: the member did the work".to_owned()
+            };
         } else if states.iter().all(|s| *s == complete || failed.contains(s)) {
             self.phase = Phase::Failed;
-            self.detail = format!("a member ended without completing; {}", self.book.summary());
+            self.detail = if self.survey().is_some() {
+                format!("a member ended without completing; {}", self.book.summary())
+            } else {
+                "the member ended without completing the work".to_owned()
+            };
         }
     }
 
@@ -318,6 +366,7 @@ impl TeamLane {
                 op,
                 refly,
                 revision: false,
+                operation: None,
             },
         );
         MemberIntent {
@@ -341,10 +390,13 @@ impl TeamLane {
         self.approval = None;
         self.statuses.clear();
         self.book = TaskBook::default();
+        let replaced = self.lose_answers(|_, _| true, "the plan was replaced before it answered");
+        self.ended.extend(replaced);
         self.pending.clear();
         self.reflies.clear();
         self.revision = None;
-        self.handovers.clear();
+        // Handover records outlive the plan: only a settled one is dropped.
+        self.handovers.retain(|h| !h.settled());
         // A new plan has no run until it starts: a parent following the
         // old run must not read the new plan's tasks as that run's.
         self.run_id = None;
@@ -376,6 +428,14 @@ impl TeamLane {
     #[must_use]
     pub fn status(&self) -> wire::MissionStatus {
         aggregate::team_status(self)
+    }
+
+    /// The team's survey, when its objective is one.
+    fn survey(&self) -> Option<&wire::SurveyObjective> {
+        match self.objective.as_ref()?.kind.as_ref()? {
+            wire::mission_objective::Kind::Survey(survey) => Some(survey),
+            wire::mission_objective::Kind::Report(_) => None,
+        }
     }
 
     /// The status when it changed since the last call.

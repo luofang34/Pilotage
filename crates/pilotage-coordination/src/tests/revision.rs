@@ -21,7 +21,7 @@ fn on_line_one(fleet: &mut Fleet) {
     }
 }
 
-fn team_intent(
+pub(super) fn team_intent(
     fleet: &mut Fleet,
     action: Action,
 ) -> (Option<wire::MissionReceipt>, Vec<MemberIntent>) {
@@ -73,7 +73,7 @@ pub(super) fn running_fleet(permit_allocate: bool) -> (Fleet, usize) {
     (fleet, planned)
 }
 
-fn reassign(fleet: &Fleet, from: &str, to: &str, fraction: f64, within: bool) -> Action {
+pub(super) fn reassign(fleet: &Fleet, from: &str, to: &str, fraction: f64, within: bool) -> Action {
     let status = fleet.team.status();
     Action::Revise(wire::MissionRevise {
         base_digest: status.proposal_digest.clone(),
@@ -299,7 +299,7 @@ fn link_of(fleet: &Fleet, member: &str) -> wire::MemberLink {
         .unwrap_or(wire::MemberLink::Unspecified)
 }
 
-fn member_down(member: &str) -> Action {
+pub(super) fn member_down(member: &str) -> Action {
     Action::MemberDown(wire::MissionMemberDown {
         member: member.to_owned(),
         stated_by: None,
