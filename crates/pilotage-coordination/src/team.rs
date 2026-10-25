@@ -220,16 +220,27 @@ impl TeamLane {
             Some(Action::Propose(objective)) => self.propose(objective, context),
             Some(Action::Approve(approval)) => self.approve(approval, context),
             Some(Action::Start(start)) => self.start(start, context),
+            // A team that waits for its results may still fly a line again,
+            // so it takes a hold too.
             Some(Action::Hold(_)) => self.steer(
-                &[Phase::Running],
+                &[Phase::Running, Phase::Settling],
                 Phase::Held,
                 Action::Hold(wire::MissionHold {}),
             ),
-            Some(Action::Resume(_)) => self.steer(
-                &[Phase::Held],
-                Phase::Running,
-                Action::Resume(wire::MissionResume {}),
-            ),
+            Some(Action::Resume(_)) => self
+                .steer(
+                    &[Phase::Held],
+                    Phase::Running,
+                    Action::Resume(wire::MissionResume {}),
+                )
+                .map(|(mut intents, deferred)| {
+                    // What the team decided or approved while it held goes on
+                    // now.
+                    intents.extend(self.start_approved_reflies());
+                    self.settle();
+                    intents.extend(self.adapt(context));
+                    (intents, deferred)
+                }),
             Some(Action::Abort(_)) => self.steer(
                 // From a proposal or an approval that waits for a member too:
                 // an answer that may never come does not keep the team there.
@@ -330,8 +341,11 @@ impl TeamLane {
         let open = self.book.open_evidence(|m| !self.stated_down(m));
         if ended && open > 0 {
             // The runs ended, but their results did not: a late judgment
-            // may still ask for a re-flight.
-            self.phase = Phase::Settling;
+            // may still ask for a re-flight, which a held team flies only
+            // once it is resumed.
+            if self.phase != Phase::Held {
+                self.phase = Phase::Settling;
+            }
             self.detail =
                 format!("every member's run ended; waiting for the results of {open} lines");
         } else if states.iter().all(|s| *s == complete) {

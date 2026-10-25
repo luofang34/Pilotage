@@ -26,7 +26,10 @@ impl TeamLane {
         let mut cancelled = Vec::new();
         for refly in &mut self.reflies {
             refly.state = match refly.state {
-                ReflyState::Queued | ReflyState::Proposing | ReflyState::Approving => {
+                ReflyState::Queued
+                | ReflyState::Proposing
+                | ReflyState::Approving
+                | ReflyState::Approved => {
                     if let Some(assignment) = &refly.assignment {
                         cancelled.push(assignment.clone());
                     }
