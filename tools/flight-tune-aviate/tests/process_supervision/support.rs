@@ -383,11 +383,37 @@ pub(super) fn create_fifo(path: &Path) {
     assert!(status.success(), "mkfifo creates the event channel");
 }
 
+/// How long the watcher waits for the FIFO before it reads it again.
+const FIFO_POLL: rustix::event::Timespec = rustix::event::Timespec {
+    tv_sec: 0,
+    tv_nsec: 100_000_000,
+};
+
 fn watch_fifo(path: &Path, sender: &mpsc::Sender<FifoEvent>) {
     let mut file = std::fs::File::open(path).expect("open FIFO reader");
     sender.send(FifoEvent::Open).expect("send FIFO open event");
-    let mut sink = Vec::new();
-    file.read_to_end(&mut sink).expect("read FIFO to EOF");
+    // A blocking read has missed the wake-up of the last writer's close
+    // under load, and waited past every deadline with no writer left. The
+    // reader reads without blocking and reads again after each bounded
+    // poll, so the end of the FIFO is seen whether or not it wakes it.
+    rustix::fs::fcntl_setfl(&file, rustix::fs::OFlags::NONBLOCK)
+        .expect("make the FIFO reader non-blocking");
+    let mut buffer = [0_u8; 4096];
+    loop {
+        match file.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                let mut ready = [rustix::event::PollFd::new(
+                    &file,
+                    rustix::event::PollFlags::IN,
+                )];
+                rustix::event::poll(&mut ready, Some(&FIFO_POLL)).ok();
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(error) => panic!("read FIFO: {error}"),
+        }
+    }
     sender.send(FifoEvent::Eof).expect("send FIFO EOF event");
 }
 

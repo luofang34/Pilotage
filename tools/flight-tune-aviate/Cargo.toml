@@ -34,4 +34,5 @@ sysctl = "=0.7.1"
 flight-tune = { path = "../flight-tune", features = ["test-support"] }
 pilotage-adapter-aviate = { workspace = true }
 pilotage-durable-storage = { workspace = true, features = ["fault-injection"] }
+rustix = { workspace = true, features = ["event", "fs", "process"] }
 tempfile = "3.23.0"
