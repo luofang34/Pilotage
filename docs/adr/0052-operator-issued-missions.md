@@ -79,6 +79,11 @@ the digest of its predecessor, validity, and releasability.
   prevents an approval of one run from renewing another run of the same
   plan. An approval of a drafted successor names the run in progress or no
   run. A vehicle lane and a team find the target with the same rule.
+  At each entry point, for a plan, a renewal or a successor, they also
+  make the same checks before they change anything or pass anything on:
+  the approval names the record format, permits execution and has not
+  expired. Limits of the domain, such as height and area, are checked
+  after these checks, by the domain.
   A held run reports each reason why it holds: the operator, or the
   expiry of its approval. A renewal removes only the expiry reason, and an
   operator's resume removes only the operator reason. The lane refuses a

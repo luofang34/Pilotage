@@ -8,7 +8,7 @@ use pilotage_protocol::wire;
 use wire::MissionHoldReason as Reason;
 use wire::MissionLaneState as State;
 
-use super::{IntentContext, Lane, LaneEffect, approval};
+use super::{IntentContext, Lane, LaneEffect};
 
 type Outcome = Result<(Option<LaneEffect>, Option<wire::MissionProposalRecord>), String>;
 
@@ -43,7 +43,7 @@ impl Lane {
         if self.holds.contains(&Reason::ApprovalExpired) {
             return Err("the approval expired; approve the plan again to resume".to_owned());
         }
-        approval::still_valid(approval, context.now_unix_ms)
+        super::target::still_valid(approval, context.now_unix_ms)
             .map_err(|reason| format!("{reason}; approve the plan again to resume"))?;
         self.holds.retain(|r| *r != Reason::Operator);
         Ok((self.resume_when_free(), None))

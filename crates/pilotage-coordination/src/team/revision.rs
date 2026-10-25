@@ -13,7 +13,7 @@ use pilotage_mission::survey::objective_change;
 use pilotage_protocol::wire;
 use wire::MissionSuccessorState as Stage;
 
-use super::intents::{delegate, valid_envelope};
+use super::intents::delegate;
 use super::{MemberIntent, Op, Phase, TeamLane};
 
 mod draft;
@@ -103,7 +103,7 @@ impl TeamLane {
             .approval
             .clone()
             .ok_or("the team runs without an approval")?;
-        let permitted = valid_envelope(&approval, context.now_unix_ms)
+        let permitted = pilotage_mission::valid_approval(&approval, context.now_unix_ms)
             .map(|e| authorize(e, &changes).map_err(|unpermitted| unpermitted.to_string()));
         match permitted {
             Ok(Ok(())) => Ok((proposal, self.apply_revision(context))),
@@ -211,19 +211,11 @@ impl TeamLane {
             .as_ref()
             .filter(|r| r.stage == Stage::Drafted && r.proposal.digest == approval.proposal_digest)
             .ok_or("no drafted revision has that digest")?;
-        super::intents::bound_format(approval)?;
         if let Change::Reassign { from, .. } = &drafted.change
             && self.lost.get(from) == Some(&wire::MemberLink::Lost)
         {
             return Err(format!(
                 "{from}'s link is lost and its state is unknown; its work stays reserved until it reports again or a person states that it is down"
-            ));
-        }
-        let envelope = valid_envelope(approval, context.now_unix_ms)?;
-        if self.height_m > envelope.max_height_m + 1e-6 {
-            return Err(format!(
-                "the team flies at {:.1} m; the envelope allows {:.1} m",
-                self.height_m, envelope.max_height_m
             ));
         }
         self.approval = Some(approval.clone());

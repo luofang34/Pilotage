@@ -6,11 +6,11 @@
 //! or that a person stated down gets none either, and the receipt names it.
 //! A member's renewal ends only the hold its approval's expiry applied.
 
-use pilotage_mission::{Approvable, ApprovalTarget, IntentContext, approval_target};
+use pilotage_mission::{Approvable, ApprovalTarget, IntentContext, admit_approval};
 use pilotage_protocol::wire;
 use wire::MissionLaneState as State;
 
-use super::intents::{delegate, valid_envelope};
+use super::intents::delegate;
 use super::{MemberIntent, Op, TeamLane};
 
 /// A renewal waiting for its members' answers.
@@ -53,8 +53,12 @@ impl TeamLane {
             run: self.run_id.as_deref(),
             drafted: drafted.as_deref(),
         };
-        match approval_target(approval, held)? {
-            ApprovalTarget::Renewal => self.renew(approval, context),
+        // Nothing changes and nothing is passed on before the approval is
+        // admitted.
+        let (target, envelope) = admit_approval(approval, held, context.now_unix_ms)?;
+        self.within_height(envelope)?;
+        match target {
+            ApprovalTarget::Renewal => self.renew(approval),
             ApprovalTarget::Successor | ApprovalTarget::Plan => self
                 .approve_revision(approval, context)
                 .map(|intents| (intents, false)),
@@ -64,15 +68,7 @@ impl TeamLane {
     fn renew(
         &mut self,
         approval: &wire::MissionApproval,
-        context: &IntentContext,
     ) -> Result<(Vec<MemberIntent>, bool), String> {
-        let envelope = valid_envelope(approval, context.now_unix_ms)?;
-        if self.height_m > envelope.max_height_m + 1e-6 {
-            return Err(format!(
-                "the team flies at {:.1} m; the envelope allows {:.1} m",
-                self.height_m, envelope.max_height_m
-            ));
-        }
         self.approval = Some(approval.clone());
         let mut renewal = Renewal::default();
         let mut intents = Vec::new();

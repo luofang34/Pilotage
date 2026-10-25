@@ -30,7 +30,7 @@ use crate::survey::SurveyRequest;
 pub use compile::SurveyDefaults;
 pub use run::{FrameAssessment, RunExecution, RunProgress};
 pub use steering::{HOST_ISSUER, Requester, Steering};
-pub use target::{Approvable, ApprovalTarget, approval_target};
+pub use target::{Approvable, ApprovalTarget, admit_approval, approval_target, valid_approval};
 
 use compile::Compiled;
 pub use evidence::{FrameTicket, VerdictRefused};
@@ -282,7 +282,7 @@ impl Lane {
                 run: run.as_deref(),
                 drafted: drafted.as_deref(),
             };
-            return match approval_target(approval, held)? {
+            return match admit_approval(approval, held, context.now_unix_ms)?.0 {
                 ApprovalTarget::Renewal => self.renew(approval, context),
                 ApprovalTarget::Successor | ApprovalTarget::Plan => {
                     self.approve_successor(approval, context)
@@ -301,7 +301,7 @@ impl Lane {
             run: None,
             drafted: None,
         };
-        approval_target(approval, held)?;
+        admit_approval(approval, held, context.now_unix_ms)?;
         approval::admit(approval, compiled, &self.config, context.now_unix_ms)?;
         self.approval = Some(approval.clone());
         self.state = wire::MissionLaneState::Admitted;
@@ -325,7 +325,7 @@ impl Lane {
         if start.proposal_digest != compiled.proposal.digest {
             return Err("the start names another proposal than the approved one".to_owned());
         }
-        approval::still_valid(approval, context.now_unix_ms)?;
+        target::still_valid(approval, context.now_unix_ms)?;
         self.expired = false;
         let run_id = context.fresh_id.clone();
         self.run = Some(RunTracker::new(

@@ -27,7 +27,7 @@ impl Lane {
             return None;
         }
         let approval = self.approval.as_ref()?;
-        if approval::still_valid(approval, self.clock_unix_ms).is_ok() {
+        if super::target::still_valid(approval, self.clock_unix_ms).is_ok() {
             return None;
         }
         let policy = approval
