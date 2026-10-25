@@ -45,6 +45,8 @@ pub(super) struct Revision {
     pub drafted_by: String,
     /// The parent team whose revision this is the team's share of.
     pub share_of: String,
+    /// The team objective once the revision applies, when it revises it.
+    pub objective: Option<wire::MissionObjective>,
     /// The approval in force before the revision's own, restored when the
     /// revision is withdrawn.
     pub replaced_approval: Option<wire::MissionApproval>,
@@ -85,8 +87,13 @@ impl TeamLane {
             Asked::Objective(objective) => self.draft_keep(objective)?,
         };
         let changes = self.changes(asked, &change);
+        let objective = match asked {
+            Asked::Objective(objective) => Some(objective.clone()),
+            _ => None,
+        };
+        let after = objective.as_ref().or(self.objective.as_ref());
         let (draft, proposal) = self
-            .revision_proposal(&change, summary, context)
+            .revision_proposal(&change, after, summary, context)
             .into_parts();
         self.revision = Some(Revision {
             change,
@@ -99,6 +106,7 @@ impl TeamLane {
                 .map(|o| o.subject.clone())
                 .unwrap_or_default(),
             share_of: revise.share_of.clone(),
+            objective,
             replaced_approval: None,
         });
         self.detail = "revision drafted; waiting for review".to_owned();
@@ -295,6 +303,10 @@ impl TeamLane {
                     intents.extend(self.member_revision(&member, &kept, context, None));
                 }
             }
+        }
+        // Later revisions are classified against the objective in force.
+        if let Some(objective) = self.revision.as_ref().and_then(|r| r.objective.clone()) {
+            self.objective = Some(objective);
         }
         intents
     }
