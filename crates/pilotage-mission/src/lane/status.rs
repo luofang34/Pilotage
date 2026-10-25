@@ -16,7 +16,7 @@ impl Lane {
             .and_then(|o| o.kind.as_ref())
             .and_then(|kind| match kind {
                 wire::mission_objective::Kind::Survey(survey) => Some(survey),
-                wire::mission_objective::Kind::Report(_) => None,
+                _ => None,
             });
         wire::MissionStatus {
             lane: self.config.name.clone(),

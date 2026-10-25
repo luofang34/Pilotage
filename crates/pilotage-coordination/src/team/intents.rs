@@ -29,9 +29,7 @@ impl TeamLane {
                 self.propose_survey(objective, survey, context)
             }
             // No area to divide: one member takes the objective whole.
-            Some(wire::mission_objective::Kind::Report(_)) => {
-                self.propose_whole(objective, context)
-            }
+            Some(_) => self.propose_whole(objective, context),
             None => Err("the objective names no kind".to_owned()),
         }
     }

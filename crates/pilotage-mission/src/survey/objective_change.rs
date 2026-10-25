@@ -19,10 +19,12 @@ pub fn classify(before: &wire::MissionObjective, after: &wire::MissionObjective)
         (Some(Kind::Survey(before)), Some(Kind::Survey(after))) => {
             surveys(before, after, &mut changes);
         }
-        // What a report reads and asks is all it must achieve.
-        (Some(Kind::Report(before)), Some(Kind::Report(after))) => {
+        // An objective that is not a survey is all it must achieve.
+        (Some(before), Some(after))
+            if std::mem::discriminant(before) == std::mem::discriminant(after) =>
+        {
             if before != after {
-                changes.add(ChangeClass::Objective, "what the report reads or asks");
+                changes.add(ChangeClass::Objective, "what the objective reads or asks");
             }
         }
         (None, None) => {}

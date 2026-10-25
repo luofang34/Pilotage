@@ -439,6 +439,7 @@ pub(super) fn toward(lane: &Lane, waypoint: usize) -> RunProgress {
 mod admission;
 mod approvals;
 mod authorize;
+mod check;
 mod evidence;
 mod expiry;
 mod fetch;

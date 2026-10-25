@@ -67,3 +67,25 @@ fn missing_unknown_or_ill_typed_parameters_are_refused() {
         })
     ));
 }
+
+#[test]
+fn a_rule_holds_a_value_to_its_limit() {
+    use super::rule::at_most;
+    assert_eq!(
+        at_most("21.5 C", "30"),
+        Ok((true, "21.5 is within the limit of 30".to_owned()))
+    );
+    assert_eq!(at_most("21.5C", " 30 ").map(|(w, _)| w), Ok(true));
+    assert_eq!(at_most("21.5°C", "30").map(|(w, _)| w), Ok(true));
+    assert_eq!(at_most("30", "30").map(|(w, _)| w), Ok(true));
+    assert_eq!(at_most("31.2 C", "30").map(|(w, _)| w), Ok(false));
+    assert_eq!(at_most("-4 C", "-5").map(|(w, _)| w), Ok(false));
+    assert!(at_most("warm", "30").is_err());
+    assert!(at_most("21.5", "thirty").is_err());
+    assert!(at_most("NaN", "30").is_err());
+    assert!(at_most("1e400", "30").is_err());
+    // The verdict names the number, so it stays short whatever the value.
+    let long = format!("21.5 {}", "C".repeat(1000));
+    let (_, verdict) = at_most(&long, "30").expect("a verdict");
+    assert!(verdict.len() < 64, "{verdict}");
+}

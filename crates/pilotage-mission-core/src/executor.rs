@@ -324,5 +324,44 @@ pub const WRITE_REPORT: OperationDescriptor = OperationDescriptor {
     status_query: true,
 };
 
+/// A rule holds a value to a limit: the value is within the limit when the
+/// number it starts with is at most the limit. The rule reads and changes
+/// nothing, so a repeat is harmless and any host carries it out.
+pub const AT_MOST: OperationDescriptor = OperationDescriptor {
+    executor: "rule",
+    operation: "at-most",
+    version: 1,
+    parameters: &[
+        ValueSpec {
+            name: "limit",
+            kind: ValueKind::Text { max_bytes: 64 },
+            required: true,
+        },
+        ValueSpec {
+            name: "value",
+            kind: ValueKind::Text { max_bytes: 1024 },
+            required: true,
+        },
+    ],
+    results: &[
+        ValueSpec {
+            name: "verdict",
+            kind: ValueKind::Text { max_bytes: 1024 },
+            required: true,
+        },
+        ValueSpec {
+            name: "within",
+            kind: ValueKind::Flag,
+            required: true,
+        },
+    ],
+    capabilities: &[],
+    cancel: CancelSemantics::Immediate,
+    idempotent: true,
+    status_query: false,
+};
+
+pub mod rule;
+
 #[cfg(test)]
 mod tests;

@@ -449,7 +449,7 @@ impl TeamLane {
     fn survey(&self) -> Option<&wire::SurveyObjective> {
         match self.objective.as_ref()?.kind.as_ref()? {
             wire::mission_objective::Kind::Survey(survey) => Some(survey),
-            wire::mission_objective::Kind::Report(_) => None,
+            _ => None,
         }
     }
 
