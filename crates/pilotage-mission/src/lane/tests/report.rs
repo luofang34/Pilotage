@@ -17,7 +17,7 @@ use super::*;
 const HOST: &[OperationDescriptor] = &[READ_VALUE, WAIT_FOR_PERSON, WRITE_REPORT];
 const VALUE: &str = "21.5 C";
 
-fn report() -> wire::MissionObjective {
+pub(super) fn report() -> wire::MissionObjective {
     wire::MissionObjective {
         objective_id: "report-1".to_owned(),
         revision: 1,
@@ -34,7 +34,7 @@ fn report() -> wire::MissionObjective {
 
 /// A lane whose host carries out the report's operations, with its report
 /// proposed, approved and started; returns it and the task ids in order.
-fn started() -> (Lane, Vec<String>) {
+pub(super) fn started() -> (Lane, Vec<String>) {
     let mut lane = Lane::new(LaneConfig {
         executors: ExecutorRegistry::new(HOST),
         ..config()
@@ -70,7 +70,7 @@ fn started() -> (Lane, Vec<String>) {
     (lane, ids)
 }
 
-fn value(name: &str, value: &str) -> wire::MissionValue {
+pub(super) fn value(name: &str, value: &str) -> wire::MissionValue {
     wire::MissionValue {
         name: name.to_owned(),
         value: value.to_owned(),
@@ -78,7 +78,7 @@ fn value(name: &str, value: &str) -> wire::MissionValue {
 }
 
 /// The run read the value and asks the person about it.
-fn asking(lane: &mut Lane, ids: &[String]) -> wire::MissionQuestion {
+pub(super) fn asking(lane: &mut Lane, ids: &[String]) -> wire::MissionQuestion {
     let question = wire::MissionQuestion {
         operation_id: format!("run-1/{}/1", ids[1]),
         prompt: "Is this the cabin temperature?".to_owned(),
@@ -95,7 +95,7 @@ fn asking(lane: &mut Lane, ids: &[String]) -> wire::MissionQuestion {
     question
 }
 
-fn answer(question: &wire::MissionQuestion, accepted: bool) -> wire::MissionIntent {
+pub(super) fn answer(question: &wire::MissionQuestion, accepted: bool) -> wire::MissionIntent {
     intent(Action::Answer(wire::MissionAnswer {
         operation_id: question.operation_id.clone(),
         subject_digest: question.subject_digest.clone(),
@@ -105,7 +105,7 @@ fn answer(question: &wire::MissionQuestion, accepted: bool) -> wire::MissionInte
     }))
 }
 
-fn task(lane: &Lane, id: &str) -> wire::MissionTaskStatus {
+pub(super) fn task(lane: &Lane, id: &str) -> wire::MissionTaskStatus {
     lane.status()
         .tasks
         .into_iter()
