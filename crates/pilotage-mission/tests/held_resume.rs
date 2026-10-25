@@ -234,3 +234,83 @@ fn a_terminal_mission_is_not_held() {
     assert_eq!(engine.state(), MissionState::Complete);
     assert!(engine.resume(now).is_none());
 }
+
+/// Steps until the engine asks the vehicle to arm, without answering it;
+/// the arm's action identifier.
+fn until_arm_asked(engine: &mut MissionEngine, truth: &mut Truth, now: &mut MonotonicNanos) -> u64 {
+    for _ in 0..4_000 {
+        *now = MonotonicNanos::from_nanos(now.as_nanos() + STEP_NANOS);
+        truth.sequence = truth.sequence.wrapping_add(1);
+        engine.on_ownship(&truth.sample(*now), *now);
+        if let Some(action) = engine.tick(*now).action {
+            assert!(matches!(action.action, ControlAction::Arm));
+            return action.action_id;
+        }
+    }
+    panic!("the engine never asked to arm");
+}
+
+/// [`engine`] for a simulated vehicle, which the engine arms itself.
+fn simulated_engine() -> MissionEngine {
+    let mut config = MissionConfig::new(String::new(), anchor(), CLOCK);
+    config.execution_target = ExecutionTarget::Simulator;
+    config.cruise_height_m = HEIGHT_M;
+    MissionEngine::from_survey(&request(), config)
+        .expect("survey builds")
+        .0
+}
+
+/// A hold far longer than the receipt timeout.
+const MINUTE_NANOS: u64 = 60_000_000_000;
+
+#[test]
+fn a_receipt_that_arrives_during_a_hold_is_taken_after_the_resume() {
+    let mut engine = simulated_engine();
+    let mut truth = Truth::new();
+    let mut now = MonotonicNanos::from_nanos(1_000_000_000);
+    let mut events = Vec::new();
+    let arm = until_arm_asked(&mut engine, &mut truth, &mut now);
+    engine.hold(now);
+    now = MonotonicNanos::from_nanos(now.as_nanos() + MINUTE_NANOS);
+    engine.tick(now);
+    // The vehicle answers while the mission holds.
+    engine.on_action_result(arm, true);
+    now = MonotonicNanos::from_nanos(now.as_nanos() + MINUTE_NANOS);
+    engine.resume(now);
+    let climbed = (0..400).any(|_| {
+        let output = step(&mut engine, &mut truth, &mut now, &mut events);
+        assert_ne!(output.state, MissionState::Failed, "{events:?}");
+        assert!(output.action.is_none(), "the arm is not asked again");
+        output.state == MissionState::Climb
+    });
+    assert!(
+        climbed,
+        "the receipt taken during the hold lets the mission climb"
+    );
+}
+
+#[test]
+fn a_receipt_that_never_came_times_out_at_the_first_step_after_the_resume() {
+    let mut engine = simulated_engine();
+    let mut truth = Truth::new();
+    let mut now = MonotonicNanos::from_nanos(1_000_000_000);
+    until_arm_asked(&mut engine, &mut truth, &mut now);
+    engine.hold(now);
+    now = MonotonicNanos::from_nanos(now.as_nanos() + MINUTE_NANOS);
+    engine.resume(now);
+    now = MonotonicNanos::from_nanos(now.as_nanos() + STEP_NANOS);
+    engine.on_ownship(&truth.sample(now), now);
+    let output = engine.tick(now);
+    // The hold does not stop the receipt timeout: no receipt came, so the
+    // first step after the resume ends the run on it.
+    assert_eq!(output.state, MissionState::Failed, "{output:?}");
+    assert!(
+        output
+            .events
+            .iter()
+            .any(|event| matches!(event, MissionEvent::MissionFailed { .. })
+                && format!("{event:?}").contains("ReceiptTimeout")),
+        "{:?}",
+        output.events
+    );
+}
