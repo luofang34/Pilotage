@@ -83,7 +83,8 @@ the digest of its predecessor, validity, and releasability.
   make the same checks before they change anything or pass anything on:
   the approval names the record format, permits execution and has not
   expired. Limits of the domain, such as height and area, are checked
-  after these checks, by the domain.
+  after these checks, by the domain. A team passes its approval down to a
+  member only when the approval is valid at that time.
   A held run reports each reason why it holds: the operator, or the
   expiry of its approval. A renewal removes only the expiry reason, and an
   operator's resume removes only the operator reason. The lane refuses a

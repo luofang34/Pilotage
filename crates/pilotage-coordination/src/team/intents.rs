@@ -113,6 +113,20 @@ impl TeamLane {
         })
     }
 
+    /// The team's approval, to pass down to a member, when it is valid at
+    /// `now_unix_ms`: nothing is passed down before the check passes.
+    pub(super) fn approval_to_pass_down(
+        &self,
+        now_unix_ms: u64,
+    ) -> Result<wire::MissionApproval, String> {
+        let team = self
+            .approval
+            .as_ref()
+            .ok_or("the team has no approval to pass down")?;
+        pilotage_mission::valid_approval(team, now_unix_ms)?;
+        Ok(team.clone())
+    }
+
     /// The team's limits of the domain an envelope sets: the height it flies.
     pub(super) fn within_height(&self, envelope: &wire::AdaptationEnvelope) -> Result<(), String> {
         if self.height_m > envelope.max_height_m + 1e-6 {

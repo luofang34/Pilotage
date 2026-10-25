@@ -29,7 +29,13 @@ impl TeamLane {
         if pending.revision {
             return TeamReply {
                 receipt: None,
-                intents: self.on_revision_receipt(member, pending.op, accepted, receipt),
+                intents: self.on_revision_receipt(
+                    member,
+                    pending.op,
+                    accepted,
+                    receipt,
+                    context.now_unix_ms,
+                ),
             };
         }
         if let Some(index) = pending.refly {

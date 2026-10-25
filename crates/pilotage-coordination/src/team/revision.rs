@@ -329,6 +329,7 @@ impl TeamLane {
         op: Op,
         accepted: bool,
         receipt: &wire::MissionReceipt,
+        now_unix_ms: u64,
     ) -> Vec<MemberIntent> {
         if !accepted {
             self.detail = format!(
@@ -348,8 +349,13 @@ impl TeamLane {
                 return Vec::new();
             }
         };
-        let Some(team) = self.approval.clone() else {
-            return Vec::new();
+        let team = match self.approval_to_pass_down(now_unix_ms) {
+            Ok(team) => team,
+            Err(reason) => {
+                self.detail = format!("{member}'s share of the revision is not approved: {reason}");
+                self.withdraw_handover(member, &reason);
+                return Vec::new();
+            }
         };
         if self.keeps_moved_work(member, &draft) {
             self.detail = format!("{member}'s share still flies the moved lines; not approved");

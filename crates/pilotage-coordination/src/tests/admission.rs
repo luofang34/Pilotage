@@ -137,3 +137,31 @@ fn the_team_refuses_with_the_verdict_a_lane_gives() {
         assert_eq!(receipt.reason, verdict, "{what}");
     }
 }
+
+#[test]
+fn a_share_answered_after_the_team_approval_expired_gets_no_approval_passed_down() {
+    let (mut fleet, good) = successor();
+    let reply = approve(&mut fleet, good);
+    let share = reply
+        .intents
+        .into_iter()
+        .find(|i| i.member == "SIM-1")
+        .expect("SIM-1 drafts its share");
+    let lane = fleet.members.get_mut("SIM-1").expect("SIM-1");
+    let drafted = lane.on_intent(&share.intent, &context("share")).receipt;
+    let expired = IntentContext {
+        now_unix_ms: NOW + 3_600_000,
+        fresh_id: "late".to_owned(),
+    };
+    let reply = fleet.team.on_member_receipt("SIM-1", &drafted, &expired);
+    assert!(reply.intents.is_empty(), "nothing is passed down");
+    let status = fleet.team.status();
+    assert!(status.detail.contains("not approved"), "{}", status.detail);
+    assert!(
+        status
+            .handovers
+            .iter()
+            .all(|h| h.state != wire::MissionHandoverState::Committed as i32),
+        "the handover is not committed"
+    );
+}

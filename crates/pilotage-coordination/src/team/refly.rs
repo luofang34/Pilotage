@@ -288,7 +288,7 @@ impl TeamLane {
         op: Op,
         accepted: bool,
         receipt: &wire::MissionReceipt,
-        _context: &IntentContext,
+        context: &IntentContext,
     ) -> Vec<MemberIntent> {
         let Some(refly) = self.reflies.get_mut(index) else {
             return Vec::new();
@@ -322,7 +322,7 @@ impl TeamLane {
                 };
                 refly.state = ReflyState::Approving;
                 refly.proposal = Some(proposal.clone());
-                self.approve_extra(index, &member, &proposal)
+                self.approve_extra(index, &member, &proposal, context.now_unix_ms)
             }
             Op::Approve => {
                 refly.state = ReflyState::Starting;
@@ -356,10 +356,23 @@ impl TeamLane {
         index: usize,
         member: &str,
         proposal: &wire::MissionProposal,
+        now_unix_ms: u64,
     ) -> Vec<MemberIntent> {
         let launch = self.member(member).map(|m| m.launch);
-        let Some(team) = self.approval.clone() else {
-            return Vec::new();
+        let team = match self.approval_to_pass_down(now_unix_ms) {
+            Ok(team) => team,
+            Err(reason) => {
+                // Nothing is approved for the member, so it flies nothing.
+                let assignment = self.reflies.get_mut(index).and_then(|refly| {
+                    refly.state = ReflyState::Failed;
+                    refly.assignment.clone()
+                });
+                self.detail = format!("{member} does not fly again: {reason}");
+                if let Some(assignment) = assignment {
+                    self.unassign_moved(&assignment, &reason);
+                }
+                return Vec::new();
+            }
         };
         let band: Vec<wire::GeoPoint> =
             proposal.tasks.iter().flat_map(|t| t.path.clone()).collect();
