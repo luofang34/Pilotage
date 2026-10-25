@@ -155,6 +155,8 @@ fn a_return_home_policy_flies_home_instead_of_stopping() {
         panic!("between lines the way home starts at once");
     };
     assert!(order.run_id.ends_with("-rev1"), "{}", order.run_id);
+    assert_eq!(lane.on_clock(EXPIRY + 1), None, "the recovery applies once");
+    assert_eq!(lane.on_clock(EXPIRY + 2), None);
     assert_eq!(lane.state(), wire::MissionLaneState::Running);
     assert!(
         lane.status().detail.contains("the approval expired"),

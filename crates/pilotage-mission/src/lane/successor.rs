@@ -16,6 +16,19 @@ use crate::change::{ChangeClass, ChangeSet, authorize};
 use crate::survey::objective_change;
 use compile::Compiled;
 
+/// What admits a successor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Basis {
+    /// Not admitted yet.
+    Drafted,
+    /// An approval of its own digest.
+    Approved,
+    /// The approval in force, inside its envelope.
+    WithinEnvelope,
+    /// The recovery the expired approval names, which applies under it.
+    ExpiryRecovery,
+}
+
 /// A revision of the plan in progress.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct Successor {
@@ -24,8 +37,11 @@ pub(super) struct Successor {
     pub drafted_by: String,
     /// Lines flown when it was drafted; one more is the checkpoint.
     pub flown_at_draft: usize,
-    /// The recovery an expired approval names, which applies under it.
-    pub recovery: bool,
+    /// What admits it, once it is admitted.
+    pub basis: Basis,
+    /// Its own approval, once it is admitted: the run in progress keeps
+    /// the lane's, and each is renewed, expires and is checked on its own.
+    pub approval: Option<wire::MissionApproval>,
     /// The work a team asked the revision to release.
     pub release: Option<wire::WorkRelease>,
     /// The team whose revision this is a member's share of.
@@ -91,7 +107,8 @@ impl Lane {
                 .map(|origin| origin.subject.clone())
                 .unwrap_or_default(),
             flown_at_draft: run.flown_lines(),
-            recovery: false,
+            basis: Basis::Drafted,
+            approval: None,
             release: revise.release.clone(),
             share_of: revise.share_of.clone(),
         });
@@ -169,7 +186,7 @@ impl Lane {
         .map_err(|reason| {
             format!("outside the envelope ({reason}); the draft waits for an approval")
         })?;
-        Ok(self.admit_successor(delegated))
+        Ok(self.admit_successor(delegated, Basis::WithinEnvelope))
     }
 
     /// An approval of the drafted successor's digest.
@@ -191,17 +208,22 @@ impl Lane {
             &self.config,
             context.now_unix_ms,
         )?;
-        self.expired = false;
-        Ok((self.admit_successor(approval.clone()), None))
+        Ok((
+            self.admit_successor(approval.clone(), Basis::Approved),
+            None,
+        ))
     }
 
+    /// Admits the drafted successor under `approval`, its own, on `basis`.
     pub(super) fn admit_successor(
         &mut self,
         approval: wire::MissionApproval,
+        basis: Basis,
     ) -> Option<LaneEffect> {
-        self.approval = Some(approval);
         if let Some(successor) = self.successor.as_mut() {
             successor.stage = Stage::Admitted;
+            successor.basis = basis;
+            successor.approval = Some(approval);
         }
         let on_line = self
             .run
@@ -221,10 +243,24 @@ impl Lane {
             .successor
             .as_ref()
             .filter(|s| s.stage == Stage::Admitted)?;
-        // A revision does not apply under an expired approval; the
-        // expiry's own recovery does.
-        if !successor.recovery && self.approval_expired() {
-            return None;
+        // A revision applies only under its own approval, still valid for it
+        // now; the expiry's own recovery applies under the expired one.
+        if successor.basis != Basis::ExpiryRecovery {
+            let valid = successor.approval.as_ref().is_some_and(|a| {
+                approval::admit(a, &successor.compiled, &self.config, self.clock_unix_ms).is_ok()
+            });
+            if !valid {
+                if let Some(successor) = self.successor.as_mut() {
+                    successor.stage = Stage::Drafted;
+                    successor.basis = Basis::Drafted;
+                    successor.approval = None;
+                }
+                self.detail =
+                    "the revision's approval no longer admits it; it waits for a new approval"
+                        .to_owned();
+                self.changed = true;
+                return None;
+            }
         }
         let run = self.run.as_ref()?;
         let reached = plan_complete
@@ -239,6 +275,11 @@ impl Lane {
         successor.stage = Stage::Applied;
         let compiled = successor.compiled.clone();
         let release = successor.release.clone();
+        // The successor's approval is now the run's.
+        let admitted_under = successor.approval.take();
+        // The recovery an expiry names runs under the expired approval: the
+        // expiry stays applied, so it is not applied again.
+        let recovery = successor.basis == Basis::ExpiryRecovery;
         let previous = self.run.take();
         let predecessor = previous.as_ref().map(super::run::RunTracker::run_id);
         let run_id = format!(
@@ -265,6 +306,10 @@ impl Lane {
         let mut run = super::run::RunTracker::new(run_id.clone(), &compiled, self.config.judged);
         run.predecessor = predecessor;
         self.run = Some(run);
+        if let Some(approval) = admitted_under {
+            self.approval = Some(approval);
+        }
+        self.expired = recovery;
         // The successor's run starts flying, as a switch while held does.
         self.holds.clear();
         self.state = State::Running;
