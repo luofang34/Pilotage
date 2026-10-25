@@ -29,6 +29,14 @@ pub(super) struct Compiled {
     pub min_usable_per_line: u32,
 }
 
+impl Compiled {
+    /// The plan is a flight. A plan of operations has no way home to fly,
+    /// and is not revised: an abort ends it, and a new proposal replaces it.
+    pub(super) fn flies(&self) -> bool {
+        !matches!(self.plan, RunPlan::Operations(_))
+    }
+}
+
 /// Compiles `objective` under `lane`'s configuration.
 pub(super) fn compile(
     objective: &wire::MissionObjective,

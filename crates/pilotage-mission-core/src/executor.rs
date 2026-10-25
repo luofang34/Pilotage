@@ -288,7 +288,7 @@ pub const READ_VALUE: OperationDescriptor = OperationDescriptor {
         kind: ValueKind::Text { max_bytes: 1024 },
         required: true,
     }],
-    capabilities: &[],
+    capabilities: &["data-source"],
     cancel: CancelSemantics::Immediate,
     idempotent: true,
     status_query: false,

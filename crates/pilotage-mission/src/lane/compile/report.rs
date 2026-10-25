@@ -217,6 +217,15 @@ fn admit(
         };
         parameters.insert(parameter.name.clone(), value);
     }
+    if let Some(wanted) = &step.met_when {
+        let declared = descriptor.is_some_and(|d| d.results.iter().any(|r| r.name == wanted.name));
+        if !declared {
+            return Err(format!(
+                "its judgment names {}, which is no result of it",
+                wanted.name
+            ));
+        }
+    }
     let action = BoundAction {
         executor: step.executor.clone(),
         operation: step.operation.clone(),

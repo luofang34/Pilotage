@@ -45,6 +45,15 @@ fn step(
     }
 }
 
+/// `planned`, met only when the person confirms.
+fn met_when_confirmed(mut planned: PlannedOperation) -> PlannedOperation {
+    planned.operation.met_when = Some(wire::MissionValue {
+        name: "confirmed".to_owned(),
+        value: "true".to_owned(),
+    });
+    planned
+}
+
 /// Read the `temperature` source, ask whether it is right, write a report.
 fn plan() -> Vec<PlannedOperation> {
     vec![
@@ -54,7 +63,7 @@ fn plan() -> Vec<PlannedOperation> {
             "read-value",
             vec![given("source", "temperature")],
         ),
-        step(
+        met_when_confirmed(step(
             "confirm",
             "person",
             "confirm",
@@ -62,7 +71,7 @@ fn plan() -> Vec<PlannedOperation> {
                 given("question", "Is this right?"),
                 result_of("subject", "read"),
             ],
-        ),
+        )),
         step(
             "write",
             "host",
@@ -142,7 +151,8 @@ fn a_confirmed_value_is_written_in_a_report() {
         assert_eq!(done.finished_tasks, ["read", "confirm", "write"]);
         assert!(done.questions.is_empty());
         let report =
-            std::fs::read_to_string(host.host.reports.unwrap().join("run-1_write_1.txt")).unwrap();
+            std::fs::read_to_string(host.host.reports.unwrap().join("run-1_2fwrite_2f1.txt"))
+                .unwrap();
         assert!(
             report.contains("Cabin temperature") && report.contains("21.5 C"),
             "{report}"
@@ -164,7 +174,10 @@ fn a_declined_value_ends_the_run_and_writes_nothing() {
             .await
             .unwrap();
         let ended = until(&mut status, |s| s.ended_because.is_some()).await;
-        assert_eq!(ended.ended_because, Some("the person declined"));
+        assert_eq!(
+            ended.ended_because,
+            Some("a step's result does not meet its plan")
+        );
         assert_eq!(ended.finished_tasks, ["read", "confirm"]);
         assert!(!ended.plan_complete);
         let written = std::fs::read_dir(host.host.reports.unwrap())
@@ -191,6 +204,11 @@ fn an_abort_while_a_person_is_asked_stops_at_once() {
             stopped.finished_tasks,
             ["read"],
             "the question was not answered"
+        );
+        assert_eq!(
+            stopped.cancelled_tasks,
+            ["confirm"],
+            "the lane hears how it ended"
         );
         assert!(stopped.questions.is_empty());
         handle.await.unwrap();
@@ -238,4 +256,25 @@ fn a_host_registers_only_what_it_is_configured_for() {
         names(&host().host),
         ["read-value", "confirm", "write-report"]
     );
+}
+
+#[test]
+fn an_operation_in_another_version_fails_and_is_reported() {
+    runtime().block_on(async {
+        let host = host();
+        let (_controls, receiver) = mpsc::channel(4);
+        let mut read = step(
+            "read",
+            "host",
+            "read-value",
+            vec![given("source", "temperature")],
+        );
+        read.operation.version = 2;
+        let (handle, mut status) =
+            spawn_operation_run("run-4".to_owned(), vec![read], host.host, receiver);
+        let ended = until(&mut status, |s| s.ended_because.is_some()).await;
+        assert_eq!(ended.failed_tasks, ["read"]);
+        assert!(ended.finished_tasks.is_empty());
+        handle.await.unwrap();
+    });
 }

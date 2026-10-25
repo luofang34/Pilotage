@@ -65,17 +65,25 @@ impl OperationRun {
             let operation_id = format!("{}/{task_id}/1", self.run_id);
             match self.carry_out(&operation_id, &planned.operation).await {
                 Step::Done(results) => {
-                    let declined = results
-                        .iter()
-                        .any(|r| r.name == "confirmed" && r.value == "false");
+                    // A step whose result does not meet its plan, such as a
+                    // person who declines, ends the run: what follows needs it.
+                    let unmet = planned
+                        .operation
+                        .met_when
+                        .as_ref()
+                        .is_some_and(|wanted| !results.contains(wanted));
                     self.finish(task_id, results);
-                    if declined {
-                        return self.end("the person declined");
+                    if unmet {
+                        return self.end("a step's result does not meet its plan");
                     }
                 }
-                Step::Aborted => return self.stop(),
+                Step::Aborted => {
+                    self.now.cancelled_tasks.push(task_id);
+                    return self.stop();
+                }
                 Step::Failed(reason) => {
                     warn!(operation = %operation_id, %reason, "operation failed");
+                    self.now.failed_tasks.push(task_id);
                     return self.end("an operation failed");
                 }
             }
@@ -93,6 +101,17 @@ impl OperationRun {
             Ok(parameters) => parameters,
             Err(reason) => return Step::Failed(reason),
         };
+        let registered = super::registry(&self.host).operations().iter().any(|d| {
+            d.executor == operation.executor
+                && d.operation == operation.operation
+                && d.version == operation.version
+        });
+        if !registered {
+            return Step::Failed(format!(
+                "this host has no operation {}/{} version {}",
+                operation.executor, operation.operation, operation.version
+            ));
+        }
         let given = |name: &str| parameters.get(name).cloned().unwrap_or_default();
         match (operation.executor.as_str(), operation.operation.as_str()) {
             ("host", "read-value") => {

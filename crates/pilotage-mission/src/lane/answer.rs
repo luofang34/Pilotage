@@ -28,6 +28,7 @@ impl Lane {
             run.ask_again(index, asked);
             return Err("the answer is for another subject than the one asked".to_owned());
         }
+        run.answered(&answer.operation_id);
         let answered_by = answer
             .answered_by
             .as_ref()

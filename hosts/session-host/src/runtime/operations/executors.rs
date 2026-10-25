@@ -57,25 +57,27 @@ pub(super) fn write_report_blocking(
         writeln!(file)?;
         writeln!(file, "{value}")?;
         file.sync_all()?;
-        std::fs::rename(&staged, &path)
+        std::fs::rename(&staged, &path)?;
+        // The rename is durable only once the directory is.
+        std::fs::File::open(reports)?.sync_all()
     })();
     written.map_err(|e| format!("cannot write {}: {e}", path.display()))?;
     Ok(name)
 }
 
-/// The operation identity as a file name: what is not a letter, a digit, a
-/// hyphen or an underscore becomes an underscore.
+/// The operation identity as a file name, one name for one identity: a
+/// letter, a digit or a hyphen stays, and any other byte becomes `_` and
+/// its two hexadecimal digits.
 fn file_name(operation_id: &str) -> String {
-    operation_id
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
+    let mut name = String::with_capacity(operation_id.len());
+    for byte in operation_id.bytes() {
+        if byte.is_ascii_alphanumeric() || byte == b'-' {
+            name.push(char::from(byte));
+        } else {
+            name.push_str(&format!("_{byte:02x}"));
+        }
+    }
+    name
 }
 
 fn staged_path(path: &Path) -> PathBuf {

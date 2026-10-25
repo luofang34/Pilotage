@@ -398,7 +398,7 @@ impl Lane {
         self.holds.clear();
         self.detail = "aborted by intent; the vehicle stops in place".to_owned();
         if let Some(run) = self.run.as_mut() {
-            run.abort(self.host_ms, &self.config.executors);
+            run.abort(self.host_ms);
         }
         Ok((Some(LaneEffect::Abort), None))
     }

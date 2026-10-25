@@ -131,9 +131,10 @@ lane has a lifecycle: `Idle`, `Admitted`, `Running`, `HoldRequested`,
 `HoldRequested`; the lane becomes `Held` only when the vehicle reports that
 it holds in place. An abort keeps each task that did not finish as
 unfinished: the execution of the task in progress becomes `Cancelled`, and
-a pending task stays pending. An operation that does not stop at once, by
-its registered cancel semantics, keeps its execution until the host reports
-how it ended, because it can still have its effect.
+a pending task stays pending. An operation task keeps its execution until
+the host reports how the operation ended, because the operation can still
+have its effect: the host cancels it as its registered cancel semantics
+say, and then reports it cancelled, completed or failed.
 
 Each kind of objective plans in its own module, and what follows the plan
 is the same for each kind: its approval, its run, its evidence and its
@@ -151,7 +152,11 @@ judgment is met when its execution completed and the result that the plan
 names has its value. A report objective reads a value, asks a person to
 confirm it, and writes a report of it: a person who declines ends the run,
 and the report is not written. The host writes the report of one operation
-once, so a repeat of that operation finds it. The environment variables remain a bootstrap source
+once, so a repeat of that operation finds it. A plan of operations has no
+way home: it takes no revision, and an expired approval holds it before
+its next operation. A host that restarts does not keep the runs in
+progress of its lane, so the lane is idle again; a person checks what an
+operation in progress did before a new proposal. The environment variables remain a bootstrap source
 that issues the first plan into an `Idle` lane; an issued plan supersedes
 them.
 

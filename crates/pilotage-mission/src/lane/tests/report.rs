@@ -259,3 +259,111 @@ fn only_an_approver_answers_and_the_host_writes_who_did() {
         Some("operator")
     );
 }
+
+#[test]
+fn an_answered_question_the_host_reports_again_is_asked_no_more() {
+    let (mut lane, ids) = started();
+    let question = asking(&mut lane, &ids);
+    let yes = lane.on_intent(&answer(&question, true), &context("yes"));
+    assert!(accepted(&yes));
+    // The runner has not taken the answer yet and reports the question again.
+    asking(&mut lane, &ids);
+    assert_eq!(task(&lane, &ids[1]).question, None);
+    let no = lane.on_intent(&answer(&question, false), &context("no"));
+    assert!(!accepted(&no), "one answer per question");
+    assert!(no.effect.is_none());
+}
+
+#[test]
+fn an_abort_leaves_each_operation_to_the_end_the_host_reports() {
+    let abort = |lane: &mut Lane| {
+        let reply = lane.on_intent(
+            &intent(Action::Abort(wire::MissionAbort {})),
+            &context("abort"),
+        );
+        assert!(accepted(&reply));
+    };
+    // The host stopped the question: the task is cancelled once it says so.
+    let (mut lane, ids) = started();
+    asking(&mut lane, &ids);
+    abort(&mut lane);
+    assert_eq!(
+        task(&lane, &ids[1]).execution,
+        Execution::Active as i32,
+        "not known yet"
+    );
+    lane.on_progress(&RunProgress {
+        finished_tasks: vec![ids[0].clone()],
+        cancelled_tasks: vec![ids[1].clone()],
+        ..RunProgress::default()
+    });
+    assert_eq!(task(&lane, &ids[1]).execution, Execution::Cancelled as i32);
+    // The host took the answer before the abort: the task completed.
+    let (mut lane, ids) = started();
+    let question = asking(&mut lane, &ids);
+    lane.on_intent(&answer(&question, true), &context("yes"));
+    abort(&mut lane);
+    lane.on_progress(&RunProgress {
+        finished_tasks: vec![ids[0].clone(), ids[1].clone()],
+        results: vec![(
+            ids[1].clone(),
+            vec![value("by", "operator"), value("confirmed", "true")],
+        )],
+        ..RunProgress::default()
+    });
+    let confirm = task(&lane, &ids[1]);
+    assert_eq!(confirm.execution, Execution::Completed as i32);
+    assert_eq!(confirm.judgment, Judgment::Met as i32);
+    // A write that fails after the abort is failed, not left in progress.
+    lane.on_progress(&RunProgress {
+        finished_tasks: vec![ids[0].clone(), ids[1].clone()],
+        failed_tasks: vec![ids[2].clone()],
+        ..RunProgress::default()
+    });
+    assert_eq!(task(&lane, &ids[2]).execution, Execution::Failed as i32);
+}
+
+#[test]
+fn an_expired_approval_holds_a_plan_of_operations_and_flies_nothing() {
+    let mut lane = Lane::new(LaneConfig {
+        executors: ExecutorRegistry::new(HOST),
+        ..config()
+    });
+    let reply = lane.on_intent(&intent(Action::Propose(report())), &context("p"));
+    let digest = opened(&reply.receipt).expect("a proposal").digest;
+    let mut home_on_expiry = approval(&digest, 0.0);
+    if let Some(envelope) = home_on_expiry.envelope.as_mut() {
+        envelope.on_expiry = wire::MissionExpiryPolicy::ReturnHome as i32;
+    }
+    lane.on_intent(&intent(Action::Approve(home_on_expiry)), &context("a"));
+    lane.on_intent(
+        &intent(Action::Start(wire::MissionStart {
+            proposal_digest: digest,
+        })),
+        &context("run-1"),
+    );
+    let effect = lane.on_clock(NOW + 10 * 3_600_000);
+    assert_eq!(effect, Some(LaneEffect::Hold), "no way home to fly");
+    assert!(lane.status().successor.is_none());
+}
+
+#[test]
+fn a_plan_of_operations_takes_no_revision() {
+    let (mut lane, _) = started();
+    let status = lane.status();
+    let reply = lane.on_intent(
+        &intent(Action::Revise(wire::MissionRevise {
+            base_digest: status.proposal_digest.clone(),
+            run_id: status.run_id.clone(),
+            change: Some(wire::mission_revise::Change::Finish(wire::MissionFinish {})),
+            ..wire::MissionRevise::default()
+        })),
+        &context("rev"),
+    );
+    assert!(!accepted(&reply));
+    assert!(
+        reply.receipt.reason.contains("no revision"),
+        "{}",
+        reply.receipt.reason
+    );
+}

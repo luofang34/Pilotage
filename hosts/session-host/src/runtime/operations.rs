@@ -37,18 +37,36 @@ pub(crate) struct OperationHost {
     pub reports: Option<PathBuf>,
 }
 
-/// The operations a host configured as `host` carries out.
+/// The operations a host configured as `host` carries out: the largest
+/// set whose operations need only the capabilities the host has.
 pub(crate) fn registry(host: &OperationHost) -> ExecutorRegistry {
-    const ALL: &[OperationDescriptor] = &[READ_VALUE, WAIT_FOR_PERSON, WRITE_REPORT];
-    const READS: &[OperationDescriptor] = &[READ_VALUE, WAIT_FOR_PERSON];
-    const WRITES: &[OperationDescriptor] = &[WAIT_FOR_PERSON, WRITE_REPORT];
-    const PERSON: &[OperationDescriptor] = &[WAIT_FOR_PERSON];
-    ExecutorRegistry::new(match (host.sources.is_some(), host.reports.is_some()) {
-        (true, true) => ALL,
-        (true, false) => READS,
-        (false, true) => WRITES,
-        (false, false) => PERSON,
-    })
+    const SETS: &[&[OperationDescriptor]] = &[
+        &[READ_VALUE, WAIT_FOR_PERSON, WRITE_REPORT],
+        &[READ_VALUE, WAIT_FOR_PERSON],
+        &[WAIT_FOR_PERSON, WRITE_REPORT],
+        &[WAIT_FOR_PERSON],
+    ];
+    let has = host.capabilities();
+    let fits = |set: &&&[OperationDescriptor]| {
+        set.iter()
+            .all(|d| d.capabilities.iter().all(|c| has.contains(c)))
+    };
+    ExecutorRegistry::new(SETS.iter().find(fits).copied().unwrap_or(&[]))
+}
+
+impl OperationHost {
+    /// What the host can do: ask a person through its lane always, read
+    /// values with a sources directory, store reports with a reports one.
+    fn capabilities(&self) -> Vec<&'static str> {
+        let mut has = vec!["person"];
+        if self.sources.is_some() {
+            has.push("data-source");
+        }
+        if self.reports.is_some() {
+            has.push("report-store");
+        }
+        has
+    }
 }
 
 /// Spawns the run `run_id` of `plan` on `host`, steered by `controls`.

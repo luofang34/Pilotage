@@ -36,7 +36,10 @@ impl Lane {
             .map_or(wire::MissionExpiryPolicy::Unspecified, |e| e.on_expiry());
         self.expired = true;
         self.changed = true;
-        if policy == wire::MissionExpiryPolicy::ReturnHome {
+        // A plan of operations has no way home: it holds before its next
+        // operation, as for a hold on expiry.
+        let flies = self.proposal.as_ref().is_some_and(compile::Compiled::flies);
+        if policy == wire::MissionExpiryPolicy::ReturnHome && flies {
             return self.recover_home();
         }
         self.detail =

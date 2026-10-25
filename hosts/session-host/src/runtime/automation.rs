@@ -115,6 +115,10 @@ pub struct AutomationStatus {
     pub finished_tasks: Vec<String>,
     /// What the operations of the finished tasks returned, by task.
     pub results: Vec<(String, Vec<pilotage_protocol::wire::MissionValue>)>,
+    /// The tasks whose operation a cancel stopped before its end.
+    pub cancelled_tasks: Vec<String>,
+    /// The tasks whose operation failed.
+    pub failed_tasks: Vec<String>,
     /// The questions the run's operations ask a person now, by task.
     pub questions: Vec<(String, pilotage_protocol::wire::MissionQuestion)>,
     /// The run of a plan of operations ended before its end, for this

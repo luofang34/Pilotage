@@ -357,6 +357,8 @@ fn run_progress(status: &AutomationStatus, finished: bool) -> RunProgress {
         holding: status.holding,
         execution: Some(execution(status)),
         results: status.results.clone(),
+        cancelled_tasks: status.cancelled_tasks.clone(),
+        failed_tasks: status.failed_tasks.clone(),
         questions: status.questions.clone(),
     }
 }
