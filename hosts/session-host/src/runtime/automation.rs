@@ -113,6 +113,13 @@ pub struct AutomationStatus {
     pub active_task: Option<String>,
     /// The tasks the run finished, in order.
     pub finished_tasks: Vec<String>,
+    /// What the operations of the finished tasks returned, by task.
+    pub results: Vec<(String, Vec<pilotage_protocol::wire::MissionValue>)>,
+    /// The questions the run's operations ask a person now, by task.
+    pub questions: Vec<(String, pilotage_protocol::wire::MissionQuestion)>,
+    /// The run of a plan of operations ended before its end, for this
+    /// reason.
+    pub ended_because: Option<&'static str>,
 }
 
 /// Where the plan comes from: a navdata snapshot the route expands
@@ -140,13 +147,15 @@ impl MissionPlan {
         self.config.clone()
     }
 
-    /// The plan of a run a mission lane admitted, over its config.
-    pub(crate) fn of_lane(plan: pilotage_mission::RunPlan, config: MissionConfig) -> Self {
+    /// The flight of a run a mission lane admitted, over its config; none
+    /// for a plan of operations, which the host's executors carry out.
+    pub(crate) fn of_lane(plan: pilotage_mission::RunPlan, config: MissionConfig) -> Option<Self> {
         let source = match plan {
             pilotage_mission::RunPlan::Survey(request) => PlanSource::Survey(request),
             pilotage_mission::RunPlan::Home => PlanSource::Home,
+            pilotage_mission::RunPlan::Operations(_) => return None,
         };
-        Self { source, config }
+        Some(Self { source, config })
     }
 
     /// The config every lane proposal starts from; compilation sets the

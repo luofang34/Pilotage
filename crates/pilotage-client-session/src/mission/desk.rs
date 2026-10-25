@@ -4,7 +4,7 @@
 //! vehicle's lane speak the same messages, so one desk serves both.
 
 use pilotage_protocol::proposal_record::{
-    FEATURE_RETURN_HOME, FEATURE_SURVEY_LINE, FEATURE_TEAM, SealedProposal,
+    FEATURE_OPERATION, FEATURE_RETURN_HOME, FEATURE_SURVEY_LINE, FEATURE_TEAM, SealedProposal,
 };
 use pilotage_protocol::wire;
 use wire::MissionLaneState as Lane;
@@ -12,6 +12,7 @@ use wire::MissionLaneState as Lane;
 use super::{ApprovalPolicy, IntentKind, approved_height_m};
 use crate::{ClientAction, ClientEngine};
 
+mod answer;
 mod resolve;
 
 /// Intents the desk remembers until the lane answers them; an answer to
@@ -19,7 +20,12 @@ mod resolve;
 const TRACKED_INTENTS: usize = 16;
 
 /// The execution features this client can show for review.
-const KNOWN_FEATURES: &[&str] = &[FEATURE_SURVEY_LINE, FEATURE_RETURN_HOME, FEATURE_TEAM];
+const KNOWN_FEATURES: &[&str] = &[
+    FEATURE_SURVEY_LINE,
+    FEATURE_RETURN_HOME,
+    FEATURE_OPERATION,
+    FEATURE_TEAM,
+];
 
 /// The proposal a receipt's record carries, when the record's digest names
 /// its body; the desk keeps nothing it cannot verify.
@@ -63,6 +69,9 @@ pub enum DeskRefusal {
     /// A revision must name exactly one change.
     #[error("a revision names exactly one change: objective, reassign or finish")]
     RevisionShape,
+    /// No task asks the question an answer is for.
+    #[error("no task asks a question this client can answer: {0}")]
+    NoQuestion(String),
 }
 
 /// The lane's answer to one of this client's intents.

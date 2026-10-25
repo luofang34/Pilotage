@@ -225,6 +225,9 @@ impl TeamLane {
             Some(Action::Skip(_)) => {
                 Err("a team skips a task through a revision; draft one instead".to_owned())
             }
+            Some(Action::Answer(_)) => {
+                Err("a team asks no question itself; answer the member lane that asks".to_owned())
+            }
             None => Err("the intent names no action".to_owned()),
         };
         match result {
@@ -375,6 +378,14 @@ impl TeamLane {
     #[must_use]
     pub fn status(&self) -> wire::MissionStatus {
         aggregate::team_status(self)
+    }
+
+    /// The team's survey, when its objective is one.
+    fn survey(&self) -> Option<&wire::SurveyObjective> {
+        match self.objective.as_ref()?.kind.as_ref()? {
+            wire::mission_objective::Kind::Survey(survey) => Some(survey),
+            wire::mission_objective::Kind::Report(_) => None,
+        }
     }
 
     /// The status when it changed since the last call.

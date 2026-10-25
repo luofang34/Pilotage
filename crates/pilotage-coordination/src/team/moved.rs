@@ -50,14 +50,7 @@ impl TeamLane {
         let Some(extra) = self.reflies.get(index).cloned() else {
             return Vec::new();
         };
-        let (Some(sweep), Some(area)) = (
-            self.sweep,
-            self.objective.as_ref().and_then(|o| {
-                o.kind
-                    .as_ref()
-                    .map(|wire::mission_objective::Kind::Survey(s)| s.area.clone())
-            }),
-        ) else {
+        let (Some(sweep), Some(area)) = (self.sweep, self.survey().map(|s| s.area.clone())) else {
             return Vec::new();
         };
         let across = Across::new(&area, sweep.bearing_deg);

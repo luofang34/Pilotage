@@ -242,6 +242,11 @@ pub const WAIT_FOR_PERSON: OperationDescriptor = OperationDescriptor {
             required: true,
         },
         ValueSpec {
+            name: "subject",
+            kind: ValueKind::Text { max_bytes: 1024 },
+            required: false,
+        },
+        ValueSpec {
             name: "timeout_s",
             kind: ValueKind::Integer {
                 min: 1,
@@ -287,6 +292,36 @@ pub const READ_VALUE: OperationDescriptor = OperationDescriptor {
     cancel: CancelSemantics::Immediate,
     idempotent: true,
     status_query: false,
+};
+
+/// The host writes a report of a value. The report of one operation is
+/// written once: a repeat finds it, and the host can tell after a restart
+/// whether it exists. A cancel waits for the write to end.
+pub const WRITE_REPORT: OperationDescriptor = OperationDescriptor {
+    executor: "host",
+    operation: "write-report",
+    version: 1,
+    parameters: &[
+        ValueSpec {
+            name: "title",
+            kind: ValueKind::Text { max_bytes: 512 },
+            required: true,
+        },
+        ValueSpec {
+            name: "value",
+            kind: ValueKind::Text { max_bytes: 1024 },
+            required: true,
+        },
+    ],
+    results: &[ValueSpec {
+        name: "report",
+        kind: ValueKind::Text { max_bytes: 256 },
+        required: true,
+    }],
+    capabilities: &["report-store"],
+    cancel: CancelSemantics::RunsToEnd,
+    idempotent: true,
+    status_query: true,
 };
 
 #[cfg(test)]

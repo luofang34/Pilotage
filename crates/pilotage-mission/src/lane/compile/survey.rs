@@ -163,6 +163,7 @@ fn tasks_of(plan: &SurveyPlan, return_home: bool, proposal_id: &str) -> Vec<wire
                 length_m: distance_m(&path[0], &path[1]),
                 path,
                 member: String::new(),
+                operation: None,
             })
         })
         .collect();
@@ -177,6 +178,7 @@ fn tasks_of(plan: &SurveyPlan, return_home: bool, proposal_id: &str) -> Vec<wire
             length_m: distance_m(&from, &home),
             path: vec![from, home],
             member: String::new(),
+            operation: None,
         });
     }
     tasks

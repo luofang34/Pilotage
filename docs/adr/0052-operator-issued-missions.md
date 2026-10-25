@@ -131,7 +131,27 @@ lane has a lifecycle: `Idle`, `Admitted`, `Running`, `HoldRequested`,
 `HoldRequested`; the lane becomes `Held` only when the vehicle reports that
 it holds in place. An abort keeps each task that did not finish as
 unfinished: the execution of the task in progress becomes `Cancelled`, and
-a pending task stays pending. The environment variables remain a bootstrap source
+a pending task stays pending. An operation that does not stop at once, by
+its registered cancel semantics, keeps its execution until the host reports
+how it ended, because it can still have its effect.
+
+Each kind of objective plans in its own module, and what follows the plan
+is the same for each kind: its approval, its run, its evidence and its
+judgment. A task that is one operation of a host executor names the
+executor, the operation, its version and its parameters (ADR-0041). A
+parameter is a value or a result of an earlier task of the plan. The lane
+refuses a plan when it is proposed if its host does not register each of
+its operations in that version, with parameters of the declared types. The
+status gives the results of each task and the question that an operation
+asks a person. A person answers with the operation's identity and the
+digest of the subject that the person saw, so the lane refuses an answer
+to a subject that changed. The host takes an answer only from a session
+with the approver secret, and it writes who answered. An operation task's
+judgment is met when its execution completed and the result that the plan
+names has its value. A report objective reads a value, asks a person to
+confirm it, and writes a report of it: a person who declines ends the run,
+and the report is not written. The host writes the report of one operation
+once, so a repeat of that operation finds it. The environment variables remain a bootstrap source
 that issues the first plan into an `Idle` lane; an issued plan supersedes
 them.
 

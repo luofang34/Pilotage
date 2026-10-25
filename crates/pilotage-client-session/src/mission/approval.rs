@@ -73,13 +73,13 @@ pub fn approved_height_m(proposal: &wire::MissionProposal, policy: &ApprovalPoli
     if let Some(ceiling) = policy.max_height_m.filter(positive) {
         return Some(ceiling);
     }
-    proposal
-        .objective
-        .as_ref()
-        .and_then(|objective| objective.kind.as_ref())
-        .map(|wire::mission_objective::Kind::Survey(survey)| survey.height_m)
-        .filter(positive)
-        .map(|height| height + policy.height_margin_m)
+    match proposal.objective.as_ref().and_then(|o| o.kind.as_ref())? {
+        wire::mission_objective::Kind::Survey(survey) => Some(survey.height_m)
+            .filter(positive)
+            .map(|height| height + policy.height_margin_m),
+        // A plan that flies nowhere is approved to climb to no height.
+        wire::mission_objective::Kind::Report(_) => Some(0.0),
+    }
 }
 
 /// The approval of `proposal` at `now_ms` under `policy`, for the run

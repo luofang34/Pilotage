@@ -11,6 +11,7 @@ use wire::MissionTaskJudgment as Judgment;
 
 use super::compile::Compiled;
 use super::evidence::{FrameTicket, VerdictRefused};
+use pilotage_mission_core::executor::{CancelSemantics, ExecutorRegistry};
 use task::{EvidenceRule, TaskTrack};
 
 /// The executor's progress, as the host reads it from the mission engine: the tasks it
@@ -31,6 +32,10 @@ pub struct RunProgress {
     pub holding: bool,
     /// What the run does now, when the host knows.
     pub execution: Option<RunExecution>,
+    /// What the operations the run finished returned, by task.
+    pub results: Vec<(String, Vec<wire::MissionValue>)>,
+    /// The questions the run's operations ask a person now, by task.
+    pub questions: Vec<(String, wire::MissionQuestion)>,
 }
 
 /// What a vehicle's run does now, as the host reads it from the run.
@@ -137,7 +142,56 @@ impl RunTracker {
         }
         changed |= active != self.active;
         self.active = active;
+        changed | self.fold_operations(progress)
+    }
+
+    /// Takes the results and the questions of the run's operations, as the
+    /// host reports them. Returns whether a task changed.
+    fn fold_operations(&mut self, progress: &RunProgress) -> bool {
+        let mut changed = false;
+        for task in &mut self.tasks {
+            let id = task.plan.task_id.as_str();
+            if let Some((_, results)) = progress.results.iter().find(|(t, _)| t == id)
+                && task.results != *results
+            {
+                task.results.clone_from(results);
+                changed = true;
+            }
+            let asked = progress
+                .questions
+                .iter()
+                .find(|(t, _)| t == id)
+                .map(|(_, q)| q.clone());
+            if task.question != asked {
+                task.question = asked;
+                changed = true;
+            }
+        }
         changed
+    }
+
+    /// Puts back `question` on the task `index`: an answer took it but did
+    /// not answer it.
+    pub(super) fn ask_again(&mut self, index: usize, question: wire::MissionQuestion) {
+        if let Some(task) = self.tasks.get_mut(index) {
+            task.question = Some(question);
+        }
+    }
+
+    /// Takes the question of the operation `operation_id`, asked now, with
+    /// its task: once answered, it is asked no more until the operation asks
+    /// again.
+    pub(super) fn take_question(
+        &mut self,
+        operation_id: &str,
+    ) -> Option<(usize, wire::MissionQuestion)> {
+        let index = self.tasks.iter().position(|t| {
+            t.question
+                .as_ref()
+                .is_some_and(|q| q.operation_id == operation_id)
+        })?;
+        let question = self.tasks.get_mut(index)?.question.take()?;
+        Some((index, question))
     }
 
     /// The run's task that the core's phase `phase` flies: the phases take the tasks'
@@ -239,6 +293,26 @@ impl RunTracker {
     pub(super) fn close(&mut self, outcome: Execution, now_ms: u64) {
         for task in &mut self.tasks {
             task.end_active(outcome, now_ms);
+        }
+        self.active = None;
+    }
+
+    /// An abort at `now_ms`: the task in progress is cancelled, unless it is
+    /// an operation that `executors` say does not stop at once. That one
+    /// keeps its execution until the host reports how it ended, as it may
+    /// still have its effect.
+    pub(super) fn abort(&mut self, now_ms: u64, executors: &ExecutorRegistry) {
+        for task in &mut self.tasks {
+            let runs_on = task.plan.operation.as_ref().is_some_and(|op| {
+                executors
+                    .operations()
+                    .iter()
+                    .find(|d| d.executor == op.executor && d.operation == op.operation)
+                    .is_none_or(|d| d.cancel != CancelSemantics::Immediate)
+            });
+            if !runs_on {
+                task.end_active(Execution::Cancelled, now_ms);
+            }
         }
         self.active = None;
     }
@@ -350,6 +424,8 @@ pub(super) fn planned_statuses(tasks: &[wire::MissionTaskPlan]) -> Vec<wire::Mis
             path: plan.path.clone(),
             execution: Execution::Pending as i32,
             judgment: Judgment::Undetermined as i32,
+            results: Vec::new(),
+            question: None,
         })
         .collect()
 }

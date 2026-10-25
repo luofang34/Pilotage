@@ -21,6 +21,9 @@ const DOMAIN: &[u8] = b"pilotage.mission-proposal.v1\0";
 pub const FEATURE_SURVEY_LINE: &str = "pilotage.task.survey-line/1";
 /// The execution feature of a return home task.
 pub const FEATURE_RETURN_HOME: &str = "pilotage.task.return-home/1";
+/// The execution feature of a task that is one operation of a host
+/// executor, named with its version in the task.
+pub const FEATURE_OPERATION: &str = "pilotage.task.operation/1";
 /// The execution feature of a team proposal that binds member records.
 pub const FEATURE_TEAM: &str = "pilotage.team-of-lanes/1";
 

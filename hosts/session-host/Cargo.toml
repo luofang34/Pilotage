@@ -41,6 +41,7 @@ aerocontext-core = { workspace = true }
 aerocontext-navdata = { workspace = true }
 chrono = { workspace = true }
 thiserror = { workspace = true }
+sha2 = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "time", "sync", "net", "process", "io-util"] }
 wtransport = { workspace = true, features = ["quinn"] }
 tracing = { workspace = true }

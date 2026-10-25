@@ -56,6 +56,8 @@ impl TaskBook {
                         path: task.path.clone(),
                         execution: Execution::Pending as i32,
                         judgment: Judgment::Undetermined as i32,
+                        results: Vec::new(),
+                        question: None,
                     },
                 );
             }
@@ -330,11 +332,7 @@ pub(super) fn team_status(team: &TeamLane) -> wire::MissionStatus {
         Phase::Failed => wire::MissionLaneState::Failed,
     };
     let proposal = team.proposal.as_ref();
-    let survey = team
-        .objective
-        .as_ref()
-        .and_then(|o| o.kind.as_ref())
-        .map(|wire::mission_objective::Kind::Survey(survey)| survey);
+    let survey = team.survey();
     let active = team
         .book
         .statuses()

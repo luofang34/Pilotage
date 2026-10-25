@@ -297,9 +297,8 @@ impl TeamLane {
             let (Some(across), Some(sweep)) = (self.across(), self.sweep) else {
                 return Vec::new();
             };
-            let area = match self.objective.as_ref().and_then(|o| o.kind.as_ref()) {
-                Some(wire::mission_objective::Kind::Survey(s)) => s.area.clone(),
-                None => return Vec::new(),
+            let Some(area) = self.area() else {
+                return Vec::new();
             };
             let positions: Vec<f64> = kept.iter().filter_map(|p| across.of_path(p)).collect();
             let strip = across.strip(&area, &positions, sweep.footprint_m);

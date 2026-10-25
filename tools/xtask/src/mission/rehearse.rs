@@ -230,5 +230,6 @@ fn vehicle(name: &str, airframe: Airframe) -> Lane {
         recovery_policy: "hold".to_owned(),
         judged: false,
         evidence_window_ms: 0,
+        executors: pilotage_mission::executor::ExecutorRegistry::NONE,
     })
 }

@@ -3,6 +3,7 @@
 //! own module; what follows the plan, its approval, run and evidence, is the
 //! same for every kind.
 
+mod report;
 mod survey;
 
 pub use survey::SurveyDefaults;
@@ -12,7 +13,7 @@ use pilotage_protocol::wire;
 use super::{LaneConfig, RunPlan};
 use crate::config::MissionConfig;
 use pilotage_protocol::proposal_record::{
-    FEATURE_RETURN_HOME, FEATURE_SURVEY_LINE, SealedProposal,
+    FEATURE_OPERATION, FEATURE_RETURN_HOME, FEATURE_SURVEY_LINE, SealedProposal,
 };
 
 /// A compiled proposal and what executes it.
@@ -38,7 +39,10 @@ pub(super) fn compile(
         Some(wire::mission_objective::Kind::Survey(survey)) => {
             survey::compile(objective, survey, lane, proposal_id)
         }
-        None => Err("the objective names no kind; this lane plans surveys".to_owned()),
+        Some(wire::mission_objective::Kind::Report(report)) => {
+            report::compile(objective, report, lane, proposal_id)
+        }
+        None => Err("the objective names no kind".to_owned()),
     }
 }
 
@@ -63,6 +67,7 @@ pub(super) fn home(base: &Compiled, proposal_id: String) -> Compiled {
             length_m: 0.0,
             member: String::new(),
             name: "home".to_owned(),
+            operation: None,
         }],
         estimates: Some(wire::MissionEstimates::default()),
         assumptions: base.proposal.assumptions.clone(),
@@ -104,6 +109,7 @@ pub(super) fn seal(
     for (kind, feature) in [
         (wire::MissionTaskKind::SurveyLine, FEATURE_SURVEY_LINE),
         (wire::MissionTaskKind::ReturnHome, FEATURE_RETURN_HOME),
+        (wire::MissionTaskKind::Operation, FEATURE_OPERATION),
     ] {
         if proposal.tasks.iter().any(|t| t.kind == kind as i32) {
             requires.push(feature.to_owned());

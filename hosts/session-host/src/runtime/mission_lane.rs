@@ -14,7 +14,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use pilotage_adapter_api::RawVideoFrame;
 use pilotage_mission::{
     FrameAssessment, IntentContext, Lane, LaneEffect, MissionState, Requester, RunExecution,
-    RunProgress, Steering,
+    RunPlan, RunProgress, Steering,
 };
 use pilotage_protocol::wire;
 use pilotage_session::ClientKey;
@@ -25,6 +25,7 @@ use tracing::{info, warn};
 
 use super::automation::{self, AutomationStatus, MissionPlan, RunControl};
 use super::engine_actor::ToEngine;
+use super::operations::{self, OperationHost};
 
 pub(crate) use config::LaneRuntimeConfig;
 pub(crate) use frame_tap::tap;
@@ -99,6 +100,8 @@ struct LaneTask {
     judge: Option<judge::Judge>,
     last_publish: Option<Instant>,
     steering: Steering,
+    /// Where the runs of plans of operations read and write.
+    operations: OperationHost,
 }
 
 impl LaneTask {
@@ -116,6 +119,7 @@ impl LaneTask {
             ids: 0,
             last_publish: None,
             steering: Steering::default(),
+            operations: config.operations,
         }
     }
 
@@ -219,15 +223,28 @@ impl LaneTask {
                 self.runs = self.runs.wrapping_add(1);
                 let client = ClientKey::new(RUN_CLIENT_BASE.wrapping_sub(self.runs));
                 let (controls, receiver) = mpsc::channel(4);
-                let plan = MissionPlan::of_lane(order.plan, order.config);
-                let (handle, status) = automation::spawn_mission_run(
-                    &self.engine,
-                    self.start,
-                    plan,
-                    self.planar_pose_is_truth,
-                    client,
-                    Some(receiver),
-                );
+                let order = *order;
+                let (handle, status) = match order.plan {
+                    RunPlan::Operations(plan) => operations::spawn_operation_run(
+                        order.run_id.clone(),
+                        plan,
+                        self.operations.clone(),
+                        receiver,
+                    ),
+                    plan => {
+                        let Some(plan) = MissionPlan::of_lane(plan, order.config) else {
+                            return;
+                        };
+                        automation::spawn_mission_run(
+                            &self.engine,
+                            self.start,
+                            plan,
+                            self.planar_pose_is_truth,
+                            client,
+                            Some(receiver),
+                        )
+                    }
+                };
                 info!(run = %order.run_id, "mission run started");
                 self.run = Some(ActiveRun {
                     handle,
@@ -240,6 +257,7 @@ impl LaneTask {
             LaneEffect::Hold => RunControl::Hold,
             LaneEffect::Resume => RunControl::Resume,
             LaneEffect::Abort => RunControl::Abort,
+            LaneEffect::Answer(answer) => RunControl::Answer(answer),
         };
         if let Some(run) = self.run.as_ref() {
             run.controls.send(control).await.ok();
@@ -333,10 +351,13 @@ fn run_progress(status: &AutomationStatus, finished: bool) -> RunProgress {
             || status.fenced
             || status.closed
             || status.ended_by_vehicle.is_some()
+            || status.ended_because.is_some()
             || status.mission_state == Some(MissionState::Failed),
-        ended_because: status.ended_by_vehicle,
+        ended_because: status.ended_by_vehicle.or(status.ended_because),
         holding: status.holding,
         execution: Some(execution(status)),
+        results: status.results.clone(),
+        questions: status.questions.clone(),
     }
 }
 

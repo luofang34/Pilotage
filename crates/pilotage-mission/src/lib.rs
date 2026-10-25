@@ -32,10 +32,11 @@ pub use engine::{
 pub use error::MissionBuildError;
 pub use lane::{
     Approvable, ApprovalTarget, FrameAssessment, FrameTicket, HOST_ISSUER, IntentContext, Lane,
-    LaneConfig, LaneEffect, LaneReply, Requester, RunExecution, RunOrder, RunPlan, RunProgress,
-    Steering, SurveyDefaults, VerdictRefused, approval_target,
+    LaneConfig, LaneEffect, LaneReply, OperationAnswer, PlannedOperation, Requester, RunExecution,
+    RunOrder, RunPlan, RunProgress, Steering, SurveyDefaults, VerdictRefused, approval_target,
 };
 pub use ownship::{OwnshipAltitude, OwnshipSample, TruthRole};
 pub use pilotage_mission_core::ExecutionTarget;
+pub use pilotage_mission_core::executor;
 pub use provenance::{MissionPlanRecord, SnapshotProvenance, decode_snapshot};
 pub use survey::{SurveyError, SurveyPlan, SurveyPlanRecord, SurveyRequest, plan_survey};
