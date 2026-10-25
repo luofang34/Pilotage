@@ -3,6 +3,7 @@
 //! own module; what follows the plan, its approval, run and evidence, is the
 //! same for every kind.
 
+mod operations;
 mod report;
 mod survey;
 
