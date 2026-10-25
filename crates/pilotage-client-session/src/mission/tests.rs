@@ -388,4 +388,35 @@ fn an_expired_approval_offers_a_renewal_of_the_run_and_no_resume() {
     assert!(offered.resume && offered.approve.is_none());
 }
 
+#[test]
+fn a_survey_over_a_named_area_names_its_identity_and_revision() {
+    let text = r#"{"title": "t", "area": [[40.0, -74.0], [40.0, -73.9], [40.1, -73.9]],
+        "launch": [40.0, -74.0, 0.0],
+        "area_ref": {"id": "graphic-7", "revision": 3, "source": "drawn on the map"}}"#;
+    let file = SurveyFile::parse(text).unwrap();
+    let objective = file.objective("test", 1);
+    let Some(wire::mission_objective::Kind::Survey(survey)) = objective.kind else {
+        panic!("a survey");
+    };
+    let named = survey.area_ref.expect("the area's identity");
+    assert_eq!((named.area_id.as_str(), named.revision), ("graphic-7", 3));
+    let derived = super::Area::derived("Nassau Street", "the map's labels", vec![]);
+    assert_eq!(derived.identity.id, "derived:Nassau Street");
+    assert!(derived.identity.derived, "its vertices are all it is");
+}
+
+#[test]
+fn a_survey_planned_over_an_area_takes_its_vertices_and_identity_together() {
+    let mut file = survey();
+    let ring = vec![[40.0, -74.0], [40.0, -73.9], [40.1, -73.9]];
+    file.plan_over(super::Area::drawn("graphic-7", 3, "drawn", ring.clone()));
+    assert_eq!(file.area, ring);
+    assert_eq!(file.area_ref.as_deref().map(|r| r.revision), Some(3));
+    let text = serde_json::to_string(&survey()).unwrap();
+    assert!(
+        !text.contains("area_ref"),
+        "an area with no identity writes none"
+    );
+}
+
 mod operations;

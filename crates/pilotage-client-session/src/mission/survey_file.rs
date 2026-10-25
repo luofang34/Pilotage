@@ -45,9 +45,71 @@ pub struct SurveyFile {
     /// the objective.
     #[serde(default)]
     pub hold_height: bool,
+    /// The area's identity and revision, when it is a named object; boxed so
+    /// that the commands that carry a survey file stay small.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub area_ref: Option<Box<AreaRef>>,
+}
+
+/// The identity and the revision of an area, and what it was found as.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AreaRef {
+    /// The area's identity, stable across its revisions.
+    pub id: String,
+    /// The revision of the area object, as its editor counts them.
+    #[serde(default)]
+    pub revision: u64,
+    /// What the area was found as, for display.
+    #[serde(default)]
+    pub source: String,
+    /// The area has no identity of its own: its vertices are all it is.
+    #[serde(default)]
+    pub derived: bool,
+}
+
+/// An area as the operator's tools find it: its identity, its revision and
+/// its geometry, one object for every client that plans over it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Area {
+    /// The area's identity and revision.
+    pub identity: AreaRef,
+    /// The area, latitude and longitude in degrees, in order around it.
+    pub ring: Vec<[f64; 2]>,
+}
+
+impl Area {
+    /// An area drawn as the object `id` in its `revision`.
+    #[must_use]
+    pub fn drawn(id: &str, revision: u64, source: &str, ring: Vec<[f64; 2]>) -> Self {
+        Self {
+            identity: AreaRef {
+                id: id.to_owned(),
+                revision,
+                source: source.to_owned(),
+                derived: false,
+            },
+            ring,
+        }
+    }
+
+    /// An area derived from the place `name`, such as labels on a map: it
+    /// has no identity of its own, so its vertices are all it is.
+    #[must_use]
+    pub fn derived(name: &str, source: &str, ring: Vec<[f64; 2]>) -> Self {
+        let mut area = Self::drawn(&format!("derived:{name}"), 0, source, ring);
+        area.identity.derived = true;
+        area
+    }
 }
 
 impl SurveyFile {
+    /// Plans over `area`: its vertices and, for a named area, its identity.
+    pub fn plan_over(&mut self, area: Area) {
+        self.area = area.ring;
+        self.area_ref = (!area.identity.id.is_empty()).then(|| Box::new(area.identity));
+    }
+
     /// The objective `text` holds.
     ///
     /// # Errors
@@ -89,6 +151,16 @@ impl SurveyFile {
                     min_usable_frames_per_line: self.min_usable_frames_per_line,
                     line_bearing_deg: self.line_bearing_deg,
                     hold_height: self.hold_height,
+                    area_ref: self
+                        .area_ref
+                        .as_ref()
+                        .filter(|r| !r.id.is_empty())
+                        .map(|r| wire::MissionAreaRef {
+                            area_id: r.id.clone(),
+                            revision: r.revision,
+                            source: r.source.clone(),
+                            derived: r.derived,
+                        }),
                 },
             )),
             delegated_by: String::new(),

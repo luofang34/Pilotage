@@ -77,6 +77,8 @@ impl TeamLane {
             sidelap: sidelap_for(team_step(&survey.area, &sweep), sweep.footprint_m),
             line_bearing_deg: Some(sweep.bearing_deg),
             return_to_launch: true,
+            // A member's strip is part of the area, not the area.
+            area_ref: None,
             ..survey.clone()
         });
         let mut intents = Vec::new();

@@ -463,6 +463,7 @@ fn an_idle_team_of_simulated_members_reports_simulated() {
 
 mod abort;
 mod admission;
+mod area;
 mod authorize;
 mod handover;
 mod hold;

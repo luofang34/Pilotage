@@ -53,6 +53,24 @@ message SurveyObjective {
   // changes the objective. Without it, the height is part of the plan, and
   // only the envelope's `max_height_m` bounds it.
   bool hold_height = 11;
+  // The area's identity and revision, when it is a named object, such as an
+  // area drawn on a map. Another identity is another area, even with the
+  // same vertices.
+  MissionAreaRef area_ref = 12;
+}
+
+// The identity and the revision of an area, and what it was found as.
+message MissionAreaRef {
+  string area_id = 1;
+  // The revision of the area object as its editor counts them, for display
+  // and to tell an older copy; the vertices tell whether the area changed.
+  uint64 revision = 2;
+  // What the area was found as, for display, such as "drawn on the map".
+  string source = 3;
+  // The area has no identity of its own, such as one found from labels:
+  // its vertices are all it is. A client sets it for such an area; without
+  // it, the area counts as named.
+  bool derived = 4;
 }
 
 // What the operator wants. A route is one way to satisfy it.

@@ -33,7 +33,17 @@ pub fn classify(before: &wire::MissionObjective, after: &wire::MissionObjective)
 
 fn surveys(before: &wire::SurveyObjective, after: &wire::SurveyObjective, set: &mut ChangeSet) {
     use ChangeClass::{Objective, Plan};
-    if before.area != after.area {
+    // A named area of another identity is another area, even with the same
+    // vertices; whether it changed is what its vertices say. An area with no
+    // identity of its own is its vertices, and a ref's revision and display
+    // text are no content.
+    let named = |s: &wire::SurveyObjective| {
+        s.area_ref
+            .as_ref()
+            .filter(|r| !r.derived && !r.area_id.is_empty())
+            .map(|r| r.area_id.clone())
+    };
+    if before.area != after.area || named(before) != named(after) {
         set.add(Objective, "the area");
     }
     if before.return_to_launch != after.return_to_launch {
@@ -67,3 +77,6 @@ fn surveys(before: &wire::SurveyObjective, after: &wire::SurveyObjective, set: &
         set.add(Plan, "the launch point");
     }
 }
+
+#[cfg(test)]
+mod tests;
