@@ -1,6 +1,6 @@
 //! What stays in force around a team revision: a withdrawn revision gives
-//! back the approval it replaced, and an applied one makes its objective
-//! the team's.
+//! back the approval it replaced, an applied one makes its
+//! objective the team's, and an approval admits a draft's own height.
 
 use pilotage_protocol::wire;
 use wire::mission_intent::Action;
@@ -295,6 +295,69 @@ fn moved_lines_that_wait_fly_over_the_planned_area() {
 fn handover_moved(fleet: &Fleet) -> usize {
     let handover = fleet.team.status().handovers.pop().expect("a handover");
     handover.task_ids.len()
+}
+
+#[test]
+fn an_approval_admits_the_drafts_own_height() {
+    let (mut fleet, _) = running_fleet(true);
+    // The draft keeps the team's height within its tolerance, a little above.
+    let higher = strip_objective(&fleet, None, 3, 0.4);
+    let action = revise_objective(&fleet, higher, false);
+    let (receipt, _) = team_intent(&mut fleet, action);
+    let receipt = receipt.expect("answered");
+    assert!(accepted(&receipt), "{}", receipt.reason);
+    let draft = opened(&receipt).expect("the draft");
+    let mut at_the_plan = approval(&draft.digest, 0);
+    if let Some(envelope) = at_the_plan.envelope.as_mut() {
+        envelope.max_height_m = defaults().height_m;
+    }
+    let (receipt, intents) = team_intent(&mut fleet, Action::Approve(at_the_plan));
+    let receipt = receipt.expect("answered");
+    assert!(!accepted(&receipt));
+    assert!(
+        receipt.reason.contains("the revision flies"),
+        "{}",
+        receipt.reason
+    );
+    assert!(intents.is_empty());
+    assert_eq!(
+        successor_state(&fleet),
+        Some(wire::MissionSuccessorState::Drafted as i32)
+    );
+}
+
+#[test]
+fn inside_the_envelope_a_draft_applies_only_at_a_height_it_allows() {
+    // The team's approval permits the objective change, at the team's height.
+    let (mut fleet, _) = super::revision::running_fleet_with(|envelope| {
+        envelope.permit_change_objective = true;
+        envelope.max_height_m = defaults().height_m;
+    });
+    let higher = strip_objective(&fleet, None, 3, 0.4);
+    let action = revise_objective(&fleet, higher, true);
+    let (receipt, intents) = team_intent(&mut fleet, action);
+    let receipt = receipt.expect("answered");
+    assert!(accepted(&receipt), "{}", receipt.reason);
+    assert!(intents.is_empty(), "nothing applies: {intents:?}");
+    let detail = fleet.team.status().detail;
+    assert!(detail.contains("the revision flies"), "{detail}");
+}
+
+#[test]
+fn a_running_team_refuses_a_revision_at_another_height() {
+    let (mut fleet, _) = running_fleet(true);
+    let higher = strip_objective(&fleet, None, 3, 20.0);
+    let action = revise_objective(&fleet, higher, false);
+    let (receipt, intents) = team_intent(&mut fleet, action);
+    let receipt = receipt.expect("answered");
+    assert!(!accepted(&receipt));
+    assert!(
+        receipt.reason.contains("keeps its height"),
+        "{}",
+        receipt.reason
+    );
+    assert!(intents.is_empty());
+    assert_eq!(successor_state(&fleet), None);
 }
 
 #[test]

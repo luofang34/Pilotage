@@ -179,6 +179,29 @@ impl TeamLane {
         ))
     }
 
+    /// The drafted revision's own height against `envelope`, as an
+    /// approval of the draft admits the height it flies, not the plan's.
+    pub(in crate::team) fn drafted_within_height(
+        &self,
+        envelope: &wire::AdaptationEnvelope,
+    ) -> Result<(), String> {
+        let height = self
+            .revision
+            .as_ref()
+            .and_then(|r| r.objective.as_ref())
+            .and_then(|o| match o.kind.as_ref()? {
+                wire::mission_objective::Kind::Survey(survey) => Some(survey.height_m),
+                wire::mission_objective::Kind::Report(_) => None,
+            });
+        match height {
+            Some(height) if height > envelope.max_height_m + 1e-6 => Err(format!(
+                "the revision flies at {height:.1} m; the envelope allows {:.1} m",
+                envelope.max_height_m
+            )),
+            _ => Ok(()),
+        }
+    }
+
     pub(super) fn running(&self, member: &str) -> bool {
         self.statuses.get(member).is_some_and(|s| {
             matches!(
