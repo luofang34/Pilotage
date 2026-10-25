@@ -109,6 +109,7 @@ impl TeamLane {
             previous_digest: Vec::new(),
             title,
             kind: Some(wire::mission_objective::Kind::Survey(survey)),
+            delegated_by: self.config.name.clone(),
         })
     }
 

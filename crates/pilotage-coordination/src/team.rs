@@ -3,6 +3,7 @@
 
 mod aggregate;
 mod budget;
+mod fetch;
 mod handover;
 mod intents;
 mod members;

@@ -41,6 +41,8 @@ pub(super) struct Revision {
     /// The draft as it travels.
     pub record: wire::MissionProposalRecord,
     pub drafted_by: String,
+    /// The parent team whose revision this is the team's share of.
+    pub share_of: String,
 }
 
 type Drafted = Result<(wire::MissionProposalRecord, Vec<MemberIntent>), String>;
@@ -91,6 +93,7 @@ impl TeamLane {
                 .as_ref()
                 .map(|o| o.subject.clone())
                 .unwrap_or_default(),
+            share_of: revise.share_of.clone(),
         });
         self.detail = "revision drafted; waiting for review".to_owned();
         if !revise.within_envelope {
@@ -316,6 +319,7 @@ impl TeamLane {
             within_envelope: false,
             drafted_by: None,
             release,
+            share_of: self.config.name.clone(),
             change: Some(change),
         };
         vec![self.request_revision(
@@ -438,31 +442,6 @@ impl TeamLane {
         }
         self.lost.remove(member);
         true
-    }
-
-    /// Answers a fetch with the full proposal `digest` names: the team
-    /// plan, or a drafted revision; an empty digest names the plan.
-    pub(super) fn on_fetch(&self, id: String, digest: &[u8]) -> super::TeamReply {
-        let plan = self.proposal_record.as_ref();
-        let revision = self.revision.as_ref().map(|r| &r.record);
-        let found = [plan, revision]
-            .into_iter()
-            .flatten()
-            .find(|r| digest.is_empty() || r.digest == digest)
-            .cloned();
-        let receipt = match found {
-            Some(proposal) => self.receipt(id, true, String::new(), Some(proposal)),
-            None => self.receipt(
-                id,
-                false,
-                "the team holds no proposal with that digest".to_owned(),
-                None,
-            ),
-        };
-        super::TeamReply {
-            receipt: Some(receipt),
-            intents: Vec::new(),
-        }
     }
 
     /// Whether a person stated `member` down, whether or not its work moved.

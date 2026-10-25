@@ -426,6 +426,7 @@ impl MissionDesk {
             within_envelope,
             drafted_by: None,
             release: None,
+            share_of: String::new(),
             change: Some(change),
         }))
     }

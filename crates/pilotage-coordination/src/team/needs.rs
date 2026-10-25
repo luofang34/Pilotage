@@ -21,11 +21,17 @@ impl TeamLane {
             .map(|a| a.delegated_by.clone())
             .unwrap_or_default();
         if self.phase == Phase::Proposed {
+            // A parent team that made the objective for this team approves its plan.
+            let owed = self
+                .objective
+                .as_ref()
+                .map(|o| o.delegated_by.clone())
+                .unwrap_or_default();
             needs.push(need(
                 Target::Plan,
                 &plan.digest,
                 String::new(),
-                String::new(),
+                owed,
                 "the team plan waits for its approval",
             ));
         }
@@ -33,14 +39,11 @@ impl TeamLane {
             .revision
             .as_ref()
             .filter(|r| r.stage == wire::MissionSuccessorState::Drafted)
+            .filter(|_| matches!(self.phase, Phase::Running | Phase::Held))
         {
-            let granted_by = self
-                .approval
-                .as_ref()
-                .and_then(|a| a.approver.as_ref())
-                .map(|o| o.subject.as_str());
-            let owed = if granted_by == Some(revision.drafted_by.as_str()) {
-                delegated_by.clone()
+            // The parent team that granted the approval in force approves its own share.
+            let owed = if !revision.share_of.is_empty() && revision.share_of == delegated_by {
+                revision.share_of.clone()
             } else {
                 String::new()
             };

@@ -68,6 +68,10 @@ message MissionObjective {
   oneof kind {
     SurveyObjective survey = 10;
   }
+  // The team lane that made this objective from its own for one member;
+  // the team owes the approval of the plan it compiles to. The host takes
+  // it only from a session with the approver secret.
+  string delegated_by = 11;
 }
 
 enum MissionTaskKind {
@@ -259,6 +263,10 @@ message MissionRevise {
   // member gets the work. When the revision applies, the member's status
   // reports the release in `released`.
   WorkRelease release = 5;
+  // The team lane whose revision this is a member's share of; that team
+  // owes its approval when it granted the approval in force. The host
+  // takes it only from a session with the approver secret.
+  string share_of = 6;
   oneof change {
     // A new revision of the objective. A vehicle lane flies it from the
     // checkpoint; a team takes only a strip on its own line grid.

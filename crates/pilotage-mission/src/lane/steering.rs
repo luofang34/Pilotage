@@ -58,6 +58,22 @@ impl Steering {
                 });
                 Ok(())
             }
+            Some(Action::Revise(revise))
+                if !revise.share_of.is_empty() && !requester.may_approve =>
+            {
+                Err(format!(
+                    "{} may not draft a team's share: it needs the approver secret",
+                    requester.subject
+                ))
+            }
+            Some(Action::Propose(objective))
+                if !objective.delegated_by.is_empty() && !requester.may_approve =>
+            {
+                Err(format!(
+                    "{} may not propose for a team: it needs the approver secret",
+                    requester.subject
+                ))
+            }
             Some(Action::Revise(revise)) => {
                 // Anyone may draft; the record names the session that did.
                 revise.drafted_by = Some(wire::RecordOrigin {
