@@ -46,6 +46,14 @@ fn lines_of(status: &wire::MissionStatus, state: wire::MissionTaskState) -> usiz
 /// A team proposed, approved under `permit_allocate` or not, started,
 /// and every member on its line 1; the number of lines planned.
 pub(super) fn running_fleet(permit_allocate: bool) -> (Fleet, usize) {
+    running_fleet_with(|envelope| envelope.permit_allocate = permit_allocate)
+}
+
+/// A team proposed, approved under the envelope `edit` sets, started, and
+/// every member on its line 1; the number of lines planned.
+pub(super) fn running_fleet_with(
+    edit: impl FnOnce(&mut wire::AdaptationEnvelope),
+) -> (Fleet, usize) {
     let mut fleet = Fleet::new();
     let reply = fleet.team.on_intent(
         &wire::MissionIntent {
@@ -66,7 +74,7 @@ pub(super) fn running_fleet(permit_allocate: bool) -> (Fleet, usize) {
         .count();
     let mut team_approval = approval(&proposal.digest, 2);
     if let Some(envelope) = team_approval.envelope.as_mut() {
-        envelope.permit_allocate = permit_allocate;
+        edit(envelope);
     }
     fleet.approve_and_start(team_approval);
     on_line_one(&mut fleet);
