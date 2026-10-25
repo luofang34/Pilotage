@@ -416,7 +416,11 @@ member gets nothing, and the work and its space stay with the giving
 member. The team does not use a changed run or a shorter list of tasks as
 a release. A moved task that the giving member began before the revision
 applied is not in the release, and it stays with that member. Without a
-release fact, the handover stays open and the status shows it. Nothing is
+release fact, the handover stays open and the status shows it. A team
+that is a member of another team does not make a release fact from
+its members' facts. It refuses a revision that asks for a release before
+it changes anything, and its parent withdraws the handover. A node does
+what an operation asks, or it refuses the operation. Nothing is
 assumed at a time-out. When the giving member refuses its revision, the
 handover is withdrawn and that member keeps the work. When the receiving
 member refuses the released work, or a person states it down before it
