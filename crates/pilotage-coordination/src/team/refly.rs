@@ -76,17 +76,29 @@ impl TeamLane {
     /// Decides re-flights from the settled verdicts and starts the extra
     /// flights of members that are free to fly them.
     pub(super) fn adapt(&mut self, context: &IntentContext) -> Vec<MemberIntent> {
-        if !matches!(self.phase, Phase::Running) {
+        if !matches!(self.phase, Phase::Running | Phase::Settling) {
             return Vec::new();
         }
-        self.decide_reflights();
-        self.dispatch(context)
+        self.decide_reflights(context.now_unix_ms);
+        let intents = self.dispatch(context);
+        if !intents.is_empty() {
+            // A late judgment sent a member to fly again.
+            self.phase = Phase::Running;
+        }
+        intents
     }
 
     /// Queues a re-flight for each settled line without enough usable
     /// pictures, while the envelope allows another.
-    fn decide_reflights(&mut self) {
-        let Some(envelope) = self.approval.as_ref().and_then(|a| a.envelope.clone()) else {
+    fn decide_reflights(&mut self, now_unix_ms: u64) {
+        // Bad evidence is recorded whatever the approval; only an approval
+        // valid now flies a line again.
+        let Some(envelope) = self
+            .approval
+            .as_ref()
+            .and_then(|a| pilotage_mission::valid_approval(a, now_unix_ms).ok())
+            .cloned()
+        else {
             return;
         };
         if !envelope.permit_revise {
@@ -144,9 +156,7 @@ impl TeamLane {
 
     /// The member completed its plan and has no extra flight.
     fn idle(&self, member: &str) -> bool {
-        self.statuses
-            .get(member)
-            .is_some_and(|s| s.state == wire::MissionLaneState::Complete as i32)
+        self.statuses.get(member).is_some_and(free)
             && !self
                 .reflies
                 .iter()
@@ -168,10 +178,7 @@ impl TeamLane {
         let mut intents = Vec::new();
         let members: Vec<String> = self.member_proposals.keys().cloned().collect();
         for member in members {
-            let complete = self
-                .statuses
-                .get(&member)
-                .is_some_and(|s| s.state == wire::MissionLaneState::Complete as i32);
+            let complete = self.statuses.get(&member).is_some_and(free);
             let busy = self
                 .reflies
                 .iter()
@@ -394,57 +401,20 @@ impl TeamLane {
             wire::mission_intent::Action::Approve(approval),
         )]
     }
+}
 
-    /// Follows a flying re-flight in its member's status; when it ends, the
-    /// original line takes the re-flight's verdict.
-    pub(super) fn refly_progress(&mut self, member: &str, status: &wire::MissionStatus) {
-        let Some(refly) = self.reflies.iter_mut().find(|r| {
-            r.member == member && matches!(r.state, ReflyState::Flying | ReflyState::Uncertain)
-        }) else {
-            return;
-        };
-        // The first run after the start is this flight, whatever state its
-        // first report shows; a member that has no earlier run starts fresh.
-        let later_run = match refly.prior_run.as_deref() {
-            Some(prior) => status.run_id != prior,
-            None => status.state == wire::MissionLaneState::Running as i32,
-        };
-        if refly.run_id.is_none() && !status.run_id.is_empty() && later_run {
-            refly.run_id = Some(status.run_id.clone());
-            if !refly.moved.is_empty() {
-                // Moved lines are new work: the book follows their run.
-                self.book.adopt(member, &status.run_id);
-                self.book.record(status, &[]);
-            }
-        }
-        if refly.run_id.as_deref() != Some(status.run_id.as_str()) {
-            return;
-        }
-        let line_status = status
-            .tasks
-            .iter()
-            .find(|t| t.kind == wire::MissionTaskKind::SurveyLine as i32);
-        let moved = !refly.moved.is_empty();
-        let assignment = refly.assignment.clone();
-        if status.state == wire::MissionLaneState::Complete as i32 {
-            refly.state = ReflyState::Done;
-            if let (Some(line_status), false) = (line_status, moved) {
-                self.book
-                    .apply_refly(&refly.owner, &refly.line, line_status);
-            }
-            if let Some(assignment) = assignment.as_deref() {
-                self.moved_flight_ended(assignment, true);
-            }
-        } else if matches!(
-            wire::MissionLaneState::try_from(status.state),
-            Ok(wire::MissionLaneState::Failed | wire::MissionLaneState::Aborted)
-        ) {
-            refly.state = ReflyState::Failed;
-            if let Some(assignment) = assignment.as_deref() {
-                self.moved_flight_ended(assignment, false);
-            }
-        }
-    }
+/// Whether a member that reports `status` may take another flight: its
+/// run is complete and no line of it still takes evidence. A new flight
+/// starts with a new proposal, which ends the member's run, and the answers
+/// still due to that run would be lost.
+fn free(status: &wire::MissionStatus) -> bool {
+    status.state == wire::MissionLaneState::Complete as i32
+        && !status.tasks.iter().any(|t| {
+            super::aggregate::ended(t)
+                && t.evidence
+                    .as_ref()
+                    .is_some_and(|e| e.collection == wire::MissionEvidenceCollection::Open as i32)
+        })
 }
 
 /// A box around `band` and `launch`, widened by a margin: the bound a

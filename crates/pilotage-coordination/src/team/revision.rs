@@ -411,6 +411,11 @@ impl TeamLane {
                     status.detail = "down, as a person stated; its work may move".to_owned();
                 }
                 self.detail = format!("{member} is down; reassign its lines to another member");
+                if self.phase == Phase::Settling {
+                    // Its open evidence no longer keeps the team waiting,
+                    // and no other member may report again to end it.
+                    self.settle();
+                }
                 Ok((Vec::new(), false))
             }
         }

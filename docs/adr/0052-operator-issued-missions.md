@@ -287,6 +287,18 @@ flight that the team pays for, a re-flight or moved lines, goes down with
 no budget, so no part is spent two times. The parts never add up to more
 than the approval of the team allows.
 
+The end of the runs of a team and the settlement of its results are
+different facts. When every member's run ended and the evidence of a line
+is still open, the team waits for its results. It shows the state
+`AWAITING_RESULTS`. A judgment that comes inside the evidence window gets
+the same decision as a judgment that came before the runs ended: the
+team flies the line again when the judgment is not met, the budget
+allows, and the approval is valid at that time. When the approval is not
+valid, the team records the judgment and flies nothing. After an abort,
+the team records results and starts no work. The team ends only when no
+evidence of its lines is open. Evidence of a member that a person stated
+down does not keep the team open.
+
 Bounds copied into a plan grant nothing. The lane verifies a plan against
 the issuer's grant at admission and again during execution. A delegation
 that must hold without a connection has an expiry and a preauthorized
