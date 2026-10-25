@@ -75,6 +75,7 @@ pub(crate) async fn spawn(
         ids: 0,
         last_publish: None,
         steering: Steering::default(),
+        start: Instant::now(),
     };
     tokio::spawn(async move {
         task.run(inbound, events).await;
@@ -95,6 +96,8 @@ struct TeamTask {
     ids: u64,
     last_publish: Option<Instant>,
     steering: Steering,
+    /// When the task started, for the team's monotonic clock.
+    start: Instant,
 }
 
 impl TeamTask {
@@ -118,8 +121,8 @@ impl TeamTask {
                     None => break,
                 },
                 _ = ticker.tick() => {
-                    let now_unix_ms = self.context().now_unix_ms;
-                    self.lane.on_host_clock(now_unix_ms);
+                    let host_ms = self.host_ms();
+                    self.lane.on_host_clock(host_ms);
                     self.retry().await;
                 }
             }
@@ -140,6 +143,10 @@ impl TeamTask {
         requester: &Requester,
         intent: &mut wire::MissionIntent,
     ) {
+        // An operation the intent opens starts at the host's time now, not
+        // at the last tick.
+        let host_ms = self.host_ms();
+        self.lane.on_host_clock(host_ms);
         if let Err(reason) = self.steering.admit(intent, requester) {
             info!(request = %intent.request_id, %reason, "team intent refused");
             let receipt = Steering::refusal(intent, &self.lane.status().lane, reason);
@@ -321,6 +328,11 @@ impl TeamTask {
             })
             .await
             .is_ok()
+    }
+
+    /// Milliseconds since the task started, on the host's monotonic clock.
+    fn host_ms(&self) -> u64 {
+        u64::try_from(self.start.elapsed().as_millis()).unwrap_or(u64::MAX)
     }
 
     fn context(&mut self) -> IntentContext {

@@ -159,9 +159,9 @@ fn an_answer_lost_with_the_link_makes_the_receipt_uncertain_and_a_late_one_answe
 fn a_timeout_ends_the_wait_uncertain_and_a_late_answer_answers_nobody() {
     let (mut fleet, _) = running_fleet(false);
     let reply = renew(&mut fleet, "renew");
-    fleet.team.on_host_clock(NOW + 29_000);
+    fleet.team.on_host_clock(29_000);
     assert!(fleet.team.take_ended().is_empty(), "not yet");
-    fleet.team.on_host_clock(NOW + 30_000);
+    fleet.team.on_host_clock(30_000);
     let ended = fleet.team.take_ended();
     assert_eq!(ended.len(), 1, "{ended:?}");
     assert_eq!(outcome(&ended[0]), wire::MissionReceiptOutcome::Uncertain);
@@ -175,7 +175,7 @@ fn a_timeout_ends_the_wait_uncertain_and_a_late_answer_answers_nobody() {
         decided.is_empty(),
         "late answers answer nobody: {decided:?}"
     );
-    fleet.team.on_host_clock(NOW + 90_000);
+    fleet.team.on_host_clock(90_000);
     assert!(fleet.team.take_ended().is_empty(), "ended once");
 }
 
@@ -254,7 +254,7 @@ fn an_approval_whose_answer_is_lost_does_not_keep_the_team_waiting() {
         &context("approve"),
     );
     assert!(reply.receipt.is_none() && !reply.intents.is_empty());
-    fleet.team.on_host_clock(NOW + 30_000);
+    fleet.team.on_host_clock(30_000);
     let ended = fleet.team.take_ended();
     assert_eq!(ended.len(), 1);
     assert_eq!(outcome(&ended[0]), wire::MissionReceiptOutcome::Uncertain);
@@ -285,7 +285,7 @@ fn an_approval_whose_answer_is_lost_does_not_keep_the_team_waiting() {
 fn a_late_answer_to_an_ended_renewal_does_not_take_the_next_ones_tally() {
     let (mut fleet, _) = running_fleet(false);
     let first = renew(&mut fleet, "renew-1");
-    fleet.team.on_host_clock(NOW + 30_000);
+    fleet.team.on_host_clock(30_000);
     assert_eq!(fleet.team.take_ended().len(), 1, "renew-1 ended uncertain");
     let late: Vec<(String, wire::MissionReceipt)> = first
         .intents
@@ -318,4 +318,32 @@ fn a_late_answer_to_an_ended_renewal_does_not_take_the_next_ones_tally() {
         "{}",
         decided[0].reason
     );
+}
+
+#[test]
+fn a_step_of_the_civil_clock_does_not_time_an_operation_out() {
+    let (mut fleet, _) = running_fleet(false);
+    fleet.team.on_host_clock(1_000);
+    let _reply = renew(&mut fleet, "renew");
+    // An intent stamped an hour later in civil time: the wait is unchanged.
+    let fetch = fleet.team.on_intent(
+        &wire::MissionIntent {
+            request_id: "fetch".to_owned(),
+            action: Some(Action::Fetch(wire::MissionFetch { digest: Vec::new() })),
+        },
+        &IntentContext {
+            now_unix_ms: NOW + 3_600_000,
+            fresh_id: "later".to_owned(),
+        },
+    );
+    assert!(fetch.receipt.is_some());
+    fleet.team.on_host_clock(30_000);
+    assert!(
+        fleet.team.take_ended().is_empty(),
+        "29 s on the host's clock"
+    );
+    // The host's clock never goes back.
+    fleet.team.on_host_clock(500);
+    fleet.team.on_host_clock(31_000);
+    assert_eq!(fleet.team.take_ended().len(), 1, "30 s on the host's clock");
 }

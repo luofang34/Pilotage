@@ -30,6 +30,7 @@ fn task(journal: std::path::PathBuf) -> (TeamTask, mpsc::Receiver<wire::MissionI
         ids: 0,
         last_publish: None,
         steering: pilotage_mission::Steering::default(),
+        start: tokio::time::Instant::now(),
     };
     (task, intents)
 }

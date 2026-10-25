@@ -168,6 +168,8 @@ pub struct TeamLane {
     detail: String,
     sequence: u64,
     changed: bool,
+    /// The latest time on the host's monotonic clock, milliseconds.
+    host_ms: u64,
 }
 
 impl TeamLane {
@@ -191,6 +193,7 @@ impl TeamLane {
             book: TaskBook::default(),
             pending: BTreeMap::new(),
             operations: BTreeMap::new(),
+            host_ms: 0,
             ended: Vec::new(),
             run_id: None,
             reflies: Vec::new(),
@@ -268,7 +271,7 @@ impl TeamLane {
         match result {
             Ok((intents, deferred)) => {
                 // A step that asks no member is answered at once.
-                if deferred && self.open_operation(&id, &intents, context.now_unix_ms) {
+                if deferred && self.open_operation(&id, &intents) {
                     TeamReply {
                         receipt: None,
                         intents,
