@@ -163,47 +163,50 @@ digest of the subject that the person saw, so the lane refuses an answer
 to a subject that changed. The host takes an answer only from a session
 with the approver secret, and it writes the session that sent it. A relay,
 such as a team, names the person that it passes the answer on for, as its
-own host wrote it, and the record names both. An operation task's
-judgment is met when its execution completed and the result that the plan
-names has its value. A report objective reads a value, asks a person to
-confirm it, and writes a report of it: a person who declines ends the run,
-and the report is not written. A check objective reads a value, a rule
-holds the value to a limit, and the host writes a report of the verdict;
-no person takes part. A rule is a pure operation that every host carries
-out. A kind of objective is its wire message, its planning module and
-the executors that it names. Lifecycle, authorization, coordination,
+own host wrote it, and the record names both. An operation task's judgment
+is met when its execution completed and the result that the plan names has
+its value. A report objective reads a value, asks a person to confirm it,
+and writes a report of it: a person who declines ends the run, and the
+report is not written. A check objective reads a value, a rule holds the
+value to a limit, and the host writes a report of the verdict; no person
+takes part. A rule is a pure operation that every host carries out. A kind
+of objective is its planning module and the executors that it names. The
+lane registers each new kind's planner by name, with its version and its
+typed parameters, and a named objective carries those parameters, so a new
+kind needs no wire message of its own. The survey, the report and the
+check keep their own messages. Lifecycle, authorization, coordination,
 recovery and display treat every kind that is not a survey the same, and
 `scripts/check-objective-kinds.sh` refuses code outside planning that
-names a kind. A client proposes an objective of any kind with one
-command that carries the encoded objective. The host writes the report
-of one operation once, so a repeat of that operation finds it. A plan of operations has no
-way home: it takes no revision, and an expired approval holds it before
-its next operation. The host keeps a record of the lane's run in a
-journal: the approved plan, the approval, the run, and the execution and
-results of each task. The record does not keep evidence or display. The
-host starts no run before the journal holds it, and a run of operations
-begins an operation only when the journal holds the end of each operation
-before it. Thus, while the journal cannot be written, no new work begins;
-a hold, an abort and an answer still pass. After a restart, the lane
-starts from the record and starts no work. The descriptor of the executor
-of each operation that did not end sets what occurs. If the host can tell
-whether the operation occurred, the host asks the executor. If a repeat
-with the same identity changes nothing, the operation runs again. Any
-other operation becomes `Uncertain`, and a person decides; the absence of
-a receipt does not show that the operation did not occur. When no task
+names a kind. A client proposes an objective of any kind with one command
+that carries the encoded objective. The host writes the report of one
+operation once, so a repeat of that operation finds it. A plan of
+operations has no way home: it takes no revision, and an expired approval
+holds it before its next operation. The host keeps a record of the lane's
+run in a journal: the approved plan, the approval, the run, and the
+execution and results of each task. The record does not keep evidence or
+display. The host starts no run before the journal holds it, and a run of
+operations begins an operation only when the journal holds the end of each
+operation before it. Thus, while the journal cannot be written, no new
+work begins; a hold, an abort and an answer still pass. After a restart,
+the lane starts from the record and starts no work. The descriptor of the
+executor of each operation that did not end sets what occurs. If the host
+can tell whether the operation occurred, the host asks the executor. If a
+repeat with the same identity changes nothing, the operation runs again.
+Any other operation becomes `Uncertain`, and a person decides; the absence
+of a receipt does not show that the operation did not occur. When no task
 is uncertain, the run holds with the reason `Restarted` until a person
 resumes it. The resume starts the remaining tasks under the same run
 identity. A flight does not fly again after a restart, because the lane
 cannot know where the vehicle is: the lane stays `Uncertain` until a
 person aborts the run. A run that ended keeps its outcome, so a restart
-does not replay cancelled work. A team gives an objective with no area
-to divide, such as a report, to one member whole, as an objective that the
+does not replay cancelled work. A team gives an objective with no area to
+divide, such as a report, to one member whole, as an objective that the
 team made. The team follows that member's run as any other. Its status
 shows the question that the member's run asks. The team gives an answer to
 the member that asks, as an operation, and the operator gets one receipt
-when that member answers. The environment variables remain a bootstrap source
-that issues the first plan into an `Idle` lane; an issued plan supersedes
-them.
+when that member answers. The environment variables remain a bootstrap
+source that issues the first plan into an `Idle` lane; an issued plan
+supersedes them.
 
 ### Tasks are the nodes
 

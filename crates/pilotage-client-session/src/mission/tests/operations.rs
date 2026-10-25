@@ -91,7 +91,18 @@ fn one_command_proposes_an_objective_of_any_kind() {
         })),
         ..wire::MissionObjective::default()
     };
-    for objective in [report, check] {
+    let named = wire::MissionObjective {
+        kind: Some(wire::mission_objective::Kind::Named(wire::NamedObjective {
+            kind: "record".to_owned(),
+            version: 1,
+            parameters: vec![wire::MissionValue {
+                name: "source".to_owned(),
+                value: "temperature".to_owned(),
+            }],
+        })),
+        ..wire::MissionObjective::default()
+    };
+    for objective in [report, check, named] {
         // The command travels as JSON, as a client writes it on a line.
         let line = serde_json::to_string(&MissionCommand::propose_objective(&objective)).unwrap();
         assert!(line.contains(r#""command":"propose_objective""#), "{line}");
@@ -164,4 +175,24 @@ fn an_objective_that_does_not_decode_or_names_no_kind_is_refused() {
             "{text:?}"
         );
     }
+}
+
+#[test]
+fn a_named_objective_that_flies_nowhere_is_approved_to_no_height() {
+    use crate::mission::approval::{ApprovalPolicy, approved_height_m};
+    let proposal = wire::MissionProposal {
+        objective: Some(wire::MissionObjective {
+            kind: Some(wire::mission_objective::Kind::Named(wire::NamedObjective {
+                kind: "record".to_owned(),
+                version: 1,
+                parameters: Vec::new(),
+            })),
+            ..wire::MissionObjective::default()
+        }),
+        ..wire::MissionProposal::default()
+    };
+    assert_eq!(
+        approved_height_m(&proposal, &ApprovalPolicy::default()),
+        Some(0.0)
+    );
 }
