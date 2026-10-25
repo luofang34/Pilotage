@@ -156,9 +156,7 @@ impl TeamLane {
 
     /// The member completed its plan and has no extra flight.
     fn idle(&self, member: &str) -> bool {
-        self.statuses
-            .get(member)
-            .is_some_and(|s| s.state == wire::MissionLaneState::Complete as i32)
+        self.statuses.get(member).is_some_and(free)
             && !self
                 .reflies
                 .iter()
@@ -180,10 +178,7 @@ impl TeamLane {
         let mut intents = Vec::new();
         let members: Vec<String> = self.member_proposals.keys().cloned().collect();
         for member in members {
-            let complete = self
-                .statuses
-                .get(&member)
-                .is_some_and(|s| s.state == wire::MissionLaneState::Complete as i32);
+            let complete = self.statuses.get(&member).is_some_and(free);
             let busy = self
                 .reflies
                 .iter()
@@ -406,6 +401,20 @@ impl TeamLane {
             wire::mission_intent::Action::Approve(approval),
         )]
     }
+}
+
+/// Whether a member that reports `status` may take another flight: its
+/// run is complete and no line of it still takes evidence. A new flight
+/// starts with a new proposal, which ends the member's run, and the answers
+/// still due to that run would be lost.
+fn free(status: &wire::MissionStatus) -> bool {
+    status.state == wire::MissionLaneState::Complete as i32
+        && !status.tasks.iter().any(|t| {
+            super::aggregate::ended(t)
+                && t.evidence
+                    .as_ref()
+                    .is_some_and(|e| e.collection == wire::MissionEvidenceCollection::Open as i32)
+        })
 }
 
 /// A box around `band` and `launch`, widened by a margin: the bound a

@@ -308,3 +308,35 @@ fn stating_the_only_member_with_open_evidence_down_ends_a_waiting_team() {
         status.detail
     );
 }
+
+#[test]
+fn a_member_whose_results_are_still_due_does_not_fly_a_re_flight() {
+    let (mut fleet, _) = running_fleet(false);
+    let (refly, held) = fleet.fly_holding(&[("SIM-3", "line-01")], Some(("SIM-1", "line-01")));
+    assert_eq!(refly.len(), 1, "SIM-3's line is flown again");
+    assert_ne!(
+        refly[0].member, "SIM-1",
+        "SIM-1 still waits for its own judgments"
+    );
+    fly_out(&mut fleet, refly);
+    judge(&mut fleet, &held, true, NOW);
+    let sim1 = fleet
+        .team
+        .status()
+        .tasks
+        .into_iter()
+        .find(|t| t.member == "SIM-1" && t.name.ends_with("line-01"))
+        .expect("SIM-1's line");
+    assert_eq!(
+        sim1.judgment,
+        wire::MissionTaskJudgment::Met as i32,
+        "its late judgment counts"
+    );
+    let status = fleet.team.status();
+    assert_eq!(
+        status.state,
+        wire::MissionLaneState::Complete as i32,
+        "{}",
+        status.detail
+    );
+}

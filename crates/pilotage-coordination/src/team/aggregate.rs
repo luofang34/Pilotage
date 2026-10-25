@@ -261,7 +261,7 @@ impl TaskBook {
 }
 
 /// Whether the task's execution ended, whichever way.
-fn ended(task: &wire::MissionTaskStatus) -> bool {
+pub(super) fn ended(task: &wire::MissionTaskStatus) -> bool {
     [
         Execution::Completed,
         Execution::Cancelled,
