@@ -95,9 +95,13 @@ the digest of its predecessor, validity, and releasability.
   Each lane status lists the approvals that the lane needs: its plan
   before the start, a drafted successor, and the renewal of an expired
   approval. A team names itself on each approval that it passes down to a
-  member. When that approval is in force, the team owes the approval of
-  its own share of a revision and the renewal of what it granted, and the
-  need names the team. A client raises a need for a person only when no
+  member, on each objective that it makes for a member, and on each share
+  of its revision that it sends to a member. The host takes these names
+  only from a session with the approver secret. The team owes the approval
+  of the plan that it made for a member, of its own share of a revision
+  when it granted the approval in force, and the renewal of what it
+  granted; the need names the team. A lane lists a need only while it can
+  take that approval. A client raises a need for a person only when no
   lane owes it. It does not find this from the name of a session.
   A client approves only a proposal that it holds in full. The lane's status names a
   proposal only by its digest and a summary, so a client that did not

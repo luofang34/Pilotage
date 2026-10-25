@@ -81,6 +81,7 @@ fn reassign(fleet: &Fleet, from: &str, to: &str, fraction: f64, within: bool) ->
         within_envelope: within,
         drafted_by: None,
         release: None,
+        share_of: String::new(),
         change: Some(wire::mission_revise::Change::Reassign(
             wire::MissionReassign {
                 from_member: from.to_owned(),
@@ -276,6 +277,7 @@ fn a_parents_strip_keeps_exactly_the_lines_inside_it() {
         within_envelope: false,
         drafted_by: None,
         release: None,
+        share_of: String::new(),
         change: Some(wire::mission_revise::Change::Objective(objective)),
     });
     let (receipt, _) = team_intent(&mut fleet, revise);

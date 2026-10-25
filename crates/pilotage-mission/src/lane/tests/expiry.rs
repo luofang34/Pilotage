@@ -175,6 +175,7 @@ fn a_waiting_revision_does_not_apply_under_an_expired_approval() {
         within_envelope: true,
         drafted_by: None,
         release: None,
+        share_of: String::new(),
         change: Some(wire::mission_revise::Change::Finish(wire::MissionFinish {})),
     }));
     let drafted = lane.on_intent(&revise, &context("rev"));
