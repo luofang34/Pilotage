@@ -326,6 +326,7 @@ impl Lane {
             run_id,
             plan: compiled.plan.clone(),
             config: compiled.config.clone(),
+            results: Vec::new(),
         };
         self.proposal = Some(compiled);
         self.changed = true;

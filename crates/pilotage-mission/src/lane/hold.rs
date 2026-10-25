@@ -45,7 +45,9 @@ impl Lane {
         }
         super::target::still_valid(approval, context.now_unix_ms)
             .map_err(|reason| format!("{reason}; approve the plan again to resume"))?;
-        self.holds.retain(|r| *r != Reason::Operator);
+        // A person's resume is what a hold after a restart waits for.
+        self.holds
+            .retain(|r| !matches!(r, Reason::Operator | Reason::Restarted));
         Ok((self.resume_when_free(), None))
     }
 
@@ -62,7 +64,9 @@ impl Lane {
         }
         self.state = State::Running;
         self.detail = "running".to_owned();
-        Some(LaneEffect::Resume)
+        // A restarted run has no run on the host to resume: what is left of
+        // it starts again.
+        Some(self.restart_order().unwrap_or(LaneEffect::Resume))
     }
 
     /// The reasons the status reports: none unless the run holds.

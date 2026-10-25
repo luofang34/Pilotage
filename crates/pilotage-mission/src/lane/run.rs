@@ -3,6 +3,7 @@
 //! task's execution; a verdict, however late, changes only its evidence and
 //! the judgment that follows from it.
 
+mod restore;
 mod task;
 
 use pilotage_protocol::wire;
