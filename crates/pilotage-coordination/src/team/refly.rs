@@ -352,7 +352,7 @@ impl TeamLane {
                 refly.state = ReflyState::Flying;
                 Vec::new()
             }
-            Op::Revise | Op::Renew => Vec::new(),
+            Op::Revise | Op::Renew | Op::Answer => Vec::new(),
         }
     }
 

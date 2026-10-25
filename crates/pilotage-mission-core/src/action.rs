@@ -48,6 +48,10 @@ pub struct BoundAction {
     pub executor: String,
     /// The operation.
     pub operation: String,
+    /// The version of the operation's parameters and results; a host admits
+    /// only the version it registers.
+    #[serde(default)]
+    pub version: u32,
     /// Its parameters, by name; ordered, so a document encodes one way.
     pub parameters: std::collections::BTreeMap<String, String>,
 }

@@ -150,7 +150,16 @@ impl TeamLane {
         context: &IntentContext,
     ) -> super::TeamReply {
         use wire::mission_revise::Change as Asked;
-        // A team does not build a release fact from its members. own,
+        // An objective given whole to one member is not divided, so the team
+        // has no share to revise: it refuses before it changes anything.
+        if self.objective.is_some() && self.survey().is_none() {
+            let reason = "this team gives its objective whole to one member and takes no revision; abort it and propose another".to_owned();
+            return super::TeamReply {
+                receipt: Some(self.receipt(id, false, reason, None)),
+                intents: Vec::new(),
+            };
+        }
+        // A team does not build a release fact from its members' own,
         // so it refuses a revision that asks for one before it changes
         // anything, so its parent never waits for a release that cannot come.
         if revise.release.is_some() {
@@ -300,9 +309,8 @@ impl TeamLane {
             let (Some(across), Some(sweep)) = (self.across(), self.sweep) else {
                 return Vec::new();
             };
-            let area = match self.objective.as_ref().and_then(|o| o.kind.as_ref()) {
-                Some(wire::mission_objective::Kind::Survey(s)) => s.area.clone(),
-                None => return Vec::new(),
+            let Some(area) = self.area() else {
+                return Vec::new();
             };
             let positions: Vec<f64> = kept.iter().filter_map(|p| across.of_path(p)).collect();
             let strip = across.strip(&area, &positions, sweep.footprint_m);

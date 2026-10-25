@@ -13,14 +13,18 @@ use crate::change::{ChangeClass, ChangeSet};
 /// The changes from objective `before` to `after`.
 #[must_use]
 pub fn classify(before: &wire::MissionObjective, after: &wire::MissionObjective) -> ChangeSet {
+    use wire::mission_objective::Kind;
     let mut changes = ChangeSet::default();
-    let survey = |o: &wire::MissionObjective| {
-        o.kind
-            .as_ref()
-            .map(|wire::mission_objective::Kind::Survey(s)| s.clone())
-    };
-    match (survey(before), survey(after)) {
-        (Some(before), Some(after)) => surveys(&before, &after, &mut changes),
+    match (before.kind.as_ref(), after.kind.as_ref()) {
+        (Some(Kind::Survey(before)), Some(Kind::Survey(after))) => {
+            surveys(before, after, &mut changes);
+        }
+        // What a report reads and asks is all it must achieve.
+        (Some(Kind::Report(before)), Some(Kind::Report(after))) => {
+            if before != after {
+                changes.add(ChangeClass::Objective, "what the report reads or asks");
+            }
+        }
         (None, None) => {}
         _ => changes.add(ChangeClass::Objective, "the kind of objective"),
     }

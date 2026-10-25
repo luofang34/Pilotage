@@ -15,6 +15,7 @@ mod reflown;
 mod refly;
 mod renewal;
 mod revision;
+mod whole;
 
 use std::collections::BTreeMap;
 
@@ -105,6 +106,8 @@ enum Op {
     Revise,
     /// A renewal of a member's approval of its plan in progress.
     Renew,
+    /// A person's answer to the question a member's run asks.
+    Answer,
 }
 
 /// A member intent awaiting its receipt.
@@ -248,6 +251,7 @@ impl TeamLane {
             Some(Action::Skip(_)) => {
                 Err("a team skips a task through a revision; draft one instead".to_owned())
             }
+            Some(Action::Answer(answer)) => self.relay_answer(answer),
             None => Err("the intent names no action".to_owned()),
         };
         match result {
@@ -310,6 +314,12 @@ impl TeamLane {
         if states.len() + released < self.member_proposals.len() {
             return;
         }
+        if states.is_empty() {
+            // Every member is stated down: nothing shows that the work was done.
+            self.phase = Phase::Failed;
+            self.detail = "every member is stated down; the work is not done".to_owned();
+            return;
+        }
         let complete = wire::MissionLaneState::Complete as i32;
         let failed = [
             wire::MissionLaneState::Failed as i32,
@@ -325,10 +335,18 @@ impl TeamLane {
                 format!("every member's run ended; waiting for the results of {open} lines");
         } else if states.iter().all(|s| *s == complete) {
             self.phase = Phase::Complete;
-            self.detail = self.book.summary();
+            self.detail = if self.survey().is_some() {
+                self.book.summary()
+            } else {
+                "complete: the member did the work".to_owned()
+            };
         } else if states.iter().all(|s| *s == complete || failed.contains(s)) {
             self.phase = Phase::Failed;
-            self.detail = format!("a member ended without completing; {}", self.book.summary());
+            self.detail = if self.survey().is_some() {
+                format!("a member ended without completing; {}", self.book.summary())
+            } else {
+                "the member ended without completing the work".to_owned()
+            };
         }
     }
 
@@ -410,6 +428,14 @@ impl TeamLane {
     #[must_use]
     pub fn status(&self) -> wire::MissionStatus {
         aggregate::team_status(self)
+    }
+
+    /// The team's survey, when its objective is one.
+    fn survey(&self) -> Option<&wire::SurveyObjective> {
+        match self.objective.as_ref()?.kind.as_ref()? {
+            wire::mission_objective::Kind::Survey(survey) => Some(survey),
+            wire::mission_objective::Kind::Report(_) => None,
+        }
     }
 
     /// The status when it changed since the last call.

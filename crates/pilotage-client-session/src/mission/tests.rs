@@ -30,7 +30,7 @@ fn digest(tag: &[u8]) -> Vec<u8> {
     proposal(tag).digest
 }
 
-fn status(state: wire::MissionLaneState, tag: &[u8]) -> Box<wire::MissionStatus> {
+pub(super) fn status(state: wire::MissionLaneState, tag: &[u8]) -> Box<wire::MissionStatus> {
     Box::new(wire::MissionStatus {
         lane: "COMMAND".to_owned(),
         state: state as i32,
@@ -387,3 +387,5 @@ fn an_expired_approval_offers_a_renewal_of_the_run_and_no_resume() {
     let offered = desk.offered(true, &ApprovalPolicy::default());
     assert!(offered.resume && offered.approve.is_none());
 }
+
+mod operations;

@@ -24,9 +24,26 @@ impl TeamLane {
         }
         self.orphan_live_handovers();
         self.refuse_while_unreconciled()?;
-        let Some(wire::mission_objective::Kind::Survey(survey)) = objective.kind.as_ref() else {
-            return Err("the objective is not a survey".to_owned());
-        };
+        match objective.kind.as_ref() {
+            Some(wire::mission_objective::Kind::Survey(survey)) => {
+                self.propose_survey(objective, survey, context)
+            }
+            // No area to divide: one member takes the objective whole.
+            Some(wire::mission_objective::Kind::Report(_)) => {
+                self.propose_whole(objective, context)
+            }
+            None => Err("the objective names no kind".to_owned()),
+        }
+    }
+
+    /// Divides the survey `survey` of `objective` into one band for each
+    /// member that can take one, and asks each member to propose its band.
+    fn propose_survey(
+        &mut self,
+        objective: &wire::MissionObjective,
+        survey: &wire::SurveyObjective,
+        context: &IntentContext,
+    ) -> Result<(Vec<MemberIntent>, bool), String> {
         if survey.area.len() < 3 {
             return Err("the survey area needs at least three vertices".to_owned());
         }

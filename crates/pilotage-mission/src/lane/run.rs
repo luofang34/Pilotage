@@ -31,6 +31,14 @@ pub struct RunProgress {
     pub holding: bool,
     /// What the run does now, when the host knows.
     pub execution: Option<RunExecution>,
+    /// What the operations the run finished returned, by task.
+    pub results: Vec<(String, Vec<wire::MissionValue>)>,
+    /// The tasks whose operation a cancel stopped before its end.
+    pub cancelled_tasks: Vec<String>,
+    /// The tasks whose operation failed.
+    pub failed_tasks: Vec<String>,
+    /// The questions the run's operations ask a person now, by task.
+    pub questions: Vec<(String, wire::MissionQuestion)>,
 }
 
 /// What a vehicle's run does now, as the host reads it from the run.
@@ -85,6 +93,8 @@ pub(super) struct RunTracker {
     active: Option<usize>,
     /// The run a revision replaced with this one.
     pub(super) predecessor: Option<String>,
+    /// The operations a person answered: their questions are asked no more.
+    answered: std::collections::BTreeSet<String>,
 }
 
 impl RunTracker {
@@ -104,6 +114,7 @@ impl RunTracker {
             },
             active: None,
             predecessor: None,
+            answered: std::collections::BTreeSet::new(),
         }
     }
 
@@ -137,7 +148,65 @@ impl RunTracker {
         }
         changed |= active != self.active;
         self.active = active;
+        changed | self.fold_operations(progress, now_ms)
+    }
+
+    /// Takes the results and the questions of the run's operations, as the
+    /// host reports them. Returns whether a task changed.
+    fn fold_operations(&mut self, progress: &RunProgress, now_ms: u64) -> bool {
+        let mut changed = false;
+        for task in &mut self.tasks {
+            let id = task.plan.task_id.clone();
+            let id = id.as_str();
+            // The host tells how an operation ended; the lane infers none.
+            if progress.cancelled_tasks.iter().any(|t| t == id) {
+                changed |= task.end(Execution::Cancelled, now_ms);
+            }
+            if progress.failed_tasks.iter().any(|t| t == id) {
+                changed |= task.end(Execution::Failed, now_ms);
+            }
+            if let Some((_, results)) = progress.results.iter().find(|(t, _)| t == id)
+                && task.results != *results
+            {
+                task.results.clone_from(results);
+                changed = true;
+            }
+            let answered = &self.answered;
+            let asked = progress
+                .questions
+                .iter()
+                .find(|(t, q)| t == id && !answered.contains(&q.operation_id))
+                .map(|(_, q)| q.clone());
+            if task.question != asked {
+                task.question = asked;
+                changed = true;
+            }
+        }
         changed
+    }
+
+    /// Puts back `question` on the task `index`: an answer took it but did
+    /// not answer it.
+    pub(super) fn ask_again(&mut self, index: usize, question: wire::MissionQuestion) {
+        if let Some(task) = self.tasks.get_mut(index) {
+            task.question = Some(question);
+        }
+    }
+
+    /// Takes the question of the operation `operation_id`, asked now, with
+    /// its task: once answered, it is asked no more until the operation asks
+    /// again.
+    pub(super) fn take_question(
+        &mut self,
+        operation_id: &str,
+    ) -> Option<(usize, wire::MissionQuestion)> {
+        let index = self.tasks.iter().position(|t| {
+            t.question
+                .as_ref()
+                .is_some_and(|q| q.operation_id == operation_id)
+        })?;
+        let question = self.tasks.get_mut(index)?.question.take()?;
+        Some((index, question))
     }
 
     /// The run's task that the core's phase `phase` flies: the phases take the tasks'
@@ -235,12 +304,34 @@ impl RunTracker {
 
     /// Ends the run with `outcome` for the task in progress: completed when
     /// the plan completed, cancelled by an abort, failed when the run ended
-    /// without completing its plan. A task not begun stays pending.
+    /// without completing its plan. A task not begun stays pending. An
+    /// operation in progress ends only as the host reports it: a run that
+    /// ended without that report does not show how the operation ended.
     pub(super) fn close(&mut self, outcome: Execution, now_ms: u64) {
         for task in &mut self.tasks {
-            task.end_active(outcome, now_ms);
+            if task.plan.operation.is_none() || outcome == Execution::Completed {
+                task.end_active(outcome, now_ms);
+            }
         }
         self.active = None;
+    }
+
+    /// An abort at `now_ms`: the line or the way home in progress is
+    /// cancelled. An operation keeps its execution until the host reports how
+    /// it ended: it may have had its effect, and a missing report does not
+    /// show that it had none.
+    pub(super) fn abort(&mut self, now_ms: u64) {
+        for task in &mut self.tasks {
+            if task.plan.operation.is_none() {
+                task.end_active(Execution::Cancelled, now_ms);
+            }
+        }
+        self.active = None;
+    }
+
+    /// Notes that a person answered the operation `operation_id`.
+    pub(super) fn answered(&mut self, operation_id: &str) {
+        self.answered.insert(operation_id.to_owned());
     }
 
     /// A successor replaced the run at `now_ms`: a task not begun is skipped,
@@ -350,6 +441,8 @@ pub(super) fn planned_statuses(tasks: &[wire::MissionTaskPlan]) -> Vec<wire::Mis
             path: plan.path.clone(),
             execution: Execution::Pending as i32,
             judgment: Judgment::Undetermined as i32,
+            results: Vec::new(),
+            question: None,
         })
         .collect()
 }

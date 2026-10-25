@@ -172,16 +172,11 @@ impl TeamLane {
     }
 
     pub(super) fn area(&self) -> Option<Vec<wire::GeoPoint>> {
-        match self.objective.as_ref()?.kind.as_ref()? {
-            wire::mission_objective::Kind::Survey(s) => Some(s.area.clone()),
-        }
+        self.survey().map(|s| s.area.clone())
     }
 
     pub(in crate::team) fn across(&self) -> Option<Across> {
-        let area = match self.objective.as_ref()?.kind.as_ref()? {
-            wire::mission_objective::Kind::Survey(s) => s.area.clone(),
-        };
-        Some(Across::new(&area, self.sweep?.bearing_deg))
+        Some(Across::new(&self.area()?, self.sweep?.bearing_deg))
     }
 
     /// The draft for review: the team's unflown lines after the change,
@@ -200,6 +195,7 @@ impl TeamLane {
             path: path.clone(),
             length_m: 0.0,
             member: member.to_owned(),
+            operation: None,
         };
         for member in self.member_proposals.keys() {
             let paths: Vec<Vec<wire::GeoPoint>> = match change {
