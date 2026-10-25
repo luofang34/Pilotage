@@ -18,6 +18,7 @@ use super::{MemberIntent, Op, Phase, TeamLane};
 
 mod draft;
 mod links;
+mod withdraw;
 
 /// What a revision does to the members.
 #[derive(Debug, Clone, PartialEq)]
@@ -44,6 +45,9 @@ pub(super) struct Revision {
     pub drafted_by: String,
     /// The parent team whose revision this is the team's share of.
     pub share_of: String,
+    /// The approval in force before the revision's own, restored when the
+    /// revision is withdrawn.
+    pub replaced_approval: Option<wire::MissionApproval>,
 }
 
 type Drafted = Result<(wire::MissionProposalRecord, Vec<MemberIntent>), String>;
@@ -95,6 +99,7 @@ impl TeamLane {
                 .map(|o| o.subject.clone())
                 .unwrap_or_default(),
             share_of: revise.share_of.clone(),
+            replaced_approval: None,
         });
         self.detail = "revision drafted; waiting for review".to_owned();
         if !revise.within_envelope {
@@ -239,7 +244,10 @@ impl TeamLane {
                 "{from}'s link is lost and its state is unknown; its work stays reserved until it reports again or a person states that it is down"
             ));
         }
-        self.approval = Some(approval.clone());
+        let replaced = self.approval.replace(approval.clone());
+        if let Some(revision) = self.revision.as_mut() {
+            revision.replaced_approval = replaced;
+        }
         Ok(self.apply_revision(context))
     }
 
@@ -356,7 +364,7 @@ impl TeamLane {
                 "{member} refused its share of the revision: {}",
                 receipt.reason
             );
-            self.withdraw_handover(member, &receipt.reason);
+            self.refused_share(member, &receipt.reason);
             return Vec::new();
         }
         if op != Op::Revise {
@@ -373,13 +381,13 @@ impl TeamLane {
             Ok(team) => team,
             Err(reason) => {
                 self.detail = format!("{member}'s share of the revision is not approved: {reason}");
-                self.withdraw_handover(member, &reason);
+                self.refused_share(member, &reason);
                 return Vec::new();
             }
         };
         if self.keeps_moved_work(member, &draft) {
             self.detail = format!("{member}'s share still flies the moved lines; not approved");
-            self.withdraw_handover(member, "its share still flies the moved lines");
+            self.refused_share(member, "its share still flies the moved lines");
             return Vec::new();
         }
         self.approving_release(member, &draft.digest);

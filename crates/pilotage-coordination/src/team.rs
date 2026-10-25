@@ -292,6 +292,7 @@ impl TeamLane {
         self.statuses.insert(member.clone(), status.clone());
         self.refly_progress(&member, status);
         let mut intents = self.commit_released(&member, status, context);
+        self.release_ended(&member, status);
         intents.extend(self.adapt(context));
         self.settle();
         intents

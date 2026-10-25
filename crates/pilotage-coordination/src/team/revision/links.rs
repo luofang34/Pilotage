@@ -31,6 +31,7 @@ impl TeamLane {
                     .map_or_else(|| "a person".to_owned(), |o| o.subject.clone());
                 self.stated_by.insert(member.to_owned(), stated_by);
                 self.unassign_queued_for(member);
+                self.share_never_comes(member);
                 if let Some(status) = self.statuses.get_mut(member) {
                     status.detail = "down, as a person stated; its work may move".to_owned();
                 }
