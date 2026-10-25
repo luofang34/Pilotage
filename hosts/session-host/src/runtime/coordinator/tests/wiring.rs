@@ -363,3 +363,26 @@ fn an_abort_while_the_journal_fails_ends_the_waiting_starts_for_good() {
         );
     });
 }
+
+#[test]
+fn a_request_a_gone_link_never_took_is_refused_and_the_operator_entry_cleared() {
+    runtime().block_on(async {
+        let (mut rig, digest) = Rig::proposed();
+        std::fs::create_dir_all(rig.journal.parent().unwrap()).unwrap();
+        // SIM-2's link task is gone: nothing sent to it leaves.
+        rig.links.remove("SIM-2");
+        rig.operator("op-approve", Action::Approve(approval(&digest)))
+            .await;
+        let receipt = rig.receipt("op-approve").expect("the operator hears");
+        assert!(refused(&receipt), "{}", receipt.reason);
+        assert!(
+            receipt.reason.contains("not sent to SIM-2"),
+            "{}",
+            receipt.reason
+        );
+        assert!(
+            rig.task.operator_requests.is_empty(),
+            "the ended request leaves the host's map"
+        );
+    });
+}

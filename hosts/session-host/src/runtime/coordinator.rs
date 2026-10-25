@@ -117,7 +117,16 @@ impl TeamTask {
                     Some(event) => self.on_member_event(event).await,
                     None => break,
                 },
-                _ = ticker.tick() => self.retry().await,
+                _ = ticker.tick() => {
+                    let now_unix_ms = self.context().now_unix_ms;
+                    self.lane.on_host_clock(now_unix_ms);
+                    self.retry().await;
+                }
+            }
+            // An operator request that ended other than by an answer to it
+            // still gets its one receipt.
+            for receipt in self.lane.take_ended() {
+                self.answer_operator(Some(receipt)).await;
             }
             if !self.publish().await {
                 break;
@@ -199,24 +208,19 @@ impl TeamTask {
         }
     }
 
-    /// Tells the lane that each withheld intent never reached its member:
-    /// the member refused it, as far as the lane can know. Returns what the
-    /// lane sends next.
+    /// Tells the lane that each withheld intent never reached its member,
+    /// so the member did not execute it. Returns what the lane sends next.
     async fn refuse_withheld(&mut self, withheld: Vec<outbox::Withheld>) -> Vec<MemberIntent> {
         let mut next = Vec::new();
         for outbox::Withheld { intent, reason } in withheld {
-            warn!(member = %intent.member, request = %intent.intent.request_id, reason, "intent withheld");
-            let receipt = wire::MissionReceipt {
-                request_id: intent.intent.request_id,
-                outcome: wire::MissionReceiptOutcome::Refused as i32,
-                reason: reason.to_owned(),
-                lane: intent.member.clone(),
-                ..wire::MissionReceipt::default()
-            };
+            warn!(member = %intent.member, request = %intent.intent.request_id, reason, "intent not sent");
             let context = self.context();
-            let reply = self
-                .lane
-                .on_member_receipt(&intent.member, &receipt, &context);
+            let reply = self.lane.on_member_unsent(
+                &intent.member,
+                &intent.intent.request_id,
+                reason,
+                &context,
+            );
             self.answer_operator(reply.receipt).await;
             next.extend(reply.intents);
         }
@@ -240,11 +244,12 @@ impl TeamTask {
         // A withheld intent's refusal can make the lane send more; each
         // refusal ends a step, so this ends.
         loop {
-            let step = self.dispatch.offer(intents, self.lane.handovers());
-            self.deliver(step.send).await;
+            let mut step = self.dispatch.offer(intents, self.lane.handovers());
+            let mut unsent = self.deliver(step.send).await;
             if let Some(handovers) = step.write {
-                self.write(handovers).await;
+                unsent.extend(self.write(handovers).await);
             }
+            step.withheld.extend(unsent);
             intents = self.refuse_withheld(step.withheld).await;
             if intents.is_empty() {
                 break;
@@ -256,30 +261,44 @@ impl TeamTask {
     /// once it succeeds.
     async fn retry(&mut self) {
         if let Some(handovers) = self.dispatch.retry(self.lane.handovers()) {
-            self.write(handovers).await;
+            let unsent = self.write(handovers).await;
+            let next = self.refuse_withheld(unsent).await;
+            self.send(next).await;
         }
     }
 
-    async fn write(&mut self, handovers: Vec<wire::MissionHandover>) {
+    /// Writes the journal and sends what waited for it. Returns what could
+    /// not be sent.
+    async fn write(&mut self, handovers: Vec<wire::MissionHandover>) -> Vec<outbox::Withheld> {
         let written = journal::write(&self.journal, &handovers).await;
         if let Err(failure) = &written {
             error!(journal = %self.journal.display(), %failure, "the handover journal cannot be written; work waits for it");
         }
         let released = self.dispatch.written(handovers, written.is_ok());
-        self.deliver(released).await;
+        self.deliver(released).await
     }
 
-    async fn deliver(&self, intents: Vec<MemberIntent>) {
+    /// Sends each intent on its member's link. Returns those that did not
+    /// leave: the member never saw them.
+    async fn deliver(&self, intents: Vec<MemberIntent>) -> Vec<outbox::Withheld> {
+        let mut unsent = Vec::new();
         for MemberIntent { member, intent } in intents {
-            match self.links.get(&member) {
-                Some(link) => {
-                    if link.send(intent).await.is_err() {
-                        warn!(%member, "member link stopped; intent not sent");
-                    }
-                }
-                None => warn!(%member, "no link to member"),
-            }
+            let reason = match self.links.get(&member) {
+                Some(link) => match link.send(intent).await {
+                    Ok(()) => continue,
+                    Err(mpsc::error::SendError(intent)) => (intent, "the member link is stopped"),
+                },
+                None => (intent, "there is no link to the member"),
+            };
+            unsent.push(outbox::Withheld {
+                intent: MemberIntent {
+                    member,
+                    intent: reason.0,
+                },
+                reason: reason.1,
+            });
         }
+        unsent
     }
 
     async fn publish(&mut self) -> bool {

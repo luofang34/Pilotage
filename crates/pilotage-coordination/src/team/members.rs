@@ -19,10 +19,12 @@ impl TeamLane {
             return TeamReply::default();
         };
         self.changed = true;
+        let operation = pending.operation.as_deref();
+        self.answered(operation, &receipt.request_id);
         let accepted = receipt.outcome == wire::MissionReceiptOutcome::Accepted as i32;
         if pending.op == Op::Renew {
             return TeamReply {
-                receipt: self.on_renew_receipt(member, accepted, receipt),
+                receipt: self.on_renew_receipt(member, accepted, receipt, operation),
                 intents: Vec::new(),
             };
         }
@@ -46,7 +48,7 @@ impl TeamLane {
             };
         }
         if !accepted {
-            return self.member_refused(member, pending.op, &receipt.reason);
+            return self.member_refused(member, pending.op, &receipt.reason, operation);
         }
         match pending.op {
             Op::Propose => match opened(receipt) {
@@ -55,21 +57,45 @@ impl TeamLane {
                     self.member_proposals.insert(member.to_owned(), proposal);
                     self.member_records.insert(member.to_owned(), record);
                 }
-                Err(reason) => return self.member_refused(member, pending.op, &reason),
+                Err(reason) => {
+                    return self.member_refused(member, pending.op, &reason, operation);
+                }
             },
             Op::Approve | Op::Start | Op::Revise | Op::Renew => {}
         }
-        if self
-            .pending
-            .values()
-            .any(|p| p.refly.is_none() && p.op == pending.op)
-        {
+        if self.group_waits(operation, pending.op) {
             return TeamReply::default();
         }
-        self.team_step_done(pending.op, context)
+        self.team_step_done(pending.op, operation, context)
     }
 
-    pub(super) fn team_step_done(&mut self, op: Op, context: &IntentContext) -> TeamReply {
+    /// A member request that never reached `member`, for `reason`. The
+    /// member did not execute it, so the team takes it as refused; the
+    /// receipt says that it was not sent.
+    pub fn on_member_unsent(
+        &mut self,
+        member: &str,
+        request_id: &str,
+        reason: &str,
+        context: &IntentContext,
+    ) -> TeamReply {
+        let receipt = wire::MissionReceipt {
+            request_id: request_id.to_owned(),
+            outcome: wire::MissionReceiptOutcome::Refused as i32,
+            reason: format!("not sent to {member}: {reason}"),
+            lane: member.to_owned(),
+            ..wire::MissionReceipt::default()
+        };
+        self.on_member_receipt(member, &receipt, context)
+    }
+
+    /// The team step `op` of `operation` is done: every member answered.
+    pub(super) fn team_step_done(
+        &mut self,
+        op: Op,
+        operation: Option<&str>,
+        context: &IntentContext,
+    ) -> TeamReply {
         let (phase, detail, proposal) = match op {
             Op::Propose => {
                 let proposal = self.compose(context);
@@ -88,15 +114,22 @@ impl TeamLane {
         };
         self.phase = phase;
         self.detail = detail;
-        let request = self.operator_request.take().unwrap_or_default();
         TeamReply {
-            receipt: Some(self.receipt(request, true, String::new(), proposal)),
+            receipt: self.finish(operation, true, String::new(), proposal),
             intents: Vec::new(),
         }
     }
 
-    pub(super) fn member_refused(&mut self, member: &str, op: Op, reason: &str) -> TeamReply {
-        self.pending.retain(|_, p| p.refly.is_some());
+    /// `member` refused the team step `op` of `operation`: the step fails,
+    /// and the answers the other members still owe it take no step.
+    pub(super) fn member_refused(
+        &mut self,
+        member: &str,
+        op: Op,
+        reason: &str,
+        operation: Option<&str>,
+    ) -> TeamReply {
+        self.drop_group(operation, op);
         let (phase, what) = match op {
             Op::Propose => (Phase::Idle, "proposal"),
             Op::Approve => (Phase::Proposed, "approval"),
@@ -104,9 +137,8 @@ impl TeamLane {
         };
         self.phase = phase;
         self.detail = format!("{member} refused the {what}: {reason}");
-        let request = self.operator_request.take().unwrap_or_default();
         TeamReply {
-            receipt: Some(self.receipt(request, false, self.detail.clone(), None)),
+            receipt: self.finish(operation, false, self.detail.clone(), None),
             intents: Vec::new(),
         }
     }

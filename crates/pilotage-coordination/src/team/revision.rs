@@ -160,7 +160,7 @@ impl TeamLane {
             (true, Some(Asked::Objective(objective))) if revise.base_digest == current => {
                 match self.propose(objective, context) {
                     Ok((intents, _)) => {
-                        self.operator_request = Some(id);
+                        self.open_operation(&id, &intents, context.now_unix_ms);
                         return super::TeamReply {
                             receipt: None,
                             intents,
@@ -419,6 +419,7 @@ impl TeamLane {
     /// line in progress stay reserved to it until it reports again or a
     /// person states that it is down.
     pub fn on_member_lost(&mut self, member: &str) {
+        self.lose_answers_of(member);
         if self.stated_down(member) {
             return;
         }

@@ -22,6 +22,7 @@ impl TeamLane {
                     .is_some_and(|r| r.state == ReflyState::Starting)
         });
         self.renewal = None;
+        self.end_operations();
         let mut cancelled = Vec::new();
         for refly in &mut self.reflies {
             refly.state = match refly.state {

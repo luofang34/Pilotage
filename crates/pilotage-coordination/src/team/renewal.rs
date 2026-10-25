@@ -69,6 +69,7 @@ impl TeamLane {
         &mut self,
         approval: &wire::MissionApproval,
     ) -> Result<(Vec<MemberIntent>, bool), String> {
+        self.busy(Op::Renew)?;
         self.approval = Some(approval.clone());
         let mut renewal = Renewal::default();
         let mut intents = Vec::new();
@@ -119,6 +120,7 @@ impl TeamLane {
         member: &str,
         accepted: bool,
         receipt: &wire::MissionReceipt,
+        operation: Option<&str>,
     ) -> Option<wire::MissionReceipt> {
         let renewal = self.renewal.get_or_insert_with(Renewal::default);
         if !accepted {
@@ -126,11 +128,10 @@ impl TeamLane {
                 .refused
                 .push(format!("{member}: {}", receipt.reason));
         }
-        if self.pending.values().any(|p| p.op == Op::Renew) {
+        if self.group_waits(operation, Op::Renew) {
             return None;
         }
         let renewal = self.renewal.take().unwrap_or_default();
-        let request = self.operator_request.take().unwrap_or_default();
         let mut reason = Vec::new();
         if !renewal.refused.is_empty() {
             reason.push(format!("refused by {}", renewal.refused.join("; ")));
@@ -144,6 +145,6 @@ impl TeamLane {
         } else {
             format!("the approval is renewed; {reason}")
         };
-        Some(self.receipt(request, renewal.refused.is_empty(), reason, None))
+        self.finish(operation, renewal.refused.is_empty(), reason, None)
     }
 }
