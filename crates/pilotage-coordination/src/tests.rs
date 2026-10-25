@@ -60,6 +60,7 @@ fn vehicle_lane_judged(name: &str, judged: bool) -> Lane {
         recovery_policy: "hold".to_owned(),
         judged,
         evidence_window_ms: 60_000,
+        executors: pilotage_mission::executor::ExecutorRegistry::NONE,
     })
 }
 
@@ -134,7 +135,7 @@ impl Fleet {
             if let Some(LaneEffect::Start(order)) = reply.effect.as_ref() {
                 let line_count = match &order.plan {
                     RunPlan::Survey(request) => request.polygon_deg.len().max(1),
-                    RunPlan::Home => 0,
+                    RunPlan::Home | RunPlan::Operations(_) => 0,
                 };
                 self.runs.insert(member.clone(), line_count);
             }

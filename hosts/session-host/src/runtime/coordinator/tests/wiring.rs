@@ -59,6 +59,7 @@ fn vehicle_lane(name: &str) -> Lane {
         recovery_policy: "hold".to_owned(),
         judged: true,
         evidence_window_ms: 60_000,
+        executors: pilotage_mission::executor::ExecutorRegistry::NONE,
     })
 }
 

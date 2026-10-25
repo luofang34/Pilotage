@@ -83,6 +83,22 @@ pub enum MissionCommand {
         /// The handover's assignment.
         assignment_id: String,
     },
+    /// Compile an objective that reads a value, asks a person to confirm
+    /// it, and writes a report of it.
+    ProposeReport {
+        /// Where the value is read, as the host names its sources.
+        source: String,
+        /// What the person is asked about the value.
+        question: String,
+    },
+    /// Answer the question a task asks, as the desk last saw it.
+    Answer {
+        /// The operation asked; absent takes the only question asked.
+        #[serde(default)]
+        operation: Option<String>,
+        /// The person confirms what was asked.
+        accept: bool,
+    },
 }
 
 /// Part of one member's unflown lines, flown by another member.
@@ -123,6 +139,8 @@ pub enum IntentKind {
     Fetch,
     /// Resolve a handover.
     ResolveHandover,
+    /// Answer a question a task asks.
+    Answer,
 }
 
 impl MissionCommand {
@@ -140,6 +158,8 @@ impl MissionCommand {
             Self::MemberDown { .. } => IntentKind::MemberDown,
             Self::Fetch {} => IntentKind::Fetch,
             Self::ResolveHandover { .. } => IntentKind::ResolveHandover,
+            Self::ProposeReport { .. } => IntentKind::Propose,
+            Self::Answer { .. } => IntentKind::Answer,
         }
     }
 }
@@ -161,6 +181,7 @@ impl IntentKind {
             Action::MemberDown(_) => Self::MemberDown,
             Action::Fetch(_) => Self::Fetch,
             Action::ResolveHandover(_) => Self::ResolveHandover,
+            Action::Answer(_) => Self::Answer,
         }
     }
 
@@ -179,6 +200,7 @@ impl IntentKind {
             Self::MemberDown => "MemberDown",
             Self::Fetch => "Fetch",
             Self::ResolveHandover => "ResolveHandover",
+            Self::Answer => "Answer",
         }
     }
 }

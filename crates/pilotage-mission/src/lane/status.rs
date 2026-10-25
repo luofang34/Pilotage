@@ -14,7 +14,10 @@ impl Lane {
         let survey = proposal
             .and_then(|p| p.objective.as_ref())
             .and_then(|o| o.kind.as_ref())
-            .map(|wire::mission_objective::Kind::Survey(survey)| survey);
+            .and_then(|kind| match kind {
+                wire::mission_objective::Kind::Survey(survey) => Some(survey),
+                wire::mission_objective::Kind::Report(_) => None,
+            });
         wire::MissionStatus {
             lane: self.config.name.clone(),
             state: self.state as i32,

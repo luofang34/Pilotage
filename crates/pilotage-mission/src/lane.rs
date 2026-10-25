@@ -6,6 +6,7 @@
 //! A proposal grants nothing. A run starts only under an approval bound to
 //! the proposal's digest whose adaptation envelope covers the plan.
 
+mod answer;
 mod approval;
 mod compile;
 mod evidence;
@@ -67,6 +68,9 @@ pub struct LaneConfig {
     /// pictures, milliseconds on the host's monotonic clock. The clock does
     /// not stop while the run holds.
     pub evidence_window_ms: u64,
+    /// The operations the lane's host carries out: a plan with another one,
+    /// or another version of one, is refused when it is proposed.
+    pub executors: pilotage_mission_core::executor::ExecutorRegistry,
 }
 
 /// What the host supplies with an intent: the civil time and a fresh,
@@ -86,6 +90,17 @@ pub enum RunPlan {
     Survey(SurveyRequest),
     /// Home from wherever the vehicle is: a successor that ends the work.
     Home,
+    /// Operations of host executors, one task each, in order.
+    Operations(Vec<PlannedOperation>),
+}
+
+/// One operation of a plan and the task it carries out.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlannedOperation {
+    /// The task the operation is.
+    pub task_id: String,
+    /// The operation, with parameters that may name results of earlier tasks.
+    pub operation: wire::MissionOperation,
 }
 
 /// A run the host must start: the plan and the config its mission engine
@@ -111,6 +126,19 @@ pub enum LaneEffect {
     Resume,
     /// End the run: the vehicle stops in place and the lane releases it.
     Abort,
+    /// Give a person's answer to the operation that asked.
+    Answer(OperationAnswer),
+}
+
+/// A person's answer to the question of one operation of the run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperationAnswer {
+    /// The operation that asked.
+    pub operation_id: String,
+    /// The person confirms what was asked.
+    pub accepted: bool,
+    /// Who answered, as the host wrote it.
+    pub answered_by: String,
 }
 
 /// The receipt for an intent and the effect, when there is one.
@@ -208,6 +236,7 @@ impl Lane {
             Some(Action::ResolveHandover(_)) => {
                 Err("a vehicle lane has no handovers; send it to the team".to_owned())
             }
+            Some(Action::Answer(answer)) => self.answer(answer),
             Some(Action::Skip(_)) => Err(
                 "skipping a task needs a successor plan, which this lane does not compile yet"
                     .to_owned(),
@@ -372,7 +401,7 @@ impl Lane {
         self.holds.clear();
         self.detail = "aborted by intent; the vehicle stops in place".to_owned();
         if let Some(run) = self.run.as_mut() {
-            run.close(wire::MissionTaskExecution::Cancelled, self.host_ms);
+            run.abort(self.host_ms);
         }
         Ok((Some(LaneEffect::Abort), None))
     }

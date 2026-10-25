@@ -71,6 +71,12 @@ impl MissionDesk {
                     resolved_by: None,
                 }))
             }
+            MissionCommand::ProposeReport { source, question } => Ok(Action::Propose(
+                self.report_objective(source, question, now_ms),
+            )),
+            MissionCommand::Answer { operation, accept } => {
+                self.answer(operation.as_deref(), *accept)
+            }
             MissionCommand::Fetch {} => Ok(Action::Fetch(wire::MissionFetch {
                 digest: self.unseen_approvable().ok_or(DeskRefusal::NoProposal)?,
             })),

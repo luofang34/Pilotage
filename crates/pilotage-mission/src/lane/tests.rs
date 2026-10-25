@@ -29,6 +29,7 @@ fn config() -> LaneConfig {
         recovery_policy: "hold in place".to_owned(),
         judged: true,
         evidence_window_ms: WINDOW_MS,
+        executors: pilotage_mission_core::executor::ExecutorRegistry::NONE,
     }
 }
 
@@ -443,6 +444,7 @@ mod expiry;
 mod fetch;
 mod needs;
 mod outcome;
+mod report;
 mod successor;
 mod window;
 

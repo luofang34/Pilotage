@@ -14,6 +14,16 @@ pub enum EngineStartError {
         #[source]
         source: ValidationError,
     },
+    /// A bound action names an operation the host does not carry out as
+    /// written.
+    #[error("phase {phase} names an operation the host does not admit: {source}")]
+    Executor {
+        /// The phase's identity.
+        phase: String,
+        /// Why the host does not admit it.
+        #[source]
+        source: crate::executor::BoundRefused,
+    },
     /// The mission content digest is not valid.
     #[error("the mission document digest is not valid: {source}")]
     DocumentIdentity {

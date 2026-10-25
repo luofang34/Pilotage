@@ -7,6 +7,7 @@ mod digest;
 mod document;
 mod engine;
 mod error;
+pub mod executor;
 mod identity;
 mod signal;
 mod trial;

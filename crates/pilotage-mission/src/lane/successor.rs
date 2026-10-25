@@ -66,6 +66,11 @@ impl Lane {
             .as_ref()
             .ok_or("the revision names no change")?;
         let current = self.proposal.as_ref().ok_or("there is no plan to revise")?;
+        if !current.flies() {
+            return Err(
+                "a plan of operations takes no revision; abort it and propose another".to_owned(),
+            );
+        }
         if revise.base_digest != current.proposal.digest {
             return Err(format!(
                 "the revision continues plan {}; the plan is now {}",

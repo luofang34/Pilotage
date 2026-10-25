@@ -137,7 +137,10 @@ lane has a lifecycle: `Idle`, `Admitted`, `Running`, `HoldRequested`,
 `HoldRequested`; the lane becomes `Held` only when the vehicle reports that
 it holds in place. An abort keeps each task that did not finish as
 unfinished: the execution of the task in progress becomes `Cancelled`, and
-a pending task stays pending. An abort of a team also ends the work that
+a pending task stays pending. An operation task keeps its execution until
+the host reports how the operation ended, because the operation can still
+have its effect: the host cancels it as its registered cancel semantics
+say, and then reports it cancelled, completed or failed. An abort of a team also ends the work that
 the team was still setting in motion. A re-flight or moved lines that have
 not started are cancelled, and a receipt that arrives later takes no next
 step. When the start was sent, the member may fly, so the work keeps its
@@ -145,7 +148,29 @@ member until the member reports. Committed work that its receiver had not
 started is unassigned when its giving member released it. Work that moved
 on a person's statement, without a release, is unreconciled instead,
 because the giving member may still fly it. A release fact that arrives after the abort is
-recorded as unassigned work, and it gives no work to the receiver. The environment variables remain a bootstrap source
+recorded as unassigned work, and it gives no work to the receiver.
+
+Each kind of objective plans in its own module, and what follows the plan
+is the same for each kind: its approval, its run, its evidence and its
+judgment. A task that is one operation of a host executor names the
+executor, the operation, its version and its parameters (ADR-0041). A
+parameter is a value or a result of an earlier task of the plan. The lane
+refuses a plan when it is proposed if its host does not register each of
+its operations in that version, with parameters of the declared types. The
+status gives the results of each task and the question that an operation
+asks a person. A person answers with the operation's identity and the
+digest of the subject that the person saw, so the lane refuses an answer
+to a subject that changed. The host takes an answer only from a session
+with the approver secret, and it writes who answered. An operation task's
+judgment is met when its execution completed and the result that the plan
+names has its value. A report objective reads a value, asks a person to
+confirm it, and writes a report of it: a person who declines ends the run,
+and the report is not written. The host writes the report of one operation
+once, so a repeat of that operation finds it. A plan of operations has no
+way home: it takes no revision, and an expired approval holds it before
+its next operation. A host that restarts does not keep the runs in
+progress of its lane, so the lane is idle again; a person checks what an
+operation in progress did before a new proposal. The environment variables remain a bootstrap source
 that issues the first plan into an `Idle` lane; an issued plan supersedes
 them.
 

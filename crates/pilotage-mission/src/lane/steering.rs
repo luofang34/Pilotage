@@ -102,6 +102,15 @@ impl Steering {
                 down.stated_by = Some(stamp(requester));
                 Ok(())
             }
+            Some(Action::Answer(_)) if !requester.may_approve => Err(format!(
+                "{} may not answer for a person: it needs the approver secret",
+                requester.subject
+            )),
+            Some(Action::Answer(answer)) => {
+                // The record names the session that answered.
+                answer.answered_by = Some(stamp(requester));
+                Ok(())
+            }
             Some(Action::Resume(_)) if self.held_by_approver && !requester.may_approve => {
                 Err(format!(
                     "{} may not resume: an approver held the mission",
