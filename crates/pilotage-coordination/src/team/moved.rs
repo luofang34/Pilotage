@@ -43,8 +43,9 @@ impl TeamLane {
         }
     }
 
-    /// Proposes the moved lines of `index` to its member: the team's area
-    /// clipped to those lines' swaths.
+    /// Proposes the moved lines of `index` to its member: the area the team
+    /// planned its lines over, clipped to those lines' swaths. A revised
+    /// objective may leave the moved lines outside its own area.
     pub(super) fn start_moved(
         &mut self,
         index: usize,
@@ -53,7 +54,10 @@ impl TeamLane {
         let Some(extra) = self.reflies.get(index).cloned() else {
             return Vec::new();
         };
-        let (Some(sweep), Some(area)) = (self.sweep, self.survey().map(|s| s.area.clone())) else {
+        let (Some(sweep), Some(area)) = (
+            self.sweep,
+            self.member_survey.as_ref().map(|s| s.area.clone()),
+        ) else {
             return Vec::new();
         };
         let across = Across::new(&area, sweep.bearing_deg);
