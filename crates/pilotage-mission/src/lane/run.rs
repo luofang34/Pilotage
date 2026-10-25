@@ -304,10 +304,14 @@ impl RunTracker {
 
     /// Ends the run with `outcome` for the task in progress: completed when
     /// the plan completed, cancelled by an abort, failed when the run ended
-    /// without completing its plan. A task not begun stays pending.
+    /// without completing its plan. A task not begun stays pending. An
+    /// operation in progress ends only as the host reports it: a run that
+    /// ended without that report does not show how the operation ended.
     pub(super) fn close(&mut self, outcome: Execution, now_ms: u64) {
         for task in &mut self.tasks {
-            task.end_active(outcome, now_ms);
+            if task.plan.operation.is_none() || outcome == Execution::Completed {
+                task.end_active(outcome, now_ms);
+            }
         }
         self.active = None;
     }

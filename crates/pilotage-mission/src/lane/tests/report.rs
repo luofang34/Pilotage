@@ -367,3 +367,26 @@ fn a_plan_of_operations_takes_no_revision() {
         reply.receipt.reason
     );
 }
+
+#[test]
+fn a_run_that_ends_without_reporting_its_operation_leaves_it_unknown() {
+    let (mut lane, ids) = started();
+    let question = asking(&mut lane, &ids);
+    lane.on_intent(&answer(&question, true), &context("yes"));
+    lane.on_progress(&RunProgress {
+        active_task: Some(ids[2].clone()),
+        finished_tasks: vec![ids[0].clone(), ids[1].clone()],
+        ..RunProgress::default()
+    });
+    lane.on_progress(&RunProgress {
+        finished_tasks: vec![ids[0].clone(), ids[1].clone()],
+        ended: true,
+        ..RunProgress::default()
+    });
+    assert_eq!(lane.state(), wire::MissionLaneState::Failed);
+    assert_eq!(
+        task(&lane, &ids[2]).execution,
+        Execution::Active as i32,
+        "the write may have happened; nothing reported how it ended"
+    );
+}
