@@ -57,6 +57,9 @@ impl TeamLane {
         // admitted.
         let (target, envelope) = admit_approval(approval, held, context.now_unix_ms)?;
         self.within_height(envelope)?;
+        if target != ApprovalTarget::Renewal {
+            self.drafted_within_height(envelope)?;
+        }
         match target {
             ApprovalTarget::Renewal => self.renew(approval),
             ApprovalTarget::Successor | ApprovalTarget::Plan => self

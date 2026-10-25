@@ -117,8 +117,11 @@ impl TeamLane {
             .approval
             .clone()
             .ok_or("the team runs without an approval")?;
-        let permitted = pilotage_mission::valid_approval(&approval, context.now_unix_ms)
-            .map(|e| authorize(e, &changes).map_err(|unpermitted| unpermitted.to_string()));
+        let permitted = pilotage_mission::valid_approval(&approval, context.now_unix_ms).map(|e| {
+            self.drafted_within_height(e).and_then(|()| {
+                authorize(e, &changes).map_err(|unpermitted| unpermitted.to_string())
+            })
+        });
         match permitted {
             Ok(Ok(())) => Ok((proposal, self.apply_revision(context))),
             Ok(Err(unpermitted)) => {
