@@ -83,7 +83,15 @@ impl TeamLane {
             &member,
             Op::Answer,
             None,
-            wire::mission_intent::Action::Answer(answer.clone()),
+            // The team vouches for the person its host named; a team above
+            // it already named the person, and that name stays.
+            wire::mission_intent::Action::Answer(wire::MissionAnswer {
+                relayed_from: answer
+                    .relayed_from
+                    .clone()
+                    .or_else(|| answer.answered_by.clone()),
+                ..answer.clone()
+            }),
         );
         self.detail = format!("passing the answer to {member}");
         Ok((vec![intent], true))

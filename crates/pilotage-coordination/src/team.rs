@@ -342,7 +342,11 @@ impl TeamLane {
             };
         } else if states.iter().all(|s| *s == complete || failed.contains(s)) {
             self.phase = Phase::Failed;
-            self.detail = format!("a member ended without completing; {}", self.book.summary());
+            self.detail = if self.survey().is_some() {
+                format!("a member ended without completing; {}", self.book.summary())
+            } else {
+                "the member ended without completing the work".to_owned()
+            };
         }
     }
 

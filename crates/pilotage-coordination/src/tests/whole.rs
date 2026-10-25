@@ -117,7 +117,11 @@ fn a_team_runs_a_report_through_one_member_and_passes_the_answer_on() {
                 operation_id: question.operation_id.clone(),
                 subject_digest: question.subject_digest.clone(),
                 accepted: true,
-                answered_by: None,
+                answered_by: Some(wire::RecordOrigin {
+                    subject: "operator".to_owned(),
+                    ..wire::RecordOrigin::default()
+                }),
+                relayed_from: None,
             })),
         },
         &context("answer"),
@@ -125,6 +129,14 @@ fn a_team_runs_a_report_through_one_member_and_passes_the_answer_on() {
     assert!(answer.receipt.is_none(), "it waits for the member");
     assert_eq!(answer.intents.len(), 1);
     assert_eq!(answer.intents[0].member, member);
+    let Some(Action::Answer(relayed)) = answer.intents[0].intent.action.clone() else {
+        panic!("an answer");
+    };
+    assert_eq!(
+        relayed.relayed_from.map(|o| o.subject).as_deref(),
+        Some("operator"),
+        "the team vouches for the person its host named"
+    );
     let decided = fleet.route(answer.intents);
     assert_eq!(decided.len(), 1, "{decided:?}");
     assert_eq!(decided[0].request_id, "op-answer");
@@ -219,6 +231,7 @@ fn a_report_whose_member_is_stated_down_fails_and_takes_no_answer() {
                 subject_digest: question.subject_digest,
                 accepted: true,
                 answered_by: None,
+                relayed_from: None,
             })),
         },
         &context("late"),
