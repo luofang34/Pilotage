@@ -30,8 +30,15 @@ pub fn classify(before: &wire::MissionObjective, after: &wire::MissionObjective)
 fn surveys(before: &wire::SurveyObjective, after: &wire::SurveyObjective, set: &mut ChangeSet) {
     use ChangeClass::{Objective, Plan};
     // A named area of another identity or revision is another area, even
-    // with the same vertices.
-    if before.area != after.area || before.area_ref != after.area_ref {
+    // with the same vertices. An area with no revision of its own is its
+    // vertices, and what a ref says for display is no content.
+    let named = |s: &wire::SurveyObjective| {
+        s.area_ref
+            .as_ref()
+            .filter(|r| r.revision > 0 && !r.area_id.is_empty())
+            .map(|r| (r.area_id.clone(), r.revision))
+    };
+    if before.area != after.area || named(before) != named(after) {
         set.add(Objective, "the area");
     }
     if before.return_to_launch != after.return_to_launch {

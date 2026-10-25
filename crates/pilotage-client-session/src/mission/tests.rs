@@ -404,3 +404,17 @@ fn a_survey_over_a_named_area_names_its_identity_and_revision() {
     assert_eq!(derived.identity.id, "derived:Nassau Street");
     assert_eq!(derived.identity.revision, 0, "its vertices are all it is");
 }
+
+#[test]
+fn a_survey_planned_over_an_area_takes_its_vertices_and_identity_together() {
+    let mut file = survey();
+    let ring = vec![[40.0, -74.0], [40.0, -73.9], [40.1, -73.9]];
+    file.plan_over(super::Area::drawn("graphic-7", 3, "drawn", ring.clone()));
+    assert_eq!(file.area, ring);
+    assert_eq!(file.area_ref.as_deref().map(|r| r.revision), Some(3));
+    let text = serde_json::to_string(&survey()).unwrap();
+    assert!(
+        !text.contains("area_ref"),
+        "an area with no identity writes none"
+    );
+}

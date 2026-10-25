@@ -45,8 +45,9 @@ pub struct SurveyFile {
     /// the objective.
     #[serde(default)]
     pub hold_height: bool,
-    /// The area's identity and revision, when it is a named object.
-    #[serde(default)]
+    /// The area's identity and revision, when it is a named object; boxed so
+    /// that the commands that carry a survey file stay small.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub area_ref: Option<Box<AreaRef>>,
 }
 
@@ -98,6 +99,12 @@ impl Area {
 }
 
 impl SurveyFile {
+    /// Plans over `area`: its vertices and, for a named area, its identity.
+    pub fn plan_over(&mut self, area: Area) {
+        self.area = area.ring;
+        self.area_ref = (!area.identity.id.is_empty()).then(|| Box::new(area.identity));
+    }
+
     /// The objective `text` holds.
     ///
     /// # Errors
@@ -139,11 +146,15 @@ impl SurveyFile {
                     min_usable_frames_per_line: self.min_usable_frames_per_line,
                     line_bearing_deg: self.line_bearing_deg,
                     hold_height: self.hold_height,
-                    area_ref: self.area_ref.as_ref().map(|r| wire::MissionAreaRef {
-                        area_id: r.id.clone(),
-                        revision: r.revision,
-                        source: r.source.clone(),
-                    }),
+                    area_ref: self
+                        .area_ref
+                        .as_ref()
+                        .filter(|r| !r.id.is_empty())
+                        .map(|r| wire::MissionAreaRef {
+                            area_id: r.id.clone(),
+                            revision: r.revision,
+                            source: r.source.clone(),
+                        }),
                 },
             )),
             delegated_by: String::new(),
