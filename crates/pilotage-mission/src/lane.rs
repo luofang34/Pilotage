@@ -205,6 +205,9 @@ impl Lane {
                 Err("a vehicle lane has no members; send it to the team".to_owned())
             }
             Some(Action::Fetch(fetch)) => self.fetch(&fetch.digest),
+            Some(Action::ResolveHandover(_)) => {
+                Err("a vehicle lane has no handovers; send it to the team".to_owned())
+            }
             Some(Action::Skip(_)) => Err(
                 "skipping a task needs a successor plan, which this lane does not compile yet"
                     .to_owned(),

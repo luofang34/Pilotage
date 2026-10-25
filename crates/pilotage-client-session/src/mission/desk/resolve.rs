@@ -65,6 +65,12 @@ impl MissionDesk {
                     stated_by: None,
                 }))
             }
+            MissionCommand::ResolveHandover { assignment_id } => {
+                Ok(Action::ResolveHandover(wire::MissionResolveHandover {
+                    assignment_id: assignment_id.clone(),
+                    resolved_by: None,
+                }))
+            }
             MissionCommand::Fetch {} => Ok(Action::Fetch(wire::MissionFetch {
                 digest: self.unseen_approvable().ok_or(DeskRefusal::NoProposal)?,
             })),
