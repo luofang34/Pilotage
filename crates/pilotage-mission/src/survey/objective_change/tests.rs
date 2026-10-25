@@ -34,36 +34,45 @@ fn area(id: &str, revision: u64) -> Option<wire::MissionAreaRef> {
         area_id: id.to_owned(),
         revision,
         source: "drawn on the map".to_owned(),
+        derived: false,
+    })
+}
+
+fn derived(name: &str) -> Option<wire::MissionAreaRef> {
+    Some(wire::MissionAreaRef {
+        derived: true,
+        ..area(&format!("derived:{name}"), 0)?
     })
 }
 
 #[test]
-fn another_revision_or_identity_of_an_area_changes_the_objective_with_the_same_vertices() {
-    let before = survey(area("graphic-7", 3));
+fn another_named_area_changes_the_objective_with_the_same_vertices() {
+    // Two areas drawn and never edited, each at revision 0.
+    let before = survey(area("graphic-7", 0));
     for after in [
-        survey(area("graphic-7", 4)),
-        survey(area("graphic-8", 3)),
+        survey(area("graphic-8", 0)),
         survey(None),
+        survey(derived("x")),
     ] {
-        let changes = classify(&before, &after);
-        assert!(changes.has(ChangeClass::Objective), "{after:?}");
+        assert!(
+            classify(&before, &after).has(ChangeClass::Objective),
+            "{after:?}"
+        );
     }
-    let same = classify(&before, &survey(area("graphic-7", 3)));
-    assert!(!same.has(ChangeClass::Objective));
 }
 
 #[test]
-fn what_an_area_ref_says_for_display_and_a_derived_name_are_no_content() {
-    let mut drawn = area("graphic-7", 3);
-    let before = survey(drawn.clone());
-    if let Some(r) = drawn.as_mut() {
+fn a_new_revision_with_the_same_vertices_and_what_a_ref_shows_are_no_content() {
+    let before = survey(area("graphic-7", 3));
+    let mut shown = area("graphic-7", 4);
+    if let Some(r) = shown.as_mut() {
         r.source = "drawn".to_owned();
     }
-    assert!(!classify(&before, &survey(drawn)).has(ChangeClass::Objective));
-    let derived = survey(area("derived:nassau st", 0));
-    for after in [survey(area("derived:nassau street", 0)), survey(None)] {
+    assert!(!classify(&before, &survey(shown)).has(ChangeClass::Objective));
+    let derived_before = survey(derived("nassau st"));
+    for after in [survey(derived("nassau street")), survey(None)] {
         assert!(
-            !classify(&derived, &after).has(ChangeClass::Objective),
+            !classify(&derived_before, &after).has(ChangeClass::Objective),
             "{after:?}"
         );
     }

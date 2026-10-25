@@ -57,13 +57,15 @@ pub struct SurveyFile {
 pub struct AreaRef {
     /// The area's identity, stable across its revisions.
     pub id: String,
-    /// The revision of its geometry; zero for an area whose vertices are
-    /// all it is.
+    /// The revision of the area object, as its editor counts them.
     #[serde(default)]
     pub revision: u64,
     /// What the area was found as, for display.
     #[serde(default)]
     pub source: String,
+    /// The area has no identity of its own: its vertices are all it is.
+    #[serde(default)]
+    pub derived: bool,
 }
 
 /// An area as the operator's tools find it: its identity, its revision and
@@ -85,16 +87,19 @@ impl Area {
                 id: id.to_owned(),
                 revision,
                 source: source.to_owned(),
+                derived: false,
             },
             ring,
         }
     }
 
     /// An area derived from the place `name`, such as labels on a map: it
-    /// has no revision of its own, so its vertices are all it is.
+    /// has no identity of its own, so its vertices are all it is.
     #[must_use]
     pub fn derived(name: &str, source: &str, ring: Vec<[f64; 2]>) -> Self {
-        Self::drawn(&format!("derived:{name}"), 0, source, ring)
+        let mut area = Self::drawn(&format!("derived:{name}"), 0, source, ring);
+        area.identity.derived = true;
+        area
     }
 }
 
@@ -154,6 +159,7 @@ impl SurveyFile {
                             area_id: r.id.clone(),
                             revision: r.revision,
                             source: r.source.clone(),
+                            derived: r.derived,
                         }),
                 },
             )),

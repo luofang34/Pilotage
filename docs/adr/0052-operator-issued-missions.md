@@ -255,10 +255,10 @@ plans. The title, the identity and the revision number of an objective are
 not content: an objective with the same identity and different content is
 an objective change. A survey names its area by identity and revision when the
 area is a named object, such as an area drawn on a map. Another identity
-or revision of the area is an objective change, also with the same
-vertices. An area found from labels has no revision, so its vertices are
-all it is, and its name is not content. What a ref says for display is not
-content either. The strip that a team gives to a member is part of the area, so
+of the area is an objective change, also with the same vertices. The
+vertices tell whether the area changed. The revision of the area object
+and the text that a ref shows are not content. An area found from labels
+has no identity of its own, so its vertices are all it is. The strip that a team gives to a member is part of the area, so
 it names no area identity. An explicit approval of the digest of a draft is the
 permission of the approver for that draft, so this check applies only to
 admission inside the envelope. Task-by-task consent is an

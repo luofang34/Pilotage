@@ -14,6 +14,7 @@ fn a_members_strip_does_not_claim_the_teams_area_identity() {
             area_id: "graphic-7".to_owned(),
             revision: 3,
             source: "drawn on the map".to_owned(),
+            derived: false,
         });
     }
     let reply = team.on_intent(

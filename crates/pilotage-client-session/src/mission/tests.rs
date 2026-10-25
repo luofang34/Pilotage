@@ -402,7 +402,7 @@ fn a_survey_over_a_named_area_names_its_identity_and_revision() {
     assert_eq!((named.area_id.as_str(), named.revision), ("graphic-7", 3));
     let derived = super::Area::derived("Nassau Street", "the map's labels", vec![]);
     assert_eq!(derived.identity.id, "derived:Nassau Street");
-    assert_eq!(derived.identity.revision, 0, "its vertices are all it is");
+    assert!(derived.identity.derived, "its vertices are all it is");
 }
 
 #[test]
