@@ -19,14 +19,17 @@ use pilotage_protocol::wire;
 use super::renewal::Renewal;
 use super::{MemberIntent, Op, TeamLane};
 
-/// How long an operation waits for its members' answers.
+/// How long an operation waits for its members' answers, on the host's
+/// monotonic clock: a step of the civil clock does not move it, and a hold
+/// does not stop it.
 pub(super) const ANSWER_TIMEOUT_MS: u64 = 30_000;
 
 /// One open operation.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct Operation {
     kind: Op,
-    opened_unix_ms: u64,
+    /// When it opened, on the host's monotonic clock, milliseconds.
+    opened_host_ms: u64,
     /// Member requests not yet answered, with their members.
     waiting: BTreeMap<String, String>,
     /// Member requests whose answer is lost, with why.
@@ -66,12 +69,7 @@ impl TeamLane {
     /// Opens the operation the operator's `request_id` asked for, over the
     /// member requests `intents`, at `now_unix_ms`. Returns whether it waits
     /// for any member.
-    pub(super) fn open_operation(
-        &mut self,
-        request_id: &str,
-        intents: &[MemberIntent],
-        now_unix_ms: u64,
-    ) -> bool {
+    pub(super) fn open_operation(&mut self, request_id: &str, intents: &[MemberIntent]) -> bool {
         let mut waiting = BTreeMap::new();
         let mut kind = None;
         for intent in intents {
@@ -88,7 +86,7 @@ impl TeamLane {
             request_id.to_owned(),
             Operation {
                 kind,
-                opened_unix_ms: now_unix_ms,
+                opened_host_ms: self.host_ms,
                 waiting,
                 lost: Vec::new(),
                 renewal: if kind == Op::Renew {
@@ -188,13 +186,16 @@ impl TeamLane {
         self.ended.extend(ended);
     }
 
-    /// The host's clock: an operation that waited too long for an answer
-    /// ends uncertain. [`TeamLane::take_ended`] gives its receipt.
-    pub fn on_host_clock(&mut self, now_unix_ms: u64) {
+    /// The host's monotonic clock at `now_ms`, milliseconds: an operation
+    /// that waited too long for an answer ends uncertain.
+    /// [`TeamLane::take_ended`] gives its receipt.
+    pub fn on_host_clock(&mut self, now_ms: u64) {
+        self.host_ms = self.host_ms.max(now_ms);
+        let now_ms = self.host_ms;
         let late: Vec<String> = self
             .operations
             .iter()
-            .filter(|(_, o)| now_unix_ms.saturating_sub(o.opened_unix_ms) >= ANSWER_TIMEOUT_MS)
+            .filter(|(_, o)| now_ms.saturating_sub(o.opened_host_ms) >= ANSWER_TIMEOUT_MS)
             .map(|(id, _)| id.clone())
             .collect();
         let reason = format!("no answer within {} s", ANSWER_TIMEOUT_MS / 1000);

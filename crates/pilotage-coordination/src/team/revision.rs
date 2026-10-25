@@ -197,7 +197,7 @@ impl TeamLane {
                 match self.propose(objective, context) {
                     Ok((intents, _)) => {
                         // Members are always asked: the objective is new.
-                        self.open_operation(&id, &intents, context.now_unix_ms);
+                        self.open_operation(&id, &intents);
                         return super::TeamReply {
                             receipt: None,
                             intents,
