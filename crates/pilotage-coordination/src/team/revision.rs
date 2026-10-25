@@ -150,6 +150,16 @@ impl TeamLane {
         context: &IntentContext,
     ) -> super::TeamReply {
         use wire::mission_revise::Change as Asked;
+        // A team does not build a release fact from its members. own,
+        // so it refuses a revision that asks for one before it changes
+        // anything, so its parent never waits for a release that cannot come.
+        if revise.release.is_some() {
+            let reason = "this team cannot report a release of its members' work; the revision that asks for one is refused, and the work stays with this team".to_owned();
+            return super::TeamReply {
+                receipt: Some(self.receipt(id, false, reason, None)),
+                intents: Vec::new(),
+            };
+        }
         let before_start = matches!(self.phase, Phase::Proposed | Phase::Admitted);
         let current = self
             .proposal

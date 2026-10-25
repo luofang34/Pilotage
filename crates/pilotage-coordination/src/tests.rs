@@ -455,6 +455,7 @@ mod hold;
 mod parent;
 mod progress;
 mod records;
+mod release;
 mod renewal;
 mod results;
 use progress::toward;
