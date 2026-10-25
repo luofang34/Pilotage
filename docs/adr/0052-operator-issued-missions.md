@@ -356,6 +356,21 @@ required participants before coordinated execution starts, and the
 proposal states what happens when only some participants admit or start;
 a multi-vehicle start is not atomic.
 
+A coordinator request that waits for its members is an operation. The
+operation records the operator's request, the member requests that it
+sent, and the result of each. Only one operation of a kind is open at a
+time. The coordinator refuses a second operation of that kind as busy,
+because it does not put concurrent operations in order. Each operation
+gets one receipt: when its members answer, when an abort or a new plan
+ends it, or when an answer is lost. A member request that did not go out
+is refused, and the receipt says that it was not sent. An answer that is
+lost, because the link is lost or no answer comes in time, makes the
+receipt uncertain. It does not show that the member did not execute the
+request. Thus an answer that comes after its operation ended still
+changes the team, but it does not give the operator a second receipt.
+The team takes an abort also while it waits for the members' proposals or
+approvals, so that a lost answer does not keep the team in that state.
+
 Three losses are distinct: loss of the internet, loss of contact with the
 operator, and loss of the control link between a coordinator and a
 vehicle. Approved authority and local resources let a coordinator continue

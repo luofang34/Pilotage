@@ -10,6 +10,7 @@ mod intents;
 mod members;
 mod moved;
 mod needs;
+mod operations;
 mod refly;
 mod renewal;
 mod revision;
@@ -111,6 +112,8 @@ struct Pending {
     refly: Option<usize>,
     /// It is a member's share of a revision.
     revision: bool,
+    /// The operator request it was sent for.
+    operation: Option<String>,
 }
 
 /// The coordinator's lane.
@@ -135,7 +138,11 @@ pub struct TeamLane {
     statuses: BTreeMap<String, wire::MissionStatus>,
     book: TaskBook,
     pending: BTreeMap<String, Pending>,
-    operator_request: Option<String>,
+    /// Operator requests waiting for their members, by request.
+    operations: BTreeMap<String, operations::Operation>,
+    /// Receipts of operator requests that ended outside an answer to them,
+    /// for the host to send.
+    ended: Vec<wire::MissionReceipt>,
     /// The team's run, once started; a parent team follows it by this id.
     run_id: Option<String>,
     reflies: Vec<Refly>,
@@ -176,7 +183,8 @@ impl TeamLane {
             statuses: BTreeMap::new(),
             book: TaskBook::default(),
             pending: BTreeMap::new(),
-            operator_request: None,
+            operations: BTreeMap::new(),
+            ended: Vec::new(),
             run_id: None,
             reflies: Vec::new(),
             revision: None,
@@ -216,7 +224,15 @@ impl TeamLane {
                 Action::Resume(wire::MissionResume {}),
             ),
             Some(Action::Abort(_)) => self.steer(
-                &[Phase::Starting, Phase::Running, Phase::Held],
+                // From a proposal or an approval that waits for a member too:
+                // an answer that may never come does not keep the team there.
+                &[
+                    Phase::Proposing,
+                    Phase::Approving,
+                    Phase::Starting,
+                    Phase::Running,
+                    Phase::Held,
+                ],
                 Phase::Aborted,
                 Action::Abort(wire::MissionAbort {}),
             ),
@@ -231,8 +247,8 @@ impl TeamLane {
         };
         match result {
             Ok((intents, deferred)) => {
-                if deferred {
-                    self.operator_request = Some(id);
+                // A step that asks no member is answered at once.
+                if deferred && self.open_operation(&id, &intents, context.now_unix_ms) {
                     TeamReply {
                         receipt: None,
                         intents,
@@ -319,6 +335,7 @@ impl TeamLane {
                 op,
                 refly,
                 revision: false,
+                operation: None,
             },
         );
         MemberIntent {
@@ -342,6 +359,8 @@ impl TeamLane {
         self.approval = None;
         self.statuses.clear();
         self.book = TaskBook::default();
+        let replaced = self.lose_answers(|_, _| true, "the plan was replaced before it answered");
+        self.ended.extend(replaced);
         self.pending.clear();
         self.reflies.clear();
         self.revision = None;
