@@ -1,10 +1,11 @@
-//! Admission of an approval: it binds the proposal's digest, permits
-//! execution, has not expired, and its adaptation envelope covers the plan.
+//! Admission of an approval of a compiled plan: it binds the plan's digest,
+//! it is valid now, and its adaptation envelope covers the plan.
 
 use pilotage_protocol::wire;
 
 use super::LaneConfig;
 use super::compile::Compiled;
+use super::target::valid_approval;
 
 /// Height a plan may exceed an envelope by through rounding, metres.
 const HEIGHT_TOLERANCE_M: f64 = 1e-6;
@@ -19,12 +20,7 @@ pub(super) fn admit(
     if approval.proposal_digest != compiled.proposal.digest {
         return Err("the approval binds another proposal digest".to_owned());
     }
-    bound_format(approval)?;
-    still_valid(approval, now_unix_ms)?;
-    let envelope = approval
-        .envelope
-        .as_ref()
-        .ok_or("the approval has no adaptation envelope")?;
+    let envelope = valid_approval(approval, now_unix_ms)?;
     if compiled.height_m > envelope.max_height_m + HEIGHT_TOLERANCE_M {
         return Err(format!(
             "the plan flies at {:.1} m; the envelope allows {:.1} m",
@@ -60,35 +56,6 @@ pub(super) fn admit(
                 "the plan needs {energy_wh:.1} Wh; the reserve leaves {allowed:.1} Wh"
             ));
         }
-    }
-    Ok(())
-}
-
-/// The approval names the record format whose digest it binds: a client
-/// that names none does not know records, and the digest it holds may not
-/// name the bytes the lane compiled.
-pub(super) fn bound_format(approval: &wire::MissionApproval) -> Result<(), String> {
-    if approval.proposal_format == wire::MissionProposalFormat::V1 as i32 {
-        Ok(())
-    } else {
-        Err("the approval names no proposal record format; the client must approve a proposal record".to_owned())
-    }
-}
-
-/// The approval permits execution and has not expired.
-pub(super) fn still_valid(
-    approval: &wire::MissionApproval,
-    now_unix_ms: u64,
-) -> Result<(), String> {
-    let envelope = approval
-        .envelope
-        .as_ref()
-        .ok_or("the approval has no adaptation envelope")?;
-    if !envelope.permit_execute {
-        return Err("the approval does not permit execution".to_owned());
-    }
-    if envelope.expires_unix_ms == 0 || envelope.expires_unix_ms <= now_unix_ms {
-        return Err("the approval has no expiry in the future".to_owned());
     }
     Ok(())
 }

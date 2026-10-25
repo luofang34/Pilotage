@@ -52,9 +52,8 @@ pub(super) struct Step {
     pub withheld: Vec<Withheld>,
 }
 
-const ABORTED: &str =
-    "not sent: an abort reached the member before the coordinator journal let this go out";
-const FULL: &str = "not sent: the coordinator journal cannot be written and its backlog is full";
+const ABORTED: &str = "an abort reached the member before the coordinator journal let this go out";
+const FULL: &str = "the coordinator journal cannot be written and its backlog is full";
 
 /// Whether `intent` aborts a member's work.
 fn is_abort(intent: &MemberIntent) -> bool {

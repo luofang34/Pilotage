@@ -104,7 +104,7 @@ fn relay_two(
 }
 
 /// [`relay_two`], keeping every intent the parent sent in `sent`.
-fn relay_recording(
+pub(super) fn relay_recording(
     parent: &mut TeamLane,
     fleet: &mut Fleet,
     vehicle: &mut Lane,
@@ -145,7 +145,7 @@ fn relay_recording(
 
 /// A parent over the fleet's team `TEAM` and the vehicle `SIM-9`, whose
 /// approval allows three re-flights inside a bound around the area, started.
-fn started_parent(fleet: &mut Fleet, vehicle: &mut Lane) -> TeamLane {
+pub(super) fn started_parent(fleet: &mut Fleet, vehicle: &mut Lane) -> TeamLane {
     use wire::mission_intent::Action;
     let mut parent = TeamLane::new(TeamConfig {
         name: "COMMAND".to_owned(),

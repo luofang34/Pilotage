@@ -6,11 +6,11 @@
 //! or that a person stated down gets none either, and the receipt names it.
 //! A member's renewal ends only the hold its approval's expiry applied.
 
-use pilotage_mission::{Approvable, ApprovalTarget, IntentContext, approval_target};
+use pilotage_mission::{Approvable, ApprovalTarget, IntentContext, admit_approval};
 use pilotage_protocol::wire;
 use wire::MissionLaneState as State;
 
-use super::intents::{delegate, valid_envelope};
+use super::intents::delegate;
 use super::{MemberIntent, Op, TeamLane};
 
 /// A renewal waiting for its members' answers.
@@ -53,8 +53,12 @@ impl TeamLane {
             run: self.run_id.as_deref(),
             drafted: drafted.as_deref(),
         };
-        match approval_target(approval, held)? {
-            ApprovalTarget::Renewal => self.renew(approval, context),
+        // Nothing changes and nothing is passed on before the approval is
+        // admitted.
+        let (target, envelope) = admit_approval(approval, held, context.now_unix_ms)?;
+        self.within_height(envelope)?;
+        match target {
+            ApprovalTarget::Renewal => self.renew(approval),
             ApprovalTarget::Successor | ApprovalTarget::Plan => self
                 .approve_revision(approval, context)
                 .map(|intents| (intents, false)),
@@ -64,15 +68,8 @@ impl TeamLane {
     fn renew(
         &mut self,
         approval: &wire::MissionApproval,
-        context: &IntentContext,
     ) -> Result<(Vec<MemberIntent>, bool), String> {
-        let envelope = valid_envelope(approval, context.now_unix_ms)?;
-        if self.height_m > envelope.max_height_m + 1e-6 {
-            return Err(format!(
-                "the team flies at {:.1} m; the envelope allows {:.1} m",
-                self.height_m, envelope.max_height_m
-            ));
-        }
+        self.busy(Op::Renew)?;
         self.approval = Some(approval.clone());
         let mut renewal = Renewal::default();
         let mut intents = Vec::new();
@@ -123,31 +120,40 @@ impl TeamLane {
         member: &str,
         accepted: bool,
         receipt: &wire::MissionReceipt,
+        operation: Option<&str>,
     ) -> Option<wire::MissionReceipt> {
-        let renewal = self.renewal.get_or_insert_with(Renewal::default);
+        // An answer to a renewal that ended changes only its member: it
+        // counts in no renewal's tally.
+        let renewal = self.renewal_of(operation)?;
         if !accepted {
             renewal
                 .refused
                 .push(format!("{member}: {}", receipt.reason));
         }
-        if self.pending.values().any(|p| p.op == Op::Renew) {
+        if self.group_waits(operation, Op::Renew) {
             return None;
         }
-        let renewal = self.renewal.take().unwrap_or_default();
-        let request = self.operator_request.take().unwrap_or_default();
-        let mut reason = Vec::new();
-        if !renewal.refused.is_empty() {
-            reason.push(format!("refused by {}", renewal.refused.join("; ")));
-        }
-        if !renewal.skipped.is_empty() {
-            reason.push(format!("not sent to {}", renewal.skipped.join("; ")));
-        }
-        let reason = reason.join("; ");
+        let (renewed, reason) = self.renewal_of(operation).map(|r| r.verdict())?;
         self.detail = if reason.is_empty() {
             "the approval is renewed".to_owned()
         } else {
             format!("the approval is renewed; {reason}")
         };
-        Some(self.receipt(request, renewal.refused.is_empty(), reason, None))
+        self.finish(operation, renewed, reason, None)
+    }
+}
+
+impl Renewal {
+    /// Whether every member asked renewed, and what the receipt says of
+    /// the members that refused or were not asked.
+    pub(super) fn verdict(&self) -> (bool, String) {
+        let mut reason = Vec::new();
+        if !self.refused.is_empty() {
+            reason.push(format!("refused by {}", self.refused.join("; ")));
+        }
+        if !self.skipped.is_empty() {
+            reason.push(format!("not sent to {}", self.skipped.join("; ")));
+        }
+        (self.refused.is_empty(), reason.join("; "))
     }
 }

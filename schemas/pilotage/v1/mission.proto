@@ -674,6 +674,9 @@ enum MissionExecutionState {
   MISSION_EXECUTION_STATE_HOLDING = 4;
   // The run stopped and released the vehicle.
   MISSION_EXECUTION_STATE_STOPPED = 5;
+  // Every run of a team ended, and the team waits for the evidence of its
+  // tasks before it judges them and decides whether to fly a task again.
+  MISSION_EXECUTION_STATE_AWAITING_RESULTS = 6;
 }
 
 enum MissionSuccessorState {

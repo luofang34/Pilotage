@@ -13,7 +13,7 @@ use pilotage_mission::survey::objective_change;
 use pilotage_protocol::wire;
 use wire::MissionSuccessorState as Stage;
 
-use super::intents::{delegate, valid_envelope};
+use super::intents::delegate;
 use super::{MemberIntent, Op, Phase, TeamLane};
 
 mod draft;
@@ -103,7 +103,7 @@ impl TeamLane {
             .approval
             .clone()
             .ok_or("the team runs without an approval")?;
-        let permitted = valid_envelope(&approval, context.now_unix_ms)
+        let permitted = pilotage_mission::valid_approval(&approval, context.now_unix_ms)
             .map(|e| authorize(e, &changes).map_err(|unpermitted| unpermitted.to_string()));
         match permitted {
             Ok(Ok(())) => Ok((proposal, self.apply_revision(context))),
@@ -150,6 +150,16 @@ impl TeamLane {
         context: &IntentContext,
     ) -> super::TeamReply {
         use wire::mission_revise::Change as Asked;
+        // A team does not build a release fact from its members. own,
+        // so it refuses a revision that asks for one before it changes
+        // anything, so its parent never waits for a release that cannot come.
+        if revise.release.is_some() {
+            let reason = "this team cannot report a release of its members' work; the revision that asks for one is refused, and the work stays with this team".to_owned();
+            return super::TeamReply {
+                receipt: Some(self.receipt(id, false, reason, None)),
+                intents: Vec::new(),
+            };
+        }
         let before_start = matches!(self.phase, Phase::Proposed | Phase::Admitted);
         let current = self
             .proposal
@@ -160,7 +170,8 @@ impl TeamLane {
             (true, Some(Asked::Objective(objective))) if revise.base_digest == current => {
                 match self.propose(objective, context) {
                     Ok((intents, _)) => {
-                        self.operator_request = Some(id);
+                        // Members are always asked: the objective is new.
+                        self.open_operation(&id, &intents, context.now_unix_ms);
                         return super::TeamReply {
                             receipt: None,
                             intents,
@@ -211,19 +222,11 @@ impl TeamLane {
             .as_ref()
             .filter(|r| r.stage == Stage::Drafted && r.proposal.digest == approval.proposal_digest)
             .ok_or("no drafted revision has that digest")?;
-        super::intents::bound_format(approval)?;
         if let Change::Reassign { from, .. } = &drafted.change
             && self.lost.get(from) == Some(&wire::MemberLink::Lost)
         {
             return Err(format!(
                 "{from}'s link is lost and its state is unknown; its work stays reserved until it reports again or a person states that it is down"
-            ));
-        }
-        let envelope = valid_envelope(approval, context.now_unix_ms)?;
-        if self.height_m > envelope.max_height_m + 1e-6 {
-            return Err(format!(
-                "the team flies at {:.1} m; the envelope allows {:.1} m",
-                self.height_m, envelope.max_height_m
             ));
         }
         self.approval = Some(approval.clone());
@@ -337,6 +340,7 @@ impl TeamLane {
         op: Op,
         accepted: bool,
         receipt: &wire::MissionReceipt,
+        now_unix_ms: u64,
     ) -> Vec<MemberIntent> {
         if !accepted {
             self.detail = format!(
@@ -356,8 +360,13 @@ impl TeamLane {
                 return Vec::new();
             }
         };
-        let Some(team) = self.approval.clone() else {
-            return Vec::new();
+        let team = match self.approval_to_pass_down(now_unix_ms) {
+            Ok(team) => team,
+            Err(reason) => {
+                self.detail = format!("{member}'s share of the revision is not approved: {reason}");
+                self.withdraw_handover(member, &reason);
+                return Vec::new();
+            }
         };
         if self.keeps_moved_work(member, &draft) {
             self.detail = format!("{member}'s share still flies the moved lines; not approved");
@@ -412,6 +421,11 @@ impl TeamLane {
                     status.detail = "down, as a person stated; its work may move".to_owned();
                 }
                 self.detail = format!("{member} is down; reassign its lines to another member");
+                if self.phase == Phase::Settling {
+                    // Its open evidence no longer keeps the team waiting,
+                    // and no other member may report again to end it.
+                    self.settle();
+                }
                 Ok((Vec::new(), false))
             }
         }
@@ -421,6 +435,7 @@ impl TeamLane {
     /// line in progress stay reserved to it until it reports again or a
     /// person states that it is down.
     pub fn on_member_lost(&mut self, member: &str) {
+        self.lose_answers_of(member);
         if self.stated_down(member) {
             return;
         }

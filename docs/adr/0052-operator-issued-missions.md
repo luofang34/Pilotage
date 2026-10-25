@@ -79,6 +79,12 @@ the digest of its predecessor, validity, and releasability.
   prevents an approval of one run from renewing another run of the same
   plan. An approval of a drafted successor names the run in progress or no
   run. A vehicle lane and a team find the target with the same rule.
+  At each entry point, for a plan, a renewal or a successor, they also
+  make the same checks before they change anything or pass anything on:
+  the approval names the record format, permits execution and has not
+  expired. Limits of the domain, such as height and area, are checked
+  after these checks, by the domain. A team passes its approval down to a
+  member only when the approval is valid at that time.
   A held run reports each reason why it holds: the operator, or the
   expiry of its approval. A renewal removes only the expiry reason, and an
   operator's resume removes only the operator reason. The lane refuses a
@@ -281,6 +287,18 @@ flight that the team pays for, a re-flight or moved lines, goes down with
 no budget, so no part is spent two times. The parts never add up to more
 than the approval of the team allows.
 
+The end of the runs of a team and the settlement of its results are
+different facts. When every member's run ended and the evidence of a line
+is still open, the team waits for its results. It shows the state
+`AWAITING_RESULTS`. A judgment that comes inside the evidence window gets
+the same decision as a judgment that came before the runs ended: the
+team flies the line again when the judgment is not met, the budget
+allows, and the approval is valid at that time. When the approval is not
+valid, the team records the judgment and flies nothing. After an abort,
+the team records results and starts no work. The team ends only when no
+evidence of its lines is open. Evidence of a member that a person stated
+down does not keep the team open.
+
 Bounds copied into a plan grant nothing. The lane verifies a plan against
 the issuer's grant at admission and again during execution. A delegation
 that must hold without a connection has an expiry and a preauthorized
@@ -350,6 +368,21 @@ required participants before coordinated execution starts, and the
 proposal states what happens when only some participants admit or start;
 a multi-vehicle start is not atomic.
 
+A coordinator request that waits for its members is an operation. The
+operation records the operator's request, the member requests that it
+sent, and the result of each. Only one operation of a kind is open at a
+time. The coordinator refuses a second operation of that kind as busy,
+because it does not put concurrent operations in order. Each operation
+gets one receipt: when its members answer, when an abort or a new plan
+ends it, or when an answer is lost. A member request that did not go out
+is refused, and the receipt says that it was not sent. An answer that is
+lost, because the link is lost or no answer comes in time, makes the
+receipt uncertain. It does not show that the member did not execute the
+request. Thus an answer that comes after its operation ended still
+changes the team, but it does not give the operator a second receipt.
+The team takes an abort also while it waits for the members' proposals or
+approvals, so that a lost answer does not keep the team in that state.
+
 Three losses are distinct: loss of the internet, loss of contact with the
 operator, and loss of the control link between a coordinator and a
 vehicle. Approved authority and local resources let a coordinator continue
@@ -383,7 +416,11 @@ member gets nothing, and the work and its space stay with the giving
 member. The team does not use a changed run or a shorter list of tasks as
 a release. A moved task that the giving member began before the revision
 applied is not in the release, and it stays with that member. Without a
-release fact, the handover stays open and the status shows it. Nothing is
+release fact, the handover stays open and the status shows it. A team
+that is a member of another team does not make a release fact from
+its members' facts. It refuses a revision that asks for a release before
+it changes anything, and its parent withdraws the handover. A node does
+what an operation asks, or it refuses the operation. Nothing is
 assumed at a time-out. When the giving member refuses its revision, the
 handover is withdrawn and that member keeps the work. When the receiving
 member refuses the released work, or a person states it down before it
