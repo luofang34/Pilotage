@@ -12,7 +12,7 @@ use super::*;
 
 /// Flies `member`'s plan to its end, every line with usable pictures, and
 /// reports it.
-fn complete(fleet: &mut Fleet, member: &str) {
+pub(super) fn complete(fleet: &mut Fleet, member: &str) {
     let lane = fleet.members.get_mut(member).expect("member");
     let lines = lane.task_ids().len().saturating_sub(1);
     for line in 0..lines {
@@ -39,7 +39,7 @@ fn complete(fleet: &mut Fleet, member: &str) {
 
 /// Asks the team, inside its envelope, to move all of SIM-1's unflown lines
 /// to SIM-2; the intents the team sends.
-fn move_sim1_to_sim2(fleet: &mut Fleet) -> Vec<MemberIntent> {
+pub(super) fn move_sim1_to_sim2(fleet: &mut Fleet) -> Vec<MemberIntent> {
     let status = fleet.team.status();
     let reply = fleet.team.on_intent(
         &wire::MissionIntent {
@@ -66,13 +66,13 @@ fn move_sim1_to_sim2(fleet: &mut Fleet) -> Vec<MemberIntent> {
     reply.intents
 }
 
-fn handover(fleet: &Fleet) -> wire::MissionHandover {
+pub(super) fn handover(fleet: &Fleet) -> wire::MissionHandover {
     fleet.team.status().handovers.pop().expect("a handover")
 }
 
 /// SIM-1 ends its line in progress, with usable pictures, and switches to
 /// its revision; its status, not yet reported.
-fn sim1_switches(fleet: &mut Fleet) -> wire::MissionStatus {
+pub(super) fn sim1_switches(fleet: &mut Fleet) -> wire::MissionStatus {
     let lane = fleet.members.get_mut("SIM-1").expect("SIM-1");
     for _ in 0..3 {
         if let Some(ticket) = lane.on_frame() {

@@ -1,6 +1,7 @@
 //! The team lane: propose by decomposition, approve by delegation, start
 //! and steer by fan-out, and adapt within the team's approval envelope.
 
+mod abort;
 mod aggregate;
 mod budget;
 mod fetch;

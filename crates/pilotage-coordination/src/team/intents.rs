@@ -224,6 +224,9 @@ impl TeamLane {
             })
             .collect();
         self.phase = to;
+        if to == Phase::Aborted {
+            self.end_pending_work();
+        }
         self.detail = format!("{to:?} sent to the members").to_lowercase();
         Ok((intents, false))
     }
