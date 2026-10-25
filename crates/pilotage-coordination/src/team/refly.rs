@@ -20,6 +20,8 @@ use super::{MemberIntent, Op, Phase, TeamLane, delegate};
 use crate::allocation::line_strip;
 use crate::geometry::Local;
 
+mod start;
+
 /// Margin around a member's band and launch point, metres.
 const BOUND_MARGIN_M: f64 = 80.0;
 
@@ -29,6 +31,8 @@ pub(super) enum ReflyState {
     Queued,
     Proposing,
     Approving,
+    /// Approved while the team holds: it starts once the team resumes.
+    Approved,
     Starting,
     Flying,
     Done,
@@ -76,10 +80,14 @@ impl TeamLane {
     /// Decides re-flights from the settled verdicts and starts the extra
     /// flights of members that are free to fly them.
     pub(super) fn adapt(&mut self, context: &IntentContext) -> Vec<MemberIntent> {
-        if !matches!(self.phase, Phase::Running | Phase::Settling) {
+        if !matches!(self.phase, Phase::Running | Phase::Settling | Phase::Held) {
             return Vec::new();
         }
         self.decide_reflights(context.now_unix_ms);
+        // A held team decides what to fly again and flies it once resumed.
+        if self.phase == Phase::Held {
+            return Vec::new();
+        }
         let intents = self.dispatch(context);
         if !intents.is_empty() {
             // A late judgment sent a member to fly again.
@@ -331,26 +339,30 @@ impl TeamLane {
                 refly.proposal = Some(proposal.clone());
                 self.approve_extra(index, &member, &proposal, context.now_unix_ms)
             }
-            Op::Approve => {
-                refly.state = ReflyState::Starting;
-                refly.prior_run = self.statuses.get(&member).map(|s| s.run_id.clone());
-                let digest = refly
-                    .proposal
-                    .as_ref()
-                    .map(|p| p.digest.clone())
-                    .unwrap_or_default();
-                vec![self.request(
-                    &member,
-                    Op::Start,
-                    Some(index),
-                    wire::mission_intent::Action::Start(wire::MissionStart {
-                        proposal_digest: digest,
-                    }),
-                )]
+            Op::Approve if self.phase == super::Phase::Held => {
+                refly.state = ReflyState::Approved;
+                self.detail = format!(
+                    "{member} may fly {} again; it starts once the team resumes",
+                    refly.line
+                );
+                Vec::new()
             }
+            Op::Approve => self.start_refly(index),
             Op::Start => {
                 refly.state = ReflyState::Flying;
-                Vec::new()
+                if self.phase != super::Phase::Held {
+                    return Vec::new();
+                }
+                // The start went out before the hold, which the member, not
+                // yet flying it, may have refused: it holds now.
+                self.requests = self.requests.wrapping_add(1);
+                vec![MemberIntent {
+                    member,
+                    intent: wire::MissionIntent {
+                        request_id: format!("{}-steer-{}", self.config.name, self.requests),
+                        action: Some(wire::mission_intent::Action::Hold(wire::MissionHold {})),
+                    },
+                }]
             }
             Op::Revise | Op::Renew | Op::Answer => Vec::new(),
         }

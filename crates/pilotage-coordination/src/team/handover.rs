@@ -309,17 +309,18 @@ impl TeamLane {
         }
     }
 
-    /// A person stated `member` down: moved work it had not started is
-    /// unassigned.
+    /// A person stated `member` down: work it had not started, queued or
+    /// approved while the team held, fails, and moved work is unassigned.
     pub(super) fn unassign_queued_for(&mut self, member: &str) {
         let queued: Vec<String> = self
             .reflies
             .iter_mut()
-            .filter(|r| r.member == member && r.state == ReflyState::Queued)
+            .filter(|r| {
+                r.member == member && matches!(r.state, ReflyState::Queued | ReflyState::Approved)
+            })
             .filter_map(|r| {
-                let assignment = r.assignment.clone()?;
                 r.state = ReflyState::Failed;
-                Some(assignment)
+                r.assignment.clone()
             })
             .collect();
         for assignment in queued {
