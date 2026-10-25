@@ -102,6 +102,8 @@ impl TaskBook {
             entry.judgment = task.judgment;
             entry.evidence.clone_from(&task.evidence);
             entry.progress = task.progress;
+            entry.results.clone_from(&task.results);
+            entry.question.clone_from(&task.question);
             // A member team reports the lines it flew again itself.
             entry.reflown = entry.reflown.max(task.reflown);
         }

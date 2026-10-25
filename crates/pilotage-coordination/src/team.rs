@@ -15,6 +15,7 @@ mod reflown;
 mod refly;
 mod renewal;
 mod revision;
+mod whole;
 
 use std::collections::BTreeMap;
 
@@ -105,6 +106,8 @@ enum Op {
     Revise,
     /// A renewal of a member's approval of its plan in progress.
     Renew,
+    /// A person's answer to the question a member's run asks.
+    Answer,
 }
 
 /// A member intent awaiting its receipt.
@@ -248,9 +251,7 @@ impl TeamLane {
             Some(Action::Skip(_)) => {
                 Err("a team skips a task through a revision; draft one instead".to_owned())
             }
-            Some(Action::Answer(_)) => {
-                Err("a team asks no question itself; answer the member lane that asks".to_owned())
-            }
+            Some(Action::Answer(answer)) => self.relay_answer(answer),
             None => Err("the intent names no action".to_owned()),
         };
         match result {

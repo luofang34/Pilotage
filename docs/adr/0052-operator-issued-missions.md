@@ -170,7 +170,12 @@ once, so a repeat of that operation finds it. A plan of operations has no
 way home: it takes no revision, and an expired approval holds it before
 its next operation. A host that restarts does not keep the runs in
 progress of its lane, so the lane is idle again; a person checks what an
-operation in progress did before a new proposal. The environment variables remain a bootstrap source
+operation in progress did before a new proposal. A team gives an objective with no area
+to divide, such as a report, to one member whole, as an objective that the
+team made. The team follows that member's run as any other. Its status
+shows the question that the member's run asks. The team gives an answer to
+the member that asks, as an operation, and the operator gets one receipt
+when that member answers. The environment variables remain a bootstrap source
 that issues the first plan into an `Idle` lane; an issued plan supersedes
 them.
 

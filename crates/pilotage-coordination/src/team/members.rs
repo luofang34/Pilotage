@@ -41,6 +41,12 @@ impl TeamLane {
     ) -> TeamReply {
         let operation = pending.operation.as_deref();
         let accepted = receipt.outcome == wire::MissionReceiptOutcome::Accepted as i32;
+        if pending.op == Op::Answer {
+            return TeamReply {
+                receipt: self.on_answer_receipt(member, accepted, receipt, operation),
+                intents: Vec::new(),
+            };
+        }
         if pending.op == Op::Renew {
             return TeamReply {
                 receipt: self.on_renew_receipt(member, accepted, receipt, operation),
@@ -80,7 +86,7 @@ impl TeamLane {
                     return self.member_refused(member, pending.op, &reason, operation);
                 }
             },
-            Op::Approve | Op::Start | Op::Revise | Op::Renew => {}
+            Op::Approve | Op::Start | Op::Revise | Op::Renew | Op::Answer => {}
         }
         if self.group_waits(operation, pending.op) {
             return TeamReply::default();
@@ -129,7 +135,9 @@ impl TeamLane {
                 "approved by every member; waiting for start".to_owned(),
                 None,
             ),
-            Op::Start | Op::Revise | Op::Renew => (Phase::Running, "running".to_owned(), None),
+            Op::Start | Op::Revise | Op::Renew | Op::Answer => {
+                (Phase::Running, "running".to_owned(), None)
+            }
         };
         self.phase = phase;
         self.detail = detail;
@@ -152,7 +160,7 @@ impl TeamLane {
         let (phase, what) = match op {
             Op::Propose => (Phase::Idle, "proposal"),
             Op::Approve => (Phase::Proposed, "approval"),
-            Op::Start | Op::Revise | Op::Renew => (Phase::Failed, "start"),
+            Op::Start | Op::Revise | Op::Renew | Op::Answer => (Phase::Failed, "start"),
         };
         self.phase = phase;
         self.detail = format!("{member} refused the {what}: {reason}");
