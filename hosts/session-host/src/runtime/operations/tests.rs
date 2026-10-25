@@ -5,8 +5,16 @@ use pilotage_protocol::wire;
 use tokio::sync::{mpsc, watch};
 
 use super::executors::{read_value_blocking, write_report_blocking};
-use super::{OperationHost, registry, spawn_operation_run};
+use super::{OperationHost, RunInputs, registry, spawn_operation_run};
 use crate::runtime::automation::{AutomationStatus, RunControl};
+
+/// A run with no earlier results, whose journal holds every task's end.
+fn inputs() -> RunInputs {
+    RunInputs {
+        results: Vec::new(),
+        recorded: watch::channel(usize::MAX).1,
+    }
+}
 
 fn given(name: &str, value: &str) -> wire::MissionParameter {
     wire::MissionParameter {
@@ -136,8 +144,13 @@ fn a_confirmed_value_is_written_in_a_report() {
     runtime().block_on(async {
         let host = host();
         let (controls, receiver) = mpsc::channel(4);
-        let (handle, mut status) =
-            spawn_operation_run("run-1".to_owned(), plan(), host.host.clone(), receiver);
+        let (handle, mut status) = spawn_operation_run(
+            "run-1".to_owned(),
+            plan(),
+            host.host.clone(),
+            receiver,
+            inputs(),
+        );
         let asked = until(&mut status, |s| !s.questions.is_empty()).await;
         let (task, question) = &asked.questions[0];
         assert_eq!(task, "confirm");
@@ -166,8 +179,13 @@ fn a_declined_value_ends_the_run_and_writes_nothing() {
     runtime().block_on(async {
         let host = host();
         let (controls, receiver) = mpsc::channel(4);
-        let (handle, mut status) =
-            spawn_operation_run("run-2".to_owned(), plan(), host.host.clone(), receiver);
+        let (handle, mut status) = spawn_operation_run(
+            "run-2".to_owned(),
+            plan(),
+            host.host.clone(),
+            receiver,
+            inputs(),
+        );
         until(&mut status, |s| !s.questions.is_empty()).await;
         controls
             .send(answer("run-2/confirm/1", false))
@@ -194,7 +212,7 @@ fn an_abort_while_a_person_is_asked_stops_at_once() {
         let host = host();
         let (controls, receiver) = mpsc::channel(4);
         let (handle, mut status) =
-            spawn_operation_run("run-3".to_owned(), plan(), host.host, receiver);
+            spawn_operation_run("run-3".to_owned(), plan(), host.host, receiver, inputs());
         until(&mut status, |s| !s.questions.is_empty()).await;
         // An answer for another operation changes nothing.
         controls.send(answer("run-3/other/1", true)).await.unwrap();
@@ -271,8 +289,13 @@ fn an_operation_in_another_version_fails_and_is_reported() {
             vec![given("source", "temperature")],
         );
         read.operation.version = 2;
-        let (handle, mut status) =
-            spawn_operation_run("run-4".to_owned(), vec![read], host.host, receiver);
+        let (handle, mut status) = spawn_operation_run(
+            "run-4".to_owned(),
+            vec![read],
+            host.host,
+            receiver,
+            inputs(),
+        );
         let ended = until(&mut status, |s| s.ended_because.is_some()).await;
         assert_eq!(ended.failed_tasks, ["read"]);
         assert!(ended.finished_tasks.is_empty());

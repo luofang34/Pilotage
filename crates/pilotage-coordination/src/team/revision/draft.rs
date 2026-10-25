@@ -10,10 +10,9 @@ use crate::allocation::{Across, team_step};
 use crate::team::TeamLane;
 
 impl TeamLane {
-    pub(super) fn draft_reassign(
-        &self,
-        reassign: &wire::MissionReassign,
-    ) -> Result<(Change, String), String> {
+    /// Refuses a reassignment between members the team does not have, of a
+    /// fraction out of range, or from a giver whose last one is still open.
+    fn reassignable(&self, reassign: &wire::MissionReassign) -> Result<(), String> {
         let (from, to) = (reassign.from_member.as_str(), reassign.to_member.as_str());
         for name in [from, to] {
             if self.member(name).is_none() {
@@ -23,12 +22,32 @@ impl TeamLane {
         if from == to {
             return Err("a reassignment moves lines between two members".to_owned());
         }
+        // A refusal withdraws the giver's open handover, so it has one at a
+        // time.
+        if self
+            .handovers
+            .iter()
+            .any(|h| h.from == from && h.state == wire::MissionHandoverState::Releasing)
+        {
+            return Err(format!(
+                "{from} has not released the lines of its last reassignment; reassign its lines once it has"
+            ));
+        }
         if !(reassign.fraction > 0.0 && reassign.fraction <= 1.0) {
             return Err(format!(
                 "the fraction {} is not in (0, 1]",
                 reassign.fraction
             ));
         }
+        Ok(())
+    }
+
+    pub(super) fn draft_reassign(
+        &self,
+        reassign: &wire::MissionReassign,
+    ) -> Result<(Change, String), String> {
+        self.reassignable(reassign)?;
+        let (from, to) = (reassign.from_member.as_str(), reassign.to_member.as_str());
         let across = self.across().ok_or("the team has no sweep")?;
         // A lost member may still fly: its work stays reserved until it
         // reports again or a person states that it is down. A member that is
@@ -160,6 +179,29 @@ impl TeamLane {
         ))
     }
 
+    /// The drafted revision's own height against `envelope`, as an
+    /// approval of the draft admits the height it flies, not the plan's.
+    pub(in crate::team) fn drafted_within_height(
+        &self,
+        envelope: &wire::AdaptationEnvelope,
+    ) -> Result<(), String> {
+        let height = self
+            .revision
+            .as_ref()
+            .and_then(|r| r.objective.as_ref())
+            .and_then(|o| match o.kind.as_ref()? {
+                wire::mission_objective::Kind::Survey(survey) => Some(survey.height_m),
+                wire::mission_objective::Kind::Report(_) => None,
+            });
+        match height {
+            Some(height) if height > envelope.max_height_m + 1e-6 => Err(format!(
+                "the revision flies at {height:.1} m; the envelope allows {:.1} m",
+                envelope.max_height_m
+            )),
+            _ => Ok(()),
+        }
+    }
+
     pub(super) fn running(&self, member: &str) -> bool {
         self.statuses.get(member).is_some_and(|s| {
             matches!(
@@ -180,10 +222,12 @@ impl TeamLane {
     }
 
     /// The draft for review: the team's unflown lines after the change,
-    /// each with its member, bound to the plan it succeeds.
+    /// each with its member, and the objective in force after it, bound to
+    /// the plan it succeeds.
     pub(super) fn revision_proposal(
         &self,
         change: &Change,
+        objective: Option<&wire::MissionObjective>,
         summary: String,
         context: &IntentContext,
     ) -> SealedProposal {
@@ -233,9 +277,7 @@ impl TeamLane {
         }
         let proposal = wire::MissionProposal {
             proposal_id: context.fresh_id.clone(),
-            objective_id: self
-                .objective
-                .as_ref()
+            objective_id: objective
                 .map(|o| o.objective_id.clone())
                 .unwrap_or_default(),
             estimates: Some(wire::MissionEstimates {
@@ -243,7 +285,7 @@ impl TeamLane {
                 ..wire::MissionEstimates::default()
             }),
             tasks,
-            objective: self.objective.clone(),
+            objective: objective.cloned(),
             predecessor_digest: self
                 .proposal
                 .as_ref()

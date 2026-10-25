@@ -20,6 +20,9 @@
 //!   reads, by source name; absent, the lane reads no value.
 //! - `PILOTAGE_LANE_REPORTS`: the directory `host/write-report` writes
 //!   reports into; absent, the lane writes no report.
+//! - `PILOTAGE_LANE_JOURNAL`: the file the lane keeps its run in, so that a
+//!   restart of the host restores it; absent, a restart leaves the lane
+//!   idle.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -53,6 +56,8 @@ pub(crate) struct LaneRuntimeConfig {
     pub planar_pose_is_truth: bool,
     /// Where the host's executors read and write.
     pub operations: OperationHost,
+    /// The file the lane keeps its run in.
+    pub journal: Option<PathBuf>,
 }
 
 impl LaneRuntimeConfig {
@@ -130,6 +135,7 @@ impl LaneRuntimeConfig {
             judge_height_m: defaults.height_m,
             planar_pose_is_truth,
             operations,
+            journal: env_var("PILOTAGE_LANE_JOURNAL")?.map(PathBuf::from),
         })
     }
 }

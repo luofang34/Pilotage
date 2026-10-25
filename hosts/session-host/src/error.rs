@@ -341,6 +341,15 @@ pub enum HostError {
         /// What is wrong.
         reason: String,
     },
+    /// The lane journal cannot be read, decoded or restored: the host does
+    /// not start, as it cannot show what the run in progress did.
+    #[error("cannot restore the mission lane from its journal {path:?}: {reason}")]
+    LaneJournal {
+        /// The journal file.
+        path: std::path::PathBuf,
+        /// What is wrong.
+        reason: String,
+    },
     /// A mission lane variable did not parse or is outside its range.
     #[error("invalid mission lane setting {variable}={value:?}")]
     LaneConfig {

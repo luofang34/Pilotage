@@ -446,6 +446,7 @@ mod fetch;
 mod needs;
 mod outcome;
 mod report;
+mod restore;
 mod successor;
 mod window;
 
