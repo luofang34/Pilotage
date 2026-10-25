@@ -101,6 +101,7 @@ impl Lane {
             flown_at_draft: flown,
             recovery: true,
             release: None,
+            share_of: String::new(),
         });
         self.detail =
             "the approval expired; the run returns home after the line in progress".to_owned();

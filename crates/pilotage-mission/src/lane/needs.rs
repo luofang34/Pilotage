@@ -13,6 +13,8 @@ use wire::MissionSuccessorState as Stage;
 use super::Lane;
 
 impl Lane {
+    /// The approvals the lane would take now: a plan need only while it is
+    /// proposed, a successor and a renewal need only while its run flies.
     pub(super) fn approval_needs(&self) -> Vec<wire::MissionApprovalNeed> {
         let mut needs = Vec::new();
         let Some(plan) = self.proposal.as_ref().map(|c| &c.proposal) else {
@@ -29,28 +31,31 @@ impl Lane {
             .map(|a| a.delegated_by.clone())
             .unwrap_or_default();
         if self.state == State::Proposed {
+            // A team that made the objective for this member approves its plan.
+            let owed = plan
+                .objective
+                .as_ref()
+                .map(|o| o.delegated_by.clone())
+                .unwrap_or_default();
             needs.push(need(
                 Target::Plan,
                 &plan.digest,
                 String::new(),
-                String::new(),
+                owed,
                 "the plan waits for its approval",
             ));
+        }
+        if !self.is_flying() {
+            return needs;
         }
         if let Some(successor) = self
             .successor
             .as_ref()
             .filter(|s| s.stage == Stage::Drafted)
         {
-            let granted_by = self
-                .approval
-                .as_ref()
-                .and_then(|a| a.approver.as_ref())
-                .map(|o| o.subject.as_str());
-            // The principal that granted the approval in force drafted it: a
-            // team's own share of its revision, which the team approves.
-            let owed = if granted_by == Some(successor.drafted_by.as_str()) {
-                delegated_by.clone()
+            // The team that granted the approval in force approves its own share.
+            let owed = if !successor.share_of.is_empty() && successor.share_of == delegated_by {
+                successor.share_of.clone()
             } else {
                 String::new()
             };
@@ -63,8 +68,8 @@ impl Lane {
             ));
         }
         if self
-            .holds
-            .contains(&wire::MissionHoldReason::ApprovalExpired)
+            .hold_reasons()
+            .contains(&(wire::MissionHoldReason::ApprovalExpired as i32))
         {
             needs.push(need(
                 Target::Renewal,
