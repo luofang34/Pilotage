@@ -101,6 +101,7 @@ fn answer(question: &wire::MissionQuestion, accepted: bool) -> wire::MissionInte
         subject_digest: question.subject_digest.clone(),
         accepted,
         answered_by: None,
+        relayed_from: None,
     }))
 }
 
@@ -392,27 +393,42 @@ fn a_run_that_ends_without_reporting_its_operation_leaves_it_unknown() {
 }
 
 #[test]
-fn an_approver_that_relays_an_answer_keeps_who_answered() {
+fn the_host_names_the_session_that_answered_and_a_relay_vouches_for_the_person() {
     let steering = crate::lane::Steering::default();
     let team = crate::lane::Requester {
         subject: "pilotage-coordinator".to_owned(),
         may_approve: true,
     };
-    let mut relayed = intent(Action::Answer(wire::MissionAnswer {
+    let person = |subject: &str| wire::RecordOrigin {
+        issuer: crate::lane::HOST_ISSUER.to_owned(),
+        subject: subject.to_owned(),
+        organization: String::new(),
+    };
+    // A session that writes another name in the record is still named.
+    let mut forged = intent(Action::Answer(wire::MissionAnswer {
         operation_id: "run-1/confirm/1".to_owned(),
-        answered_by: Some(wire::RecordOrigin {
-            issuer: crate::lane::HOST_ISSUER.to_owned(),
-            subject: "operator".to_owned(),
-            organization: String::new(),
-        }),
+        answered_by: Some(person("someone else")),
         ..wire::MissionAnswer::default()
     }));
-    steering.admit(&mut relayed, &team).expect("admitted");
-    let Some(Action::Answer(given)) = relayed.action else {
+    steering.admit(&mut forged, &team).expect("admitted");
+    let Some(Action::Answer(given)) = forged.action else {
         panic!("an answer");
     };
     assert_eq!(
         given.answered_by.map(|o| o.subject).as_deref(),
-        Some("operator")
+        Some("pilotage-coordinator")
     );
+    // A relay's answer reaches the operation with both names.
+    let (mut lane, ids) = started();
+    let question = asking(&mut lane, &ids);
+    let mut relayed = answer(&question, true);
+    if let Some(Action::Answer(a)) = relayed.action.as_mut() {
+        a.relayed_from = Some(person("operator"));
+    }
+    steering.admit(&mut relayed, &team).expect("admitted");
+    let reply = lane.on_intent(&relayed, &context("relayed"));
+    let Some(LaneEffect::Answer(given)) = reply.effect else {
+        panic!("the answer goes to the operation");
+    };
+    assert_eq!(given.answered_by, "operator via pilotage-coordinator");
 }

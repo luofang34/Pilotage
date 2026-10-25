@@ -29,11 +29,16 @@ impl Lane {
             return Err("the answer is for another subject than the one asked".to_owned());
         }
         run.answered(&answer.operation_id);
-        let answered_by = answer
+        let sender = answer
             .answered_by
             .as_ref()
             .map(|origin| origin.subject.clone())
             .unwrap_or_default();
+        // A relay names the person it vouches for; the record names both.
+        let answered_by = match answer.relayed_from.as_ref() {
+            Some(person) => format!("{} via {sender}", person.subject),
+            None => sender,
+        };
         self.detail = format!(
             "{} {}",
             if answered_by.is_empty() {

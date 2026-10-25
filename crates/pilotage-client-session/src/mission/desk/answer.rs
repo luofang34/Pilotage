@@ -64,6 +64,7 @@ impl MissionDesk {
             subject_digest: question.subject_digest.clone(),
             accepted: accept,
             answered_by: None,
+            relayed_from: None,
         }))
     }
 }
