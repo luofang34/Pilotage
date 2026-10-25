@@ -24,7 +24,7 @@ pub use instruction::{
     Chain, ChainLane, Dispatch, Drafted, Instruction, InstructionError, Offers, Progress, Step,
     catalog,
 };
-pub use survey_file::SurveyFile;
+pub use survey_file::{Area, AreaRef, SurveyFile};
 pub use view::{
     MemberSummary, MemberView, MissionSummary, MissionView, ProposalView, ReceiptView,
     SuccessorView, TaskView, hex,

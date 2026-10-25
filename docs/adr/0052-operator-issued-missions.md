@@ -253,7 +253,12 @@ plan field, but it is an objective field when the objective holds the
 height (`hold_height`). The height bound of the envelope applies to all
 plans. The title, the identity and the revision number of an objective are
 not content: an objective with the same identity and different content is
-an objective change. An explicit approval of the digest of a draft is the
+an objective change. A survey names its area by identity and revision when the
+area is a named object, such as an area drawn on a map. Another identity
+or revision of the area is an objective change, also with the same
+vertices. An area found from labels has no revision, so its vertices are
+all it is. The strip that a team gives to a member is part of the area, so
+it names no area identity. An explicit approval of the digest of a draft is the
 permission of the approver for that draft, so this check applies only to
 admission inside the envelope. Task-by-task consent is an
 optional workflow inside this rule, not a separate level.

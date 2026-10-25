@@ -387,3 +387,20 @@ fn an_expired_approval_offers_a_renewal_of_the_run_and_no_resume() {
     let offered = desk.offered(true, &ApprovalPolicy::default());
     assert!(offered.resume && offered.approve.is_none());
 }
+
+#[test]
+fn a_survey_over_a_named_area_names_its_identity_and_revision() {
+    let text = r#"{"title": "t", "area": [[40.0, -74.0], [40.0, -73.9], [40.1, -73.9]],
+        "launch": [40.0, -74.0, 0.0],
+        "area_ref": {"id": "graphic-7", "revision": 3, "source": "drawn on the map"}}"#;
+    let file = SurveyFile::parse(text).unwrap();
+    let objective = file.objective("test", 1);
+    let Some(wire::mission_objective::Kind::Survey(survey)) = objective.kind else {
+        panic!("a survey");
+    };
+    let named = survey.area_ref.expect("the area's identity");
+    assert_eq!((named.area_id.as_str(), named.revision), ("graphic-7", 3));
+    let derived = super::Area::derived("Nassau Street", "the map's labels", vec![]);
+    assert_eq!(derived.identity.id, "derived:Nassau Street");
+    assert_eq!(derived.identity.revision, 0, "its vertices are all it is");
+}

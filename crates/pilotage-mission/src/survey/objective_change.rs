@@ -29,7 +29,9 @@ pub fn classify(before: &wire::MissionObjective, after: &wire::MissionObjective)
 
 fn surveys(before: &wire::SurveyObjective, after: &wire::SurveyObjective, set: &mut ChangeSet) {
     use ChangeClass::{Objective, Plan};
-    if before.area != after.area {
+    // A named area of another identity or revision is another area, even
+    // with the same vertices.
+    if before.area != after.area || before.area_ref != after.area_ref {
         set.add(Objective, "the area");
     }
     if before.return_to_launch != after.return_to_launch {
@@ -63,3 +65,6 @@ fn surveys(before: &wire::SurveyObjective, after: &wire::SurveyObjective, set: &
         set.add(Plan, "the launch point");
     }
 }
+
+#[cfg(test)]
+mod tests;
