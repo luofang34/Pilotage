@@ -546,8 +546,10 @@ uncertainty. Each deadline names its clock and whether a hold stops it:
   does not stop it.
 - The receipt timeout of a mission action and the wall deadline of a run,
   24 hours from its start, run on the host's monotonic clock. A hold does
-  not stop them, so a directive that still waits for its receipt when a
-  long hold ends can time out at the first step after the resume.
+  not stop them. A receipt that came during the hold is taken before the
+  receipt timeout is checked, so only a directive whose receipt never
+  came times out at the first step after the resume. The wall deadline
+  and the phase deadlines are checked before any receipt.
 
 A host restart reconciles state; it does not replay commands.
 When an endpoint dies or loses its aircraft link, its adapter reports the
