@@ -150,9 +150,9 @@ fn bad_evidence_after_the_approval_expired_is_recorded_and_flies_nothing() {
         line(&fleet).judgment,
         wire::MissionTaskJudgment::NotMet as i32
     );
-    assert_ne!(
+    assert_eq!(
         fleet.team.status().state,
-        wire::MissionLaneState::Running as i32,
+        wire::MissionLaneState::Complete as i32,
         "the team ends: nothing waits any more"
     );
 }
@@ -213,4 +213,98 @@ fn a_team_whose_tasks_take_no_judgment_ends_with_its_runs() {
         status.detail
     );
     assert!(status.execution.is_none());
+}
+
+/// Routes and flies until the fleet settles.
+fn fly_out(fleet: &mut Fleet, intents: Vec<MemberIntent>) {
+    let mut intents = intents;
+    for _ in 0..4 {
+        fleet.route(intents);
+        intents = fleet.fly(&[]);
+    }
+}
+
+#[test]
+fn a_member_that_failed_with_lines_it_never_flew_ends_the_team_failed() {
+    let (mut fleet, _) = running_fleet(false);
+    let lane = fleet.members.get_mut("SIM-3").expect("SIM-3");
+    lane.on_progress(&RunProgress {
+        ended: true,
+        ended_because: Some("the vehicle landed"),
+        ..toward(lane, 1)
+    });
+    let status = lane.take_changed().expect("SIM-3 reports");
+    let intents = fleet.team.on_member_status(&status, &context("failed"));
+    let more = fleet.fly(&[]);
+    fly_out(&mut fleet, intents.into_iter().chain(more).collect());
+    let status = fleet.team.status();
+    assert_eq!(
+        status.state,
+        wire::MissionLaneState::Failed as i32,
+        "{}",
+        status.detail
+    );
+    assert!(status.execution.is_none(), "nothing waits for results");
+}
+
+#[test]
+fn a_re_flight_that_ends_before_its_judgments_settles_the_line_when_they_come() {
+    let (mut fleet, held) = flown_waiting();
+    let refly = judge(&mut fleet, &held, false, NOW);
+    let flyer = refly
+        .first()
+        .map(|i| i.member.clone())
+        .expect("a re-flight");
+    fleet.route(refly);
+    let name = fleet
+        .members
+        .get(&flyer)
+        .map(Lane::status)
+        .and_then(|s| {
+            s.tasks
+                .into_iter()
+                .find(|t| t.kind == wire::MissionTaskKind::SurveyLine as i32)
+        })
+        .map(|t| t.name)
+        .expect("the line flown again");
+    let (intents, again) = fleet.fly_holding(&[], Some((flyer.as_str(), name.as_str())));
+    assert!(intents.is_empty() && !again.is_empty());
+    assert_eq!(
+        fleet.team.status().execution.map(|e| e.state),
+        Some(wire::MissionExecutionState::AwaitingResults as i32),
+        "the re-flight ended; its verdict is open"
+    );
+    judge(&mut fleet, &again, true, NOW);
+    assert_eq!(line(&fleet).judgment, wire::MissionTaskJudgment::Met as i32);
+    let status = fleet.team.status();
+    assert_eq!(
+        status.state,
+        wire::MissionLaneState::Complete as i32,
+        "{}",
+        status.detail
+    );
+}
+
+#[test]
+fn stating_the_only_member_with_open_evidence_down_ends_a_waiting_team() {
+    let (mut fleet, _) = flown_waiting();
+    fleet.team.on_member_lost(LINE.0);
+    let reply = fleet.team.on_intent(
+        &wire::MissionIntent {
+            request_id: "down".to_owned(),
+            action: Some(Action::MemberDown(wire::MissionMemberDown {
+                member: LINE.0.to_owned(),
+                stated_by: None,
+            })),
+        },
+        &context("down"),
+    );
+    assert!(reply.receipt.is_some_and(|r| accepted(&r)));
+    let status = fleet.team.status();
+    assert_eq!(
+        status.state,
+        wire::MissionLaneState::Complete as i32,
+        "{}",
+        status.detail
+    );
 }

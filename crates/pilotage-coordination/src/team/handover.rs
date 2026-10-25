@@ -259,7 +259,10 @@ impl TeamLane {
             .partition(|(id, _)| !released.task_ids.contains(id));
         handover.moved = moved;
         handover.released = true;
-        if !matches!(self.phase, super::Phase::Running | super::Phase::Held) {
+        if !matches!(
+            self.phase,
+            super::Phase::Running | super::Phase::Held | super::Phase::Settling
+        ) {
             // The release happened; the abort ended the work it was for.
             // Lines the giver began first are not released and stay its own.
             if handover.moved.is_empty() {

@@ -191,7 +191,9 @@ impl TaskBook {
         self.tasks
             .values()
             .filter(|t| t.kind == wire::MissionTaskKind::SurveyLine as i32)
-            .filter(|t| heard(&t.member) && t.execution != Execution::Skipped as i32)
+            // A line not begun takes no evidence: a member that failed keeps
+            // its unflown lines pending, and they do not keep the team open.
+            .filter(|t| heard(&t.member) && ended(t))
             .filter(|t| {
                 t.evidence
                     .as_ref()
@@ -211,15 +213,19 @@ impl TaskBook {
         })
     }
 
-    /// The original line takes the re-flight's verdict and evidence.
+    /// The original line takes the re-flight's verdict and evidence; the
+    /// re-flight counts once, at its end, and not at a later report.
     pub(super) fn apply_refly(
         &mut self,
         member: &str,
         line: &str,
         flown: &wire::MissionTaskStatus,
+        ended_now: bool,
     ) {
         if let Some(entry) = self.tasks.get_mut(&key(member, line)) {
-            entry.reflown = entry.reflown.wrapping_add(1);
+            if ended_now {
+                entry.reflown = entry.reflown.wrapping_add(1);
+            }
             entry.state = flown.state;
             entry.execution = flown.execution;
             entry.judgment = flown.judgment;
