@@ -173,9 +173,11 @@ takes part. A rule is a pure operation that every host carries out. A kind
 of objective is its planning module and the executors that it names. The
 lane registers each new kind's planner by name, with its version and its
 typed parameters, and a named objective carries those parameters, so a new
-kind needs no wire message of its own. The survey, the report and the
-check keep their own messages. Lifecycle, authorization, coordination,
-recovery and display treat every kind that is not a survey the same, and
+kind needs no wire message of its own. The report's and the check's own
+messages are read as named objectives of their kind, so every kind but the
+survey plans through the registry; the survey, whose area a team divides,
+plans in its own module. Lifecycle, authorization, coordination, recovery
+and display treat every kind that is not a survey the same, and
 `scripts/check-objective-kinds.sh` refuses code outside planning that
 names a kind. A client proposes an objective of any kind with one command
 that carries the encoded objective. The host writes the report of one
