@@ -71,9 +71,9 @@ impl MissionDesk {
                     resolved_by: None,
                 }))
             }
-            MissionCommand::ProposeReport { source, question } => Ok(Action::Propose(
-                self.report_objective(source, question, now_ms),
-            )),
+            MissionCommand::ProposeObjective { objective } => self
+                .encoded_objective(objective, now_ms)
+                .map(Action::Propose),
             MissionCommand::Answer { operation, accept } => {
                 self.answer(operation.as_deref(), *accept)
             }
@@ -108,5 +108,39 @@ impl MissionDesk {
             MissionCommand::Resume {} => Ok(Action::Resume(wire::MissionResume {})),
             MissionCommand::Abort {} => Ok(Action::Abort(wire::MissionAbort {})),
         }
+    }
+}
+
+impl MissionDesk {
+    /// The objective `encoded` names, whatever its kind; one with no
+    /// identity or origin of its own gets one made by this client at
+    /// `now_ms`, as a survey file does.
+    fn encoded_objective(
+        &self,
+        encoded: &str,
+        now_ms: u64,
+    ) -> Result<wire::MissionObjective, DeskRefusal> {
+        use prost::Message as _;
+        let bytes = parse_hex(encoded)
+            .map_err(|_| DeskRefusal::BadObjective("not hexadecimal".to_owned()))?;
+        let mut objective = wire::MissionObjective::decode(bytes.as_slice())
+            .map_err(|error| DeskRefusal::BadObjective(error.to_string()))?;
+        if objective.kind.is_none() {
+            return Err(DeskRefusal::BadObjective("it names no kind".to_owned()));
+        }
+        if objective.objective_id.is_empty() {
+            objective.objective_id = format!("{}-objective-{now_ms}", self.subject);
+        }
+        if objective.revision == 0 {
+            objective.revision = 1;
+        }
+        if objective.origin.is_none() {
+            objective.origin = Some(wire::RecordOrigin {
+                issuer: "local".to_owned(),
+                subject: self.subject.clone(),
+                organization: String::new(),
+            });
+        }
+        Ok(objective)
     }
 }

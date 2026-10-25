@@ -70,18 +70,98 @@ fn an_answer_needs_a_question_and_names_one_when_several_are_asked() {
 }
 
 #[test]
-fn a_report_command_proposes_a_report_objective() {
+fn one_command_proposes_an_objective_of_any_kind() {
     let desk = MissionDesk::new("test", 7);
-    let command: MissionCommand = serde_json::from_str(
-        r#"{"command":"propose_report","source":"temperature","question":"Is this right?"}"#,
-    )
-    .unwrap();
-    let Ok(Action::Propose(objective)) = desk.resolve(&command, 5) else {
+    let report = wire::MissionObjective {
+        title: "Cabin temperature".to_owned(),
+        kind: Some(wire::mission_objective::Kind::Report(
+            wire::ReportObjective {
+                source: "temperature".to_owned(),
+                question: "Is this right?".to_owned(),
+            },
+        )),
+        ..wire::MissionObjective::default()
+    };
+    let check = wire::MissionObjective {
+        objective_id: "check-1".to_owned(),
+        revision: 3,
+        kind: Some(wire::mission_objective::Kind::Check(wire::CheckObjective {
+            source: "temperature".to_owned(),
+            limit: "30".to_owned(),
+        })),
+        ..wire::MissionObjective::default()
+    };
+    for objective in [report, check] {
+        // The command travels as JSON, as a client writes it on a line.
+        let line = serde_json::to_string(&MissionCommand::propose_objective(&objective)).unwrap();
+        assert!(line.contains(r#""command":"propose_objective""#), "{line}");
+        let command: MissionCommand = serde_json::from_str(&line).unwrap();
+        let Ok(Action::Propose(proposed)) = desk.resolve(&command, 5) else {
+            panic!("a proposal");
+        };
+        assert_eq!(proposed.kind, objective.kind, "the kind arrives whole");
+        if objective.objective_id.is_empty() {
+            assert_eq!(proposed.objective_id, "test-objective-5");
+            assert_eq!(proposed.revision, 1);
+        } else {
+            assert_eq!(proposed.objective_id, objective.objective_id);
+            assert_eq!(proposed.revision, objective.revision);
+        }
+    }
+}
+
+#[test]
+fn what_the_objective_states_passes_through_and_an_unstated_origin_is_the_clients() {
+    let desk = MissionDesk::new("test", 7);
+    let stated = wire::RecordOrigin {
+        issuer: "planner".to_owned(),
+        subject: "cell-2".to_owned(),
+        organization: "survey".to_owned(),
+    };
+    let objective = wire::MissionObjective {
+        objective_id: "check-1".to_owned(),
+        origin: Some(stated.clone()),
+        revision: 2,
+        previous_digest: vec![7; 32],
+        delegated_by: "TEAM".to_owned(),
+        kind: Some(wire::mission_objective::Kind::Check(wire::CheckObjective {
+            source: "temperature".to_owned(),
+            limit: "30".to_owned(),
+        })),
+        ..wire::MissionObjective::default()
+    };
+    let Ok(Action::Propose(proposed)) =
+        desk.resolve(&MissionCommand::propose_objective(&objective), 5)
+    else {
         panic!("a proposal");
     };
-    let Some(wire::mission_objective::Kind::Report(report)) = objective.kind else {
-        panic!("a report objective");
+    assert_eq!(proposed, objective, "nothing the objective states changes");
+    let unstated = wire::MissionObjective {
+        origin: None,
+        ..objective
     };
-    assert_eq!(report.source, "temperature");
-    assert_eq!(objective.revision, 1);
+    let Ok(Action::Propose(proposed)) =
+        desk.resolve(&MissionCommand::propose_objective(&unstated), 5)
+    else {
+        panic!("a proposal");
+    };
+    let origin = proposed.origin.expect("an origin");
+    assert_eq!(
+        (origin.issuer.as_str(), origin.subject.as_str()),
+        ("local", "test")
+    );
+}
+
+#[test]
+fn an_objective_that_does_not_decode_or_names_no_kind_is_refused() {
+    let desk = MissionDesk::new("test", 7);
+    for text in ["not hex", "ff", "", "abc"] {
+        let command = MissionCommand::ProposeObjective {
+            objective: text.to_owned(),
+        };
+        assert!(
+            matches!(desk.resolve(&command, 5), Err(DeskRefusal::BadObjective(_))),
+            "{text:?}"
+        );
+    }
 }

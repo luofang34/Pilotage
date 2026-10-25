@@ -11,13 +11,11 @@ set -euo pipefail
 
 root_dir="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
-# The planning dispatch and its kinds' modules, and the client that makes a
-# report objective for its operator, name kinds by design.
+# The planning dispatch and its kinds' modules name kinds by design.
 allowed() {
     case "$1" in
         crates/pilotage-mission/src/lane/compile.rs) return 0 ;;
         crates/pilotage-mission/src/lane/compile/*) return 0 ;;
-        crates/pilotage-client-session/src/mission/desk/answer.rs) return 0 ;;
     esac
     return 1
 }
