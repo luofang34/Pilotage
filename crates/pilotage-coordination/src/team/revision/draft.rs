@@ -199,10 +199,12 @@ impl TeamLane {
     }
 
     /// The draft for review: the team's unflown lines after the change,
-    /// each with its member, bound to the plan it succeeds.
+    /// each with its member, and the objective in force after it, bound to
+    /// the plan it succeeds.
     pub(super) fn revision_proposal(
         &self,
         change: &Change,
+        objective: Option<&wire::MissionObjective>,
         summary: String,
         context: &IntentContext,
     ) -> SealedProposal {
@@ -252,9 +254,7 @@ impl TeamLane {
         }
         let proposal = wire::MissionProposal {
             proposal_id: context.fresh_id.clone(),
-            objective_id: self
-                .objective
-                .as_ref()
+            objective_id: objective
                 .map(|o| o.objective_id.clone())
                 .unwrap_or_default(),
             estimates: Some(wire::MissionEstimates {
@@ -262,7 +262,7 @@ impl TeamLane {
                 ..wire::MissionEstimates::default()
             }),
             tasks,
-            objective: self.objective.clone(),
+            objective: objective.cloned(),
             predecessor_digest: self
                 .proposal
                 .as_ref()
