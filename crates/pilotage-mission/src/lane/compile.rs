@@ -4,6 +4,7 @@
 //! same for every kind.
 
 mod check;
+mod named;
 mod operations;
 mod report;
 mod survey;
@@ -54,6 +55,9 @@ pub(super) fn compile(
         }
         Some(wire::mission_objective::Kind::Check(check)) => {
             check::compile(objective, check, lane, proposal_id)
+        }
+        Some(wire::mission_objective::Kind::Named(named)) => {
+            named::compile(objective, named, lane, proposal_id)
         }
         None => Err("the objective names no kind".to_owned()),
     }

@@ -1,5 +1,6 @@
-//! A kind of objective the team code does not name: a check goes to one
-//! member whole and completes through the team's own lifecycle.
+//! Kinds of objective the team code does not name: a check, and a kind the
+//! lane plans by name, go to one member whole and complete through the
+//! team's own lifecycle.
 
 use pilotage_mission::executor::{
     AT_MOST, ExecutorRegistry, OperationDescriptor, READ_VALUE, WAIT_FOR_PERSON, WRITE_REPORT,
@@ -73,5 +74,55 @@ fn a_team_runs_a_check_through_one_member() {
         wire::MissionLaneState::Complete as i32,
         "{}",
         team.detail
+    );
+}
+
+#[test]
+fn a_team_runs_a_named_objective_through_one_member() {
+    let mut fleet = Fleet::new();
+    for (name, lane) in &mut fleet.members {
+        *lane = member_lane(name, true, ExecutorRegistry::new(HOST));
+    }
+    let named = wire::MissionObjective {
+        objective_id: "team-record".to_owned(),
+        revision: 1,
+        title: "Cabin temperature".to_owned(),
+        kind: Some(wire::mission_objective::Kind::Named(wire::NamedObjective {
+            kind: "record".to_owned(),
+            version: 1,
+            parameters: vec![wire::MissionValue {
+                name: "source".to_owned(),
+                value: "temperature".to_owned(),
+            }],
+        })),
+        ..wire::MissionObjective::default()
+    };
+    let reply = fleet.team.on_intent(
+        &wire::MissionIntent {
+            request_id: "op-propose".to_owned(),
+            action: Some(Action::Propose(named)),
+        },
+        &context("team-proposal"),
+    );
+    assert_eq!(reply.intents.len(), 1, "one member takes it whole");
+    let member = reply.intents[0].member.clone();
+    let proposal = fleet.route(reply.intents)[0]
+        .proposal_record
+        .clone()
+        .and_then(open_record)
+        .expect("the team proposal");
+    fleet.approve_and_start(approval(&proposal.digest, 0));
+    let lane = fleet.members.get_mut(&member).expect("the member");
+    let ids = lane.task_ids();
+    lane.on_progress(&RunProgress {
+        finished_tasks: ids.clone(),
+        plan_complete: true,
+        ..RunProgress::default()
+    });
+    let status = lane.take_changed().expect("changed");
+    fleet.team.on_member_status(&status, &context("done"));
+    assert_eq!(
+        fleet.team.status().state,
+        wire::MissionLaneState::Complete as i32
     );
 }

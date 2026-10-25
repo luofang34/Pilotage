@@ -194,7 +194,13 @@ impl ExecutorRegistry {
     }
 }
 
-fn admit_values(
+/// Whether `values`, by name, are what `specs` declare for `operation`:
+/// none unknown, every required one given, each of its declared type.
+///
+/// # Errors
+///
+/// [`BoundRefused`] naming the first value that is not.
+pub fn admit_values(
     operation: &str,
     specs: &[ValueSpec],
     values: &BTreeMap<String, String>,

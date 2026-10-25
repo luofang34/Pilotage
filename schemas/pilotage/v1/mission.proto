@@ -87,6 +87,7 @@ message MissionObjective {
     SurveyObjective survey = 10;
     ReportObjective report = 12;
     CheckObjective check = 13;
+    NamedObjective named = 14;
   }
   // The team lane that made this objective from its own for one member;
   // the team owes the approval of the plan it compiles to. The host takes
@@ -139,6 +140,16 @@ message CheckObjective {
   string source = 1;
   // The most the value may be, as a number in the value's unit.
   string limit = 2;
+}
+
+// An objective of a kind that the lane registers by name. The lane's
+// planner for the kind declares its version and its typed parameters, so a
+// new kind needs no wire message of its own.
+message NamedObjective {
+  string kind = 1;
+  uint32 version = 2;
+  // The planner's parameters, by name.
+  repeated MissionValue parameters = 3;
 }
 
 // One operation of a host executor and its parameters. The host refuses a
