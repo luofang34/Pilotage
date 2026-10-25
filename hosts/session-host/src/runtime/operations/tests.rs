@@ -251,10 +251,11 @@ fn a_host_registers_only_what_it_is_configured_for() {
             .map(|d| d.operation)
             .collect()
     };
-    assert_eq!(names(&OperationHost::default()), ["confirm"]);
+    // A rule needs nothing of the host, so every host carries it out.
+    assert_eq!(names(&OperationHost::default()), ["confirm", "at-most"]);
     assert_eq!(
         names(&host().host),
-        ["read-value", "confirm", "write-report"]
+        ["read-value", "confirm", "write-report", "at-most"]
     );
 }
 
@@ -276,5 +277,64 @@ fn an_operation_in_another_version_fails_and_is_reported() {
         assert_eq!(ended.failed_tasks, ["read"]);
         assert!(ended.finished_tasks.is_empty());
         handle.await.unwrap();
+    });
+}
+
+/// Read the `temperature` source, hold it to `limit`, write the verdict.
+fn check_plan(limit: &str) -> Vec<PlannedOperation> {
+    let mut verdict = result_of("value", "limit");
+    if let Some(wire::mission_parameter::Source::ResultOf(of)) = verdict.source.as_mut() {
+        of.result = "verdict".to_owned();
+    }
+    vec![
+        step(
+            "read",
+            "host",
+            "read-value",
+            vec![given("source", "temperature")],
+        ),
+        step(
+            "limit",
+            "rule",
+            "at-most",
+            vec![given("limit", limit), result_of("value", "read")],
+        ),
+        step(
+            "write",
+            "host",
+            "write-report",
+            vec![given("title", "Cabin temperature"), verdict],
+        ),
+    ]
+}
+
+#[test]
+fn a_rule_decides_a_check_with_no_person() {
+    runtime().block_on(async {
+        for (limit, within) in [("30", "true"), ("20", "false")] {
+            let host = host();
+            let (_controls, receiver) = mpsc::channel(4);
+            let (handle, mut status) = spawn_operation_run(
+                "run-c".to_owned(),
+                check_plan(limit),
+                host.host.clone(),
+                receiver,
+            );
+            let done = until(&mut status, |s| s.plan_complete).await;
+            assert_eq!(done.finished_tasks, ["read", "limit", "write"]);
+            let (_, rule) = &done.results[1];
+            assert!(
+                rule.iter().any(|v| v.name == "within" && v.value == within),
+                "{rule:?}"
+            );
+            let report =
+                std::fs::read_to_string(host.host.reports.unwrap().join("run-c_2fwrite_2f1.txt"))
+                    .unwrap();
+            assert!(
+                report.contains(&format!("the limit of {limit}")),
+                "{report}"
+            );
+            handle.await.unwrap();
+        }
     });
 }

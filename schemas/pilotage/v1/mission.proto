@@ -86,6 +86,7 @@ message MissionObjective {
   oneof kind {
     SurveyObjective survey = 10;
     ReportObjective report = 12;
+    CheckObjective check = 13;
   }
   // The team lane that made this objective from its own for one member;
   // the team owes the approval of the plan it compiles to. The host takes
@@ -128,6 +129,16 @@ message ReportObjective {
   string source = 1;
   // What the person is asked about the value, for display.
   string question = 2;
+}
+
+// A value a host reads, held to a limit by a rule: the run reads the value,
+// the rule compares it with the limit, and the host writes a report of the
+// verdict. No person takes part.
+message CheckObjective {
+  // Where the value is read, as the host's read executor names its sources.
+  string source = 1;
+  // The most the value may be, as a number in the value's unit.
+  string limit = 2;
 }
 
 // One operation of a host executor and its parameters. The host refuses a

@@ -465,6 +465,7 @@ mod abort;
 mod admission;
 mod area;
 mod authorize;
+mod check;
 mod handover;
 mod hold;
 mod parent;

@@ -167,7 +167,10 @@ own host wrote it, and the record names both. An operation task's
 judgment is met when its execution completed and the result that the plan
 names has its value. A report objective reads a value, asks a person to
 confirm it, and writes a report of it: a person who declines ends the run,
-and the report is not written. The host writes the report of one operation
+and the report is not written. A check objective reads a value, a rule
+holds the value to a limit, and the host writes a report of the verdict;
+no person takes part. A rule is a pure operation that every host carries
+out. The host writes the report of one operation
 once, so a repeat of that operation finds it. A plan of operations has no
 way home: it takes no revision, and an expired approval holds it before
 its next operation. A host that restarts does not keep the runs in

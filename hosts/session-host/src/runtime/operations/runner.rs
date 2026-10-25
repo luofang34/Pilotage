@@ -137,6 +137,21 @@ impl OperationRun {
                 self.note_abort();
                 step
             }
+            ("rule", "at-most") => {
+                match pilotage_mission::executor::rule::at_most(&given("value"), &given("limit")) {
+                    Ok((within, verdict)) => Step::Done(vec![
+                        wire::MissionValue {
+                            name: "verdict".to_owned(),
+                            value: verdict,
+                        },
+                        wire::MissionValue {
+                            name: "within".to_owned(),
+                            value: within.to_string(),
+                        },
+                    ]),
+                    Err(reason) => Step::Failed(reason),
+                }
+            }
             ("person", "confirm") => {
                 self.confirm(operation_id, &given("question"), &given("subject"))
                     .await

@@ -3,6 +3,7 @@
 //! own module; what follows the plan, its approval, run and evidence, is the
 //! same for every kind.
 
+mod check;
 mod operations;
 mod report;
 mod survey;
@@ -50,6 +51,9 @@ pub(super) fn compile(
         }
         Some(wire::mission_objective::Kind::Report(report)) => {
             report::compile(objective, report, lane, proposal_id)
+        }
+        Some(wire::mission_objective::Kind::Check(check)) => {
+            check::compile(objective, check, lane, proposal_id)
         }
         None => Err("the objective names no kind".to_owned()),
     }

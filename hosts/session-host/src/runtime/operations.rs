@@ -21,7 +21,7 @@ use std::path::PathBuf;
 
 use pilotage_mission::PlannedOperation;
 use pilotage_mission::executor::{
-    ExecutorRegistry, OperationDescriptor, READ_VALUE, WAIT_FOR_PERSON, WRITE_REPORT,
+    AT_MOST, ExecutorRegistry, OperationDescriptor, READ_VALUE, WAIT_FOR_PERSON, WRITE_REPORT,
 };
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
@@ -41,10 +41,10 @@ pub(crate) struct OperationHost {
 /// set whose operations need only the capabilities the host has.
 pub(crate) fn registry(host: &OperationHost) -> ExecutorRegistry {
     const SETS: &[&[OperationDescriptor]] = &[
-        &[READ_VALUE, WAIT_FOR_PERSON, WRITE_REPORT],
-        &[READ_VALUE, WAIT_FOR_PERSON],
-        &[WAIT_FOR_PERSON, WRITE_REPORT],
-        &[WAIT_FOR_PERSON],
+        &[READ_VALUE, WAIT_FOR_PERSON, WRITE_REPORT, AT_MOST],
+        &[READ_VALUE, WAIT_FOR_PERSON, AT_MOST],
+        &[WAIT_FOR_PERSON, WRITE_REPORT, AT_MOST],
+        &[WAIT_FOR_PERSON, AT_MOST],
     ];
     let has = host.capabilities();
     let fits = |set: &&&[OperationDescriptor]| {
