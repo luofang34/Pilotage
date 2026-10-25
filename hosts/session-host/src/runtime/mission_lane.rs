@@ -2,10 +2,13 @@
 //! control endpoint. It answers client intents through the sans-IO
 //! [`pilotage_mission::Lane`], runs each approved plan as its own mission
 //! principal, counts the pictures each survey line acquires, asks the
-//! judgment service about a sample of them, and publishes its status.
+//! judgment service about a sample of them, and publishes its status. It
+//! keeps its run in a journal, so that a restart restores the run and
+//! replays nothing.
 
 mod config;
 mod frame_tap;
+mod journal;
 mod judge;
 
 use std::sync::Arc;
@@ -14,18 +17,20 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use pilotage_adapter_api::RawVideoFrame;
 use pilotage_mission::{
     FrameAssessment, IntentContext, Lane, LaneEffect, MissionState, Requester, RunExecution,
-    RunPlan, RunProgress, Steering,
+    RunOrder, RunPlan, RunProgress, Steering,
 };
 use pilotage_protocol::wire;
 use pilotage_session::ClientKey;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 use super::automation::{self, AutomationStatus, MissionPlan, RunControl};
 use super::engine_actor::ToEngine;
-use super::operations::{self, OperationHost};
+use super::operations::{self, OperationHost, RunInputs};
+use crate::error::HostError;
+use journal::LaneJournal;
 
 pub(crate) use config::LaneRuntimeConfig;
 pub(crate) use frame_tap::tap;
@@ -64,13 +69,18 @@ struct ActiveRun {
     stopping: bool,
 }
 
-/// Spawns the lane and registers it with the engine actor. Returns the
-/// sender the frame tap feeds and the lane's task.
+/// Spawns the lane, restored from its journal, and registers it with the
+/// engine actor. Returns the sender the frame tap feeds and the lane's
+/// task.
+///
+/// # Errors
+/// [`HostError::LaneJournal`] for a journal that cannot be read or restored.
 pub(crate) async fn spawn(
     engine_tx: &mpsc::Sender<ToEngine>,
     start: Instant,
     config: LaneRuntimeConfig,
-) -> (mpsc::Sender<LaneInbound>, JoinHandle<()>) {
+) -> Result<(mpsc::Sender<LaneInbound>, JoinHandle<()>), HostError> {
+    let task = LaneTask::restored(config, engine_tx.clone(), start).await?;
     let (sender, inbound) = mpsc::channel(INBOUND_QUEUE);
     let registered = engine_tx
         .send(ToEngine::MissionLane {
@@ -80,13 +90,11 @@ pub(crate) async fn spawn(
     if registered.is_err() {
         warn!("the engine actor is gone; the mission lane does not start");
     }
-    info!(lane = %config.lane.name, simulated = config.lane.simulated, judge = config.decision.is_some(), "mission lane ready");
-    let engine = engine_tx.clone();
     let handle = tokio::spawn(async move {
-        LaneTask::new(config, engine, start).run(inbound).await;
+        task.run(inbound).await;
         tracing::debug!(task = "mission-lane", "task exited");
     });
-    (sender, handle)
+    Ok((sender, handle))
 }
 
 struct LaneTask {
@@ -102,15 +110,48 @@ struct LaneTask {
     steering: Steering,
     /// Where the runs of plans of operations read and write.
     operations: OperationHost,
+    /// Where the lane keeps its run.
+    journal: LaneJournal,
+    /// A run the lane started that waits for the journal to hold it.
+    unrecorded: Option<Box<RunOrder>>,
 }
 
 impl LaneTask {
-    fn new(config: LaneRuntimeConfig, engine: mpsc::Sender<ToEngine>, start: Instant) -> Self {
+    /// The lane as its journal left it, with the operations a restart left
+    /// uncertain asked about.
+    async fn restored(
+        config: LaneRuntimeConfig,
+        engine: mpsc::Sender<ToEngine>,
+        start: Instant,
+    ) -> Result<Self, HostError> {
+        let held = match config.journal.as_deref() {
+            Some(path) => journal::read(path).await?,
+            None => None,
+        };
+        let journal = LaneJournal::new(config.journal.clone(), held.clone());
+        let lane = match (held, config.journal.as_deref()) {
+            (Some(record), Some(path)) => Lane::restore(config.lane.clone(), &record)
+                .map_err(|reason| journal::journal_error(path, &reason))?,
+            _ => Lane::new(config.lane.clone()),
+        };
+        info!(lane = %config.lane.name, simulated = config.lane.simulated, judge = config.decision.is_some(), state = ?lane.state(), "mission lane ready");
+        let mut task = Self::new(config, engine, start, lane, journal);
+        task.reconcile().await;
+        Ok(task)
+    }
+
+    fn new(
+        config: LaneRuntimeConfig,
+        engine: mpsc::Sender<ToEngine>,
+        start: Instant,
+        lane: Lane,
+        journal: LaneJournal,
+    ) -> Self {
         Self {
             judge: config.decision.map(|provider| {
                 judge::Judge::new(provider, config.assess_every, config.judge_height_m)
             }),
-            lane: Lane::new(config.lane),
+            lane,
             engine,
             start,
             planar_pose_is_truth: config.planar_pose_is_truth,
@@ -120,6 +161,36 @@ impl LaneTask {
             last_publish: None,
             steering: Steering::default(),
             operations: config.operations,
+            journal,
+            unrecorded: None,
+        }
+    }
+
+    /// Asks the executors whether the operations a restart left uncertain
+    /// happened.
+    async fn reconcile(&mut self) {
+        for query in self.lane.status_queries() {
+            match operations::status(&self.operations, &query).await {
+                Ok(found) => {
+                    if let Err(reason) = self.lane.reconcile(&query.task_id, found) {
+                        error!(operation = %query.operation_id, %reason, "status not taken");
+                    }
+                }
+                Err(reason) => {
+                    warn!(operation = %query.operation_id, %reason, "whether the operation happened is not known; it stays uncertain");
+                }
+            }
+        }
+        self.journal.keep(self.lane.record()).await;
+    }
+
+    /// Makes the journal hold the run as it is now, and starts the run that
+    /// waited for it.
+    async fn record(&mut self) {
+        if self.journal.keep(self.lane.record()).await
+            && let Some(order) = self.unrecorded.take()
+        {
+            self.apply(LaneEffect::Start(order)).await;
         }
     }
 
@@ -156,6 +227,7 @@ impl LaneTask {
                         self.apply(effect).await;
                     }
                     self.on_progress().await;
+                    self.record().await;
                     if !self.publish(false).await {
                         break;
                     }
@@ -207,12 +279,20 @@ impl LaneTask {
         if let Some(effect) = reply.effect {
             self.apply(effect).await;
         }
+        self.record().await;
         self.publish(true).await
     }
 
     async fn apply(&mut self, effect: LaneEffect) {
         let control = match effect {
             LaneEffect::Start(order) => {
+                // A run starts only once the journal holds it, so that a
+                // restart finds every run that may have had an effect.
+                if !self.journal.keep(self.lane.record()).await {
+                    warn!(run = %order.run_id, "the run waits for the lane journal");
+                    self.unrecorded = Some(order);
+                    return;
+                }
                 if let Some(previous) = self.run.take() {
                     // The previous run released the vehicle or is releasing
                     // it; waiting for it keeps two principals from asking
@@ -223,6 +303,14 @@ impl LaneTask {
                 self.runs = self.runs.wrapping_add(1);
                 let client = ClientKey::new(RUN_CLIENT_BASE.wrapping_sub(self.runs));
                 let (controls, receiver) = mpsc::channel(4);
+                // A hold the lane took while the run waited for the journal
+                // reaches the run before its first operation.
+                if matches!(
+                    self.lane.state(),
+                    wire::MissionLaneState::HoldRequested | wire::MissionLaneState::Held
+                ) {
+                    controls.try_send(RunControl::Hold).ok();
+                }
                 let order = *order;
                 let (handle, status) = match order.plan {
                     RunPlan::Operations(plan) => operations::spawn_operation_run(
@@ -230,6 +318,10 @@ impl LaneTask {
                         plan,
                         self.operations.clone(),
                         receiver,
+                        RunInputs {
+                            results: order.results,
+                            recorded: self.journal.ended(),
+                        },
                     ),
                     plan => {
                         let Some(plan) = MissionPlan::of_lane(plan, order.config) else {
@@ -256,7 +348,11 @@ impl LaneTask {
             }
             LaneEffect::Hold => RunControl::Hold,
             LaneEffect::Resume => RunControl::Resume,
-            LaneEffect::Abort => RunControl::Abort,
+            LaneEffect::Abort => {
+                // A run that never started needs no stop.
+                self.unrecorded = None;
+                RunControl::Abort
+            }
             LaneEffect::Answer(answer) => RunControl::Answer(answer),
         };
         if let Some(run) = self.run.as_ref() {

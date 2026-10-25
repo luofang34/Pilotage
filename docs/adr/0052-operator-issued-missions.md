@@ -170,9 +170,25 @@ confirm it, and writes a report of it: a person who declines ends the run,
 and the report is not written. The host writes the report of one operation
 once, so a repeat of that operation finds it. A plan of operations has no
 way home: it takes no revision, and an expired approval holds it before
-its next operation. A host that restarts does not keep the runs in
-progress of its lane, so the lane is idle again; a person checks what an
-operation in progress did before a new proposal. A team gives an objective with no area
+its next operation. The host keeps a record of the lane's run in a
+journal: the approved plan, the approval, the run, and the execution and
+results of each task. The record does not keep evidence or display. The
+host starts no run before the journal holds it, and a run of operations
+begins an operation only when the journal holds the end of each operation
+before it. Thus, while the journal cannot be written, no new work begins;
+a hold, an abort and an answer still pass. After a restart, the lane
+starts from the record and starts no work. The descriptor of the executor
+of each operation that did not end sets what occurs. If the host can tell
+whether the operation occurred, the host asks the executor. If a repeat
+with the same identity changes nothing, the operation runs again. Any
+other operation becomes `Uncertain`, and a person decides; the absence of
+a receipt does not show that the operation did not occur. When no task
+is uncertain, the run holds with the reason `Restarted` until a person
+resumes it. The resume starts the remaining tasks under the same run
+identity. A flight does not fly again after a restart, because the lane
+cannot know where the vehicle is: the lane stays `Uncertain` until a
+person aborts the run. A run that ended keeps its outcome, so a restart
+does not replay cancelled work. A team gives an objective with no area
 to divide, such as a report, to one member whole, as an objective that the
 team made. The team follows that member's run as any other. Its status
 shows the question that the member's run asks. The team gives an answer to
@@ -236,9 +252,10 @@ the evidence becomes `Closed`, and the judgment uses the answers that
 arrived. The lane counts an answer that arrives after that as late. A late
 answer changes no other fact. At most four replaced runs wait for answers
 at one time; when one more run is replaced, the windows of the oldest close
-at once. The lane is not persisted. A host that restarts makes a new lane,
-which refuses verdicts for the runs of the old lane, and the host never
-compares the monotonic times of two processes. A display may show progress inside a task from
+at once. The evidence is not persisted. A lane that a host restores after
+a restart refuses verdicts for the pictures of the runs before the
+restart, and the host never compares the monotonic times of two
+processes. A display may show progress inside a task from
 the remaining waypoints, and that view is not a second execution truth. The
 first delivery uses a sequence of tasks per vehicle. A team task graph and
 concurrent tasks within a bound come later; a linear list is not promised
