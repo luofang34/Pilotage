@@ -122,7 +122,9 @@ impl TeamLane {
         receipt: &wire::MissionReceipt,
         operation: Option<&str>,
     ) -> Option<wire::MissionReceipt> {
-        let renewal = self.renewal.get_or_insert_with(Renewal::default);
+        // An answer to a renewal that ended changes only its member: it
+        // counts in no renewal's tally.
+        let renewal = self.renewal_of(operation)?;
         if !accepted {
             renewal
                 .refused
@@ -131,20 +133,27 @@ impl TeamLane {
         if self.group_waits(operation, Op::Renew) {
             return None;
         }
-        let renewal = self.renewal.take().unwrap_or_default();
-        let mut reason = Vec::new();
-        if !renewal.refused.is_empty() {
-            reason.push(format!("refused by {}", renewal.refused.join("; ")));
-        }
-        if !renewal.skipped.is_empty() {
-            reason.push(format!("not sent to {}", renewal.skipped.join("; ")));
-        }
-        let reason = reason.join("; ");
+        let (renewed, reason) = self.renewal_of(operation).map(|r| r.verdict())?;
         self.detail = if reason.is_empty() {
             "the approval is renewed".to_owned()
         } else {
             format!("the approval is renewed; {reason}")
         };
-        self.finish(operation, renewal.refused.is_empty(), reason, None)
+        self.finish(operation, renewed, reason, None)
+    }
+}
+
+impl Renewal {
+    /// Whether every member asked renewed, and what the receipt says of
+    /// the members that refused or were not asked.
+    pub(super) fn verdict(&self) -> (bool, String) {
+        let mut reason = Vec::new();
+        if !self.refused.is_empty() {
+            reason.push(format!("refused by {}", self.refused.join("; ")));
+        }
+        if !self.skipped.is_empty() {
+            reason.push(format!("not sent to {}", self.skipped.join("; ")));
+        }
+        (self.refused.is_empty(), reason.join("; "))
     }
 }

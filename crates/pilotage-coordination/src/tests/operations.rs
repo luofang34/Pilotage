@@ -280,3 +280,42 @@ fn an_approval_whose_answer_is_lost_does_not_keep_the_team_waiting() {
         again.receipt
     );
 }
+
+#[test]
+fn a_late_answer_to_an_ended_renewal_does_not_take_the_next_ones_tally() {
+    let (mut fleet, _) = running_fleet(false);
+    let first = renew(&mut fleet, "renew-1");
+    fleet.team.on_host_clock(NOW + 30_000);
+    assert_eq!(fleet.team.take_ended().len(), 1, "renew-1 ended uncertain");
+    let late: Vec<(String, wire::MissionReceipt)> = first
+        .intents
+        .iter()
+        .map(|i| (i.member.clone(), answer(&mut fleet, i)))
+        .collect();
+    let second = renew(&mut fleet, "renew-2");
+    let (refusing, rest) = second.intents.split_first().expect("intents");
+    let refused = wire::MissionReceipt {
+        request_id: refusing.intent.request_id.clone(),
+        outcome: wire::MissionReceiptOutcome::Refused as i32,
+        reason: "busy here".to_owned(),
+        lane: refusing.member.clone(),
+        ..wire::MissionReceipt::default()
+    };
+    let mut decided: Vec<wire::MissionReceipt> = Vec::new();
+    decided.extend(tell(&mut fleet, &refusing.member, &refused));
+    for (member, receipt) in &late {
+        decided.extend(tell(&mut fleet, member, receipt));
+    }
+    for intent in rest {
+        let receipt = answer(&mut fleet, intent);
+        decided.extend(tell(&mut fleet, &intent.member, &receipt));
+    }
+    assert_eq!(decided.len(), 1, "{decided:?}");
+    assert_eq!(decided[0].request_id, "renew-2");
+    assert_eq!(outcome(&decided[0]), wire::MissionReceiptOutcome::Refused);
+    assert!(
+        decided[0].reason.contains(&refusing.member),
+        "{}",
+        decided[0].reason
+    );
+}

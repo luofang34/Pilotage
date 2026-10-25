@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 
 use pilotage_protocol::wire;
 
+use super::renewal::Renewal;
 use super::{MemberIntent, Op, TeamLane};
 
 /// How long an operation waits for its members' answers.
@@ -30,6 +31,8 @@ pub(super) struct Operation {
     waiting: BTreeMap<String, String>,
     /// Member requests whose answer is lost, with why.
     lost: Vec<String>,
+    /// What the members of a renewal answered.
+    renewal: Renewal,
 }
 
 fn name(kind: Op) -> &'static str {
@@ -87,6 +90,11 @@ impl TeamLane {
                 opened_unix_ms: now_unix_ms,
                 waiting,
                 lost: Vec::new(),
+                renewal: if kind == Op::Renew {
+                    self.renewal.take().unwrap_or_default()
+                } else {
+                    Renewal::default()
+                },
             },
         );
         true
@@ -110,7 +118,13 @@ impl TeamLane {
         if !open.waiting.is_empty() || open.lost.is_empty() {
             return None;
         }
-        self.finish(operation, true, String::new(), None)
+        let (accepted, reason) = open.renewal.verdict();
+        self.finish(operation, accepted, reason, None)
+    }
+
+    /// The tally of the open renewal `operation`.
+    pub(super) fn renewal_of(&mut self, operation: Option<&str>) -> Option<&mut Renewal> {
+        self.operations.get_mut(operation?).map(|o| &mut o.renewal)
     }
 
     /// Whether a member request of the same operation as `operation`, or of
@@ -219,8 +233,12 @@ impl TeamLane {
                 done.push(id.clone());
             }
         }
-        done.iter()
-            .filter_map(|id| self.finish(Some(id), true, String::new(), None))
-            .collect()
+        let mut ended = Vec::new();
+        for id in done {
+            let verdict = self.operations.get(&id).map(|o| o.renewal.verdict());
+            let (accepted, reason) = verdict.unwrap_or((true, String::new()));
+            ended.extend(self.finish(Some(&id), accepted, reason, None));
+        }
+        ended
     }
 }
