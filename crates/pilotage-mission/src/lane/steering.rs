@@ -107,8 +107,12 @@ impl Steering {
                 requester.subject
             )),
             Some(Action::Answer(answer)) => {
-                // The record names the session that answered.
-                answer.answered_by = Some(stamp(requester));
+                // The record names the session that answered. An approver that
+                // relays an answer, such as a team, keeps the name its own host
+                // wrote, so the record names the person and not the relay.
+                if answer.answered_by.is_none() {
+                    answer.answered_by = Some(stamp(requester));
+                }
                 Ok(())
             }
             Some(Action::Resume(_)) if self.held_by_approver && !requester.may_approve => {
