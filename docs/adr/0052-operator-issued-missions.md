@@ -535,7 +535,21 @@ launch, waiting for a lease that another principal holds, holding, or
 stopped. Clients act on these states; the detail text is for display
 only. Loss of progress is preferred to conflicting control. Deadlines bind to a host's boot and
 clock identity, and schedules across vehicles record their synchronization
-uncertainty. A host restart reconciles state; it does not replay commands.
+uncertainty. Each deadline names its clock and whether a hold stops it:
+
+- An approval expires at a civil time, in Unix milliseconds. A hold does
+  not stop it, and an expired approval holds the run.
+- The evidence window of a task starts when its execution ends and runs
+  on the host's monotonic clock. A hold does not stop it.
+- A team waits 30 s for its members' answers on the host's monotonic
+  clock. A step of the civil clock does not change the wait, and a hold
+  does not stop it.
+- The receipt timeout of a mission action and the wall deadline of a run,
+  24 hours from its start, run on the host's monotonic clock. A hold does
+  not stop them, so a directive that still waits for its receipt when a
+  long hold ends can time out at the first step after the resume.
+
+A host restart reconciles state; it does not replay commands.
 When an endpoint dies or loses its aircraft link, its adapter reports the
 device's verified loss behaviour or refuses the autonomy requirement.
 
