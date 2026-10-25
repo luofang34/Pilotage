@@ -300,32 +300,7 @@ impl TeamLane {
                 };
                 refly.state = ReflyState::Approving;
                 refly.proposal = Some(proposal.clone());
-                let launch = self.member(&member).map(|m| m.launch);
-                let Some(team) = self.approval.clone() else {
-                    return Vec::new();
-                };
-                let band = proposal
-                    .tasks
-                    .iter()
-                    .flat_map(|t| t.path.clone())
-                    .collect::<Vec<_>>();
-                let approval = delegate(
-                    &team,
-                    &proposal.proposal_id,
-                    &proposal.digest,
-                    &band,
-                    launch,
-                    &self.config.name,
-                );
-                // The team pays for this flight: the member decides no
-                // re-flight inside it, so it spends no part twice.
-                let approval = super::budget::without_budget(approval);
-                vec![self.request(
-                    &member,
-                    Op::Approve,
-                    Some(index),
-                    wire::mission_intent::Action::Approve(approval),
-                )]
+                self.approve_extra(index, &member, &proposal)
             }
             Op::Approve => {
                 refly.state = ReflyState::Starting;
@@ -349,6 +324,39 @@ impl TeamLane {
             }
             Op::Revise | Op::Renew => Vec::new(),
         }
+    }
+
+    /// The approval of the extra flight `index`, proposed by `member` as
+    /// `proposal`, passed down inside the team's own approval.
+    fn approve_extra(
+        &mut self,
+        index: usize,
+        member: &str,
+        proposal: &wire::MissionProposal,
+    ) -> Vec<MemberIntent> {
+        let launch = self.member(member).map(|m| m.launch);
+        let Some(team) = self.approval.clone() else {
+            return Vec::new();
+        };
+        let band: Vec<wire::GeoPoint> =
+            proposal.tasks.iter().flat_map(|t| t.path.clone()).collect();
+        let approval = delegate(
+            &team,
+            &proposal.proposal_id,
+            &proposal.digest,
+            &band,
+            launch,
+            &self.config.name,
+        );
+        // The team pays for this flight: the member decides no re-flight
+        // inside it, so it spends no part twice.
+        let approval = super::budget::without_budget(approval);
+        vec![self.request(
+            member,
+            Op::Approve,
+            Some(index),
+            wire::mission_intent::Action::Approve(approval),
+        )]
     }
 
     /// Follows a flying re-flight in its member's status; when it ends, the

@@ -143,11 +143,10 @@ fn relay_recording(
     decided
 }
 
-#[test]
-fn a_member_team_spends_only_its_part_of_the_re_flight_budget() {
+/// A parent over the fleet's team `TEAM` and the vehicle `SIM-9`, whose
+/// approval allows three re-flights inside a bound around the area, started.
+fn started_parent(fleet: &mut Fleet, vehicle: &mut Lane) -> TeamLane {
     use wire::mission_intent::Action;
-    let mut fleet = Fleet::new();
-    let mut vehicle = vehicle_lane("SIM-9");
     let mut parent = TeamLane::new(TeamConfig {
         name: "COMMAND".to_owned(),
         members: vec![
@@ -170,28 +169,31 @@ fn a_member_team_spends_only_its_part_of_the_re_flight_budget() {
         action: Some(action),
     };
     let reply = parent.on_intent(&intent("p", Action::Propose(objective())), &context("p"));
-    let proposal = relay_two(&mut parent, &mut fleet, &mut vehicle, reply.intents)
+    let proposal = relay_two(&mut parent, fleet, vehicle, reply.intents)
         .first()
         .and_then(opened)
         .expect("the parent proposal");
-    // Three lines in all: the team gets two, the parent keeps one for SIM-9.
     let mut approved = approval(&proposal.digest, 3);
     if let Some(envelope) = approved.envelope.as_mut() {
-        envelope.bound = vec![
-            point(40.3300, -74.6760),
-            point(40.3300, -74.6610),
-            point(40.3400, -74.6610),
-            point(40.3400, -74.6760),
-        ];
+        envelope.bound = approved_bound();
     }
     let reply = parent.on_intent(&intent("a", Action::Approve(approved)), &context("a"));
-    let decided = relay_two(&mut parent, &mut fleet, &mut vehicle, reply.intents);
+    let decided = relay_two(&mut parent, fleet, vehicle, reply.intents);
     assert!(decided.first().is_some_and(accepted), "{decided:?}");
     let start = Action::Start(wire::MissionStart {
         proposal_digest: proposal.digest.clone(),
     });
     let reply = parent.on_intent(&intent("s", start), &context("s"));
-    relay_two(&mut parent, &mut fleet, &mut vehicle, reply.intents);
+    relay_two(&mut parent, fleet, vehicle, reply.intents);
+    parent
+}
+
+#[test]
+fn a_member_team_spends_only_its_part_of_the_re_flight_budget() {
+    let mut fleet = Fleet::new();
+    let mut vehicle = vehicle_lane("SIM-9");
+    // Three lines in all: the team gets two, the parent keeps one for SIM-9.
+    let _parent = started_parent(&mut fleet, &mut vehicle);
     let bad = [
         ("SIM-1", "line-01"),
         ("SIM-2", "line-01"),
@@ -208,50 +210,13 @@ fn a_member_team_spends_only_its_part_of_the_re_flight_budget() {
 #[test]
 fn a_member_team_flying_its_parents_re_flight_gets_no_budget_for_it() {
     use wire::mission_intent::Action;
-    let mut fleet = Fleet::new();
-    let mut vehicle = vehicle_lane("SIM-9");
-    let mut parent = TeamLane::new(TeamConfig {
-        name: "COMMAND".to_owned(),
-        members: vec![
-            Member {
-                name: "TEAM".to_owned(),
-                launch: point(40.3328, -74.6722),
-                launch_altitude_m: 0.0,
-            },
-            Member {
-                name: "SIM-9".to_owned(),
-                launch: point(40.3368, -74.6648),
-                launch_altitude_m: 0.0,
-            },
-        ],
-        defaults: defaults(),
-        recovery_policy: "hold".to_owned(),
-    });
     let intent = |id: &str, action| wire::MissionIntent {
         request_id: id.to_owned(),
         action: Some(action),
     };
-    let reply = parent.on_intent(&intent("p", Action::Propose(objective())), &context("p"));
-    let proposal = relay_two(&mut parent, &mut fleet, &mut vehicle, reply.intents)
-        .first()
-        .and_then(opened)
-        .expect("the parent proposal");
-    let mut approved = approval(&proposal.digest, 3);
-    if let Some(envelope) = approved.envelope.as_mut() {
-        envelope.bound = vec![
-            point(40.3300, -74.6760),
-            point(40.3300, -74.6610),
-            point(40.3400, -74.6610),
-            point(40.3400, -74.6760),
-        ];
-    }
-    let reply = parent.on_intent(&intent("a", Action::Approve(approved)), &context("a"));
-    relay_two(&mut parent, &mut fleet, &mut vehicle, reply.intents);
-    let start = Action::Start(wire::MissionStart {
-        proposal_digest: proposal.digest.clone(),
-    });
-    let reply = parent.on_intent(&intent("s", start), &context("s"));
-    relay_two(&mut parent, &mut fleet, &mut vehicle, reply.intents);
+    let mut fleet = Fleet::new();
+    let mut vehicle = vehicle_lane("SIM-9");
+    let mut parent = started_parent(&mut fleet, &mut vehicle);
     // TEAM finishes first, with every line usable.
     let refly = fleet.fly(&[]);
     fleet.route(refly);
