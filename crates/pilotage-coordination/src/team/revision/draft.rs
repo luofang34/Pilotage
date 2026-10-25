@@ -191,7 +191,7 @@ impl TeamLane {
             .and_then(|r| r.objective.as_ref())
             .and_then(|o| match o.kind.as_ref()? {
                 wire::mission_objective::Kind::Survey(survey) => Some(survey.height_m),
-                wire::mission_objective::Kind::Report(_) => None,
+                _ => None,
             });
         match height {
             Some(height) if height > envelope.max_height_m + 1e-6 => Err(format!(

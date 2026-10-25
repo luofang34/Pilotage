@@ -314,7 +314,7 @@ fn restored_plan(
         .and_then(|o| o.kind.as_ref())
         .and_then(|kind| match kind {
             wire::mission_objective::Kind::Survey(survey) => Some(survey.clone()),
-            wire::mission_objective::Kind::Report(_) => None,
+            _ => None,
         });
     let mut mission = config.template.clone();
     mission.task_ids = proposal.tasks.iter().map(|t| t.task_id.clone()).collect();

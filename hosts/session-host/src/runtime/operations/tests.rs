@@ -342,6 +342,7 @@ fn a_rule_decides_a_check_with_no_person() {
                 check_plan(limit),
                 host.host.clone(),
                 receiver,
+                inputs(),
             );
             let done = until(&mut status, |s| s.plan_complete).await;
             assert_eq!(done.finished_tasks, ["read", "limit", "write"]);
