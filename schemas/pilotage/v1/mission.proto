@@ -157,12 +157,16 @@ message MissionQuestion {
 }
 
 // A person's answer to a question. The host takes it only from a session
-// with the approver secret, and writes who answered.
+// with the approver secret, and writes that session as `answered_by`.
 message MissionAnswer {
   string operation_id = 1;
   bytes subject_digest = 2;
   bool accepted = 3;
   RecordOrigin answered_by = 4;
+  // The person a relay, such as a team, passes the answer on for, as the
+  // relay's own host wrote it. The relay vouches for it; the record names
+  // both.
+  RecordOrigin relayed_from = 5;
 }
 
 message MissionEstimates {
