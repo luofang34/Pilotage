@@ -8,7 +8,12 @@
 //! {"command": "hold"}
 //! {"command": "revise", "reassign": {"from": "CAMPUS", "to": "BATTLEFIELD", "fraction": 0.5}}
 //! {"command": "revise", "finish": true, "within_envelope": true}
+//! {"command": "propose_objective", "objective": "0a0b..."}
 //! ```
+//!
+//! `propose_objective` proposes an objective of any kind as its wire
+//! message, encoded and written in hexadecimal: a client proposes a kind
+//! with no command of its own. `propose` is the survey's shorthand.
 //!
 //! `revise` drafts a change to the plan in progress for review: a new
 //! objective, a team's reassignment of unflown lines, or the end of the
@@ -83,13 +88,10 @@ pub enum MissionCommand {
         /// The handover's assignment.
         assignment_id: String,
     },
-    /// Compile an objective that reads a value, asks a person to confirm
-    /// it, and writes a report of it.
-    ProposeReport {
-        /// Where the value is read, as the host names its sources.
-        source: String,
-        /// What the person is asked about the value.
-        question: String,
+    /// Compile an objective of any kind.
+    ProposeObjective {
+        /// The `MissionObjective` wire message, encoded, in hexadecimal.
+        objective: String,
     },
     /// Answer the question a task asks, as the desk last saw it.
     Answer {
@@ -158,9 +160,23 @@ impl MissionCommand {
             Self::MemberDown { .. } => IntentKind::MemberDown,
             Self::Fetch {} => IntentKind::Fetch,
             Self::ResolveHandover { .. } => IntentKind::ResolveHandover,
-            Self::ProposeReport { .. } => IntentKind::Propose,
+            Self::ProposeObjective { .. } => IntentKind::Propose,
             Self::Answer { .. } => IntentKind::Answer,
         }
+    }
+}
+
+impl MissionCommand {
+    /// The command that proposes `objective`, whatever its kind.
+    #[must_use]
+    pub fn propose_objective(objective: &wire::MissionObjective) -> Self {
+        use prost::Message as _;
+        use std::fmt::Write as _;
+        let mut text = String::new();
+        for byte in objective.encode_to_vec() {
+            write!(text, "{byte:02x}").ok();
+        }
+        Self::ProposeObjective { objective: text }
     }
 }
 

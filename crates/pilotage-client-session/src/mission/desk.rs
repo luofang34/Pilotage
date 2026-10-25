@@ -72,6 +72,9 @@ pub enum DeskRefusal {
     /// No task asks the question an answer is for.
     #[error("no task asks a question this client can answer: {0}")]
     NoQuestion(String),
+    /// The objective is not a mission objective encoded in hexadecimal.
+    #[error("the objective is not an encoded mission objective: {0}")]
+    BadObjective(String),
 }
 
 /// The lane's answer to one of this client's intents.
