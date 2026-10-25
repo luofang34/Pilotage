@@ -548,6 +548,9 @@ enum MissionTaskState {
   // without enough evidence, or cut short by an abort.
   MISSION_TASK_STATE_INCOMPLETE = 4;
   MISSION_TASK_STATE_SKIPPED = 5;
+  // The host restarted while the task's operation may have run, and
+  // whether it had its effect is not known.
+  MISSION_TASK_STATE_UNCERTAIN = 6;
 }
 
 // How a task's execution stands or ended. Only run events set it: evidence
@@ -566,6 +569,9 @@ enum MissionTaskExecution {
   MISSION_TASK_EXECUTION_FAILED = 5;
   // A revision replaced the task before it began.
   MISSION_TASK_EXECUTION_SKIPPED = 6;
+  // The host restarted while the task's operation may have run, and the
+  // host cannot tell whether it had its effect. A person decides.
+  MISSION_TASK_EXECUTION_UNCERTAIN = 7;
 }
 
 // Whether the known evidence of a task meets what its objective needs. The
@@ -732,6 +738,9 @@ enum MissionHoldReason {
   MISSION_HOLD_REASON_OPERATOR = 1;
   // The approval expired, and its recovery holds the run.
   MISSION_HOLD_REASON_APPROVAL_EXPIRED = 2;
+  // The host restarted during the run. Nothing runs again until a person
+  // resumes it.
+  MISSION_HOLD_REASON_RESTARTED = 3;
 }
 
 // How a team sees one member.
@@ -795,4 +804,23 @@ message MissionSuccessor {
   string applies_after = 4;
   // The session that drafted it.
   string drafted_by = 5;
+}
+
+// The facts of a vehicle lane's run that outlive its host: the plan as
+// approved, the approval, the run and how each task's execution stands.
+// Telemetry, evidence and display are not kept.
+message MissionLaneRecord {
+  MissionProposalRecord proposal = 1;
+  MissionApproval approval = 2;
+  string run_id = 3;
+  MissionLaneState state = 4;
+  repeated MissionTaskRecord tasks = 5;
+}
+
+// One task of a recorded run.
+message MissionTaskRecord {
+  string task_id = 1;
+  MissionTaskExecution execution = 2;
+  // What the task's operation returned, in name order.
+  repeated MissionValue results = 3;
 }

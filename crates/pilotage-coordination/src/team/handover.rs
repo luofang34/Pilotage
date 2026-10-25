@@ -42,6 +42,12 @@ pub(super) struct Handover {
     pub released: bool,
     pub state: State,
     pub basis: String,
+    /// The digest of the team revision the handover carries out; empty for
+    /// a person's override or a restored record.
+    pub revision: Vec<u8>,
+    /// The team's approval that revision replaced, given back when the
+    /// handover is withdrawn while the revision's approval is in force.
+    pub replaced_approval: Option<wire::MissionApproval>,
 }
 
 impl Handover {
@@ -117,6 +123,11 @@ impl TeamLane {
             .get(from)
             .map(|s| s.run_id.clone())
             .unwrap_or_default();
+        let (revision, replaced_approval) = self
+            .revision
+            .as_ref()
+            .map(|r| (r.proposal.digest.clone(), r.replaced_approval.clone()))
+            .unwrap_or_default();
         self.handovers.push(Handover {
             assignment_id: assignment_id.clone(),
             generation: 1,
@@ -128,6 +139,8 @@ impl TeamLane {
             released: false,
             state: State::Releasing,
             basis: format!("waiting for {from} to release the work"),
+            revision,
+            replaced_approval,
         });
         wire::WorkRelease {
             assignment_id,
@@ -168,6 +181,8 @@ impl TeamLane {
             basis: format!(
                 "{stated_by} stated that {from} is down; this does not show that {from} stopped or that its airspace is clear"
             ),
+            revision: Vec::new(),
+            replaced_approval: None,
         });
         assignment_id
     }
@@ -188,7 +203,7 @@ impl TeamLane {
     }
 
     /// The open handover `member` gives.
-    fn releasing(&mut self, member: &str) -> Option<&mut Handover> {
+    pub(super) fn releasing(&mut self, member: &str) -> Option<&mut Handover> {
         self.handovers
             .iter_mut()
             .find(|h| h.from == member && h.state == State::Releasing)
@@ -227,16 +242,17 @@ impl TeamLane {
         }
     }
 
-    /// `member` refused its share: its open handover is withdrawn and it
-    /// keeps the work.
-    pub(super) fn withdraw_handover(&mut self, member: &str, reason: &str) {
-        if let Some(handover) = self.releasing(member) {
-            handover.state = State::Withdrawn;
-            handover.basis = format!("{member} refused: {reason}; it keeps the work");
-            if let Some(revision) = self.revision.as_mut() {
-                revision.stage = wire::MissionSuccessorState::Withdrawn;
-            }
-        }
+    /// Withdraws `member`'s open handover for `basis`; the revision it
+    /// carries out, with the approval that revision replaced, when it had one.
+    pub(super) fn withdraw_handover(
+        &mut self,
+        member: &str,
+        basis: String,
+    ) -> Option<(Vec<u8>, Option<wire::MissionApproval>)> {
+        let handover = self.releasing(member)?;
+        handover.state = State::Withdrawn;
+        handover.basis = basis;
+        Some((handover.revision.clone(), handover.replaced_approval.take()))
     }
 
     /// Commits the open handover of `member` when its status reports the
@@ -450,6 +466,8 @@ impl TeamLane {
                 released: false,
                 state: State::try_from(record.state).unwrap_or(State::Unspecified),
                 basis: record.basis.clone(),
+                revision: Vec::new(),
+                replaced_approval: None,
             };
             if open {
                 restored.state = State::Unreconciled;

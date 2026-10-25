@@ -274,7 +274,7 @@ async fn spawn_host_runtime(
                 adapter.is_simulator(),
                 matches!(adapter, AdapterKind::Reference),
             )?;
-            Some(mission_lane::spawn(&engine_tx, start, config).await)
+            Some(mission_lane::spawn(&engine_tx, start, config).await?)
         }
     };
     let runtime = adapter_launch::spawn_adapter_runtime(

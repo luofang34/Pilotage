@@ -58,3 +58,5 @@ fn a_run_waiting_for_a_lease_held_elsewhere_names_its_holder() {
         Some(RunExecution::Stopped)
     );
 }
+
+mod restart;

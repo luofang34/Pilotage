@@ -188,6 +188,7 @@ impl TaskTrack {
             Execution::Pending | Execution::Unspecified => wire::MissionTaskState::Pending,
             Execution::Active => wire::MissionTaskState::Active,
             Execution::Skipped => wire::MissionTaskState::Skipped,
+            Execution::Uncertain => wire::MissionTaskState::Uncertain,
             Execution::Completed if self.judgment(rule) == Judgment::Met => {
                 wire::MissionTaskState::Done
             }

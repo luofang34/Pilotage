@@ -19,10 +19,11 @@ mod tests;
 
 use std::path::PathBuf;
 
-use pilotage_mission::PlannedOperation;
 use pilotage_mission::executor::{
     ExecutorRegistry, OperationDescriptor, READ_VALUE, WAIT_FOR_PERSON, WRITE_REPORT,
 };
+use pilotage_mission::{PlannedOperation, Reconciled, StatusQuery};
+use pilotage_protocol::wire;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
@@ -69,6 +70,14 @@ impl OperationHost {
     }
 }
 
+/// What the run takes besides its plan: the results of its tasks that ended
+/// before it started, and how many of its tasks the lane journal holds as
+/// ended.
+pub(crate) struct RunInputs {
+    pub results: Vec<(String, Vec<wire::MissionValue>)>,
+    pub recorded: watch::Receiver<usize>,
+}
+
 /// Spawns the run `run_id` of `plan` on `host`, steered by `controls`.
 /// Returns the task handle and the status watch.
 pub(crate) fn spawn_operation_run(
@@ -76,12 +85,49 @@ pub(crate) fn spawn_operation_run(
     plan: Vec<PlannedOperation>,
     host: OperationHost,
     controls: mpsc::Receiver<RunControl>,
+    inputs: RunInputs,
 ) -> (JoinHandle<()>, watch::Receiver<AutomationStatus>) {
     let (status_tx, status_rx) = watch::channel(AutomationStatus::default());
-    let run = runner::OperationRun::new(run_id, host, controls, status_tx);
+    let run = runner::OperationRun::new(run_id, host, controls, status_tx, inputs);
     let handle = tokio::spawn(async move {
         run.run(plan).await;
         tracing::debug!(task = "operation-run", "task exited");
     });
     (handle, status_rx)
+}
+
+/// Whether the operation `query` names happened before the host restarted,
+/// as its executor can tell.
+///
+/// # Errors
+/// When the executor cannot tell, such as without its directory.
+pub(crate) async fn status(
+    host: &OperationHost,
+    query: &StatusQuery,
+) -> Result<Reconciled, String> {
+    let operation = &query.operation;
+    match (operation.executor.as_str(), operation.operation.as_str()) {
+        ("host", "write-report") => {
+            let reports = host
+                .reports
+                .clone()
+                .ok_or("this host has no reports directory")?;
+            let id = query.operation_id.clone();
+            let found =
+                tokio::task::spawn_blocking(move || executors::report_of_blocking(&reports, &id))
+                    .await
+                    .map_err(|join| format!("the status query stopped: {join}"))??;
+            Ok(found.map_or(Reconciled::DidNotHappen, |report| {
+                Reconciled::Happened(vec![wire::MissionValue {
+                    name: "report".to_owned(),
+                    value: report,
+                }])
+            }))
+        }
+        // A person's answer reaches only the run, which ended with the host.
+        ("person", "confirm") => Ok(Reconciled::DidNotHappen),
+        (executor, name) => Err(format!(
+            "this host cannot tell whether {executor}/{name} happened"
+        )),
+    }
 }

@@ -13,6 +13,7 @@ mod evidence;
 mod expiry;
 mod hold;
 mod needs;
+mod restore;
 mod run;
 mod settle;
 mod status;
@@ -29,6 +30,7 @@ use crate::config::MissionConfig;
 use crate::survey::SurveyRequest;
 
 pub use compile::SurveyDefaults;
+pub use restore::{Reconciled, StatusQuery, operation_id};
 pub use run::{FrameAssessment, RunExecution, RunProgress};
 pub use steering::{HOST_ISSUER, Requester, Steering};
 pub use target::{Approvable, ApprovalTarget, admit_approval, approval_target, valid_approval};
@@ -113,6 +115,10 @@ pub struct RunOrder {
     pub plan: RunPlan,
     /// The mission config.
     pub config: MissionConfig,
+    /// What the run's tasks that ended before it started returned, by task,
+    /// for the operations that take them: the tasks a run restarted after
+    /// the host restarted had carried out.
+    pub results: Vec<(String, Vec<wire::MissionValue>)>,
 }
 
 /// What the host does after an intent.
@@ -180,6 +186,8 @@ pub struct Lane {
     released: Vec<wire::WorkReleased>,
     /// The latest time on the host's monotonic clock, milliseconds.
     host_ms: u64,
+    /// What a restart of the host left of the run, until it is settled.
+    restart: Option<restore::Restart>,
 }
 
 impl Lane {
@@ -204,6 +212,7 @@ impl Lane {
             holds: Vec::new(),
             released: Vec::new(),
             host_ms: 0,
+            restart: None,
         }
     }
 
@@ -284,6 +293,7 @@ impl Lane {
         self.past.clear();
         self.holds.clear();
         self.released.clear();
+        self.restart = None;
         self.state = wire::MissionLaneState::Proposed;
         self.detail = "proposed; waiting for an approval".to_owned();
         Ok((None, Some(record)))
@@ -369,6 +379,7 @@ impl Lane {
                 run_id,
                 plan: compiled.plan.clone(),
                 config: compiled.config.clone(),
+                results: Vec::new(),
             }))),
             None,
         ))
@@ -399,6 +410,8 @@ impl Lane {
         self.state = wire::MissionLaneState::Aborted;
         self.successor = None;
         self.holds.clear();
+        // What a restart left of the run ends with it.
+        self.restart = None;
         self.detail = "aborted by intent; the vehicle stops in place".to_owned();
         if let Some(run) = self.run.as_mut() {
             run.abort(self.host_ms);
