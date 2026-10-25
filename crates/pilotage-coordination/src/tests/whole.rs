@@ -178,3 +178,77 @@ fn an_answer_no_member_asks_for_is_refused_by_the_team() {
         receipt.reason
     );
 }
+
+#[test]
+fn a_report_whose_member_is_stated_down_fails_and_takes_no_answer() {
+    let (mut fleet, member) = started();
+    let (question, _) = asks(&mut fleet, &member);
+    fleet.team.on_member_lost(&member);
+    let down = fleet.team.on_intent(
+        &wire::MissionIntent {
+            request_id: "down".to_owned(),
+            action: Some(Action::MemberDown(wire::MissionMemberDown {
+                member: member.clone(),
+                stated_by: None,
+            })),
+        },
+        &context("down"),
+    );
+    assert!(down.receipt.is_some_and(|r| accepted(&r)));
+    // Another member's status lets the team settle.
+    let other = fleet
+        .members
+        .keys()
+        .find(|m| **m != member)
+        .cloned()
+        .expect("another member");
+    let status = fleet.members.get(&other).map(Lane::status).expect("status");
+    fleet.team.on_member_status(&status, &context("other"));
+    let team = fleet.team.status();
+    assert_eq!(
+        team.state,
+        wire::MissionLaneState::Failed as i32,
+        "{}",
+        team.detail
+    );
+    let answer = fleet.team.on_intent(
+        &wire::MissionIntent {
+            request_id: "late".to_owned(),
+            action: Some(Action::Answer(wire::MissionAnswer {
+                operation_id: question.operation_id,
+                subject_digest: question.subject_digest,
+                accepted: true,
+                answered_by: None,
+            })),
+        },
+        &context("late"),
+    );
+    assert!(
+        answer.intents.is_empty(),
+        "nothing goes to a member stated down"
+    );
+    assert!(answer.receipt.is_some_and(|r| !accepted(&r)));
+}
+
+#[test]
+fn a_team_running_a_report_refuses_every_revision_before_it_changes() {
+    let (mut fleet, _) = started();
+    let status = fleet.team.status();
+    let reply = fleet.team.on_intent(
+        &wire::MissionIntent {
+            request_id: "finish".to_owned(),
+            action: Some(Action::Revise(wire::MissionRevise {
+                base_digest: status.proposal_digest.clone(),
+                run_id: status.run_id.clone(),
+                within_envelope: true,
+                change: Some(wire::mission_revise::Change::Finish(wire::MissionFinish {})),
+                ..wire::MissionRevise::default()
+            })),
+        },
+        &context("finish"),
+    );
+    let receipt = reply.receipt.expect("refused at once");
+    assert!(!accepted(&receipt), "{}", receipt.reason);
+    assert!(reply.intents.is_empty());
+    assert!(fleet.team.status().successor.is_none());
+}

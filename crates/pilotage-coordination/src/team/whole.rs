@@ -19,12 +19,14 @@ impl TeamLane {
         objective: &wire::MissionObjective,
         context: &IntentContext,
     ) -> Result<(Vec<MemberIntent>, bool), String> {
+        // The first member the team does not know as lost or down.
         let member = self
             .config
             .members
-            .first()
+            .iter()
             .map(|m| m.name.clone())
-            .ok_or("the team has no member")?;
+            .find(|m| !self.lost.contains_key(m))
+            .ok_or("no member of the team reports")?;
         self.reset_plan();
         self.objective = Some(objective.clone());
         self.height_m = 0.0;
@@ -56,10 +58,18 @@ impl TeamLane {
         &mut self,
         answer: &wire::MissionAnswer,
     ) -> Result<(Vec<MemberIntent>, bool), String> {
+        if !matches!(self.phase, Phase::Running | Phase::Held | Phase::Settling) {
+            return Err(format!(
+                "no run of the team asks a question; the team is {:?}",
+                self.phase
+            ));
+        }
         self.busy(Op::Answer)?;
+        // Only a member that flies the team's plan and still reports.
         let member = self
             .statuses
             .iter()
+            .filter(|(m, _)| self.member_proposals.contains_key(*m) && !self.lost.contains_key(*m))
             .find(|(_, status)| {
                 status.tasks.iter().any(|t| {
                     t.question
@@ -88,6 +98,7 @@ impl TeamLane {
         operation: Option<&str>,
     ) -> Option<wire::MissionReceipt> {
         let reason = if accepted {
+            self.detail = format!("{member} took the answer");
             String::new()
         } else {
             format!("{member} refused the answer: {}", receipt.reason)

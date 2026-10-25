@@ -314,6 +314,12 @@ impl TeamLane {
         if states.len() + released < self.member_proposals.len() {
             return;
         }
+        if states.is_empty() {
+            // Every member is stated down: nothing shows that the work was done.
+            self.phase = Phase::Failed;
+            self.detail = "every member is stated down; the work is not done".to_owned();
+            return;
+        }
         let complete = wire::MissionLaneState::Complete as i32;
         let failed = [
             wire::MissionLaneState::Failed as i32,
@@ -329,7 +335,11 @@ impl TeamLane {
                 format!("every member's run ended; waiting for the results of {open} lines");
         } else if states.iter().all(|s| *s == complete) {
             self.phase = Phase::Complete;
-            self.detail = self.book.summary();
+            self.detail = if self.survey().is_some() {
+                self.book.summary()
+            } else {
+                "complete: the member did the work".to_owned()
+            };
         } else if states.iter().all(|s| *s == complete || failed.contains(s)) {
             self.phase = Phase::Failed;
             self.detail = format!("a member ended without completing; {}", self.book.summary());
