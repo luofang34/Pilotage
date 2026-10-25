@@ -8,6 +8,10 @@ mod adapter;
 mod config;
 mod journal;
 mod member_link;
+mod outbox;
+
+#[cfg(test)]
+mod tests;
 
 use std::collections::BTreeMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -60,11 +64,11 @@ pub(crate) async fn spawn(
         );
         lane.restore_handovers(&config.restored);
     }
-    let journaled = lane.handovers();
+    let dispatch = outbox::Dispatch::new(lane.handovers());
     let task = TeamTask {
         lane,
         journal: config.journal,
-        journaled,
+        dispatch,
         engine: engine_tx.clone(),
         links,
         operator_requests: BTreeMap::new(),
@@ -82,8 +86,8 @@ struct TeamTask {
     lane: TeamLane,
     /// Where the handovers are written before any intent leaves.
     journal: std::path::PathBuf,
-    /// The handovers as last written.
-    journaled: Vec<wire::MissionHandover>,
+    /// What waits for the journal before it goes out.
+    dispatch: outbox::Dispatch,
     engine: mpsc::Sender<ToEngine>,
     links: BTreeMap<String, mpsc::Sender<wire::MissionIntent>>,
     /// The operator who sent each deferred intent, by request.
@@ -113,9 +117,8 @@ impl TeamTask {
                     Some(event) => self.on_member_event(event).await,
                     None => break,
                 },
-                _ = ticker.tick() => {}
+                _ = ticker.tick() => self.retry().await,
             }
-            self.journal().await;
             if !self.publish().await {
                 break;
             }
@@ -131,6 +134,20 @@ impl TeamTask {
         if let Err(reason) = self.steering.admit(intent, requester) {
             info!(request = %intent.request_id, %reason, "team intent refused");
             let receipt = Steering::refusal(intent, &self.lane.status().lane, reason);
+            self.reply_to(Some(client), receipt).await;
+            return;
+        }
+        let stop = matches!(
+            intent.action,
+            Some(
+                wire::mission_intent::Action::Hold(_)
+                    | wire::mission_intent::Action::Abort(_)
+                    | wire::mission_intent::Action::Fetch(_)
+            )
+        );
+        if self.dispatch.blocks_new_work() && !stop {
+            let receipt =
+                Steering::refusal(intent, &self.lane.status().lane, self.dispatch.refusal());
             self.reply_to(Some(client), receipt).await;
             return;
         }
@@ -168,14 +185,42 @@ impl TeamTask {
     }
 
     async fn answer(&mut self, reply: TeamReply) {
-        if let Some(receipt) = reply.receipt {
+        self.answer_operator(reply.receipt).await;
+        self.send(reply.intents).await;
+    }
+
+    async fn answer_operator(&mut self, receipt: Option<wire::MissionReceipt>) {
+        if let Some(receipt) = receipt {
             let to = self.operator_requests.remove(&receipt.request_id);
             info!(request = %receipt.request_id, outcome = receipt.outcome, reason = %receipt.reason, "team intent answered");
             if to.is_some() || !receipt.request_id.is_empty() {
                 self.reply_to(to, receipt).await;
             }
         }
-        self.send(reply.intents).await;
+    }
+
+    /// Tells the lane that each withheld intent never reached its member:
+    /// the member refused it, as far as the lane can know. Returns what the
+    /// lane sends next.
+    async fn refuse_withheld(&mut self, withheld: Vec<outbox::Withheld>) -> Vec<MemberIntent> {
+        let mut next = Vec::new();
+        for outbox::Withheld { intent, reason } in withheld {
+            warn!(member = %intent.member, request = %intent.intent.request_id, reason, "intent withheld");
+            let receipt = wire::MissionReceipt {
+                request_id: intent.intent.request_id,
+                outcome: wire::MissionReceiptOutcome::Refused as i32,
+                reason: reason.to_owned(),
+                lane: intent.member.clone(),
+                ..wire::MissionReceipt::default()
+            };
+            let context = self.context();
+            let reply = self
+                .lane
+                .on_member_receipt(&intent.member, &receipt, &context);
+            self.answer_operator(reply.receipt).await;
+            next.extend(reply.intents);
+        }
+        next
     }
 
     async fn reply_to(&self, to: Option<ClientKey>, receipt: wire::MissionReceipt) {
@@ -188,35 +233,43 @@ impl TeamTask {
             .ok();
     }
 
-    /// Writes the handovers when they changed. Returns whether the journal
-    /// holds them.
-    async fn journal(&mut self) -> bool {
-        let handovers = self.lane.handovers();
-        if handovers == self.journaled {
-            return true;
-        }
-        match journal::write(&self.journal, &handovers).await {
-            Ok(()) => {
-                self.journaled = handovers;
-                true
+    /// Sends what may go out now and writes the journal for the rest: work
+    /// goes out only once the journal holds the handovers it acts on, and a
+    /// stop goes out at once.
+    async fn send(&mut self, mut intents: Vec<MemberIntent>) {
+        // A withheld intent's refusal can make the lane send more; each
+        // refusal ends a step, so this ends.
+        loop {
+            let step = self.dispatch.offer(intents, self.lane.handovers());
+            self.deliver(step.send).await;
+            if let Some(handovers) = step.write {
+                self.write(handovers).await;
             }
-            Err(failure) => {
-                error!(journal = %self.journal.display(), %failure, "the handover journal cannot be written");
-                false
+            intents = self.refuse_withheld(step.withheld).await;
+            if intents.is_empty() {
+                break;
             }
         }
     }
 
-    /// Sends `intents` once the journal holds the handovers they act on; an
-    /// intent is never sent ahead of the record of the work it gives.
-    async fn send(&mut self, intents: Vec<MemberIntent>) {
-        if !self.journal().await {
-            error!(
-                intents = intents.len(),
-                "member intents not sent: the handover journal is not written"
-            );
-            return;
+    /// Writes the journal again while it fails; the waiting work goes out
+    /// once it succeeds.
+    async fn retry(&mut self) {
+        if let Some(handovers) = self.dispatch.retry(self.lane.handovers()) {
+            self.write(handovers).await;
         }
+    }
+
+    async fn write(&mut self, handovers: Vec<wire::MissionHandover>) {
+        let written = journal::write(&self.journal, &handovers).await;
+        if let Err(failure) = &written {
+            error!(journal = %self.journal.display(), %failure, "the handover journal cannot be written; work waits for it");
+        }
+        let released = self.dispatch.written(handovers, written.is_ok());
+        self.deliver(released).await;
+    }
+
+    async fn deliver(&self, intents: Vec<MemberIntent>) {
         for MemberIntent { member, intent } in intents {
             match self.links.get(&member) {
                 Some(link) => {
@@ -233,11 +286,14 @@ impl TeamTask {
         let stale = self
             .last_publish
             .is_none_or(|at| at.elapsed() >= STATUS_REFRESH);
-        let status = match self.lane.take_changed() {
+        let mut status = match self.lane.take_changed() {
             Some(status) => status,
             None if stale => self.lane.status(),
             None => return true,
         };
+        if self.dispatch.blocks_new_work() {
+            status.detail = format!("{}; {}", self.dispatch.refusal(), status.detail);
+        }
         self.last_publish = Some(Instant::now());
         self.engine
             .send(ToEngine::MissionPublish {

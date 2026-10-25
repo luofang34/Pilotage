@@ -387,8 +387,21 @@ A person's statement that a member is down is an override with a source.
 The team records who stated it, and the handover that it causes names it
 as its basis. The statement does not prove that the member stopped, that
 its control is revoked, or that its space is clear. The coordinator host writes the
-handovers to durable storage before it sends work to a member, and it
-sends no intent when it cannot write them. A coordinator that restarts
+handovers to durable storage before it sends work to a member. An intent
+that gives work is prepared, then persisted, then sent, and never sent
+before its record. When a write fails, the prepared intents wait in a
+bounded backlog, the coordinator refuses new work and says so in its
+status, and it tries the write again. When the write succeeds, the waiting
+intents go out one time. A hold and an abort never wait for the journal.
+A hold for a member with waiting work goes out at once, and it also waits
+again after that work. When the write succeeds, the member gets the work
+and then the hold, in the same order as when the journal is written. Thus
+the disk does not change what a hold does. An abort for a member removes
+the waiting work of that member. When the work of one answer does not fit
+in the backlog, all of that work is removed, so that no part of it goes
+out without the rest. The team lane receives each removed intent as
+refused by its member, because the member never received it. Thus the lane
+does not show the work as possibly started. A coordinator that restarts
 reads them back. It shows each handover that was open or committed as
 unreconciled, because it cannot know whether a member flies that work,
 and it moves nothing. While a handover of its members is unreconciled, the
