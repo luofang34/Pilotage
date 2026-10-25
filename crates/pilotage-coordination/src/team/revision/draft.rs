@@ -10,10 +10,9 @@ use crate::allocation::{Across, team_step};
 use crate::team::TeamLane;
 
 impl TeamLane {
-    pub(super) fn draft_reassign(
-        &self,
-        reassign: &wire::MissionReassign,
-    ) -> Result<(Change, String), String> {
+    /// Refuses a reassignment between members the team does not have, of a
+    /// fraction out of range, or from a giver whose last one is still open.
+    fn reassignable(&self, reassign: &wire::MissionReassign) -> Result<(), String> {
         let (from, to) = (reassign.from_member.as_str(), reassign.to_member.as_str());
         for name in [from, to] {
             if self.member(name).is_none() {
@@ -23,12 +22,32 @@ impl TeamLane {
         if from == to {
             return Err("a reassignment moves lines between two members".to_owned());
         }
+        // A refusal withdraws the giver's open handover, so it has one at a
+        // time.
+        if self
+            .handovers
+            .iter()
+            .any(|h| h.from == from && h.state == wire::MissionHandoverState::Releasing)
+        {
+            return Err(format!(
+                "{from} has not released the lines of its last reassignment; reassign its lines once it has"
+            ));
+        }
         if !(reassign.fraction > 0.0 && reassign.fraction <= 1.0) {
             return Err(format!(
                 "the fraction {} is not in (0, 1]",
                 reassign.fraction
             ));
         }
+        Ok(())
+    }
+
+    pub(super) fn draft_reassign(
+        &self,
+        reassign: &wire::MissionReassign,
+    ) -> Result<(Change, String), String> {
+        self.reassignable(reassign)?;
+        let (from, to) = (reassign.from_member.as_str(), reassign.to_member.as_str());
         let across = self.across().ok_or("the team has no sweep")?;
         // A lost member may still fly: its work stays reserved until it
         // reports again or a person states that it is down. A member that is
