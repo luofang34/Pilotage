@@ -25,6 +25,7 @@ write_clean_fixture() {
         'fn signal_current_process_group() {' \
         '    rustix::process::kill_current_process_group(Signal::KILL);' \
         '}' \
+        'fn stop_process_group(group: u32) { signal_process_group(group); }' \
         'fn signal_process_group(group: Pid) {' \
         '    rustix::process::kill_process_group(group, Signal::KILL);' \
         '}' \
@@ -34,7 +35,7 @@ write_clean_fixture() {
         'fn fail() { process_control::signal_current_process_group(); }' \
         > "$gate"
     printf '%s\n' \
-        'fn stop(group: u32) { process_control::signal_process_group(group); }' \
+        'fn stop(group: u32) { process_control::stop_process_group(group); }' \
         > "$owner_cleanup"
     printf '%s\n' \
         'fn stop(child: &mut Child) { process_control::stop_child(child); }' \
@@ -68,7 +69,7 @@ expect_failure \
 
 write_clean_fixture
 printf '%s\n' \
-    'fn recover(group: u32) { process_control::signal_process_group(group); }' \
+    'fn recover(group: u32) { process_control::stop_process_group(group); }' \
     > "$recovery"
 expect_failure \
     'a recovery signal entry point' \
@@ -82,7 +83,7 @@ expect_failure \
 
 write_clean_fixture
 printf '%s\n' \
-    'fn stop(group: u32) { process_control::signal_process_group(group); }' \
+    'fn stop(group: u32) { process_control::stop_process_group(group); }' \
     > "$gate"
 expect_failure \
     'a signal entry point with the wrong owner' \
