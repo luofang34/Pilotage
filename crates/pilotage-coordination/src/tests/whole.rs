@@ -265,3 +265,34 @@ fn a_team_running_a_report_refuses_every_revision_before_it_changes() {
     assert!(reply.intents.is_empty());
     assert!(fleet.team.status().successor.is_none());
 }
+
+#[test]
+fn a_name_the_sender_claims_stays_behind_the_sender_the_host_named() {
+    let (mut fleet, member) = started();
+    let (question, _) = asks(&mut fleet, &member);
+    let origin = |subject: &str| wire::RecordOrigin {
+        subject: subject.to_owned(),
+        ..wire::RecordOrigin::default()
+    };
+    let answer = fleet.team.on_intent(
+        &wire::MissionIntent {
+            request_id: "claimed".to_owned(),
+            action: Some(Action::Answer(wire::MissionAnswer {
+                operation_id: question.operation_id,
+                subject_digest: question.subject_digest,
+                accepted: true,
+                answered_by: Some(origin("rogue-session")),
+                relayed_from: Some(origin("alice")),
+            })),
+        },
+        &context("claimed"),
+    );
+    let Some(Action::Answer(relayed)) = answer.intents[0].intent.action.clone() else {
+        panic!("an answer");
+    };
+    assert_eq!(
+        relayed.relayed_from.map(|o| o.subject).as_deref(),
+        Some("alice via rogue-session"),
+        "the session the host named stays in the record"
+    );
+}

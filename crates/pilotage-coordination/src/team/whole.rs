@@ -83,13 +83,10 @@ impl TeamLane {
             &member,
             Op::Answer,
             None,
-            // The team vouches for the person its host named; a team above
-            // it already named the person, and that name stays.
+            // The team vouches for who sent it the answer, as its host wrote
+            // it, after whatever that sender relayed: each sender stays named.
             wire::mission_intent::Action::Answer(wire::MissionAnswer {
-                relayed_from: answer
-                    .relayed_from
-                    .clone()
-                    .or_else(|| answer.answered_by.clone()),
+                relayed_from: chain(answer),
                 ..answer.clone()
             }),
         );
@@ -113,4 +110,17 @@ impl TeamLane {
         };
         self.finish(operation, accepted, reason, None)
     }
+}
+
+/// Who the team passes `answer` on for: its sender, as the team's host
+/// named it, after the person that sender relayed for, when it did.
+fn chain(answer: &wire::MissionAnswer) -> Option<wire::RecordOrigin> {
+    let sender = answer.answered_by.clone()?;
+    Some(match answer.relayed_from.as_ref() {
+        Some(earlier) => wire::RecordOrigin {
+            subject: format!("{} via {}", earlier.subject, sender.subject),
+            ..sender
+        },
+        None => sender,
+    })
 }
