@@ -37,6 +37,9 @@ pub(super) struct Handover {
     pub from_run: String,
     /// The digest of the giving member's draft the team approved.
     pub approved: Option<Vec<u8>>,
+    /// The giving member reported that it released the work. Without a
+    /// release, as after a person's statement, the giver may still fly it.
+    pub released: bool,
     pub state: State,
     pub basis: String,
 }
@@ -49,6 +52,25 @@ impl Handover {
             self.state,
             State::Withdrawn | State::Completed | State::Resolved
         )
+    }
+
+    /// The receiver will not fly the moved lines, for `why`. Work its giver
+    /// released is unassigned. Work moved without a release may still be
+    /// flown by its giver, so the handover is unreconciled.
+    fn not_flown_by_receiver(&mut self, why: &str) {
+        if self.released {
+            self.state = State::Unassigned;
+            self.basis = format!(
+                "{} released the work and {why}; an operator gives it to a member",
+                self.from
+            );
+        } else {
+            self.state = State::Unreconciled;
+            self.basis = format!(
+                "{why}; {} did not release the work and may still fly it; check whether {} flies these lines, then give them to a member",
+                self.from, self.from
+            );
+        }
     }
 
     fn wire(&self) -> wire::MissionHandover {
@@ -103,6 +125,7 @@ impl TeamLane {
             moved,
             from_run,
             approved: None,
+            released: false,
             state: State::Releasing,
             basis: format!("waiting for {from} to release the work"),
         });
@@ -140,6 +163,7 @@ impl TeamLane {
             moved,
             from_run: String::new(),
             approved: None,
+            released: false,
             state: State::Committed,
             basis: format!(
                 "{stated_by} stated that {from} is down; this does not show that {from} stopped or that its airspace is clear"
@@ -234,6 +258,7 @@ impl TeamLane {
             .drain(..)
             .partition(|(id, _)| !released.task_ids.contains(id));
         handover.moved = moved;
+        handover.released = true;
         if !matches!(self.phase, super::Phase::Running | super::Phase::Held) {
             // The release happened; the abort ended the work it was for.
             // Lines the giver began first are not released and stay its own.
@@ -270,16 +295,13 @@ impl TeamLane {
         self.queue_moved(&to, member, paths, assignment, context)
     }
 
-    /// The moved work of `assignment` did not start: it is released and
-    /// unassigned.
+    /// The moved work of `assignment` did not start: it is unassigned when
+    /// its giver released it.
     pub(super) fn unassign_moved(&mut self, assignment: &str, reason: &str) {
         for handover in &mut self.handovers {
             if handover.assignment_id == assignment && handover.state == State::Committed {
-                handover.state = State::Unassigned;
-                handover.basis = format!(
-                    "{} released the work and {} did not take it ({reason}); an operator gives it to a member",
-                    handover.from, handover.to
-                );
+                handover
+                    .not_flown_by_receiver(&format!("{} did not take it ({reason})", handover.to));
             }
         }
     }
@@ -357,11 +379,10 @@ impl TeamLane {
                     handover.state = State::Completed;
                     handover.basis = format!("{} flew the moved lines", handover.to);
                 } else {
-                    handover.state = State::Unassigned;
-                    handover.basis = format!(
-                        "{}'s flight of the moved lines ended before they were flown; an operator gives them to a member",
+                    handover.not_flown_by_receiver(&format!(
+                        "{}'s flight of the moved lines ended before they were flown",
                         handover.to
-                    );
+                    ));
                 }
             }
         }
@@ -422,6 +443,7 @@ impl TeamLane {
                     .collect(),
                 from_run: String::new(),
                 approved: None,
+                released: false,
                 state: State::try_from(record.state).unwrap_or(State::Unspecified),
                 basis: record.basis.clone(),
             };

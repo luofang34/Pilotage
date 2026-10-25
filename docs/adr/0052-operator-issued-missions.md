@@ -136,7 +136,9 @@ the team was still setting in motion. A re-flight or moved lines that have
 not started are cancelled, and a receipt that arrives later takes no next
 step. When the start was sent, the member may fly, so the work keeps its
 member until the member reports. Committed work that its receiver had not
-started is unassigned. A release fact that arrives after the abort is
+started is unassigned when its giving member released it. Work that moved
+on a person's statement, without a release, is unreconciled instead,
+because the giving member may still fly it. A release fact that arrives after the abort is
 recorded as unassigned work, and it gives no work to the receiver. The environment variables remain a bootstrap source
 that issues the first plan into an `Idle` lane; an issued plan supersedes
 them.
@@ -374,7 +376,8 @@ assumed at a time-out. When the giving member refuses its revision, the
 handover is withdrawn and that member keeps the work. When the receiving
 member refuses the released work, or a person states it down before it
 starts the work, the work is unassigned. It does not go back to the giving
-member. A lane refuses an approval or a revision for a plan that a
+member. When the work moved on a person's statement and not on a release,
+it is unreconciled, as the giving member may still fly it. A lane refuses an approval or a revision for a plan that a
 revision replaced, so a late message cannot bring a released plan back.
 Fencing at a control endpoint (ADR-0010) makes an old generation invalid
 at that endpoint only: a lease on the receiving vehicle does not stop the

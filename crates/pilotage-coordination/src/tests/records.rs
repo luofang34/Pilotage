@@ -179,3 +179,37 @@ fn reading_the_journal_back_twice_keeps_one_record_of_each_handover() {
     fleet.team.restore_handovers(&journal);
     assert_eq!(fleet.team.status().handovers.len(), 1);
 }
+
+#[test]
+fn work_moved_on_a_statement_and_then_not_flown_stops_the_next_plan() {
+    use super::revision::{member_down, reassign, team_intent};
+    let (mut fleet, _) = running_fleet(false);
+    // SIM-3's link is gone and a person states it down: its lines move to
+    // SIM-1 without a release, as SIM-3 cannot answer.
+    fleet.team.on_member_lost("SIM-3");
+    let (receipt, _) = team_intent(&mut fleet, member_down("SIM-3"));
+    assert!(receipt.is_some_and(|r| accepted(&r)));
+    let give = reassign(&fleet, "SIM-3", "SIM-1", 1.0, false);
+    let (receipt, _) = team_intent(&mut fleet, give);
+    let draft = opened(&receipt.expect("answered")).expect("a draft");
+    let (receipt, _) = team_intent(&mut fleet, Action::Approve(approval(&draft.digest, 0)));
+    assert!(receipt.is_some_and(|r| accepted(&r)));
+    assert_eq!(handover(&fleet).state, State::Committed as i32);
+    // The team aborts before SIM-1 starts the moved lines.
+    let (receipt, _) = team_intent(&mut fleet, Action::Abort(wire::MissionAbort {}));
+    assert!(receipt.is_some_and(|r| accepted(&r)));
+    let record = handover(&fleet);
+    assert_eq!(
+        record.state,
+        State::Unreconciled as i32,
+        "SIM-3 released nothing and may still fly its lines: {}",
+        record.basis
+    );
+    let (receipt, intents) = propose(&mut fleet);
+    let receipt = receipt.expect("refused at once");
+    assert!(
+        !accepted(&receipt) && intents.is_empty(),
+        "{}",
+        receipt.reason
+    );
+}
