@@ -160,6 +160,7 @@ impl TeamLane {
             (true, Some(Asked::Objective(objective))) if revise.base_digest == current => {
                 match self.propose(objective, context) {
                     Ok((intents, _)) => {
+                        // Members are always asked: the objective is new.
                         self.open_operation(&id, &intents, context.now_unix_ms);
                         return super::TeamReply {
                             receipt: None,

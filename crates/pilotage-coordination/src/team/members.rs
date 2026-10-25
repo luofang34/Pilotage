@@ -19,8 +19,27 @@ impl TeamLane {
             return TeamReply::default();
         };
         self.changed = true;
+        let operation = pending.operation.clone();
+        self.answered(operation.as_deref(), &receipt.request_id);
+        let mut reply = self.fold_receipt(member, &pending, receipt, context);
+        if let Some(ended) = self.close_if_only_lost(operation.as_deref()) {
+            match reply.receipt {
+                None => reply.receipt = Some(ended),
+                Some(_) => self.ended.push(ended),
+            }
+        }
+        reply
+    }
+
+    /// What `receipt`, the answer to `pending`, does to the team.
+    fn fold_receipt(
+        &mut self,
+        member: &str,
+        pending: &super::Pending,
+        receipt: &wire::MissionReceipt,
+        context: &IntentContext,
+    ) -> TeamReply {
         let operation = pending.operation.as_deref();
-        self.answered(operation, &receipt.request_id);
         let accepted = receipt.outcome == wire::MissionReceiptOutcome::Accepted as i32;
         if pending.op == Op::Renew {
             return TeamReply {

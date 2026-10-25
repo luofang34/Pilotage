@@ -203,3 +203,80 @@ fn an_abort_ends_an_open_operation_with_one_receipt() {
     );
     assert!(fleet.team.take_ended().is_empty());
 }
+
+#[test]
+fn an_answer_lost_first_ends_the_operation_once_the_others_answered() {
+    let (mut fleet, _) = running_fleet(false);
+    let reply = renew(&mut fleet, "renew");
+    let (lost, rest) = reply.intents.split_first().expect("intents");
+    fleet.team.on_member_lost(&lost.member);
+    assert!(
+        fleet.team.take_ended().is_empty(),
+        "others still owe answers"
+    );
+    let mut decided = Vec::new();
+    for intent in rest {
+        let receipt = answer(&mut fleet, intent);
+        decided.extend(tell(&mut fleet, &intent.member, &receipt));
+    }
+    assert_eq!(decided.len(), 1, "{decided:?}");
+    assert_eq!(outcome(&decided[0]), wire::MissionReceiptOutcome::Uncertain);
+    assert!(
+        decided[0].reason.contains(&lost.member),
+        "{}",
+        decided[0].reason
+    );
+    assert!(fleet.team.take_ended().is_empty(), "one receipt only");
+    let next = renew(&mut fleet, "renew-2");
+    assert!(next.receipt.is_none(), "not busy: {:?}", next.receipt);
+}
+
+#[test]
+fn an_approval_whose_answer_is_lost_does_not_keep_the_team_waiting() {
+    let mut fleet = Fleet::new();
+    let reply = fleet.team.on_intent(
+        &wire::MissionIntent {
+            request_id: "op-1".to_owned(),
+            action: Some(Action::Propose(objective())),
+        },
+        &context("team-proposal"),
+    );
+    let proposal = fleet.route(reply.intents)[0]
+        .proposal_record
+        .clone()
+        .and_then(open_record)
+        .expect("proposal");
+    let reply = fleet.team.on_intent(
+        &wire::MissionIntent {
+            request_id: "op-approve".to_owned(),
+            action: Some(Action::Approve(approval(&proposal.digest, 2))),
+        },
+        &context("approve"),
+    );
+    assert!(reply.receipt.is_none() && !reply.intents.is_empty());
+    fleet.team.on_host_clock(NOW + 30_000);
+    let ended = fleet.team.take_ended();
+    assert_eq!(ended.len(), 1);
+    assert_eq!(outcome(&ended[0]), wire::MissionReceiptOutcome::Uncertain);
+    // The members never answer; the operator aborts and proposes again.
+    let abort = fleet.team.on_intent(
+        &wire::MissionIntent {
+            request_id: "abort".to_owned(),
+            action: Some(Action::Abort(wire::MissionAbort {})),
+        },
+        &context("abort"),
+    );
+    assert!(abort.receipt.is_some_and(|r| accepted(&r)));
+    let again = fleet.team.on_intent(
+        &wire::MissionIntent {
+            request_id: "op-2".to_owned(),
+            action: Some(Action::Propose(objective())),
+        },
+        &context("again"),
+    );
+    assert!(
+        again.receipt.is_none() && !again.intents.is_empty(),
+        "{:?}",
+        again.receipt
+    );
+}

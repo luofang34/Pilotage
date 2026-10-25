@@ -60,13 +60,14 @@ impl TeamLane {
     }
 
     /// Opens the operation the operator's `request_id` asked for, over the
-    /// member requests `intents`, at `now_unix_ms`.
+    /// member requests `intents`, at `now_unix_ms`. Returns whether it waits
+    /// for any member.
     pub(super) fn open_operation(
         &mut self,
         request_id: &str,
         intents: &[MemberIntent],
         now_unix_ms: u64,
-    ) {
+    ) -> bool {
         let mut waiting = BTreeMap::new();
         let mut kind = None;
         for intent in intents {
@@ -77,7 +78,7 @@ impl TeamLane {
             }
         }
         let Some(kind) = kind else {
-            return;
+            return false;
         };
         self.operations.insert(
             request_id.to_owned(),
@@ -88,6 +89,7 @@ impl TeamLane {
                 lost: Vec::new(),
             },
         );
+        true
     }
 
     /// The member request `child` of `operation` is answered.
@@ -95,6 +97,20 @@ impl TeamLane {
         if let Some(open) = operation.and_then(|id| self.operations.get_mut(id)) {
             open.waiting.remove(child);
         }
+    }
+
+    /// Ends `operation` uncertain when it waits for nobody but lost an
+    /// answer: the members left answered, and the lost answer may never
+    /// come.
+    pub(super) fn close_if_only_lost(
+        &mut self,
+        operation: Option<&str>,
+    ) -> Option<wire::MissionReceipt> {
+        let open = self.operations.get(operation?)?;
+        if !open.waiting.is_empty() || open.lost.is_empty() {
+            return None;
+        }
+        self.finish(operation, true, String::new(), None)
     }
 
     /// Whether a member request of the same operation as `operation`, or of
@@ -152,7 +168,7 @@ impl TeamLane {
     pub(super) fn lose_answers_of(&mut self, member: &str) {
         let ended = self.lose_answers(
             |_, to| to == member,
-            "the link was lost after the request went out",
+            "the link was lost before it answered; the request may have reached it",
         );
         self.ended.extend(ended);
     }
@@ -199,7 +215,7 @@ impl TeamLane {
             open.waiting = kept;
             open.lost
                 .extend(gone.values().map(|member| format!("{member}: {why}")));
-            if !gone.is_empty() && open.waiting.is_empty() {
+            if open.waiting.is_empty() && !open.lost.is_empty() {
                 done.push(id.clone());
             }
         }

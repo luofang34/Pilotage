@@ -224,7 +224,15 @@ impl TeamLane {
                 Action::Resume(wire::MissionResume {}),
             ),
             Some(Action::Abort(_)) => self.steer(
-                &[Phase::Starting, Phase::Running, Phase::Held],
+                // From a proposal or an approval that waits for a member too:
+                // an answer that may never come does not keep the team there.
+                &[
+                    Phase::Proposing,
+                    Phase::Approving,
+                    Phase::Starting,
+                    Phase::Running,
+                    Phase::Held,
+                ],
                 Phase::Aborted,
                 Action::Abort(wire::MissionAbort {}),
             ),
@@ -239,8 +247,8 @@ impl TeamLane {
         };
         match result {
             Ok((intents, deferred)) => {
-                if deferred {
-                    self.open_operation(&id, &intents, context.now_unix_ms);
+                // A step that asks no member is answered at once.
+                if deferred && self.open_operation(&id, &intents, context.now_unix_ms) {
                     TeamReply {
                         receipt: None,
                         intents,
