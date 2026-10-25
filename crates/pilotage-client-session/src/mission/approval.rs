@@ -77,8 +77,9 @@ pub fn approved_height_m(proposal: &wire::MissionProposal, policy: &ApprovalPoli
         wire::mission_objective::Kind::Survey(survey) => Some(survey.height_m)
             .filter(positive)
             .map(|height| height + policy.height_margin_m),
-        // A plan that flies nowhere is approved to climb to no height.
-        wire::mission_objective::Kind::Report(_) => Some(0.0),
+        // Only a survey flies; a plan that flies nowhere is approved to
+        // climb to no height.
+        _ => Some(0.0),
     }
 }
 
