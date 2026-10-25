@@ -4,7 +4,9 @@
 //! is a planner module and its entry here: it needs no wire message, no
 //! client command and no change to the lifecycle, the team or the display.
 
+mod check;
 mod record;
+mod report;
 
 use std::collections::BTreeMap;
 
@@ -34,7 +36,32 @@ pub(super) struct NamedKind {
 }
 
 /// The kinds the lane plans by name, each name once.
-pub(super) const KINDS: &[NamedKind] = &[record::RECORD];
+pub(super) const KINDS: &[NamedKind] = &[check::CHECK, record::RECORD, report::REPORT];
+
+/// The named objective a report objective is.
+pub(super) fn report(report: &wire::ReportObjective) -> wire::NamedObjective {
+    wire::NamedObjective {
+        kind: report::REPORT.kind.to_owned(),
+        version: report::REPORT.version,
+        parameters: report::parameters(report),
+    }
+}
+
+/// The named objective a check objective is.
+pub(super) fn check(check: &wire::CheckObjective) -> wire::NamedObjective {
+    wire::NamedObjective {
+        kind: check::CHECK.kind.to_owned(),
+        version: check::CHECK.version,
+        parameters: check::parameters(check),
+    }
+}
+
+fn value(name: &str, value: &str) -> wire::MissionValue {
+    wire::MissionValue {
+        name: name.to_owned(),
+        value: value.to_owned(),
+    }
+}
 
 /// Compiles the named objective `named` of `objective` under `lane`'s
 /// configuration.
