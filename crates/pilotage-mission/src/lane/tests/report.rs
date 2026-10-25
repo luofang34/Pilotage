@@ -390,3 +390,29 @@ fn a_run_that_ends_without_reporting_its_operation_leaves_it_unknown() {
         "the write may have happened; nothing reported how it ended"
     );
 }
+
+#[test]
+fn an_approver_that_relays_an_answer_keeps_who_answered() {
+    let steering = crate::lane::Steering::default();
+    let team = crate::lane::Requester {
+        subject: "pilotage-coordinator".to_owned(),
+        may_approve: true,
+    };
+    let mut relayed = intent(Action::Answer(wire::MissionAnswer {
+        operation_id: "run-1/confirm/1".to_owned(),
+        answered_by: Some(wire::RecordOrigin {
+            issuer: crate::lane::HOST_ISSUER.to_owned(),
+            subject: "operator".to_owned(),
+            organization: String::new(),
+        }),
+        ..wire::MissionAnswer::default()
+    }));
+    steering.admit(&mut relayed, &team).expect("admitted");
+    let Some(Action::Answer(given)) = relayed.action else {
+        panic!("an answer");
+    };
+    assert_eq!(
+        given.answered_by.map(|o| o.subject).as_deref(),
+        Some("operator")
+    );
+}

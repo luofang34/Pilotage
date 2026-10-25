@@ -147,7 +147,8 @@ status gives the results of each task and the question that an operation
 asks a person. A person answers with the operation's identity and the
 digest of the subject that the person saw, so the lane refuses an answer
 to a subject that changed. The host takes an answer only from a session
-with the approver secret, and it writes who answered. An operation task's
+with the approver secret, and it writes who answered. An approver session that
+relays an answer, such as a team, keeps the name that its own host wrote. An operation task's
 judgment is met when its execution completed and the result that the plan
 names has its value. A report objective reads a value, asks a person to
 confirm it, and writes a report of it: a person who declines ends the run,
