@@ -93,6 +93,7 @@ impl Lane {
             basis: Basis::Drafted,
             approval: None,
             release: None,
+            share_of: String::new(),
         });
         self.detail =
             "the approval expired; the run returns home after the line in progress".to_owned();

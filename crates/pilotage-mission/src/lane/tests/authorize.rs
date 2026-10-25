@@ -53,6 +53,7 @@ fn revise_within(
             within_envelope: true,
             drafted_by: None,
             release: None,
+            share_of: String::new(),
             change: Some(wire::mission_revise::Change::Objective(objective)),
         })),
         &context("rev"),

@@ -44,6 +44,8 @@ pub(super) struct Successor {
     pub approval: Option<wire::MissionApproval>,
     /// The work a team asked the revision to release.
     pub release: Option<wire::WorkRelease>,
+    /// The team whose revision this is a member's share of.
+    pub share_of: String,
 }
 
 type Outcome = Result<(Option<LaneEffect>, Option<wire::MissionProposalRecord>), String>;
@@ -108,6 +110,7 @@ impl Lane {
             basis: Basis::Drafted,
             approval: None,
             release: revise.release.clone(),
+            share_of: revise.share_of.clone(),
         });
         self.detail = "revision drafted; waiting for review".to_owned();
         if !revise.within_envelope {
