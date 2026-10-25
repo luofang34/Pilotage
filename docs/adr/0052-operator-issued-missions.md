@@ -246,23 +246,24 @@ uses the kind of request as the class. The classes are:
 
 One successor can make changes of more than one class. Then each of the
 permissions is necessary, and a refusal names each missing permission. A
-vehicle lane and a team use the same check. The task kind gives the meaning
-of its fields. For a survey, the area, the return to the launch point and
-the evidence that each line needs are objective fields. The height is a
-plan field, but it is an objective field when the objective holds the
-height (`hold_height`). The height bound of the envelope applies to all
-plans. The title, the identity and the revision number of an objective are
-not content: an objective with the same identity and different content is
-an objective change. A survey names its area by identity and revision when the
-area is a named object, such as an area drawn on a map. Another identity
-of the area is an objective change, also with the same vertices. The
-vertices tell whether the area changed. The revision of the area object
-and the text that a ref shows are not content. An area found from labels
-has no identity of its own, so its vertices are all it is. The strip that a team gives to a member is part of the area, so
-it names no area identity. An explicit approval of the digest of a draft is the
-permission of the approver for that draft, so this check applies only to
-admission inside the envelope. Task-by-task consent is an
-optional workflow inside this rule, not a separate level.
+vehicle lane and a team use the same check. The task kind gives the
+meaning of its fields. For a survey, the area, the return to the launch
+point and the evidence that each line needs are objective fields. The
+height is a plan field, but it is an objective field when the objective
+holds the height (`hold_height`). The height bound of the envelope applies
+to all plans. The title, the identity and the revision number of an
+objective are not content: an objective with the same identity and
+different content is an objective change. A survey names its area by
+identity and revision when the area is a named object, such as an area
+drawn on a map. Another identity of the area is an objective change, also
+with the same vertices. The vertices tell whether the area changed. The
+revision of the area object and the text that a ref shows are not content.
+An area found from labels has no identity of its own, so its vertices are
+all it is. The strip that a team gives to a member is part of the area, so
+it names no area identity. An explicit approval of the digest of a draft
+is the permission of the approver for that draft, so this check applies
+only to admission inside the envelope. Task-by-task consent is an optional
+workflow inside this rule, not a separate level.
 
 A team that passes its approval down divides a consumable budget; it
 does not copy it. A member team gets an even part of the re-flight budget,

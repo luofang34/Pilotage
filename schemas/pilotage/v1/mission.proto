@@ -68,7 +68,8 @@ message MissionAreaRef {
   // What the area was found as, for display, such as "drawn on the map".
   string source = 3;
   // The area has no identity of its own, such as one found from labels:
-  // its vertices are all it is.
+  // its vertices are all it is. A client sets it for such an area; without
+  // it, the area counts as named.
   bool derived = 4;
 }
 
