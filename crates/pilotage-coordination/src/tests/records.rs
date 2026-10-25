@@ -154,6 +154,14 @@ fn a_live_handover_of_an_ended_run_stops_the_next_plan_until_resolved() {
             &context("abort"),
         );
         let (receipt, intents) = propose(&mut fleet);
+        if released {
+            // The abort cancelled the moved flight before it started: the
+            // lines are known unflown, so they wait for a member and do not
+            // stop the next plan.
+            assert_eq!(handover(&fleet).state, State::Unassigned as i32);
+            assert!(receipt.is_none_or(|r| accepted(&r)) && !intents.is_empty());
+            continue;
+        }
         let receipt = receipt.expect("refused at once");
         assert!(
             !accepted(&receipt) && intents.is_empty(),

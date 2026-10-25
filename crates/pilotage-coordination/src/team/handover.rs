@@ -234,6 +234,19 @@ impl TeamLane {
             .drain(..)
             .partition(|(id, _)| !released.task_ids.contains(id));
         handover.moved = moved;
+        if !matches!(self.phase, super::Phase::Running | super::Phase::Held) {
+            // The release happened; the abort ended the work it was for.
+            // Lines the giver began first are not released and stay its own.
+            if handover.moved.is_empty() {
+                handover.state = State::Withdrawn;
+                handover.basis = format!("{member} released none of the moved lines");
+            } else {
+                handover.state = State::Unassigned;
+                handover.basis =
+                    format!("{member} released the work after the team aborted; nobody flies it");
+            }
+            return Vec::new();
+        }
         if handover.moved.is_empty() {
             handover.state = State::Withdrawn;
             handover.basis = format!("{member} began every moved line before it released any");

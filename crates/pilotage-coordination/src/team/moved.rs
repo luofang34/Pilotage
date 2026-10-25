@@ -30,6 +30,7 @@ impl TeamLane {
             run_id: None,
             moved,
             assignment: Some(assignment),
+            prior_run: None,
         });
         let complete = self
             .statuses

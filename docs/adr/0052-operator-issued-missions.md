@@ -131,7 +131,13 @@ lane has a lifecycle: `Idle`, `Admitted`, `Running`, `HoldRequested`,
 `HoldRequested`; the lane becomes `Held` only when the vehicle reports that
 it holds in place. An abort keeps each task that did not finish as
 unfinished: the execution of the task in progress becomes `Cancelled`, and
-a pending task stays pending. The environment variables remain a bootstrap source
+a pending task stays pending. An abort of a team also ends the work that
+the team was still setting in motion. A re-flight or moved lines that have
+not started are cancelled, and a receipt that arrives later takes no next
+step. When the start was sent, the member may fly, so the work keeps its
+member until the member reports. Committed work that its receiver had not
+started is unassigned. A release fact that arrives after the abort is
+recorded as unassigned work, and it gives no work to the receiver. The environment variables remain a bootstrap source
 that issues the first plan into an `Idle` lane; an issued plan supersedes
 them.
 
@@ -256,8 +262,10 @@ A team that passes its approval down divides a consumable budget; it
 does not copy it. A member team gets an even part of the re-flight budget,
 and the first member teams get one more line each until the remainder is
 gone. When the team has vehicle members too, it keeps one part for their
-lines. A vehicle member decides no re-flight, so it gets no part. The parts
-never add up to more than the approval of the team allows.
+lines. A vehicle member decides no re-flight, so it gets no part. An extra
+flight that the team pays for, a re-flight or moved lines, goes down with
+no budget, so no part is spent two times. The parts never add up to more
+than the approval of the team allows.
 
 Bounds copied into a plan grant nothing. The lane verifies a plan against
 the issuer's grant at admission and again during execution. A delegation
