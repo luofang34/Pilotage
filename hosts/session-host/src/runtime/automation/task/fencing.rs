@@ -191,6 +191,7 @@ impl MissionTask {
         }
         self.update(|status| {
             status.held = false;
+            status.awaiting_hand_back = false;
             status.lease_generation = Some(generation.as_u64());
         });
     }
@@ -208,7 +209,8 @@ impl MissionTask {
         // mission stops asking for the lease, so neither a retry nor a
         // released lease returns it without a person's decision. Before the
         // first grant, the mission still asks until the pilot lets go.
-        if self.generation.take().is_some() {
+        let lost = self.generation.take().is_some();
+        if lost {
             self.lease_wanted = false;
             self.lease_retry_at = None;
             self.lease_due = false;
@@ -221,6 +223,7 @@ impl MissionTask {
         self.schedule_lease_retry();
         self.update(|status| {
             status.held = true;
+            status.awaiting_hand_back |= lost;
             status.lease_generation = None;
         });
     }
