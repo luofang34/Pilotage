@@ -21,14 +21,14 @@ use crate::runtime::engine_actor::ToEngine;
 use crate::runtime::operations::{self, OperationHost};
 
 /// The directories of one host: what it reads, writes and keeps.
-struct Host {
+pub(super) struct Host {
     _root: tempfile::TempDir,
     reports: PathBuf,
     journal: PathBuf,
     config: LaneRuntimeConfig,
 }
 
-fn host() -> Host {
+pub(super) fn host() -> Host {
     let root = tempfile::tempdir().expect("a directory");
     let sources = root.path().join("sources");
     let reports = root.path().join("reports");
@@ -75,7 +75,7 @@ fn host() -> Host {
 }
 
 /// A lane task of `host`, as its journal left it, and what it publishes.
-async fn lane(host: &Host) -> (LaneTask, mpsc::Receiver<ToEngine>) {
+pub(super) async fn lane(host: &Host) -> (LaneTask, mpsc::Receiver<ToEngine>) {
     let (engine, published) = mpsc::channel(4096);
     let task = LaneTask::restored(host.config.clone(), engine, Instant::now())
         .await
@@ -90,7 +90,7 @@ fn operator() -> Requester {
     }
 }
 
-async fn send(task: &mut LaneTask, action: Action) {
+pub(super) async fn send(task: &mut LaneTask, action: Action) {
     let mut intent = wire::MissionIntent {
         request_id: "request".to_owned(),
         action: Some(action),
@@ -231,7 +231,7 @@ fn reports(directory: &Path) -> Vec<String> {
     names
 }
 
-fn runtime() -> tokio::runtime::Runtime {
+pub(super) fn runtime() -> tokio::runtime::Runtime {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

@@ -2,8 +2,9 @@
 //! ADR-0025, ADR-0051): a human who asks for the motion scope receives an
 //! offer; a transfer, revocation, or override away from this principal
 //! holds the mission; an offer back is accepted, and the mission resumes
-//! on the committed transfer. Only a closed connection fences the task
-//! for good.
+//! on the committed transfer. Once the mission held the lease, that
+//! hand-back is the only way back: it asks for the lease no more. Only a
+//! closed connection fences the task for good.
 
 use pilotage_protocol::{
     Generation, PrincipalId, ScopeId, ScopeTransferAccept, ScopeTransferOffer, wire,
@@ -190,6 +191,7 @@ impl MissionTask {
         }
         self.update(|status| {
             status.held = false;
+            status.awaiting_hand_back = false;
             status.lease_generation = Some(generation.as_u64());
         });
     }
@@ -202,7 +204,17 @@ impl MissionTask {
             return;
         }
         self.held = true;
-        self.generation = None;
+        // Control lost after the mission held the lease, by a takeover, an
+        // override or a revocation, comes back only by a hand-back: the
+        // mission stops asking for the lease, so neither a retry nor a
+        // released lease returns it without a person's decision. Before the
+        // first grant, the mission still asks until the pilot lets go.
+        let lost = self.generation.take().is_some();
+        if lost {
+            self.lease_wanted = false;
+            self.lease_retry_at = None;
+            self.lease_due = false;
+        }
         let now = self.mission_now();
         if let Some(mission) = self.mission.as_mut() {
             mission.hold(now);
@@ -211,6 +223,7 @@ impl MissionTask {
         self.schedule_lease_retry();
         self.update(|status| {
             status.held = true;
+            status.awaiting_hand_back |= lost;
             status.lease_generation = None;
         });
     }

@@ -10,6 +10,7 @@ mod config;
 mod frame_tap;
 mod journal;
 mod judge;
+mod start;
 
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -114,6 +115,10 @@ struct LaneTask {
     journal: LaneJournal,
     /// A run the lane started that waits for the journal to hold it.
     unrecorded: Option<Box<RunOrder>>,
+    /// A run that replaces one waiting for a hand-back. It starts only once
+    /// a person hands control back to the run it replaces: a fresh run
+    /// would take the lease as its first, without that decision.
+    after_hand_back: Option<Box<RunOrder>>,
 }
 
 impl LaneTask {
@@ -163,6 +168,7 @@ impl LaneTask {
             operations: config.operations,
             journal,
             unrecorded: None,
+            after_hand_back: None,
         }
     }
 
@@ -286,64 +292,7 @@ impl LaneTask {
     async fn apply(&mut self, effect: LaneEffect) {
         let control = match effect {
             LaneEffect::Start(order) => {
-                // A run starts only once the journal holds it, so that a
-                // restart finds every run that may have had an effect.
-                if !self.journal.keep(self.lane.record()).await {
-                    warn!(run = %order.run_id, "the run waits for the lane journal");
-                    self.unrecorded = Some(order);
-                    return;
-                }
-                if let Some(previous) = self.run.take() {
-                    // The previous run released the vehicle or is releasing
-                    // it; waiting for it keeps two principals from asking
-                    // for the same lease.
-                    previous.controls.send(RunControl::Abort).await.ok();
-                    previous.handle.await.ok();
-                }
-                self.runs = self.runs.wrapping_add(1);
-                let client = ClientKey::new(RUN_CLIENT_BASE.wrapping_sub(self.runs));
-                let (controls, receiver) = mpsc::channel(4);
-                // A hold the lane took while the run waited for the journal
-                // reaches the run before its first operation.
-                if matches!(
-                    self.lane.state(),
-                    wire::MissionLaneState::HoldRequested | wire::MissionLaneState::Held
-                ) {
-                    controls.try_send(RunControl::Hold).ok();
-                }
-                let order = *order;
-                let (handle, status) = match order.plan {
-                    RunPlan::Operations(plan) => operations::spawn_operation_run(
-                        order.run_id.clone(),
-                        plan,
-                        self.operations.clone(),
-                        receiver,
-                        RunInputs {
-                            results: order.results,
-                            recorded: self.journal.ended(),
-                        },
-                    ),
-                    plan => {
-                        let Some(plan) = MissionPlan::of_lane(plan, order.config) else {
-                            return;
-                        };
-                        automation::spawn_mission_run(
-                            &self.engine,
-                            self.start,
-                            plan,
-                            self.planar_pose_is_truth,
-                            client,
-                            Some(receiver),
-                        )
-                    }
-                };
-                info!(run = %order.run_id, "mission run started");
-                self.run = Some(ActiveRun {
-                    handle,
-                    status,
-                    controls,
-                    stopping: false,
-                });
+                self.start(order).await;
                 return;
             }
             LaneEffect::Hold => RunControl::Hold,
@@ -351,6 +300,7 @@ impl LaneTask {
             LaneEffect::Abort => {
                 // A run that never started needs no stop.
                 self.unrecorded = None;
+                self.after_hand_back = None;
                 RunControl::Abort
             }
             LaneEffect::Answer(answer) => RunControl::Answer(answer),
@@ -366,6 +316,18 @@ impl LaneTask {
         };
         let status = run.status.borrow().clone();
         let finished = run.handle.is_finished();
+        if self.after_hand_back.is_some() {
+            // The replaced run's progress is not its successor's. Once a
+            // person handed control back to it, the successor starts.
+            if !status.awaiting_hand_back
+                && !finished
+                && let Some(order) = self.after_hand_back.take()
+            {
+                info!(run = %order.run_id, "control was handed back; the waiting run starts");
+                self.apply(LaneEffect::Start(order)).await;
+            }
+            return;
+        }
         if let Some(effect) = self.lane.on_progress(&run_progress(&status, finished)) {
             // A revision's checkpoint: its run replaces this one.
             self.apply(effect).await;

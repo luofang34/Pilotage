@@ -70,6 +70,10 @@ pub struct AutomationStatus {
     /// A human holds the motion scope: the mission stopped framing and
     /// waits for a transfer back (ADR-0051).
     pub held: bool,
+    /// The mission lost a lease it held. Only a transfer offered to this
+    /// principal, the hand-back, returns control; no other run of the lane
+    /// may take the lease meanwhile (ADR-0051).
+    pub awaiting_hand_back: bool,
     /// A real vehicle's mission is waiting for its pilot to launch it.
     pub awaiting_launch: bool,
     /// A real vehicle's mission is waiting for the vehicle to advertise
