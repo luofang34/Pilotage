@@ -35,6 +35,7 @@ impl MissionTask {
         match event.event {
             Some(Event::ScopeLeaseGranted(granted)) => self.on_granted_event(&granted),
             Some(Event::ScopeLeaseRevoked(revoked)) => self.on_revoked_event(&revoked),
+            Some(Event::WarningRaised(warning)) => self.on_warning_event(&warning),
             Some(Event::EmergencyOverrideApplied(applied)) => self.on_override_event(&applied),
             Some(Event::ScopeTransferCommitted(committed)) => self.on_transfer_event(&committed),
             Some(Event::ScopeTransferRequested(requested)) => {
@@ -71,12 +72,42 @@ impl MissionTask {
                 self.hold("the motion lease was revoked");
             }
         } else {
-            // Revoked from another principal, the lease is free.
-            self.note_holder(None);
-            if self.held && self.lease_wanted && !self.awaiting_launch {
-                // The human who held the scope released it: ask at once.
-                self.lease_due = true;
-            }
+            self.on_released(revoked.principal.as_ref().map(|p| p.value));
+        }
+    }
+
+    /// The engine released the scope because its holder's link was lost,
+    /// as when the holder's connection closed: the same as a revocation of
+    /// that holder's lease.
+    pub(super) fn on_warning_event(&mut self, warning: &wire::WarningRaised) {
+        if warning.kind != wire::WarningKind::HolderLinkLost as i32
+            || !our_pair(warning.vehicle.as_ref(), warning.scope.as_ref())
+            || self.our_principal(warning.principal.as_ref())
+        {
+            return;
+        }
+        self.on_released(warning.principal.as_ref().map(|p| p.value));
+    }
+
+    /// The lease of the principal `from` ended. Released by the principal
+    /// that holds it, the lease is free; a release naming another principal
+    /// changes nothing. When the holder took the lease from this run,
+    /// control is freed without a hand-back; a revocation of this run's own
+    /// lease, with no taker, frees nothing.
+    fn on_released(&mut self, from: Option<u64>) {
+        let holder = self.status.borrow().lease_holder;
+        if holder.is_some() && from != holder {
+            return;
+        }
+        let freed = self.status.borrow().awaiting_hand_back && holder.is_some();
+        self.note_holder(None);
+        if freed {
+            warn!("the principal that took control released it without a hand-back");
+            self.update(|status| status.control_freed = true);
+        }
+        if self.held && self.lease_wanted && !self.awaiting_launch {
+            // The human who held the scope released it: ask at once.
+            self.lease_due = true;
         }
     }
 
@@ -84,8 +115,11 @@ impl MissionTask {
         if !our_pair(applied.vehicle.as_ref(), applied.scope.as_ref()) {
             return;
         }
-        if !self.our_principal(applied.principal.as_ref()) && self.generation.is_some() {
-            self.hold("an emergency override preempted the motion scope");
+        if !self.our_principal(applied.principal.as_ref()) {
+            self.note_holder(applied.principal.as_ref());
+            if self.generation.is_some() {
+                self.hold("an emergency override preempted the motion scope");
+            }
         }
     }
 
@@ -192,6 +226,7 @@ impl MissionTask {
         self.update(|status| {
             status.held = false;
             status.awaiting_hand_back = false;
+            status.control_freed = false;
             status.lease_generation = Some(generation.as_u64());
         });
     }
@@ -253,7 +288,13 @@ impl MissionTask {
         let holder = holder
             .filter(|h| !self.our_principal(Some(h)))
             .map(|h| h.value);
-        self.update(|status| status.lease_holder = holder);
+        self.update(|status| {
+            status.lease_holder = holder;
+            // A principal that holds the lease again holds control.
+            if holder.is_some() {
+                status.control_freed = false;
+            }
+        });
     }
 }
 

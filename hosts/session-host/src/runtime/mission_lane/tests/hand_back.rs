@@ -25,7 +25,7 @@ fn point(latitude_deg: f64, longitude_deg: f64) -> wire::GeoPoint {
 }
 
 /// About 330 m by 220 m south of Nassau Hall, flown at `height_m`.
-fn survey(height_m: f64) -> wire::MissionObjective {
+pub(super) fn survey(height_m: f64) -> wire::MissionObjective {
     wire::MissionObjective {
         objective_id: "survey-1".to_owned(),
         revision: 1,
@@ -50,7 +50,11 @@ fn survey(height_m: f64) -> wire::MissionObjective {
     }
 }
 
-fn approval(digest: &[u8], expires_unix_ms: u64) -> wire::MissionApproval {
+pub(super) fn approval(
+    digest: &[u8],
+    expires_unix_ms: u64,
+    on_control_lost: wire::MissionControlLossPolicy,
+) -> wire::MissionApproval {
     wire::MissionApproval {
         approval_id: format!("approval-{}", digest.first().copied().unwrap_or(0)),
         proposal_digest: digest.to_vec(),
@@ -61,6 +65,7 @@ fn approval(digest: &[u8], expires_unix_ms: u64) -> wire::MissionApproval {
             permit_execute: true,
             permit_revise: true,
             on_expiry: wire::MissionExpiryPolicy::ReturnHome as i32,
+            on_control_lost: on_control_lost as i32,
             ..wire::AdaptationEnvelope::default()
         }),
         proposal_format: wire::MissionProposalFormat::V1 as i32,
@@ -69,7 +74,7 @@ fn approval(digest: &[u8], expires_unix_ms: u64) -> wire::MissionApproval {
 }
 
 /// The digest of the lane's proposal under review, as a fetch returns it.
-fn fetched(task: &mut LaneTask, digest: Vec<u8>) -> Vec<u8> {
+pub(super) fn fetched(task: &mut LaneTask, digest: Vec<u8>) -> Vec<u8> {
     let record = task
         .lane
         .on_intent(
@@ -96,13 +101,18 @@ fn fetched(task: &mut LaneTask, digest: Vec<u8>) -> Vec<u8> {
 /// home, and replaces its run with a stand-in that lost the lease it held
 /// to a person who released it without handing it back. Returns what the
 /// stand-in reports and the controls it was sent.
-async fn flying_without_control(
+pub(super) async fn flying_without_control(
     task: &mut LaneTask,
     expires: u64,
+    on_control_lost: wire::MissionControlLossPolicy,
 ) -> (watch::Sender<AutomationStatus>, Arc<Mutex<Vec<RunControl>>>) {
     send(task, Action::Propose(survey(60.0))).await;
     let digest = fetched(task, task.lane.status().proposal_digest);
-    send(task, Action::Approve(approval(&digest, expires))).await;
+    send(
+        task,
+        Action::Approve(approval(&digest, expires, on_control_lost)),
+    )
+    .await;
     send(
         task,
         Action::Start(wire::MissionStart {
@@ -182,7 +192,12 @@ fn an_expiry_way_home_waits_for_the_hand_back() {
     runtime().block_on(async {
         let (mut task, _published) = lane(&host).await;
         let now = super::super::unix_now_ms();
-        let (status, seen) = flying_without_control(&mut task, now + HOUR_MS).await;
+        let (status, seen) = flying_without_control(
+            &mut task,
+            now + HOUR_MS,
+            wire::MissionControlLossPolicy::Hold,
+        )
+        .await;
         let effect = task
             .lane
             .on_clock(now + 2 * HOUR_MS)
@@ -198,7 +213,12 @@ fn a_revision_waits_for_the_hand_back() {
     runtime().block_on(async {
         let (mut task, _published) = lane(&host).await;
         let now = super::super::unix_now_ms();
-        let (status, seen) = flying_without_control(&mut task, now + HOUR_MS).await;
+        let (status, seen) = flying_without_control(
+            &mut task,
+            now + HOUR_MS,
+            wire::MissionControlLossPolicy::Hold,
+        )
+        .await;
         let state = task.lane.status();
         send(
             &mut task,
@@ -219,7 +239,11 @@ fn a_revision_waits_for_the_hand_back() {
         let reply = task.lane.on_intent(
             &wire::MissionIntent {
                 request_id: "approve-revision".to_owned(),
-                action: Some(Action::Approve(approval(&draft, now + HOUR_MS))),
+                action: Some(Action::Approve(approval(
+                    &draft,
+                    now + HOUR_MS,
+                    wire::MissionControlLossPolicy::Hold,
+                ))),
             },
             &pilotage_mission::IntentContext {
                 now_unix_ms: now,

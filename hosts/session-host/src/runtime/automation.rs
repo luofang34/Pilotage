@@ -74,6 +74,10 @@ pub struct AutomationStatus {
     /// principal, the hand-back, returns control; no other run of the lane
     /// may take the lease meanwhile (ADR-0051).
     pub awaiting_hand_back: bool,
+    /// The principal that took the lease from a run that waits for a
+    /// hand-back released it, or its connection closed, without a hand-back:
+    /// no one holds the lease, and the approval's recovery may apply.
+    pub control_freed: bool,
     /// A real vehicle's mission is waiting for its pilot to launch it.
     pub awaiting_launch: bool,
     /// A real vehicle's mission is waiting for the vehicle to advertise

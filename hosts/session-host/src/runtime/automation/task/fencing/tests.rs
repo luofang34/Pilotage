@@ -276,3 +276,95 @@ async fn an_operator_who_took_over_and_disconnected_does_not_return_control() {
     assert!(task.held, "the mission stays held");
     assert!(!asks_again(&task), "a lost operator hands nothing back");
 }
+
+#[tokio::test]
+async fn control_is_freed_only_when_the_taker_lets_go_without_a_hand_back() {
+    let (mut task, status, _engine_tx) = flying();
+    task.on_granted_event(&wire::ScopeLeaseGranted {
+        principal: principal(30),
+        vehicle: vehicle(),
+        scope: scope(),
+        generation: Some(wire::Generation { value: 7 }),
+        ..Default::default()
+    });
+    assert!(status.borrow().awaiting_hand_back);
+    assert!(!status.borrow().control_freed, "the taker holds control");
+    // Another principal's lease ends: that frees nothing.
+    task.on_revoked_event(&released(31));
+    assert!(!status.borrow().control_freed);
+    // The taker's lease ends without a hand-back.
+    task.on_revoked_event(&released(30));
+    assert!(status.borrow().control_freed, "no one holds the lease");
+    // Someone takes the lease again: control is not free any more.
+    task.on_granted_event(&wire::ScopeLeaseGranted {
+        principal: principal(32),
+        vehicle: vehicle(),
+        scope: scope(),
+        generation: Some(wire::Generation { value: 9 }),
+        ..Default::default()
+    });
+    assert!(!status.borrow().control_freed);
+    // A hand-back returns control and clears the loss.
+    task.on_transfer_event(&wire::ScopeTransferCommitted {
+        from_principal: principal(32),
+        to_principal: principal(9),
+        vehicle: vehicle(),
+        scope: scope(),
+        generation: Some(wire::Generation { value: 10 }),
+        ..Default::default()
+    });
+    assert!(!status.borrow().awaiting_hand_back && !status.borrow().control_freed);
+}
+
+#[tokio::test]
+async fn an_emergency_override_that_ends_frees_control_and_a_revocation_does_not() {
+    let (mut task, status, _engine_tx) = flying();
+    task.on_override_event(&wire::EmergencyOverrideApplied {
+        principal: principal(30),
+        vehicle: vehicle(),
+        scope: scope(),
+        ..Default::default()
+    });
+    assert_eq!(status.borrow().lease_holder, Some(30), "the override holds");
+    task.on_revoked_event(&released(30));
+    assert!(status.borrow().control_freed);
+
+    // The run's own lease is revoked, with no taker: a stop, never freed.
+    let (mut task, status, _engine_tx) = flying();
+    task.on_revoked_event(&released(9));
+    assert!(status.borrow().awaiting_hand_back);
+    task.on_revoked_event(&released(30));
+    assert!(!status.borrow().control_freed, "a revocation is a stop");
+}
+
+#[tokio::test]
+async fn a_takers_lost_connection_frees_control_as_a_release_does() {
+    let (mut task, status, _engine_tx) = flying();
+    task.on_granted_event(&wire::ScopeLeaseGranted {
+        principal: principal(30),
+        vehicle: vehicle(),
+        scope: scope(),
+        generation: Some(wire::Generation { value: 7 }),
+        ..Default::default()
+    });
+    let lost = |of: u64| wire::WarningRaised {
+        vehicle: vehicle(),
+        scope: scope(),
+        kind: wire::WarningKind::HolderLinkLost as i32,
+        principal: principal(of),
+        ..Default::default()
+    };
+    // Another principal's link frees nothing; other warnings change nothing.
+    task.on_warning_event(&lost(31));
+    task.on_warning_event(&wire::WarningRaised {
+        kind: wire::WarningKind::CommandRejected as i32,
+        principal: principal(30),
+        ..lost(30)
+    });
+    assert!(!status.borrow().control_freed);
+    assert_eq!(status.borrow().lease_holder, Some(30));
+    // The taker's connection closed: the engine released its scope.
+    task.on_warning_event(&lost(30));
+    assert!(status.borrow().control_freed && status.borrow().lease_holder.is_none());
+    assert!(task.held, "freed is not resumed");
+}
