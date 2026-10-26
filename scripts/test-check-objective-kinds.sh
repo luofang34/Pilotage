@@ -11,19 +11,19 @@ git -C "$fixture" init -q
 
 # Planning names every kind; other code names only the survey.
 printf '%s\n' \
-    'match kind { Kind::Survey(s) => survey(s), Kind::Report(r) => report(r) }' \
+    'match kind { Kind::Survey(s) => survey(s), Kind::Named(n) => named(n) }' \
     > "$fixture/crates/pilotage-mission/src/lane/compile.rs"
 printf '%s\n' \
     'match kind { Kind::Survey(s) => Some(s), _ => None }' \
     > "$fixture/crates/pilotage-coordination/src/team.rs"
 printf '%s\n' \
-    'let objective = Kind::Report(report);' \
+    'let objective = Kind::Named(report);' \
     > "$fixture/crates/pilotage-coordination/src/tests/whole.rs"
 bash "$fixture/scripts/check-objective-kinds.sh" "$fixture" >/dev/null
 
 # A match arm outside planning that names another kind is refused.
 printf '%s\n' \
-    'match kind { Kind::Survey(s) => Some(s), Kind::Check(_) => None }' \
+    'match kind { Kind::Survey(s) => Some(s), Kind::Named(_) => None }' \
     > "$fixture/crates/pilotage-coordination/src/team.rs"
 output="$fixture/failure.txt"
 if bash "$fixture/scripts/check-objective-kinds.sh" "$fixture" >"$output" 2>&1; then
@@ -43,7 +43,7 @@ bash "$fixture/scripts/check-objective-kinds.sh" "$fixture" >/dev/null
 
 # Planning's own kinds' modules may name any kind.
 printf '%s\n' \
-    'pub fn compile(check: Kind::Check) {}' \
+    'pub fn compile(check: Kind::Named) {}' \
     > "$fixture/crates/pilotage-mission/src/lane/compile/check.rs"
 bash "$fixture/scripts/check-objective-kinds.sh" "$fixture" >/dev/null
 
@@ -51,7 +51,7 @@ bash "$fixture/scripts/check-objective-kinds.sh" "$fixture" >/dev/null
 for import in \
     'use wire::mission_objective::Kind as ObjectiveKind;' \
     'use wire::mission_objective::Kind::*;' \
-    'use wire::mission_objective::Kind::{Report, Check};'; do
+    'use wire::mission_objective::Kind::{Survey, Named};'; do
     printf '%s\n' "$import" > "$fixture/crates/pilotage-coordination/src/team.rs"
     if bash "$fixture/scripts/check-objective-kinds.sh" "$fixture" >"$output" 2>&1; then
         echo "the objective kinds guard accepted: $import" >&2

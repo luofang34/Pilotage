@@ -85,14 +85,15 @@ message MissionObjective {
   string title = 5;
   oneof kind {
     SurveyObjective survey = 10;
-    ReportObjective report = 12;
-    CheckObjective check = 13;
     NamedObjective named = 14;
   }
   // The team lane that made this objective from its own for one member;
   // the team owes the approval of the plan it compiles to. The host takes
   // it only from a session with the approver secret.
   string delegated_by = 11;
+  // A report and a check are named objectives of their kind.
+  reserved 12, 13;
+  reserved "report", "check";
 }
 
 enum MissionTaskKind {
@@ -121,25 +122,6 @@ message MissionTaskPlan {
   string name = 6;
   // The operation the task carries out, for an operation task.
   MissionOperation operation = 7;
-}
-
-// An objective that reads a value, asks a person to confirm it, and then
-// writes a report of it.
-message ReportObjective {
-  // Where the value is read, as the host's read executor names its sources.
-  string source = 1;
-  // What the person is asked about the value, for display.
-  string question = 2;
-}
-
-// A value a host reads, held to a limit by a rule: the run reads the value,
-// the rule compares it with the limit, and the host writes a report of the
-// verdict. No person takes part.
-message CheckObjective {
-  // Where the value is read, as the host's read executor names its sources.
-  string source = 1;
-  // The most the value may be, as a number in the value's unit.
-  string limit = 2;
 }
 
 // An objective of a kind that the lane registers by name. The lane's

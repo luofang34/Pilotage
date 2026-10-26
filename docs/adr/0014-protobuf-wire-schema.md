@@ -27,6 +27,11 @@ shape the format choice:
 - Evolution rules: field numbers are never reused; unknown fields are tolerated;
   every enum has an `UNSPECIFIED = 0` sentinel; breaking changes require a new
   message or package version, negotiated at session setup.
+- A message that no client sends can be removed. The removal reserves its field
+  numbers and names. A peer that still sends it gives an unknown field, which the
+  receiver refuses as a message without that field. `buf breaking` refuses a
+  deletion, so `schemas/buf.yaml` names the file under `ignore_only` for the
+  deletion rules, and the reservation rules stay in force for that file.
 - Framing: a WebTransport datagram carries exactly one envelope-wrapped protobuf
   message; streams carry length-delimited envelopes. The recording format adds
   explicit length-and-type framing.

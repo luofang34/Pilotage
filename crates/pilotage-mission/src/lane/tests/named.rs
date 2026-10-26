@@ -137,50 +137,23 @@ fn a_change_to_a_named_objective_is_a_change_of_objective() {
 }
 
 #[test]
-fn a_report_and_a_check_message_plan_as_their_named_kind() {
-    let plan = |objective: wire::MissionObjective| {
+fn an_objective_in_a_retired_report_or_check_message_is_refused_as_naming_no_kind() {
+    use prost::Message as _;
+    // Field 12 held a report and field 13 a check; both are reserved, so a
+    // client that still sends them proposes an objective with no kind.
+    for field in [12_u8, 13] {
+        let mut bytes = vec![0x2a, 4];
+        bytes.extend_from_slice(b"Cabn");
+        bytes.extend_from_slice(&[(field << 3) | 2, 2, 0x0a, 0]);
+        let objective = wire::MissionObjective::decode(bytes.as_slice()).expect("it decodes");
+        assert!(objective.kind.is_none(), "field {field} names no kind");
         let mut lane = lane();
         let reply = lane.on_intent(&intent(Action::Propose(objective)), &context("p"));
-        let proposal = opened(&reply.receipt).expect("a proposal");
-        proposal
-            .tasks
-            .into_iter()
-            .map(|t| (t.task_id, t.operation))
-            .collect::<Vec<_>>()
-    };
-    let with = |kind| wire::MissionObjective {
-        objective_id: "named-1".to_owned(),
-        revision: 1,
-        title: "Cabin temperature".to_owned(),
-        kind: Some(kind),
-        ..wire::MissionObjective::default()
-    };
-    use wire::mission_objective::Kind;
-    let report = wire::ReportObjective {
-        source: "temperature".to_owned(),
-        question: "Is this right?".to_owned(),
-    };
-    assert_eq!(
-        plan(with(Kind::Report(report))),
-        plan(named(
-            "report",
-            1,
-            vec![
-                value("question", "Is this right?"),
-                value("source", "temperature")
-            ]
-        ))
-    );
-    let check = wire::CheckObjective {
-        source: "temperature".to_owned(),
-        limit: "30".to_owned(),
-    };
-    assert_eq!(
-        plan(with(Kind::Check(check))),
-        plan(named(
-            "check",
-            1,
-            vec![value("limit", "30"), value("source", "temperature")]
-        ))
-    );
+        assert!(!accepted(&reply), "field {field} is refused");
+        assert!(
+            reply.receipt.reason.contains("names no kind"),
+            "{}",
+            reply.receipt.reason
+        );
+    }
 }

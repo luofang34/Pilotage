@@ -22,9 +22,19 @@ fn a_team_runs_a_check_through_one_member() {
         objective_id: "team-check".to_owned(),
         revision: 1,
         title: "Cabin temperature".to_owned(),
-        kind: Some(wire::mission_objective::Kind::Check(wire::CheckObjective {
-            source: "temperature".to_owned(),
-            limit: "30".to_owned(),
+        kind: Some(wire::mission_objective::Kind::Named(wire::NamedObjective {
+            kind: "check".to_owned(),
+            version: 1,
+            parameters: vec![
+                wire::MissionValue {
+                    name: "source".to_owned(),
+                    value: "temperature".to_owned(),
+                },
+                wire::MissionValue {
+                    name: "limit".to_owned(),
+                    value: "30".to_owned(),
+                },
+            ],
         })),
         ..wire::MissionObjective::default()
     };
