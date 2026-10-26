@@ -126,7 +126,9 @@ survey height: the mission completes there and commands nothing more, and
 the pilot takes the vehicle and lands it. A human may hold the scope at that moment, for
 example after a software takeoff from the App: the mission stays held and
 asks again every five seconds, and at once when that lease is released, so
-releasing control hands the aircraft to the mission. The pilot keeps the
+releasing control hands the aircraft to the mission. This applies only until
+the first grant. After the mission has held the lease, a lost lease follows
+"Held and resume": only a hand-back returns it. The pilot keeps the
 original remote controller and can take the aircraft at any time; a native
 takeover is not a lease event, so the mission does not resume from it
 without a host restart.

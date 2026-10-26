@@ -180,3 +180,99 @@ async fn an_offer_to_another_principal_is_ignored_and_a_fenced_task_stays_fenced
     };
     assert!(task.on_transfer_requested(&requested).is_none());
 }
+
+/// A mission flying under its lease after the launch: it asked for the
+/// lease once the aircraft was airborne, and holds it.
+fn flying() -> (
+    MissionTask,
+    watch::Receiver<AutomationStatus>,
+    mpsc::Sender<ToEngine>,
+) {
+    let (mut task, status, engine_tx) = task();
+    task.lease_wanted = true;
+    (task, status, engine_tx)
+}
+
+/// Whether the task would ask for the lease on any later tick.
+fn asks_again(task: &MissionTask) -> bool {
+    task.lease_due || task.lease_retry_due(u64::MAX)
+}
+
+fn released(by: u64) -> wire::ScopeLeaseRevoked {
+    wire::ScopeLeaseRevoked {
+        principal: principal(by),
+        vehicle: vehicle(),
+        scope: scope(),
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn control_lost_after_the_launch_comes_back_only_by_a_hand_back() {
+    for case in ["native takeover", "own lease revoked", "emergency override"] {
+        let (mut task, _status, _engine_tx) = flying();
+        match case {
+            "native takeover" => task.on_granted_event(&wire::ScopeLeaseGranted {
+                principal: principal(30),
+                vehicle: vehicle(),
+                scope: scope(),
+                generation: Some(wire::Generation { value: 7 }),
+                ..Default::default()
+            }),
+            "own lease revoked" => task.on_revoked_event(&released(9)),
+            _ => task.on_override_event(&wire::EmergencyOverrideApplied {
+                principal: principal(30),
+                vehicle: vehicle(),
+                scope: scope(),
+                ..Default::default()
+            }),
+        }
+        assert!(task.held && task.generation.is_none(), "{case}: held");
+        assert!(!asks_again(&task), "{case}: no retry is scheduled");
+        // The holder goes away, as an operator whose connection closed:
+        // the lease is free, and the mission still does not take it.
+        task.on_revoked_event(&released(30));
+        assert!(!asks_again(&task), "{case}: a release is not a hand-back");
+        assert!(task.held, "{case}");
+        // An explicit hand-back returns control.
+        let offered = wire::ScopeTransferOffered {
+            from_principal: principal(30),
+            to_principal: principal(9),
+            vehicle: vehicle(),
+            scope: scope(),
+            ..Default::default()
+        };
+        assert!(matches!(
+            task.on_transfer_offered(&offered),
+            Some(DomainEnvelope::TransferAccept(_))
+        ));
+        task.on_transfer_event(&wire::ScopeTransferCommitted {
+            from_principal: principal(30),
+            to_principal: principal(9),
+            vehicle: vehicle(),
+            scope: scope(),
+            generation: Some(wire::Generation { value: 8 }),
+            ..Default::default()
+        });
+        assert!(!task.held, "{case}: the hand-back resumes");
+        assert_eq!(task.generation, Some(Generation::new(8)), "{case}");
+    }
+}
+
+#[tokio::test]
+async fn an_operator_who_took_over_and_disconnected_does_not_return_control() {
+    let (mut task, _status, _engine_tx) = flying();
+    // The operator takes the scope by transfer, then the connection closes.
+    task.on_transfer_event(&wire::ScopeTransferCommitted {
+        from_principal: principal(9),
+        to_principal: principal(21),
+        vehicle: vehicle(),
+        scope: scope(),
+        generation: Some(wire::Generation { value: 4 }),
+        ..Default::default()
+    });
+    assert!(task.held && !asks_again(&task));
+    task.on_revoked_event(&released(21));
+    assert!(task.held, "the mission stays held");
+    assert!(!asks_again(&task), "a lost operator hands nothing back");
+}
