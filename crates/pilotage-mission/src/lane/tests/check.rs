@@ -16,9 +16,19 @@ fn check() -> wire::MissionObjective {
         objective_id: "check-1".to_owned(),
         revision: 1,
         title: "Cabin temperature".to_owned(),
-        kind: Some(wire::mission_objective::Kind::Check(wire::CheckObjective {
-            source: "temperature".to_owned(),
-            limit: "30".to_owned(),
+        kind: Some(wire::mission_objective::Kind::Named(wire::NamedObjective {
+            kind: "check".to_owned(),
+            version: 1,
+            parameters: vec![
+                wire::MissionValue {
+                    name: "source".to_owned(),
+                    value: "temperature".to_owned(),
+                },
+                wire::MissionValue {
+                    name: "limit".to_owned(),
+                    value: "30".to_owned(),
+                },
+            ],
         })),
         ..wire::MissionObjective::default()
     }
@@ -125,8 +135,12 @@ fn a_host_without_the_rule_refuses_a_check_before_it_runs() {
 fn a_check_whose_limit_is_no_number_is_refused_when_proposed() {
     let mut lane = lane_with(HOST);
     let mut objective = check();
-    if let Some(wire::mission_objective::Kind::Check(check)) = objective.kind.as_mut() {
-        check.limit = "thirty".to_owned();
+    if let Some(wire::mission_objective::Kind::Named(check)) = objective.kind.as_mut() {
+        for parameter in &mut check.parameters {
+            if parameter.name == "limit" {
+                parameter.value = "thirty".to_owned();
+            }
+        }
     }
     let reply = lane.on_intent(&intent(Action::Propose(objective)), &context("p"));
     assert!(!accepted(&reply));

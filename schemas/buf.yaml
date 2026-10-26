@@ -7,3 +7,13 @@ lint:
 breaking:
   use:
     - FILE
+    # Still in force where the file-level deletion rules are ignored.
+    - FIELD_NO_DELETE_UNLESS_NUMBER_RESERVED
+    - FIELD_NO_DELETE_UNLESS_NAME_RESERVED
+  # The retired report and check objectives (ADR-0014): their field
+  # numbers and names are reserved in MissionObjective.
+  ignore_only:
+    FIELD_NO_DELETE:
+      - pilotage/v1/mission.proto
+    MESSAGE_NO_DELETE:
+      - pilotage/v1/mission.proto

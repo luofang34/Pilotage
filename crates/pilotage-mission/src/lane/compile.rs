@@ -48,14 +48,6 @@ pub(super) fn compile(
         Some(wire::mission_objective::Kind::Survey(survey)) => {
             survey::compile(objective, survey, lane, proposal_id)
         }
-        // The report's and the check's own messages are the named
-        // objectives of their kind.
-        Some(wire::mission_objective::Kind::Report(report)) => {
-            named::compile(objective, &named::report(report), lane, proposal_id)
-        }
-        Some(wire::mission_objective::Kind::Check(check)) => {
-            named::compile(objective, &named::check(check), lane, proposal_id)
-        }
         Some(wire::mission_objective::Kind::Named(named)) => {
             named::compile(objective, named, lane, proposal_id)
         }

@@ -31,14 +31,6 @@ pub(super) const REPORT: NamedKind = NamedKind {
     plan,
 };
 
-/// The report objective's parameters, as the lane plans it by name.
-pub(super) fn parameters(report: &wire::ReportObjective) -> Vec<wire::MissionValue> {
-    vec![
-        super::value("question", &report.question),
-        super::value("source", &report.source),
-    ]
-}
-
 fn plan(
     objective: &wire::MissionObjective,
     values: &BTreeMap<String, String>,

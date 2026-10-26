@@ -107,12 +107,20 @@ async fn start_report(task: &mut LaneTask) {
         objective_id: "report-1".to_owned(),
         revision: 1,
         title: "Cabin temperature".to_owned(),
-        kind: Some(wire::mission_objective::Kind::Report(
-            wire::ReportObjective {
-                source: "temperature".to_owned(),
-                question: "Is this the cabin temperature?".to_owned(),
-            },
-        )),
+        kind: Some(wire::mission_objective::Kind::Named(wire::NamedObjective {
+            kind: "report".to_owned(),
+            version: 1,
+            parameters: vec![
+                wire::MissionValue {
+                    name: "source".to_owned(),
+                    value: "temperature".to_owned(),
+                },
+                wire::MissionValue {
+                    name: "question".to_owned(),
+                    value: "Is this the cabin temperature?".to_owned(),
+                },
+            ],
+        })),
         ..wire::MissionObjective::default()
     };
     send(task, Action::Propose(objective)).await;

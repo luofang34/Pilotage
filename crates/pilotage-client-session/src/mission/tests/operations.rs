@@ -74,20 +74,38 @@ fn one_command_proposes_an_objective_of_any_kind() {
     let desk = MissionDesk::new("test", 7);
     let report = wire::MissionObjective {
         title: "Cabin temperature".to_owned(),
-        kind: Some(wire::mission_objective::Kind::Report(
-            wire::ReportObjective {
-                source: "temperature".to_owned(),
-                question: "Is this right?".to_owned(),
-            },
-        )),
+        kind: Some(wire::mission_objective::Kind::Named(wire::NamedObjective {
+            kind: "report".to_owned(),
+            version: 1,
+            parameters: vec![
+                wire::MissionValue {
+                    name: "source".to_owned(),
+                    value: "temperature".to_owned(),
+                },
+                wire::MissionValue {
+                    name: "question".to_owned(),
+                    value: "Is this right?".to_owned(),
+                },
+            ],
+        })),
         ..wire::MissionObjective::default()
     };
     let check = wire::MissionObjective {
         objective_id: "check-1".to_owned(),
         revision: 3,
-        kind: Some(wire::mission_objective::Kind::Check(wire::CheckObjective {
-            source: "temperature".to_owned(),
-            limit: "30".to_owned(),
+        kind: Some(wire::mission_objective::Kind::Named(wire::NamedObjective {
+            kind: "check".to_owned(),
+            version: 1,
+            parameters: vec![
+                wire::MissionValue {
+                    name: "source".to_owned(),
+                    value: "temperature".to_owned(),
+                },
+                wire::MissionValue {
+                    name: "limit".to_owned(),
+                    value: "30".to_owned(),
+                },
+            ],
         })),
         ..wire::MissionObjective::default()
     };
@@ -135,9 +153,19 @@ fn what_the_objective_states_passes_through_and_an_unstated_origin_is_the_client
         revision: 2,
         previous_digest: vec![7; 32],
         delegated_by: "TEAM".to_owned(),
-        kind: Some(wire::mission_objective::Kind::Check(wire::CheckObjective {
-            source: "temperature".to_owned(),
-            limit: "30".to_owned(),
+        kind: Some(wire::mission_objective::Kind::Named(wire::NamedObjective {
+            kind: "check".to_owned(),
+            version: 1,
+            parameters: vec![
+                wire::MissionValue {
+                    name: "source".to_owned(),
+                    value: "temperature".to_owned(),
+                },
+                wire::MissionValue {
+                    name: "limit".to_owned(),
+                    value: "30".to_owned(),
+                },
+            ],
         })),
         ..wire::MissionObjective::default()
     };

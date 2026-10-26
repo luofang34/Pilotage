@@ -28,14 +28,6 @@ pub(super) const CHECK: NamedKind = NamedKind {
     plan,
 };
 
-/// The check objective's parameters, as the lane plans it by name.
-pub(super) fn parameters(check: &wire::CheckObjective) -> Vec<wire::MissionValue> {
-    vec![
-        super::value("limit", &check.limit),
-        super::value("source", &check.source),
-    ]
-}
-
 fn plan(
     objective: &wire::MissionObjective,
     values: &BTreeMap<String, String>,
