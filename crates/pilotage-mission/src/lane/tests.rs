@@ -443,6 +443,7 @@ mod check;
 mod evidence;
 mod expiry;
 mod fetch;
+mod held_switch;
 mod named;
 mod needs;
 mod outcome;

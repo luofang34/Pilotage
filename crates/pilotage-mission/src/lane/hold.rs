@@ -43,8 +43,12 @@ impl Lane {
         if self.holds.contains(&Reason::ApprovalExpired) {
             return Err("the approval expired; approve the plan again to resume".to_owned());
         }
-        super::target::still_valid(approval, context.now_unix_ms)
-            .map_err(|reason| format!("{reason}; approve the plan again to resume"))?;
+        // The return home an expired approval names flies under that
+        // approval; any other run needs one still valid.
+        if !self.expired {
+            super::target::still_valid(approval, context.now_unix_ms)
+                .map_err(|reason| format!("{reason}; approve the plan again to resume"))?;
+        }
         // A person's resume is what a hold after a restart waits for.
         self.holds
             .retain(|r| !matches!(r, Reason::Operator | Reason::Restarted));
