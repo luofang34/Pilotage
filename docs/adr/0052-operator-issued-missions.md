@@ -280,7 +280,11 @@ digest, the run identifier, and the checkpoint it was planned against; the
 lane refuses it when any of these changed. The lane admits a successor
 while a task runs and switches at the next checkpoint: the completion of
 the running task, or at once while the lane is `Held`. The lane never
-splices a running plan.
+splices a running plan. A switch does not end a hold: the run of the
+successor starts held, and an operator's hold or a restart's hold stays
+until a person resumes. Only the hold that an expiry applied ends when the
+successor's own approval admits it. The return home that an expiry names
+resumes under the expired approval.
 
 The run in progress and an admitted successor each hold their own approval,
 bound to its own digest, run and expiry. A successor is admitted on one of

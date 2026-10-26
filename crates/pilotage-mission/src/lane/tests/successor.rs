@@ -140,7 +140,8 @@ fn inside_the_envelope_a_revision_applies_without_a_new_approval() {
         status.detail
     );
 
-    // Under an approval that permits revisions, a held run switches at once.
+    // Under an approval that permits revisions, a held run switches at once
+    // and stays held: only a person's resume moves it.
     let mut lane = Lane::new(config());
     let proposal = lane
         .on_intent(&intent(Action::Propose(objective())), &context("p"))
@@ -169,7 +170,18 @@ fn inside_the_envelope_a_revision_applies_without_a_new_approval() {
         matches!(reply.effect, Some(LaneEffect::Start(_))),
         "held: at once"
     );
-    assert_eq!(lane.state(), wire::MissionLaneState::Running);
+    assert!(
+        matches!(
+            lane.state(),
+            wire::MissionLaneState::HoldRequested | wire::MissionLaneState::Held
+        ),
+        "{:?}",
+        lane.state()
+    );
+    assert_eq!(
+        lane.status().holds,
+        [wire::MissionHoldReason::Operator as i32]
+    );
 }
 
 #[test]

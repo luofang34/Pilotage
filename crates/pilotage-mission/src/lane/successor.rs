@@ -315,13 +315,26 @@ impl Lane {
             self.approval = Some(approval);
         }
         self.expired = recovery;
-        // The successor's run starts flying, as a switch while held does.
-        self.holds.clear();
-        self.state = State::Running;
-        self.detail = format!(
-            "flying revision {}: {}",
-            self.revisions, compiled.proposal.summary
-        );
+        // A successor approved on its own ends only the hold its
+        // predecessor's expiry applied. An operator's hold and a restart's
+        // hold stay until a person resumes: admitting a plan never by itself
+        // moves the vehicle, so a held lane starts the successor's run held.
+        if !recovery {
+            self.holds
+                .retain(|r| *r != wire::MissionHoldReason::ApprovalExpired);
+        }
+        if self.holds.is_empty() {
+            self.state = State::Running;
+            self.detail = format!(
+                "flying revision {}: {}",
+                self.revisions, compiled.proposal.summary
+            );
+        } else {
+            self.detail = format!(
+                "revision {} applies held; it flies when a person resumes: {}",
+                self.revisions, compiled.proposal.summary
+            );
+        }
         let order = RunOrder {
             run_id,
             plan: compiled.plan.clone(),
