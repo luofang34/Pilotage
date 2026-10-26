@@ -447,6 +447,7 @@ mod held_switch;
 mod named;
 mod needs;
 mod outcome;
+mod recovery;
 mod report;
 mod restore;
 mod successor;

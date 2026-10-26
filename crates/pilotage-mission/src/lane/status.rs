@@ -7,6 +7,34 @@ use super::run::{self, RunTracker};
 use super::{Lane, RunExecution};
 
 impl Lane {
+    /// The identities of the tasks of the plan the lane holds, in plan order: each
+    /// survey line, then the way home.
+    #[must_use]
+    pub fn task_ids(&self) -> Vec<String> {
+        self.proposal
+            .as_ref()
+            .map(|compiled| {
+                compiled
+                    .proposal
+                    .tasks
+                    .iter()
+                    .map(|task| task.task_id.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Whether a run is in progress.
+    pub(super) fn is_flying(&self) -> bool {
+        matches!(
+            self.state,
+            wire::MissionLaneState::Running
+                | wire::MissionLaneState::HoldRequested
+                | wire::MissionLaneState::Held
+                | wire::MissionLaneState::Uncertain
+        )
+    }
+
     /// The status as it stands, with the sequence of the last change.
     #[must_use]
     pub fn status(&self) -> wire::MissionStatus {

@@ -289,6 +289,22 @@ message AdaptationEnvelope {
   // What a run does when the approval expires while it flies. A held or
   // expired run resumes only under a new approval of its plan.
   MissionExpiryPolicy on_expiry = 10;
+  // What a run may do on its own, while this approval is valid, after it
+  // lost control: a principal took the motion lease from it, and that
+  // principal's lease ended without a hand-back. The run never resumes its
+  // work this way; only a hand-back does that.
+  MissionControlLossPolicy on_control_lost = 11;
+}
+
+// The recovery a run that lost control may fly on its own.
+enum MissionControlLossPolicy {
+  // The same as HOLD.
+  MISSION_CONTROL_LOSS_POLICY_UNSPECIFIED = 0;
+  // Do nothing until a person hands control back.
+  MISSION_CONTROL_LOSS_POLICY_HOLD = 1;
+  // Take the free lease only to end and return to the launch point, inside
+  // the approval's height and area limits.
+  MISSION_CONTROL_LOSS_POLICY_RETURN_HOME = 2;
 }
 
 // The recovery a run applies when its approval expires.

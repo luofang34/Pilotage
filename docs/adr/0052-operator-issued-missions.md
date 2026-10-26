@@ -383,6 +383,25 @@ and a manual override fence every action regardless. A native
 remote-controller override holds the mission and revokes software control
 until the operator authorizes it again.
 
+Work, control and recovery have separate lifetimes. An approval permits
+the work; a lease gives temporary control; a recovery is what the approval
+permits when no person controls the vehicle. When a principal takes the
+lease from a run, the work stops, and only a hand-back resumes it. While a
+person holds the lease, nothing moves the vehicle against that person. When
+the taker's lease ends without a hand-back, by a release or a closed
+connection, the run applies the approval's `on_control_lost` recovery, if
+the approval is still valid: `HOLD` waits for a hand-back, and
+`RETURN_HOME` takes the free lease only to fly home inside the approval's
+limits. A revocation of the run's own lease, with no taker, is a stop and
+starts no recovery. After the approval expires, only its `on_expiry`
+recovery applies. A recovery run flies a home-only plan and never runs the
+work again. Admission refuses a recovery that the plan cannot fly: a plan
+of operations has no way home. When the link between the host and the
+vehicle fails, the host can do nothing, and the vehicle-local fallback
+that its adapter advertises applies. For the DJI adapter, that fallback
+is `Neutralize`, which stops software motion and guarantees neither a
+hover nor a return home.
+
 ### Proposal and admission are separate, and planning is shared
 
 `Propose(request)` is separate from `Issue` and `Start`. The host compiles

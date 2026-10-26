@@ -129,6 +129,22 @@ fn approve_takes_the_held_proposal_under_the_default_policy() {
     assert_eq!(envelope.expires_unix_ms, 1_000 + 3_600_000);
     assert_eq!(envelope.max_refly_lines, 4);
     assert!(envelope.permit_revise && !envelope.permit_change_objective);
+    assert_eq!(
+        envelope.on_control_lost(),
+        wire::MissionControlLossPolicy::Hold,
+        "by default a lost control waits for a hand-back"
+    );
+    let home = MissionCommand::Approve {
+        digest: None,
+        policy: serde_json::from_str(r#"{"on_control_lost": "return_home"}"#).unwrap(),
+    };
+    let Ok(Action::Approve(approved)) = desk.resolve(&home, 1_000) else {
+        panic!("an approval");
+    };
+    assert_eq!(
+        approved.envelope.unwrap().on_control_lost(),
+        wire::MissionControlLossPolicy::ReturnHome
+    );
 
     let named = MissionCommand::Approve {
         digest: Some("abce".to_owned()),

@@ -13,6 +13,7 @@ mod evidence;
 mod expiry;
 mod hold;
 mod needs;
+mod recovery;
 mod restore;
 mod run;
 mod settle;
@@ -119,6 +120,9 @@ pub struct RunOrder {
     /// for the operations that take them: the tasks a run restarted after
     /// the host restarted had carried out.
     pub results: Vec<(String, Vec<wire::MissionValue>)>,
+    /// The run only returns home under an approval's recovery. It may take
+    /// a lease freed after a lost control, which a run of work may not.
+    pub recovery: bool,
 }
 
 /// What the host does after an intent.
@@ -178,6 +182,8 @@ pub struct Lane {
     clock_unix_ms: u64,
     /// The active approval expired during the run and its recovery applied.
     expired: bool,
+    /// The run in progress only returns home, as a recovery.
+    recovering: bool,
     /// What the run does now, as the host last said.
     execution: Option<RunExecution>,
     /// Why the run holds, when it does.
@@ -208,6 +214,7 @@ impl Lane {
             changed: true,
             clock_unix_ms: 0,
             expired: false,
+            recovering: false,
             execution: None,
             holds: Vec::new(),
             released: Vec::new(),
@@ -366,6 +373,7 @@ impl Lane {
         }
         target::still_valid(approval, context.now_unix_ms)?;
         self.expired = false;
+        self.recovering = false;
         let run_id = context.fresh_id.clone();
         self.run = Some(RunTracker::new(
             run_id.clone(),
@@ -380,6 +388,7 @@ impl Lane {
                 plan: compiled.plan.clone(),
                 config: compiled.config.clone(),
                 results: Vec::new(),
+                recovery: false,
             }))),
             None,
         ))
@@ -419,38 +428,12 @@ impl Lane {
         Ok((Some(LaneEffect::Abort), None))
     }
 
-    /// The identities of the tasks of the plan the lane holds, in plan order: each
-    /// survey line, then the way home.
-    #[must_use]
-    pub fn task_ids(&self) -> Vec<String> {
-        self.proposal
-            .as_ref()
-            .map(|compiled| {
-                compiled
-                    .proposal
-                    .tasks
-                    .iter()
-                    .map(|task| task.task_id.clone())
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-
-    fn is_flying(&self) -> bool {
-        matches!(
-            self.state,
-            wire::MissionLaneState::Running
-                | wire::MissionLaneState::HoldRequested
-                | wire::MissionLaneState::Held
-                | wire::MissionLaneState::Uncertain
-        )
-    }
-
     /// Folds the run's progress in. A plan that completes ends the run,
     /// unless an admitted successor takes over: then the host starts the
     /// successor's run, the effect returned.
     pub fn on_progress(&mut self, progress: &RunProgress) -> Option<LaneEffect> {
         let flying = self.is_flying();
+        let was_freed = self.control_freed();
         if progress.execution != self.execution {
             self.execution = progress.execution;
             self.changed = true;
@@ -464,6 +447,10 @@ impl Lane {
             self.state = wire::MissionLaneState::Held;
             self.detail = "held in place".to_owned();
             self.changed = true;
+        }
+        // Each lease that ends without a hand-back starts the recovery once.
+        if !was_freed && let Some(effect) = self.recover_from_lost_control() {
+            return Some(effect);
         }
         if flying && let Some(effect) = self.at_checkpoint(progress.plan_complete) {
             return Some(effect);
