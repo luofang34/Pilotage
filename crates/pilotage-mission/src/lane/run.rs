@@ -51,6 +51,15 @@ pub enum RunExecution {
     AwaitingLaunch,
     /// Another principal holds the motion lease, when the run knows which.
     LeaseHeldElsewhere(Option<u64>),
+    /// The run lost a lease it held to the principal `holder`, and only a
+    /// hand-back resumes its work. `freed` when that principal's lease
+    /// ended without a hand-back, so that no one holds the lease.
+    ControlLost {
+        /// The principal that took the lease, when the run knows which.
+        holder: Option<u64>,
+        /// The taker's lease ended without a hand-back.
+        freed: bool,
+    },
     /// The run holds the vehicle in place.
     Holding,
     /// The run stopped and released the vehicle.
@@ -66,6 +75,12 @@ impl RunExecution {
             Self::Flying => (State::Flying, 0),
             Self::AwaitingLaunch => (State::AwaitingLaunch, 0),
             Self::LeaseHeldElsewhere(holder) => (State::LeaseHeldElsewhere, holder.unwrap_or(0)),
+            // A client sees a lost control as a lease that is not the run's,
+            // naming the taker while it holds it.
+            Self::ControlLost { holder, freed } => (
+                State::LeaseHeldElsewhere,
+                if freed { 0 } else { holder.unwrap_or(0) },
+            ),
             Self::Holding => (State::Holding, 0),
             Self::Stopped => (State::Stopped, 0),
         };

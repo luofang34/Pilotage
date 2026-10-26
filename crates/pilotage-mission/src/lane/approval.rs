@@ -21,6 +21,15 @@ pub(super) fn admit(
         return Err("the approval binds another proposal digest".to_owned());
     }
     let envelope = valid_approval(approval, now_unix_ms)?;
+    // A recovery the plan cannot fly is refused, not implied.
+    let returns_home = envelope.on_expiry() == wire::MissionExpiryPolicy::ReturnHome
+        || envelope.on_control_lost() == wire::MissionControlLossPolicy::ReturnHome;
+    if returns_home && !compiled.flies() {
+        return Err(
+            "a plan of operations has no way home; approve it to hold on expiry and on a lost control"
+                .to_owned(),
+        );
+    }
     if compiled.height_m > envelope.max_height_m + HEIGHT_TOLERANCE_M {
         return Err(format!(
             "the plan flies at {:.1} m; the envelope allows {:.1} m",

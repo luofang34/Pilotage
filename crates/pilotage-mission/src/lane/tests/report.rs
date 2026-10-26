@@ -333,7 +333,7 @@ fn an_abort_leaves_each_operation_to_the_end_the_host_reports() {
 }
 
 #[test]
-fn an_expired_approval_holds_a_plan_of_operations_and_flies_nothing() {
+fn an_approval_naming_a_way_home_is_refused_for_a_plan_of_operations() {
     let mut lane = Lane::new(LaneConfig {
         executors: ExecutorRegistry::new(HOST),
         ..config()
@@ -344,15 +344,31 @@ fn an_expired_approval_holds_a_plan_of_operations_and_flies_nothing() {
     if let Some(envelope) = home_on_expiry.envelope.as_mut() {
         envelope.on_expiry = wire::MissionExpiryPolicy::ReturnHome as i32;
     }
-    lane.on_intent(&intent(Action::Approve(home_on_expiry)), &context("a"));
+    let refused = lane.on_intent(&intent(Action::Approve(home_on_expiry)), &context("a"));
+    assert!(!accepted(&refused), "a way home is not implied");
+    assert!(
+        refused.receipt.reason.contains("no way home"),
+        "{}",
+        refused.receipt.reason
+    );
+    let mut home_on_loss = approval(&digest, 0.0);
+    if let Some(envelope) = home_on_loss.envelope.as_mut() {
+        envelope.on_control_lost = wire::MissionControlLossPolicy::ReturnHome as i32;
+    }
+    let refused = lane.on_intent(&intent(Action::Approve(home_on_loss)), &context("a2"));
+    assert!(!accepted(&refused), "{}", refused.receipt.reason);
+    // Under the hold it can fly, the expiry holds the run.
+    assert!(accepted(&lane.on_intent(
+        &intent(Action::Approve(approval(&digest, 0.0))),
+        &context("a3")
+    )));
     lane.on_intent(
         &intent(Action::Start(wire::MissionStart {
             proposal_digest: digest,
         })),
         &context("run-1"),
     );
-    let effect = lane.on_clock(NOW + 10 * 3_600_000);
-    assert_eq!(effect, Some(LaneEffect::Hold), "no way home to fly");
+    assert_eq!(lane.on_clock(NOW + 10 * 3_600_000), Some(LaneEffect::Hold));
     assert!(lane.status().successor.is_none());
 }
 

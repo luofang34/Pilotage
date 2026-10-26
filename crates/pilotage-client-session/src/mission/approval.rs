@@ -3,7 +3,7 @@
 //! height above the plan's, an hour, execution with revision and
 //! allocation but no change of objective, a few re-flown lines, a fifth of
 //! the battery kept in reserve, and a hold in place if the hour ends during
-//! the run.
+//! the run or if control is lost and not handed back.
 
 use pilotage_protocol::wire;
 use serde::{Deserialize, Serialize};
@@ -28,6 +28,30 @@ pub struct ApprovalPolicy {
     pub min_reserve_fraction: f64,
     /// What a run does when the approval expires while it flies.
     pub on_expiry: OnExpiry,
+    /// What a run that lost control may do on its own once the taker's
+    /// lease ended without a hand-back.
+    pub on_control_lost: OnControlLost,
+}
+
+/// What a run that lost control may do on its own; it never resumes its
+/// work without a hand-back.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OnControlLost {
+    /// Wait for a person to hand control back.
+    #[default]
+    Hold,
+    /// Take the free lease only to return to the launch point.
+    ReturnHome,
+}
+
+impl OnControlLost {
+    fn wire(self) -> wire::MissionControlLossPolicy {
+        match self {
+            Self::Hold => wire::MissionControlLossPolicy::Hold,
+            Self::ReturnHome => wire::MissionControlLossPolicy::ReturnHome,
+        }
+    }
 }
 
 /// What a run does when its approval expires while it flies.
@@ -60,6 +84,7 @@ impl Default for ApprovalPolicy {
             permit_revise: true,
             min_reserve_fraction: 0.2,
             on_expiry: OnExpiry::Hold,
+            on_control_lost: OnControlLost::Hold,
         }
     }
 }
@@ -112,6 +137,7 @@ pub fn approval(
                 permit_change_objective: false,
                 max_refly_lines: policy.max_refly_lines,
                 on_expiry: policy.on_expiry.wire() as i32,
+                on_control_lost: policy.on_control_lost.wire() as i32,
             }),
             approved_unix_ms: now_ms,
             run_id: run_id.to_owned(),

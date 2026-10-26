@@ -294,6 +294,8 @@ impl Lane {
                 .filter(|t| t.execution == Execution::Completed)
                 .map(|t| (t.plan.task_id.clone(), t.results.clone()))
                 .collect(),
+            // A plan of operations has no way home to recover by.
+            recovery: false,
         };
         self.restart = None;
         Some(LaneEffect::Start(Box::new(order)))

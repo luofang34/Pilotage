@@ -27,6 +27,8 @@ pub(super) enum Basis {
     WithinEnvelope,
     /// The recovery the expired approval names, which applies under it.
     ExpiryRecovery,
+    /// The recovery the valid approval names for a lost control.
+    ControlLossRecovery,
 }
 
 /// A revision of the plan in progress.
@@ -234,7 +236,11 @@ impl Lane {
             .run
             .as_ref()
             .is_some_and(super::run::RunTracker::on_line);
-        if matches!(self.state, State::Held | State::HoldRequested) || !on_line {
+        // No one flies a plan whose run lost control to its checkpoint.
+        if matches!(self.state, State::Held | State::HoldRequested)
+            || !on_line
+            || self.control_lost()
+        {
             return self.switch();
         }
         self.detail = "revision admitted; it applies at the end of the line in progress".to_owned();
@@ -250,7 +256,10 @@ impl Lane {
             .filter(|s| s.stage == Stage::Admitted)?;
         // A revision applies only under its own approval, still valid for it
         // now; the expiry's own recovery applies under the expired one.
-        if successor.basis != Basis::ExpiryRecovery {
+        if !matches!(
+            successor.basis,
+            Basis::ExpiryRecovery | Basis::ControlLossRecovery
+        ) {
             let valid = successor.approval.as_ref().is_some_and(|a| {
                 approval::admit(a, &successor.compiled, &self.config, self.clock_unix_ms).is_ok()
             });
@@ -275,7 +284,7 @@ impl Lane {
         if reached { self.switch() } else { None }
     }
 
-    fn switch(&mut self) -> Option<LaneEffect> {
+    pub(super) fn switch(&mut self) -> Option<LaneEffect> {
         let successor = self.successor.as_mut()?;
         successor.stage = Stage::Applied;
         let compiled = successor.compiled.clone();
@@ -285,6 +294,8 @@ impl Lane {
         // The recovery an expiry names runs under the expired approval: the
         // expiry stays applied, so it is not applied again.
         let recovery = successor.basis == Basis::ExpiryRecovery;
+        // A recovery only returns home: it never runs the work again.
+        let returns_home = recovery || successor.basis == Basis::ControlLossRecovery;
         let previous = self.run.take();
         let predecessor = previous.as_ref().map(super::run::RunTracker::run_id);
         let run_id = format!(
@@ -315,6 +326,7 @@ impl Lane {
             self.approval = Some(approval);
         }
         self.expired = recovery;
+        self.recovering = returns_home;
         // A successor approved on its own ends only the hold its
         // predecessor's expiry applied. An operator's hold and a restart's
         // hold stay until a person resumes: admitting a plan never by itself
@@ -340,6 +352,7 @@ impl Lane {
             plan: compiled.plan.clone(),
             config: compiled.config.clone(),
             results: Vec::new(),
+            recovery: returns_home,
         };
         self.proposal = Some(compiled);
         self.changed = true;
