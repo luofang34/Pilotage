@@ -304,3 +304,75 @@ fn a_name_the_sender_claims_stays_behind_the_sender_the_host_named() {
         "the session the host named stays in the record"
     );
 }
+
+/// The person's answer to the report's question, as the operator sends it
+/// to the team under `request_id`.
+fn answering(
+    fleet: &mut Fleet,
+    question: &wire::MissionQuestion,
+    request_id: &str,
+) -> crate::TeamReply {
+    fleet.team.on_intent(
+        &wire::MissionIntent {
+            request_id: request_id.to_owned(),
+            action: Some(Action::Answer(wire::MissionAnswer {
+                operation_id: question.operation_id.clone(),
+                subject_digest: question.subject_digest.clone(),
+                accepted: true,
+                answered_by: Some(wire::RecordOrigin {
+                    subject: "operator".to_owned(),
+                    ..wire::RecordOrigin::default()
+                }),
+                relayed_from: None,
+            })),
+        },
+        &context(request_id),
+    )
+}
+
+#[test]
+fn a_repeated_answer_reaches_the_member_once() {
+    let (mut fleet, member) = started();
+    let (question, _) = asks(&mut fleet, &member);
+    let first = answering(&mut fleet, &question, "op-answer-1");
+    assert_eq!(
+        first.intents.len(),
+        1,
+        "the first answer goes to the member"
+    );
+    // The same answer again while the first is on its way.
+    let again = answering(&mut fleet, &question, "op-answer-2");
+    assert!(again.intents.is_empty(), "{:?}", again.intents);
+    let refused = again.receipt.expect("the repeat is answered at once");
+    assert!(!accepted(&refused), "{}", refused.reason);
+    let decided = fleet.route(first.intents);
+    assert!(accepted(&decided[0]), "{}", decided[0].reason);
+    report_status(&mut fleet, &member);
+    // And once more after the member took it.
+    let late = answering(&mut fleet, &question, "op-answer-3");
+    assert!(late.intents.is_empty(), "{:?}", late.intents);
+    assert!(
+        !late.receipt.as_ref().is_some_and(accepted),
+        "{:?}",
+        late.receipt
+    );
+}
+
+#[test]
+fn an_answer_after_the_team_aborts_reaches_no_member() {
+    let (mut fleet, member) = started();
+    let (question, _) = asks(&mut fleet, &member);
+    let aborted = fleet.team.on_intent(
+        &wire::MissionIntent {
+            request_id: "op-abort".to_owned(),
+            action: Some(Action::Abort(wire::MissionAbort {})),
+        },
+        &context("abort"),
+    );
+    fleet.route(aborted.intents);
+    report_status(&mut fleet, &member);
+    let late = answering(&mut fleet, &question, "op-answer");
+    assert!(late.intents.is_empty(), "{:?}", late.intents);
+    let receipt = late.receipt.expect("refused at once");
+    assert!(!accepted(&receipt), "{}", receipt.reason);
+}
