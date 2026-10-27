@@ -224,39 +224,111 @@ fn a_revision_waits_for_the_hand_back() {
             wire::MissionControlLossPolicy::Hold,
         )
         .await;
-        let state = task.lane.status();
-        send(
+        let effect = revision(&mut task, now).await;
+        waits_then_starts(&mut task, &status, &seen, effect).await;
+    });
+}
+
+/// Drafts and approves a revision of the run in progress: the effect that
+/// replaces the run.
+async fn revision(task: &mut LaneTask, now: u64) -> LaneEffect {
+    let state = task.lane.status();
+    send(
+        task,
+        Action::Revise(wire::MissionRevise {
+            base_digest: state.proposal_digest.clone(),
+            run_id: state.run_id.clone(),
+            change: Some(wire::mission_revise::Change::Objective(survey(80.0))),
+            ..wire::MissionRevise::default()
+        }),
+    )
+    .await;
+    let draft = task
+        .lane
+        .status()
+        .successor
+        .expect("a drafted revision")
+        .digest;
+    let reply = task.lane.on_intent(
+        &wire::MissionIntent {
+            request_id: "approve-revision".to_owned(),
+            action: Some(Action::Approve(approval(
+                &draft,
+                now + HOUR_MS,
+                wire::MissionControlLossPolicy::Hold,
+            ))),
+        },
+        &pilotage_mission::IntentContext {
+            now_unix_ms: now,
+            fresh_id: "approve-revision".to_owned(),
+        },
+    );
+    let effect = reply.effect.expect("the revision replaces the run");
+    assert!(matches!(effect, LaneEffect::Start(_)), "{effect:?}");
+    effect
+}
+
+/// The replaced run ends, as when its session closes: no hand-back can
+/// reach it any more.
+async fn replaced_run_ends(task: &mut LaneTask) {
+    let run = task.run.as_ref().expect("the replaced run");
+    run.handle.abort();
+    while !run.handle.is_finished() {
+        tokio::task::yield_now().await;
+    }
+    task.on_progress().await;
+    assert!(task.after_hand_back.is_none(), "nothing waits for it");
+}
+
+#[test]
+fn work_whose_replaced_run_ends_before_the_hand_back_ends_and_says_why() {
+    let host = host();
+    runtime().block_on(async {
+        let (mut task, _published) = lane(&host).await;
+        let now = super::super::unix_now_ms();
+        flying_without_control(
             &mut task,
-            Action::Revise(wire::MissionRevise {
-                base_digest: state.proposal_digest.clone(),
-                run_id: state.run_id.clone(),
-                change: Some(wire::mission_revise::Change::Objective(survey(80.0))),
-                ..wire::MissionRevise::default()
-            }),
+            now + HOUR_MS,
+            wire::MissionControlLossPolicy::Hold,
         )
         .await;
-        let draft = task
+        let effect = revision(&mut task, now).await;
+        let runs = task.runs;
+        task.apply(effect).await;
+        assert!(task.after_hand_back.is_some());
+        replaced_run_ends(&mut task).await;
+        assert_eq!(task.runs, runs, "work does not start without a hand-back");
+        assert!(task.run.is_none());
+        let status = task.lane.status();
+        assert_eq!(status.state, wire::MissionLaneState::Failed as i32);
+        assert!(status.detail.contains("handed back"), "{}", status.detail);
+    });
+}
+
+#[test]
+fn a_recovery_whose_replaced_run_ends_before_the_hand_back_starts() {
+    let host = host();
+    runtime().block_on(async {
+        let (mut task, _published) = lane(&host).await;
+        let now = super::super::unix_now_ms();
+        flying_without_control(
+            &mut task,
+            now + HOUR_MS,
+            wire::MissionControlLossPolicy::Hold,
+        )
+        .await;
+        let effect = task
             .lane
-            .status()
-            .successor
-            .expect("a drafted revision")
-            .digest;
-        let reply = task.lane.on_intent(
-            &wire::MissionIntent {
-                request_id: "approve-revision".to_owned(),
-                action: Some(Action::Approve(approval(
-                    &draft,
-                    now + HOUR_MS,
-                    wire::MissionControlLossPolicy::Hold,
-                ))),
-            },
-            &pilotage_mission::IntentContext {
-                now_unix_ms: now,
-                fresh_id: "approve-revision".to_owned(),
-            },
+            .on_clock(now + 2 * HOUR_MS)
+            .expect("the way home replaces the run");
+        let runs = task.runs;
+        task.apply(effect).await;
+        assert!(task.after_hand_back.is_some());
+        replaced_run_ends(&mut task).await;
+        assert_eq!(task.runs, runs.wrapping_add(1), "the recovery starts");
+        assert_eq!(
+            task.lane.status().state,
+            wire::MissionLaneState::Running as i32
         );
-        let effect = reply.effect.expect("the revision replaces the run");
-        assert!(matches!(effect, LaneEffect::Start(_)), "{effect:?}");
-        waits_then_starts(&mut task, &status, &seen, effect).await;
     });
 }

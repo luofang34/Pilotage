@@ -319,6 +319,10 @@ impl LaneTask {
         let status = run.status.borrow().clone();
         let finished = run.handle.is_finished();
         if self.after_hand_back.is_some() {
+            if finished {
+                self.on_replaced_run_ended().await;
+                return;
+            }
             // The replaced run's progress is not its successor's, but whether
             // its taker's lease ended is: the approval's recovery replaces a
             // waiting run of work.
