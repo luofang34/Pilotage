@@ -39,6 +39,7 @@ impl Lane {
     #[must_use]
     pub fn status(&self) -> wire::MissionStatus {
         let proposal = self.proposal.as_ref().map(|compiled| &compiled.proposal);
+        let envelope = self.approval.as_ref().and_then(|a| a.envelope.as_ref());
         let survey = proposal
             .and_then(|p| p.objective.as_ref())
             .and_then(|o| o.kind.as_ref())
@@ -94,6 +95,8 @@ impl Lane {
             released: self.released.clone(),
             handovers: Vec::new(),
             approvals_needed: self.approval_needs(),
+            on_control_lost: envelope.map_or(0, |e| e.on_control_lost),
+            on_expiry: envelope.map_or(0, |e| e.on_expiry),
             predecessor_run_id: self
                 .run
                 .as_ref()

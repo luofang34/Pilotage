@@ -165,3 +165,23 @@ fn a_share_answered_after_the_team_approval_expired_gets_no_approval_passed_down
         "the handover is not committed"
     );
 }
+
+#[test]
+fn the_team_status_names_the_recoveries_of_its_approval() {
+    let (mut fleet, mut good) = proposed();
+    assert_eq!(fleet.team.status().on_control_lost, 0);
+    if let Some(envelope) = good.envelope.as_mut() {
+        envelope.on_control_lost = wire::MissionControlLossPolicy::ReturnHome as i32;
+        envelope.on_expiry = wire::MissionExpiryPolicy::ReturnHome as i32;
+    }
+    let reply = approve(&mut fleet, good);
+    fleet.route(reply.intents);
+    let status = fleet.team.status();
+    assert_eq!(
+        status.on_control_lost(),
+        wire::MissionControlLossPolicy::ReturnHome,
+        "{}",
+        status.detail
+    );
+    assert_eq!(status.on_expiry(), wire::MissionExpiryPolicy::ReturnHome);
+}

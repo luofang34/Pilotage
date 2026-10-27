@@ -137,3 +137,27 @@ fn after_the_switch_the_run_holds_the_successors_approval() {
     );
     assert_eq!(lane.on_clock(NOW + 120 * MINUTE), Some(LaneEffect::Hold));
 }
+
+#[test]
+fn the_status_names_the_recoveries_of_the_approval_in_force() {
+    let mut lane = Lane::new(config());
+    let reply = lane.on_intent(&intent(Action::Propose(objective())), &context("p"));
+    let digest = opened(&reply.receipt).expect("a proposal").digest;
+    let none = lane.status();
+    assert_eq!(none.on_control_lost, 0, "no approval is in force");
+    assert_eq!(none.on_expiry, 0);
+    let mut approved = approval(&digest, 120.0);
+    if let Some(envelope) = approved.envelope.as_mut() {
+        envelope.on_control_lost = wire::MissionControlLossPolicy::ReturnHome as i32;
+        envelope.on_expiry = wire::MissionExpiryPolicy::Hold as i32;
+    }
+    assert!(accepted(
+        &lane.on_intent(&intent(Action::Approve(approved)), &context("a"))
+    ));
+    let status = lane.status();
+    assert_eq!(
+        status.on_control_lost(),
+        wire::MissionControlLossPolicy::ReturnHome
+    );
+    assert_eq!(status.on_expiry(), wire::MissionExpiryPolicy::Hold);
+}

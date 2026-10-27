@@ -720,6 +720,12 @@ message MissionStatus {
   // The approvals the lane needs now. A client raises one for a person
   // only when no other lane owes it.
   repeated MissionApprovalNeed approvals_needed = 24;
+  // The recoveries that the approval in force names, so that a client can
+  // show what the vehicle does on its own: after control is lost and not
+  // handed back, and when the approval expires. Unspecified when no
+  // approval is in force.
+  MissionControlLossPolicy on_control_lost = 25;
+  MissionExpiryPolicy on_expiry = 26;
 }
 
 // What an approval is for.
