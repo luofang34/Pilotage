@@ -296,6 +296,8 @@ impl LaneTask {
                 return;
             }
             LaneEffect::Hold => RunControl::Hold,
+            // A replaced run stays held: only its replacement resumes.
+            LaneEffect::Resume if self.after_hand_back.is_some() => return,
             LaneEffect::Resume => RunControl::Resume,
             LaneEffect::Abort => {
                 // A run that never started needs no stop.

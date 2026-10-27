@@ -386,7 +386,9 @@ until the operator authorizes it again.
 Work, control and recovery have separate lifetimes. An approval permits
 the work; a lease gives temporary control; a recovery is what the approval
 permits when no person controls the vehicle. When a principal takes the
-lease from a run, the work stops, and only a hand-back resumes it. While a
+lease from a run, the work stops, and only a hand-back resumes it. When a
+replacement of that run waits for the hand-back, the run takes control back
+only to pass it on: it holds, and only the replacement flies. While a
 person holds the lease, nothing moves the vehicle against that person. When
 the taker's lease ends without a hand-back, by a release or a closed
 connection, the run applies the approval's `on_control_lost` recovery, if
