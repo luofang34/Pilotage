@@ -81,4 +81,28 @@ impl LaneTask {
             stopping: false,
         });
     }
+
+    /// The run that lost control ended while its replacement waited, so no
+    /// hand-back can reach it. A recovery starts and, as any new run, waits
+    /// for the lease until no person holds it; work does not start without
+    /// a hand-back, so the lane's run ends instead and says why.
+    pub(super) async fn on_replaced_run_ended(&mut self) {
+        self.run = None;
+        let Some(order) = self.after_hand_back.take() else {
+            return;
+        };
+        if order.recovery {
+            info!(run = %order.run_id, "the run that lost control ended; the recovery starts");
+            self.start(order).await;
+            return;
+        }
+        warn!(run = %order.run_id, "the run that lost control ended before a hand-back");
+        self.lane.on_progress(&RunProgress {
+            ended: true,
+            ended_because: Some(
+                "the run that lost control ended before control was handed back; propose the work again",
+            ),
+            ..RunProgress::default()
+        });
+    }
 }
