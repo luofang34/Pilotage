@@ -9,7 +9,7 @@ use wire::MissionLaneState as State;
 use wire::mission_intent::Action;
 
 use super::*;
-use crate::lane::{RunExecution, RunOrder};
+use crate::lane::{LaneReply, RunExecution, RunOrder};
 
 const EXPIRY: u64 = NOW + 3_600_000;
 
@@ -166,4 +166,99 @@ fn an_expiry_way_home_switches_at_once_while_control_is_lost() {
         home.recovery,
         "the host may start it once the lease is free"
     );
+}
+
+/// A bound around the survey's lines that leaves out its launch point.
+fn bound_without_launch() -> Vec<wire::GeoPoint> {
+    vec![
+        point(40.34560, -74.66060),
+        point(40.34560, -74.65870),
+        point(40.34840, -74.65870),
+        point(40.34840, -74.66060),
+    ]
+}
+
+/// The survey without its own way home: its plan never reaches the launch
+/// point, so only a recovery would fly there.
+fn ending_on_its_last_line() -> wire::MissionObjective {
+    let mut objective = objective();
+    if let Some(wire::mission_objective::Kind::Survey(survey)) = objective.kind.as_mut() {
+        survey.return_to_launch = false;
+    }
+    objective
+}
+
+/// Approves the proposal under the bound with `on_lost` and `on_expiry`.
+fn approve_bounded(
+    on_lost: wire::MissionControlLossPolicy,
+    on_expiry: wire::MissionExpiryPolicy,
+) -> LaneReply {
+    let mut lane = Lane::new(config());
+    let proposed = Action::Propose(ending_on_its_last_line());
+    let reply = lane.on_intent(&intent(proposed), &context("p"));
+    let digest = opened(&reply.receipt).expect("a proposal").digest;
+    let mut approved = approval(&digest, 120.0);
+    if let Some(envelope) = approved.envelope.as_mut() {
+        envelope.bound = bound_without_launch();
+        envelope.on_control_lost = on_lost as i32;
+        envelope.on_expiry = on_expiry as i32;
+    }
+    lane.on_intent(&intent(Action::Approve(approved)), &context("a"))
+}
+
+#[test]
+fn a_way_home_outside_the_approved_bound_is_refused_with_the_approval() {
+    use wire::MissionControlLossPolicy as Lost;
+    use wire::MissionExpiryPolicy as Expiry;
+    let work_only = approve_bounded(Lost::Hold, Expiry::Hold);
+    assert!(accepted(&work_only), "{}", work_only.receipt.reason);
+    for (on_lost, on_expiry) in [
+        (Lost::ReturnHome, Expiry::Hold),
+        (Lost::Hold, Expiry::ReturnHome),
+    ] {
+        let refused = approve_bounded(on_lost, on_expiry);
+        assert!(!accepted(&refused), "{on_lost:?} {on_expiry:?}");
+        assert!(
+            refused.receipt.reason.contains("way home is refused")
+                && refused.receipt.reason.contains("leaves the approved bound"),
+            "{}",
+            refused.receipt.reason
+        );
+    }
+}
+
+/// Narrows the admitted approval's bound so that the launch point lies
+/// outside it, as an approval kept from before the way home was checked.
+fn narrow_to_the_work(lane: &mut Lane) {
+    if let Some(envelope) = lane.approval.as_mut().and_then(|a| a.envelope.as_mut()) {
+        envelope.bound = bound_without_launch();
+    }
+}
+
+#[test]
+fn a_lost_control_recovery_outside_the_bound_does_not_start() {
+    let (mut lane, _) = running_under(
+        wire::MissionControlLossPolicy::ReturnHome,
+        wire::MissionExpiryPolicy::Hold,
+    );
+    narrow_to_the_work(&mut lane);
+    assert_eq!(lane.on_progress(&lost(&lane, 21, true)), None);
+    assert_eq!(lane.state(), State::Running);
+    assert!(lane.status().successor.is_none());
+    let detail = lane.status().detail;
+    assert!(detail.contains("way home is refused"), "{detail}");
+}
+
+#[test]
+fn an_expiry_way_home_outside_the_bound_holds_instead() {
+    let (mut lane, _) = running_under(
+        wire::MissionControlLossPolicy::Hold,
+        wire::MissionExpiryPolicy::ReturnHome,
+    );
+    narrow_to_the_work(&mut lane);
+    assert_eq!(lane.on_clock(EXPIRY), Some(LaneEffect::Hold));
+    assert!(lane.status().successor.is_none());
+    assert_eq!(lane.status().holds, [Reason::ApprovalExpired as i32]);
+    let detail = lane.status().detail;
+    assert!(detail.contains("way home is refused"), "{detail}");
 }

@@ -39,11 +39,18 @@ impl Lane {
         // A plan of operations has no way home: it holds before its next
         // operation, as for a hold on expiry.
         let flies = self.proposal.as_ref().is_some_and(compile::Compiled::flies);
-        if policy == wire::MissionExpiryPolicy::ReturnHome && flies {
-            return self.recover_home();
-        }
         self.detail =
             "the approval expired; the run holds until its plan is approved again".to_owned();
+        if policy == wire::MissionExpiryPolicy::ReturnHome && flies {
+            match self.recover_home() {
+                Ok(effect) => return effect,
+                Err(refusal) => {
+                    self.detail = format!(
+                        "the approval expired; the way home is refused, so the run holds until its plan is approved again: {refusal}"
+                    );
+                }
+            }
+        }
         self.add_hold(wire::MissionHoldReason::ApprovalExpired);
         if self.state == State::Running {
             self.state = State::HoldRequested;
@@ -71,12 +78,24 @@ impl Lane {
     /// The return home an expired approval names: a successor that ends
     /// after the line in progress, admitted under the expired approval only
     /// for that recovery.
-    fn recover_home(&mut self) -> Option<LaneEffect> {
-        let current = self.proposal.as_ref()?;
-        let run = self.run.as_ref()?;
+    fn recover_home(&mut self) -> Result<Option<LaneEffect>, String> {
+        let (Some(current), Some(run), Some(approval)) = (
+            self.proposal.as_ref(),
+            self.run.as_ref(),
+            self.approval.clone(),
+        ) else {
+            return Ok(None);
+        };
         let flown = run.flown_lines();
         let fresh_id = format!("{}-expired", run.run_id());
         let mut compiled = compile::home(current, fresh_id);
+        // The lane starts this recovery on its own, so it flies only inside
+        // the envelope the expired approval gave.
+        let envelope = approval
+            .envelope
+            .as_ref()
+            .ok_or("the approval has no adaptation envelope")?;
+        approval::within(&compiled, envelope)?;
         self.revisions = self.revisions.wrapping_add(1);
         compile::succeed(
             &mut compiled,
@@ -86,7 +105,7 @@ impl Lane {
         );
         let delegated = wire::MissionApproval {
             proposal_digest: compiled.proposal.digest.clone(),
-            ..self.approval.clone()?
+            ..approval
         };
         self.successor = Some(Successor {
             compiled,
@@ -100,6 +119,6 @@ impl Lane {
         });
         self.detail =
             "the approval expired; the run returns home after the line in progress".to_owned();
-        self.admit_successor(delegated, Basis::ExpiryRecovery)
+        Ok(self.admit_successor(delegated, Basis::ExpiryRecovery))
     }
 }
