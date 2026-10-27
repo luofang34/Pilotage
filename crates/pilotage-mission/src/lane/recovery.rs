@@ -28,6 +28,21 @@ impl Lane {
         matches!(self.execution, Some(RunExecution::ControlLost { .. }))
     }
 
+    /// Takes what the run in progress does now, apart from its progress:
+    /// a run that waits to replace one that lost control learns this way
+    /// that the taker's lease ended. Returns the recovery when it applies.
+    pub fn on_execution(&mut self, execution: RunExecution) -> Option<LaneEffect> {
+        let was_freed = self.control_freed();
+        if self.execution != Some(execution) {
+            self.execution = Some(execution);
+            self.changed = true;
+        }
+        if was_freed {
+            return None;
+        }
+        self.recover_from_lost_control()
+    }
+
     /// Applies the approval's recovery for a lost control: the way home,
     /// when the approval is still valid and names it, and the plan flies.
     /// A recovery that loses control in its turn starts again from where the

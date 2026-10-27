@@ -317,13 +317,21 @@ impl LaneTask {
         let status = run.status.borrow().clone();
         let finished = run.handle.is_finished();
         if self.after_hand_back.is_some() {
-            // The replaced run's progress is not its successor's. Once a
-            // person handed control back to it, the successor starts.
-            if !status.awaiting_hand_back
+            // The replaced run's progress is not its successor's, but whether
+            // its taker's lease ended is: the approval's recovery replaces a
+            // waiting run of work.
+            if let Some(effect) = self.lane.on_execution(execution(&status)) {
+                self.after_hand_back = None;
+                self.apply(effect).await;
+                return;
+            }
+            let recovery = self.after_hand_back.as_ref().is_some_and(|o| o.recovery);
+            let starts = !status.awaiting_hand_back || (recovery && status.control_freed);
+            if starts
                 && !finished
                 && let Some(order) = self.after_hand_back.take()
             {
-                info!(run = %order.run_id, "control was handed back; the waiting run starts");
+                info!(run = %order.run_id, "control was handed back or freed; the waiting run starts");
                 self.apply(LaneEffect::Start(order)).await;
             }
             return;
@@ -427,6 +435,11 @@ fn execution(status: &AutomationStatus) -> RunExecution {
         RunExecution::Stopped
     } else if status.awaiting_launch {
         RunExecution::AwaitingLaunch
+    } else if status.awaiting_hand_back {
+        RunExecution::ControlLost {
+            holder: status.lease_holder,
+            freed: status.control_freed,
+        }
     } else if status.held {
         RunExecution::LeaseHeldElsewhere(status.lease_holder)
     } else if status.operator_held {

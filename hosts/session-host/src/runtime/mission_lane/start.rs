@@ -1,5 +1,7 @@
 //! Starting a lane's run: only once the journal holds it, and only once a
-//! person handed control back to a run that lost its lease.
+//! person handed control back to a run that lost its lease. A recovery, which
+//! only returns home, may start once the taker's lease ended without a
+//! hand-back; it never starts while a person holds the lease.
 
 use super::*;
 
@@ -13,11 +15,11 @@ impl LaneTask {
             self.unrecorded = Some(order);
             return;
         }
-        if self
-            .run
-            .as_ref()
-            .is_some_and(|run| run.status.borrow().awaiting_hand_back)
-        {
+        let waits = self.run.as_ref().is_some_and(|run| {
+            let status = run.status.borrow();
+            status.awaiting_hand_back && !(order.recovery && status.control_freed)
+        });
+        if waits {
             warn!(run = %order.run_id, "the run waits for a hand-back to the run it replaces");
             self.after_hand_back = Some(order);
             return;
