@@ -390,3 +390,58 @@ fn an_expiry_way_home_waits_for_the_operator_and_starts_when_they_leave() {
         rig.shutdown().await;
     });
 }
+
+#[test]
+fn a_hand_back_to_a_replaced_run_does_not_fly_its_old_plan() {
+    runtime().block_on(async {
+        let mut rig = rig();
+        rig.flying(wire::MissionControlLossPolicy::Hold).await;
+        let mut operator = Operator::connect(&rig, OPERATOR).await;
+        let mission = operator.take_control().await;
+        rig.until("the mission to lose control", awaiting_hand_back)
+            .await;
+        let runs = rig.task.runs;
+        let effect = rig
+            .task
+            .lane
+            .on_clock(unix_now_ms() + 2 * HOUR_MS)
+            .expect("the expiry names the way home");
+        rig.task.apply(effect).await;
+        assert!(rig.task.after_hand_back.is_some(), "the way home waits");
+        operator.hand_back(mission).await;
+        // Between the hand-back and the lane's next look, the replaced run
+        // holds the lease and flies nothing of its old plan.
+        let mut status = rig
+            .task
+            .run
+            .as_ref()
+            .expect("the replaced run")
+            .status
+            .clone();
+        tokio::time::timeout(PHASE, status.wait_for(|s| !s.awaiting_hand_back))
+            .await
+            .expect("the hand-back arrives")
+            .expect("the run reports");
+        tokio::time::sleep(PROGRESS_INTERVAL).await;
+        let replaced = rig.run_status();
+        assert!(replaced.lease_generation.is_some(), "{replaced:?}");
+        assert_ne!(
+            replaced.mission_state,
+            Some(pilotage_mission::MissionState::Enroute),
+            "the replaced run flies its old plan: {replaced:?}"
+        );
+        rig.until("the way home to start", |task| task.runs != runs)
+            .await;
+        rig.until("the way home to end", |task| {
+            task.lane.state() != State::Running
+        })
+        .await;
+        assert_eq!(
+            rig.task.lane.state(),
+            State::Complete,
+            "{}",
+            rig.task.lane.status().detail
+        );
+        rig.shutdown().await;
+    });
+}
