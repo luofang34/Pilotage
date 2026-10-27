@@ -365,6 +365,7 @@ pub(super) fn team_status(team: &TeamLane) -> wire::MissionStatus {
         .collect::<Vec<_>>()
         .join(", ");
     let holds = hold_reasons(team, state);
+    let envelope = team.approval.as_ref().and_then(|a| a.envelope.as_ref());
     wire::MissionStatus {
         lane: team.config.name.clone(),
         state: state as i32,
@@ -396,6 +397,8 @@ pub(super) fn team_status(team: &TeamLane) -> wire::MissionStatus {
             lease_holder: 0,
         }),
         approvals_needed: team.approval_needs(&holds),
+        on_control_lost: envelope.map_or(0, |e| e.on_control_lost),
+        on_expiry: envelope.map_or(0, |e| e.on_expiry),
         holds,
         released: Vec::new(),
         handovers: team.handovers(),
