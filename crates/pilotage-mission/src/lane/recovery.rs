@@ -58,20 +58,23 @@ impl Lane {
             return None;
         }
         let approval = self.approval.as_ref()?;
-        super::target::still_valid(approval, self.clock_unix_ms).ok()?;
-        let policy = approval
-            .envelope
-            .as_ref()
-            .map_or(wire::MissionControlLossPolicy::Unspecified, |e| {
-                e.on_control_lost()
-            });
-        if policy != wire::MissionControlLossPolicy::ReturnHome {
+        let envelope = super::target::still_valid(approval, self.clock_unix_ms).ok()?;
+        if envelope.on_control_lost() != wire::MissionControlLossPolicy::ReturnHome {
             return None;
         }
         let current = self.proposal.as_ref().filter(|c| c.flies())?;
         let run = self.run.as_ref()?;
         let flown = run.flown_lines();
         let mut compiled = compile::home(current, format!("{}-recovered", run.run_id()));
+        // The lane starts this recovery on its own, so it flies only inside
+        // the envelope the approval gave.
+        if let Err(refusal) = super::approval::within(&compiled, envelope) {
+            self.detail = format!(
+                "control was lost and not handed back; the way home is refused and the run waits for a hand-back: {refusal}"
+            );
+            self.changed = true;
+            return None;
+        }
         self.revisions = self.revisions.wrapping_add(1);
         compile::succeed(
             &mut compiled,

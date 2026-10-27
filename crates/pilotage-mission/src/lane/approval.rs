@@ -4,7 +4,7 @@
 use pilotage_protocol::wire;
 
 use super::LaneConfig;
-use super::compile::Compiled;
+use super::compile::{self, Compiled};
 use super::target::valid_approval;
 
 /// Height a plan may exceed an envelope by through rounding, metres.
@@ -30,6 +30,39 @@ pub(super) fn admit(
                 .to_owned(),
         );
     }
+    within(compiled, envelope)?;
+    // The way home a recovery would fly is approved with the plan, inside
+    // the same envelope: a recovery never needs a wider area than the work.
+    if returns_home {
+        within(&compile::home(compiled, String::new()), envelope)
+            .map_err(|refusal| format!("the way home is refused: {refusal}"))?;
+    }
+    let energy_wh = compiled
+        .proposal
+        .estimates
+        .as_ref()
+        .map_or(0.0, |e| e.energy_wh);
+    if let Some(usable_wh) = lane
+        .usable_energy_wh
+        .filter(|wh| *wh > 0.0 && energy_wh > 0.0)
+    {
+        let allowed = usable_wh * (1.0 - envelope.min_reserve_fraction.clamp(0.0, 1.0));
+        if energy_wh > allowed {
+            return Err(format!(
+                "the plan needs {energy_wh:.1} Wh; the reserve leaves {allowed:.1} Wh"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Checks that `compiled` stays inside `envelope`'s height and bound. A
+/// recovery the lane starts on its own passes the same check before it
+/// flies.
+pub(super) fn within(
+    compiled: &Compiled,
+    envelope: &wire::AdaptationEnvelope,
+) -> Result<(), String> {
     if compiled.height_m > envelope.max_height_m + HEIGHT_TOLERANCE_M {
         return Err(format!(
             "the plan flies at {:.1} m; the envelope allows {:.1} m",
@@ -47,22 +80,6 @@ pub(super) fn admit(
             return Err(format!(
                 "the plan leaves the approved bound at {:.6}, {:.6}",
                 point.latitude_deg, point.longitude_deg
-            ));
-        }
-    }
-    let energy_wh = compiled
-        .proposal
-        .estimates
-        .as_ref()
-        .map_or(0.0, |e| e.energy_wh);
-    if let Some(usable_wh) = lane
-        .usable_energy_wh
-        .filter(|wh| *wh > 0.0 && energy_wh > 0.0)
-    {
-        let allowed = usable_wh * (1.0 - envelope.min_reserve_fraction.clamp(0.0, 1.0));
-        if energy_wh > allowed {
-            return Err(format!(
-                "the plan needs {energy_wh:.1} Wh; the reserve leaves {allowed:.1} Wh"
             ));
         }
     }
