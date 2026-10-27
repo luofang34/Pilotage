@@ -401,7 +401,11 @@ limits. A revocation of the run's own lease, with no taker, is a stop and
 starts no recovery. After the approval expires, only its `on_expiry`
 recovery applies. A recovery run flies a home-only plan and never runs the
 work again. Admission refuses a recovery that the plan cannot fly: a plan
-of operations has no way home. When the link between the host and the
+of operations has no way home, and a way home that leaves the approval's
+envelope is not approved with the work. Before a recovery that the lane
+starts on its own flies, the lane checks it against that envelope again; a
+recovery that the envelope does not cover does not start, and the run
+holds. When the link between the host and the
 vehicle fails, the host can do nothing, and the vehicle-local fallback
 that its adapter advertises applies. For the DJI adapter, that fallback
 is `Neutralize`, which stops software motion and guarantees neither a
