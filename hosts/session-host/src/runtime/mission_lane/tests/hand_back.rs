@@ -170,18 +170,23 @@ async fn waits_then_starts(
     assert_eq!(task.runs, runs, "no fresh run asks for the lease");
     task.on_progress().await;
     tokio::task::yield_now().await;
-    assert!(
-        seen.lock().expect("the log").is_empty(),
-        "the run that waits for the hand-back is not stopped"
+    assert_eq!(
+        seen.lock().expect("the log").as_slice(),
+        [RunControl::Hold],
+        "the run that waits for the hand-back is held, not stopped"
     );
     assert!(task.after_hand_back.is_some(), "still no hand-back");
+    // A resume of the lane does not resume the replaced run's plan.
+    task.apply(LaneEffect::Resume).await;
+    tokio::task::yield_now().await;
+    assert_eq!(seen.lock().expect("the log").as_slice(), [RunControl::Hold]);
     hand_back(status);
     task.on_progress().await;
     assert!(task.after_hand_back.is_none(), "the replacement started");
     assert_eq!(task.runs, runs.wrapping_add(1));
     assert_eq!(
         seen.lock().expect("the log").as_slice(),
-        [RunControl::Abort],
+        [RunControl::Hold, RunControl::Abort],
         "the replaced run is stopped only after the hand-back"
     );
 }

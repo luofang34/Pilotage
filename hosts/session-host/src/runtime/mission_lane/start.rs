@@ -21,6 +21,11 @@ impl LaneTask {
         });
         if waits {
             warn!(run = %order.run_id, "the run waits for a hand-back to the run it replaces");
+            // The replaced run takes the hand-back only to pass control on:
+            // it holds, so its own plan never flies again.
+            if let Some(run) = self.run.as_ref() {
+                run.controls.send(RunControl::Hold).await.ok();
+            }
             self.after_hand_back = Some(order);
             return;
         }
