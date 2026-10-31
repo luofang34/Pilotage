@@ -54,7 +54,7 @@ pub fn surface_normal_ecef(
 }
 
 /// A terrain model JSBSim can ask during a step.
-pub trait GroundModel {
+pub trait GroundModel: Send {
     /// The ground under a geodetic latitude and longitude, radians, or
     /// `None` when the model has no answer.
     fn height(&self, lat_rad: f64, lon_rad: f64) -> Option<GroundAnswer>;

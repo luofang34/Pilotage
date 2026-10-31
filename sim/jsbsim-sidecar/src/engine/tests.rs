@@ -1,16 +1,23 @@
-//! The engine over the real JSBSim library: loading, properties, and
-//! the ground callback.
+//! Every built engine over a real JSBSim: loading, properties, and the
+//! ground callback.
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
 use std::path::PathBuf;
 
-use super::{Engine, EngineError, ModelPaths};
+use super::{Engine, EngineError, EngineKind, ModelPaths};
 use crate::ground::{GroundAnswer, GroundModel};
+
+/// The engines this build has.
+const ENGINES: &[EngineKind] = &[
+    EngineKind::Rust,
+    #[cfg(feature = "cpp")]
+    EngineKind::Cpp,
+];
 
 fn x500() -> ModelPaths {
     ModelPaths {
-        root: PathBuf::from(env!("PILOTAGE_JSBSIM_ROOT")),
+        root: option_env!("PILOTAGE_JSBSIM_ROOT").map(PathBuf::from),
         aircraft_dir: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("aircraft/x500"),
         model: "x500".to_owned(),
     }
@@ -60,88 +67,161 @@ fn start(engine: &mut Engine, ground: f64) {
 fn a_missing_model_is_a_load_error_naming_it() {
     let mut paths = x500();
     paths.model = "no-such-aircraft".to_owned();
-    match Engine::load(&paths, 0.004) {
-        Err(EngineError::Load { model, .. }) => assert_eq!(model, "no-such-aircraft"),
-        Err(other) => panic!("expected a load error, got {other}"),
-        Ok(_) => panic!("a missing model loaded"),
+    for &kind in ENGINES {
+        match Engine::load(kind, &paths, 0.004) {
+            Err(EngineError::Load { model, .. }) => assert_eq!(model, "no-such-aircraft"),
+            Err(other) => panic!("{kind:?}: expected a load error, got {other}"),
+            Ok(_) => panic!("{kind:?}: a missing model loaded"),
+        }
     }
 }
 
 #[test]
 fn an_unknown_property_is_refused_and_an_input_is_created() {
-    let mut engine = Engine::load(&x500(), 0.004).unwrap();
-    assert!(matches!(
-        engine.property("no/such-property"),
-        Err(EngineError::NoProperty { .. })
-    ));
-    let input = engine.input("pilotage/test-input").unwrap();
-    engine.set(input, 4.25);
-    assert_eq!(engine.get(input), 4.25);
-    assert!(matches!(
-        engine.property("bad\0name"),
-        Err(EngineError::Nul { .. })
-    ));
+    for &kind in ENGINES {
+        let mut engine = Engine::load(kind, &x500(), 0.004).unwrap();
+        assert!(matches!(
+            engine.property("no/such-property"),
+            Err(EngineError::NoProperty { .. })
+        ));
+        let input = engine.input("pilotage/test-input").unwrap();
+        engine.set(input, 4.25);
+        assert_eq!(engine.get(input), 4.25);
+    }
+}
+
+/// Resolving an input must not write it: a property that runs code when
+/// written, the ground trim, would run at resolve time.
+#[test]
+fn resolving_an_input_runs_none_of_its_code() {
+    for &kind in ENGINES {
+        let mut engine = Engine::load(kind, &x500(), 0.004).unwrap();
+        start(&mut engine, 10.0);
+        let agl = engine.property("position/h-agl-ft").unwrap();
+        let before = engine.get(agl);
+        engine.input("simulation/do_simple_trim").unwrap();
+        assert_eq!(engine.get(agl), before, "{kind:?}");
+    }
 }
 
 /// The x500 drops onto ground that only the callback knows about, and
 /// rests with its legs on it: the centre of gravity 0.12 m above.
 #[test]
 fn the_vehicle_rests_on_the_ground_the_callback_answers() {
-    for ground in [0.0, 312.5] {
-        let mut engine = Engine::load(&x500(), 0.004).unwrap();
-        start(&mut engine, ground);
-        settle(&mut engine, 3.0);
-        let altitude = engine.property("position/h-sl-meters").unwrap();
-        let height = engine.get(altitude) - ground;
-        assert!(
-            (height - 0.12).abs() < 0.02,
-            "rests {height} m above {ground} m"
-        );
-        let agl = engine.property("position/h-agl-ft").unwrap();
-        assert!((engine.get(agl) * 0.3048 - 0.12).abs() < 0.02);
+    for &kind in ENGINES {
+        for ground in [0.0, 312.5] {
+            let mut engine = Engine::load(kind, &x500(), 0.004).unwrap();
+            start(&mut engine, ground);
+            settle(&mut engine, 3.0);
+            let altitude = engine.property("position/h-sl-meters").unwrap();
+            let height = engine.get(altitude) - ground;
+            assert!(
+                (height - 0.12).abs() < 0.02,
+                "{kind:?}: rests {height} m above {ground} m"
+            );
+            let agl = engine.property("position/h-agl-ft").unwrap();
+            assert!((engine.get(agl) * 0.3048 - 0.12).abs() < 0.02);
+        }
     }
 }
 
 #[test]
 fn replacing_the_ground_moves_the_resting_height() {
-    let mut engine = Engine::load(&x500(), 0.004).unwrap();
-    start(&mut engine, 10.0);
-    settle(&mut engine, 2.0);
-    assert!(engine.replace_ground(Box::new(Flat(9.0))));
-    settle(&mut engine, 3.0);
-    let altitude = engine.property("position/h-sl-meters").unwrap();
-    assert!(
-        (engine.get(altitude) - 9.12).abs() < 0.02,
-        "{}",
-        engine.get(altitude)
-    );
+    for &kind in ENGINES {
+        let mut engine = Engine::load(kind, &x500(), 0.004).unwrap();
+        start(&mut engine, 10.0);
+        settle(&mut engine, 2.0);
+        assert!(engine.replace_ground(Box::new(Flat(9.0))));
+        settle(&mut engine, 3.0);
+        let altitude = engine.property("position/h-sl-meters").unwrap();
+        assert!(
+            (engine.get(altitude) - 9.12).abs() < 0.02,
+            "{kind:?}: {}",
+            engine.get(altitude)
+        );
+    }
 }
 
-/// JSBSim keeps process-wide state that loading a model writes: the
-/// first `Element` built fills the unit-conversion table while other
-/// threads already read it. Engines loaded and flown on many threads at
-/// once must not race on it. Without the engine's own serialisation a run
-/// of this test crashes (SIGSEGV) or hangs in a few percent of processes,
-/// since the race is on the process's first model load.
+/// A ground that loses its answer leaves the vehicle on the last one.
+#[test]
+fn a_ground_without_an_answer_keeps_the_last_height() {
+    struct Nowhere;
+    impl GroundModel for Nowhere {
+        fn height(&self, _: f64, _: f64) -> Option<GroundAnswer> {
+            None
+        }
+    }
+    for &kind in ENGINES {
+        let mut engine = Engine::load(kind, &x500(), 0.004).unwrap();
+        start(&mut engine, 10.0);
+        settle(&mut engine, 2.0);
+        assert!(engine.replace_ground(Box::new(Nowhere)));
+        settle(&mut engine, 2.0);
+        let altitude = engine.property("position/h-sl-meters").unwrap();
+        assert!(
+            (engine.get(altitude) - 10.12).abs() < 0.02,
+            "{kind:?}: {}",
+            engine.get(altitude)
+        );
+    }
+}
+
+/// Engines loaded and flown on many threads at once must stay
+/// independent. JSBSim's C++ library keeps process-wide state that loading
+/// a model writes: the first `Element` built fills the unit-conversion
+/// table while other threads already read it. Without that engine's own
+/// serialisation a run of this test crashes (SIGSEGV) or hangs in a few
+/// percent of processes, since the race is on the process's first model
+/// load.
 #[test]
 fn engines_load_and_fly_on_many_threads_at_once() {
     const THREADS: usize = 8;
     const ROUNDS: usize = 4;
-    let barrier = std::sync::Arc::new(std::sync::Barrier::new(THREADS));
-    let workers: Vec<_> = (0..THREADS)
-        .map(|_| {
-            let barrier = std::sync::Arc::clone(&barrier);
-            std::thread::spawn(move || {
-                for _ in 0..ROUNDS {
-                    barrier.wait();
-                    let mut engine = Engine::load(&x500(), 0.004).expect("the x500 loads");
-                    start(&mut engine, 10.0);
-                    settle(&mut engine, 0.2);
-                }
+    for &kind in ENGINES {
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(THREADS));
+        let workers: Vec<_> = (0..THREADS)
+            .map(|_| {
+                let barrier = std::sync::Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    for _ in 0..ROUNDS {
+                        barrier.wait();
+                        let mut engine =
+                            Engine::load(kind, &x500(), 0.004).expect("the x500 loads");
+                        start(&mut engine, 10.0);
+                        settle(&mut engine, 0.2);
+                    }
+                })
             })
-        })
-        .collect();
-    for worker in workers {
-        worker.join().expect("an engine thread finished");
+            .collect();
+        for worker in workers {
+            worker.join().expect("an engine thread finished");
+        }
     }
+}
+
+#[cfg(feature = "cpp")]
+#[test]
+fn a_nul_in_a_name_is_refused_by_the_cpp_engine() {
+    let mut engine = Engine::load(EngineKind::Cpp, &x500(), 0.004).unwrap();
+    assert!(matches!(
+        engine.property("bad\0name"),
+        Err(EngineError::Nul { .. })
+    ));
+}
+
+#[cfg(not(feature = "cpp"))]
+#[test]
+fn a_build_without_the_cpp_feature_says_so() {
+    assert!(matches!(
+        Engine::load(EngineKind::Cpp, &x500(), 0.004),
+        Err(EngineError::CppNotBuilt)
+    ));
+}
+
+/// A bundled model needs no JSBSim checkout on the Rust engine.
+#[test]
+fn the_rust_engine_needs_no_checkout() {
+    let mut paths = x500();
+    paths.root = None;
+    Engine::load(EngineKind::Rust, &paths, 0.004).unwrap();
 }

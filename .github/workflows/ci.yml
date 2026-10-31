@@ -159,9 +159,9 @@ jobs:
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
 
-      # The production lint guard lints the JSBSim sidecar, which links
-      # JSBSim's C++ library, an external checkout at the release the
-      # build script pins; the cache key follows the pin.
+      # The production lint guard lints the JSBSim sidecar's `cpp` feature,
+      # which links JSBSim's C++ library, an external checkout at the
+      # release the build script pins; the cache key follows the pin.
       - name: Cache the JSBSim build
         uses: actions/cache@v6
         with:

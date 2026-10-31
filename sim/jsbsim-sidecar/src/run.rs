@@ -50,6 +50,7 @@ pub fn run_blocking(args: &Args) -> Result<(), RunError> {
         port: args.port,
         vehicle: Vehicle {
             aircraft: args.aircraft,
+            engine: args.engine,
             paths: ModelPaths {
                 root: args.jsbsim_root.clone(),
                 aircraft_dir,

@@ -4,7 +4,9 @@ name: JSBSim sidecar
 # only, so Aviate's CI can build it from a checkout of this repository.
 # This job proves that: no deploy keys, no checkout credential, and a
 # fresh CARGO_HOME, so a private git dependency anywhere in the
-# sidecar's graph fails the fetch.
+# sidecar's graph fails the fetch. The default build needs no JSBSim
+# checkout at all; the `cpp` leg adds JSBSim's C++ library and flies both
+# engines against each other.
 on:
   push:
     branches: [main]
@@ -46,6 +48,23 @@ jobs:
           echo "${install_dir}/bin" >> "${GITHUB_PATH}"
           "${install_dir}/bin/protoc" --version
 
+      - name: Build and test the sidecar alone, without credentials or JSBSim
+        working-directory: sim/jsbsim-sidecar
+        env:
+          GIT_CONFIG_NOSYSTEM: "1"
+          GIT_TERMINAL_PROMPT: "0"
+          RUSTDOCFLAGS: -D missing_docs -D rustdoc::broken_intra_doc_links
+        run: |
+          export CARGO_HOME="${RUNNER_TEMP}/cargo-home"
+          export GIT_CONFIG_GLOBAL="${RUNNER_TEMP}/empty-gitconfig"
+          : > "${GIT_CONFIG_GLOBAL}"
+          test ! -e ~/jsbsim
+          cargo fmt --check
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked --all-targets
+          cargo doc --locked --no-deps
+          cargo build --locked --release
+
       # The cache key follows the release the build script pins.
       - name: Cache the JSBSim build
         uses: actions/cache@v6
@@ -56,18 +75,13 @@ jobs:
       - name: Build JSBSim
         run: bash scripts/build-jsbsim.sh
 
-      - name: Build and test the sidecar alone, without credentials
+      - name: Test the C++ engine, and both engines against each other
         working-directory: sim/jsbsim-sidecar
         env:
           GIT_CONFIG_NOSYSTEM: "1"
           GIT_TERMINAL_PROMPT: "0"
-          RUSTDOCFLAGS: -D missing_docs -D rustdoc::broken_intra_doc_links
         run: |
           export CARGO_HOME="${RUNNER_TEMP}/cargo-home"
           export GIT_CONFIG_GLOBAL="${RUNNER_TEMP}/empty-gitconfig"
-          : > "${GIT_CONFIG_GLOBAL}"
-          cargo fmt --check
-          cargo clippy --locked --all-targets -- -D warnings
-          cargo test --locked --all-targets
-          cargo doc --locked --no-deps
-          cargo build --locked --release
+          cargo clippy --locked --all-targets --features cpp -- -D warnings
+          cargo test --locked --all-targets --features cpp

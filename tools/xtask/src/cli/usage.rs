@@ -123,7 +123,9 @@ commands:
   build-jsbsim
       Clone JSBSim v1.3.3 into $JSBSIM_DIR (default: ~/jsbsim) when it
       is absent, then build and install its static library into
-      $JSBSIM_DIR/install with CMake. The JSBSim sidecar links it.
+      $JSBSIM_DIR/install with CMake. Only JSBSIM_ENGINE=cpp needs it:
+      px4-jsbsim and aviate-jsbsim sessions fly the pure-Rust port unless
+      JSBSIM_ENGINE=cpp chooses this C++ library.
 
   build-sim-terrain
       Fetch AWS Terrain Tiles around N51 into target/sim-terrain/n51.mbtiles,

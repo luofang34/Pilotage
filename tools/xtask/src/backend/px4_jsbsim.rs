@@ -16,7 +16,7 @@ use super::{Placement, SessionContext, SimBackend, Stage};
 use crate::cli::Profile;
 use crate::conflicts::{Claim, Remedy};
 use crate::error::XtaskError;
-use crate::jsbsim::{JsbsimInstall, jsbsim_dir};
+use crate::jsbsim::SidecarEngine;
 use crate::process::ProcessSpec;
 use crate::readiness::{Readiness, stage_log};
 
@@ -93,8 +93,8 @@ impl SimBackend for Px4Jsbsim {
     }
 
     fn plan(&self, ctx: &SessionContext) -> Result<Vec<Stage>, XtaskError> {
-        let jsbsim = jsbsim_dir()?;
-        plan_with_dirs(ctx, &px4_dir(&ctx.repo_root), &jsbsim, self.model)
+        let engine = SidecarEngine::select()?;
+        plan_with_dirs(ctx, &px4_dir(&ctx.repo_root), &engine, self.model)
     }
 
     fn spawn(
@@ -148,8 +148,12 @@ impl SimBackend for Px4Jsbsim {
 
 /// Builds the sidecar, which builds outside the workspace.
 pub(super) fn build_sidecar(ctx: &SessionContext) -> Result<(), XtaskError> {
+    let mut args = vec!["build", "--release", "--manifest-path", SIDECAR_MANIFEST];
+    if SidecarEngine::cpp_selected()? {
+        args.extend(["--features", "cpp"]);
+    }
     let status = std::process::Command::new("cargo")
-        .args(["build", "--release", "--manifest-path", SIDECAR_MANIFEST])
+        .args(args)
         .current_dir(&ctx.repo_root)
         .status()
         .map_err(|source| XtaskError::Io {
@@ -209,7 +213,7 @@ fn set_flag(args: &mut [String], flag: &str, value: String) -> Result<(), XtaskE
 fn plan_with_dirs(
     ctx: &SessionContext,
     px4: &Path,
-    jsbsim: &Path,
+    engine: &SidecarEngine,
     model: JsbsimModel,
 ) -> Result<Vec<Stage>, XtaskError> {
     if ctx.profile != Profile::Simulation {
@@ -236,9 +240,8 @@ fn plan_with_dirs(
             hint: "build it: make px4_sitl in the PX4-Autopilot checkout (or set PX4_DIR)",
         });
     }
-    let install = JsbsimInstall::validate(jsbsim)?;
     Ok(vec![
-        sidecar_stage(ctx, &install, model, model.gimbal())?,
+        sidecar_stage(ctx, engine, model, model.gimbal())?,
         px4_stage(ctx, px4, &binary, model)?,
     ])
 }
@@ -247,7 +250,7 @@ fn plan_with_dirs(
 /// gimbal `gimbal` when the flight controller points one.
 pub(super) fn sidecar_stage(
     ctx: &SessionContext,
-    install: &JsbsimInstall,
+    engine: &SidecarEngine,
     model: JsbsimModel,
     gimbal: Option<vehicle::GimbalTravel>,
 ) -> Result<Stage, XtaskError> {
@@ -256,11 +259,10 @@ pub(super) fn sidecar_stage(
         simulator_port(ctx.instance).to_string(),
         "--aircraft".to_owned(),
         model.sidecar_aircraft().to_owned(),
-        "--jsbsim-root".to_owned(),
-        install.root.display().to_string(),
         "--truth-addr".to_owned(),
         format!("127.0.0.1:{}", truth_port(ctx.instance)),
     ];
+    args.extend(engine.sidecar_args());
     // The site's terrain archive when it is built; elsewhere, and without
     // it, the world stands on the site's stated elevation.
     let terrain = crate::sim_terrain::archive_path(&ctx.repo_root, crate::site::DEFAULT_SITE.name);

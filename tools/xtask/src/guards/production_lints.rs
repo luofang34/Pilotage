@@ -28,6 +28,8 @@ pub(crate) struct FfiCrate {
     pub(crate) workspace_package: Option<&'static str>,
     /// Its directory, relative to the repository root.
     pub(crate) dir: &'static str,
+    /// The feature that compiles its binding, if the binding is optional.
+    pub(crate) feature: Option<&'static str>,
     /// The one source file, relative to [`Self::dir`], that may hold
     /// unsafe code.
     pub(crate) unsafe_module: &'static str,
@@ -38,11 +40,13 @@ pub(crate) const FFI_CRATES: &[FfiCrate] = &[
     FfiCrate {
         workspace_package: None,
         dir: "sim/jsbsim-sidecar",
+        feature: Some("cpp"),
         unsafe_module: "src/engine/ffi.rs",
     },
     FfiCrate {
         workspace_package: Some("pilotage-dji-usb"),
         dir: "adapters/dji-usb",
+        feature: None,
         unsafe_module: "src/ffi.rs",
     },
 ];
@@ -107,6 +111,9 @@ pub(crate) fn clippy_invocations(ffi: &[FfiCrate]) -> Vec<Vec<String>> {
             "--manifest-path".to_owned(),
             format!("{}/Cargo.toml", krate.dir),
         ];
+        if let Some(feature) = krate.feature {
+            args.extend(["--features".to_owned(), feature.to_owned()]);
+        }
         args.extend(targets.clone());
         args.extend(lint_args("-D"));
         invocations.push(args);
