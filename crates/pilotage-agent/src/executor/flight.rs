@@ -17,8 +17,6 @@ const CLIMB_CAPTURE_M: f64 = 0.5;
 /// Ground speed above which a vehicle inside the arrival radius is still
 /// passing through and is not at the fix, in metres per second.
 const ARRIVAL_SPEED_MPS: f64 = 0.5;
-/// Height at or below which the vehicle is on the ground.
-const GROUND_HEIGHT_M: f64 = 0.3;
 /// Height below which a vehicle that stopped descending is on the ground. It
 /// covers an estimate that does not read zero at touchdown.
 const SETTLED_BELOW_M: f64 = 1.5;
@@ -211,13 +209,19 @@ impl Executor {
         )
     }
 
+    /// The flight controller's landed detector decides when it reports one:
+    /// the disarm it will accept is its own judgement of the same thing. A
+    /// height is no substitute, because an estimate near the ground reads a
+    /// vehicle still in the air as down, and the vehicle then holds there
+    /// with the descent stopped. Without a report, touchdown is the descent
+    /// ending under a descent demand.
     fn touched_down(&mut self, state: &VehicleState, now_s: f64) -> bool {
+        if let Some(on_ground) = state.on_ground {
+            return on_ground;
+        }
         let Some(height) = state.height_m else {
             return true;
         };
-        if height <= GROUND_HEIGHT_M {
-            return true;
-        }
         let settled = height < SETTLED_BELOW_M && state.climb_mps.abs() < SETTLED_CLIMB_MPS;
         if !settled {
             self.settled_since_s = None;

@@ -4,7 +4,7 @@
 //! executor flies on the operational estimate. The verifier reads truth.
 
 use pilotage_agent::{TruthState, VehicleState, yaw_of_quaternion};
-use pilotage_protocol::wire;
+use pilotage_protocol::{LandedState, wire};
 
 /// `FcState.arm_state` value that the adapters publish for an armed vehicle.
 const ARM_STATE_ARMED: u32 = 2;
@@ -16,6 +16,13 @@ pub(crate) fn control_state(sample: &wire::TelemetrySample) -> Option<VehicleSta
         .fc_state
         .as_ref()
         .map(|fc| fc.arm_state == ARM_STATE_ARMED);
+    let on_ground = sample
+        .fc_state
+        .as_ref()
+        .and_then(|fc| fc.landed_state.as_ref())
+        // A landed state without a stamp has no provenance and is not used.
+        .filter(|landed| landed.stamp.is_some())
+        .and_then(|landed| on_ground_of(landed.state));
     if let Some(avionics) = sample.avionics.as_ref()
         && avionics.kinematics_stamp.is_some()
     {
@@ -36,6 +43,7 @@ pub(crate) fn control_state(sample: &wire::TelemetrySample) -> Option<VehicleSta
                 avionics.quat_z,
             ),
             armed,
+            on_ground,
         });
     }
     let pose = sample.pose.as_ref()?;
@@ -54,7 +62,17 @@ pub(crate) fn control_state(sample: &wire::TelemetrySample) -> Option<VehicleSta
         climb_mps: 0.0,
         yaw_rad: f64::from(pose.heading_rad),
         armed,
+        on_ground,
     })
+}
+
+/// Reads a landed state. An unknown state says nothing either way.
+fn on_ground_of(raw: i32) -> Option<bool> {
+    match LandedState::from_wire(raw) {
+        LandedState::OnGround => Some(true),
+        LandedState::InAir | LandedState::TakingOff | LandedState::Landing => Some(false),
+        LandedState::Unknown => None,
+    }
 }
 
 /// Reads truth. `planar_pose_is_truth` is the operator's declaration that the

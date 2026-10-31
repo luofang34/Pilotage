@@ -47,6 +47,7 @@ fn on_the_pad() -> VehicleState {
         climb_mps: 0.0,
         yaw_rad: 0.0,
         armed: Some(false),
+        on_ground: None,
     }
 }
 

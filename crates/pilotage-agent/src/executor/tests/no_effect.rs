@@ -1,7 +1,7 @@
 //! A directive that changes nothing is refused, and the phases that a hold,
 //! a landing or a return can end.
 
-use super::{LIMITS, Phase, airborne, direct, executor, state};
+use super::{LIMITS, Phase, airborne, direct, executor, state, touching};
 use crate::directive::{Arrival, Directive, HoldPoint, TurnDirection};
 use crate::model_port::Refusal;
 
@@ -36,16 +36,16 @@ fn a_return_to_base_during_the_disarm_does_not_relaunch() {
             .accept(&Directive::Land {}, Some(&here), 1.2)
             .is_ok()
     );
-    let down = state(0.0, 0.0, 0.2, true);
+    let down = touching(0.0, 0.0, 0.2, true);
     assert_eq!(executor.step(&down, 2.0).phase, Phase::Disarming);
     assert!(no_effect(executor.accept(
         &Directive::ReturnToBase {},
         Some(&down),
         2.1
     )));
-    let landed = executor.step(&state(0.0, 0.0, 0.2, false), 2.2);
+    let landed = executor.step(&touching(0.0, 0.0, 0.2, false), 2.2);
     assert_eq!(landed.phase, Phase::Landed);
-    let still = executor.step(&state(0.0, 0.0, 0.2, false), 2.3);
+    let still = executor.step(&touching(0.0, 0.0, 0.2, false), 2.3);
     assert_eq!(
         (still.phase, still.action),
         (Phase::Landed, None),
