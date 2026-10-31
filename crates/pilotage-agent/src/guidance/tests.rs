@@ -28,6 +28,7 @@ fn at_origin(yaw_rad: f64) -> VehicleState {
         climb_mps: 0.0,
         yaw_rad,
         armed: Some(true),
+        on_ground: None,
     }
 }
 

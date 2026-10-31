@@ -2,6 +2,7 @@
 
 #![allow(clippy::panic)]
 
+mod landing;
 mod no_effect;
 
 use super::{Discrete, Executor, FlightLimits, Phase};
@@ -45,6 +46,15 @@ fn state(north_m: f64, east_m: f64, height_m: f64, armed: bool) -> VehicleState 
         climb_mps: 0.0,
         yaw_rad: 0.0,
         armed: Some(armed),
+        on_ground: None,
+    }
+}
+
+/// A vehicle the flight controller's landed detector reads on the ground.
+fn touching(north_m: f64, east_m: f64, height_m: f64, armed: bool) -> VehicleState {
+    VehicleState {
+        on_ground: Some(true),
+        ..state(north_m, east_m, height_m, armed)
     }
 }
 
@@ -140,19 +150,19 @@ fn arrival_with_land_descends_then_disarms_on_the_ground() {
     assert!(down.demand.throttle < 0.0);
     assert_eq!(down.action, None, "no disarm in the air");
     assert_eq!(
-        executor.step(&state(14.8, 0.0, 0.2, true), 14.0).phase,
+        executor.step(&touching(14.8, 0.0, 0.2, true), 14.0).phase,
         Phase::Disarming
     );
     assert_eq!(
-        executor.step(&state(14.8, 0.0, 0.2, true), 14.1).action,
+        executor.step(&touching(14.8, 0.0, 0.2, true), 14.1).action,
         Some(Discrete::Disarm)
     );
     assert_eq!(
-        executor.step(&state(14.8, 0.0, 0.2, false), 14.5).phase,
+        executor.step(&touching(14.8, 0.0, 0.2, false), 14.5).phase,
         Phase::Landed
     );
     assert_eq!(
-        executor.step(&state(14.8, 0.0, 0.2, false), 15.0).action,
+        executor.step(&touching(14.8, 0.0, 0.2, false), 15.0).action,
         None
     );
 }
@@ -180,7 +190,7 @@ fn a_vehicle_that_offers_no_disarm_is_landed_at_touchdown() {
     executor.step(&state(0.0, 0.0, 0.0, true), 0.1);
     executor.step(&state(0.0, 0.0, 5.0, true), 1.0);
     executor.step(&state(14.8, 0.0, 5.0, true), 9.0);
-    let down = executor.step(&state(14.8, 0.0, 0.2, true), 14.0);
+    let down = executor.step(&touching(14.8, 0.0, 0.2, true), 14.0);
     assert_eq!((down.phase, down.action), (Phase::Landed, None));
 }
 
@@ -335,9 +345,9 @@ fn unable_flies_nothing() {
 fn a_directive_that_arrives_during_disarm_is_flown_after_it() {
     let mut executor = airborne(&direct("ALPHA", Arrival::Land));
     executor.step(&state(14.8, 0.0, 5.0, true), 9.0);
-    executor.step(&state(14.8, 0.0, 0.2, true), 14.0);
+    executor.step(&touching(14.8, 0.0, 0.2, true), 14.0);
     assert_eq!(executor.phase(), Phase::Disarming);
-    let down = state(14.8, 0.0, 0.2, false);
+    let down = touching(14.8, 0.0, 0.2, false);
     assert!(
         executor
             .accept(&direct("ALPHA", Arrival::Hold), Some(&down), 14.2)
