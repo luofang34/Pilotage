@@ -23,6 +23,9 @@ pub struct VehicleState {
     pub yaw_rad: f64,
     /// Armed state as the flight controller reports it, when it does.
     pub armed: Option<bool>,
+    /// Whether the flight controller's landed detector reads on the ground,
+    /// when it reports a state.
+    pub on_ground: Option<bool>,
 }
 
 /// Truth, for the verdict only.

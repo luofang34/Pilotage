@@ -147,6 +147,7 @@ impl AgentModule {
                 ARM_STATE_DISARMED => Some(false),
                 _ => None,
             },
+            on_ground: None,
         });
     }
 
