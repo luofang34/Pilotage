@@ -74,8 +74,10 @@ impl Px4Adapter {
     /// Periodic uplink upkeep at telemetry cadence. The fixed-wing
     /// takeoff handover needs the present height estimate.
     pub(super) fn maintain_flight_uplink(&mut self) {
+        let armed = self.arm.report().map(|report| report.armed);
         if let Some(uplink) = self.uplink.as_mut() {
             uplink.maintain();
+            uplink.observe_fc_armed(armed);
         }
         if self.fixed_wing.is_some() {
             let down_m = self.current_pose().map(|pose| pose.pos_ned_m[2]);

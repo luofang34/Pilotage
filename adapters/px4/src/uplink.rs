@@ -18,6 +18,7 @@ use tracing::{info, warn};
 
 pub(crate) mod clock;
 pub(crate) mod direct;
+mod disarm;
 pub(crate) mod failsafe;
 mod resume;
 use clock::UplinkClock;
@@ -69,6 +70,8 @@ enum ArmPhase {
     Warmup,
     /// OFFBOARD and arm have been commanded; stream continues.
     Commanded,
+    /// Disarm commanded; stream continues until the FC confirms it.
+    Disarming,
 }
 
 /// Whether a stick frame reached the PX4 setpoint queue.
@@ -356,30 +359,11 @@ impl Px4Uplink {
         } else {
             warn!(arm, result, "FC REFUSED the arm/disarm command");
         }
-        self.last_arm_ack = Some(FcCommandAck {
-            arm,
-            outcome: command_outcome(result),
-        });
-    }
-
-    /// Disarms and stops the setpoint stream.
-    pub fn send_disarm(&mut self) {
-        self.leave_direct();
-        let frame = encode_arm_command(
-            self.seq,
-            false,
-            self.expected_system_id,
-            self.expected_component_id,
-        );
-        self.send(&frame);
-        self.arm_phase = ArmPhase::Idle;
-        self.neutralized_generation = None;
-        self.resume_offboard_at = None;
-        self.warmup_since = None;
-        self.last_vel_ned = [0.0; 3];
-        self.last_sent_arm = Some(false);
-        self.last_arm_ack = None;
-        info!("disarm sent; setpoint stream stopped");
+        let outcome = command_outcome(result);
+        if !arm && outcome == CommandOutcome::Accepted {
+            self.finish_disarm();
+        }
+        self.last_arm_ack = Some(FcCommandAck { arm, outcome });
     }
 
     /// Converts one canonical stick frame (`[-1, 1]` roll/pitch/

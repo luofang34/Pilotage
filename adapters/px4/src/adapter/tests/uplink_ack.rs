@@ -10,8 +10,8 @@ use std::time::Duration;
 use pilotage_adapter_api::{CommandOutcome, FcCommandAck};
 use pilotage_mavlink::codec::encode_command_ack;
 
-use super::{fake_fc, uplink_to};
-use crate::uplink::Px4Uplink;
+use super::{fake_fc, received_kind, uplink_to};
+use crate::uplink::{Px4Uplink, StickFrameDisposition};
 
 /// Drains FC replies (one `maintain` per pass) until `condition` holds or
 /// a deadline lapses — loopback UDP delivery has no event to await.
@@ -101,4 +101,69 @@ fn an_fc_command_ack_pairs_with_the_latest_arm_or_disarm() {
             outcome: CommandOutcome::Accepted,
         })
     );
+}
+
+#[test]
+fn a_refused_disarm_keeps_the_stream_and_an_accepted_one_stops_it() {
+    let (fc, addr) = fake_fc();
+    let mut uplink = uplink_to(addr);
+    uplink.use_manual_clock();
+    uplink.begin_arm(0.0);
+    uplink.send_disarm();
+    let uplink_addr = recv_until_arm_command(&fc);
+
+    // PX4 answers a landing that outran its detector with a refusal.
+    let refused = encode_command_ack(0, 400, 4, 1, 1);
+    fc.send_to(&refused, uplink_addr).expect("ack send");
+    assert!(
+        drain_until(&mut uplink, |u| u.last_arm_ack().is_some()),
+        "the refusal reaches the uplink"
+    );
+    assert!(
+        uplink.streaming(),
+        "silence on an armed vehicle hands it to the offboard-loss failsafe"
+    );
+
+    uplink.send_disarm();
+    let accepted = encode_command_ack(1, 400, 0, 1, 1);
+    fc.send_to(&accepted, uplink_addr).expect("ack send");
+    assert!(
+        drain_until(&mut uplink, |u| u.last_arm_ack().is_some()),
+        "the acceptance reaches the uplink"
+    );
+    assert!(!uplink.streaming(), "the FC accepted the disarm");
+}
+
+#[test]
+fn stick_frames_still_fly_while_a_disarm_is_pending() {
+    let (_fc, addr) = fake_fc();
+    let mut uplink = uplink_to(addr);
+    uplink.begin_arm(0.0);
+    uplink.send_disarm();
+    assert_eq!(
+        uplink.send_stick_frame(0.0, 0.0, 0.5, 0.0),
+        StickFrameDisposition::Queued
+    );
+}
+
+#[test]
+fn disarm_holds_the_stream_until_the_fc_reports_disarmed() {
+    let (fc, addr) = fake_fc();
+    let mut uplink = uplink_to(addr);
+    uplink.begin_arm(0.0);
+    uplink.send_disarm();
+    assert!(uplink.streaming(), "the FC has not answered yet");
+    uplink.observe_fc_armed(Some(true));
+    assert!(uplink.streaming(), "an armed report ends nothing");
+    uplink.observe_fc_armed(Some(false));
+    assert!(!uplink.streaming(), "the FC reports itself disarmed");
+    let mut disarmed = false;
+    for _ in 0..3 {
+        let (msg_id, command) = received_kind(&fc);
+        if msg_id == 76 && command == Some(400) {
+            disarmed = true;
+            break;
+        }
+    }
+    assert!(disarmed, "disarm command reached the FC");
 }

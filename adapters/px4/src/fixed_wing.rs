@@ -117,6 +117,10 @@ pub struct FixedWingUplink {
     last_heartbeat_sent: Option<Instant>,
     last_sent_arm: Option<bool>,
     last_arm_ack: Option<FcCommandAck>,
+    // A disarm awaits the FC's confirmation, and the sticks flow until it
+    // comes: PX4 refuses a disarm it judges unsafe, and silence on a plane
+    // still armed hands it to the manual-control-loss failsafe.
+    disarm_pending: bool,
     send_failures: u64,
 }
 
@@ -156,6 +160,7 @@ impl FixedWingUplink {
             last_heartbeat_sent: None,
             last_sent_arm: None,
             last_arm_ack: None,
+            disarm_pending: false,
             send_failures: 0,
         })
     }
@@ -199,6 +204,9 @@ impl FixedWingUplink {
         for request in self.params.due(now) {
             let frame = request.encode(self.seq, self.system_id, self.component_id);
             self.send(&frame);
+        }
+        if self.fc_armed == Some(false) {
+            self.finish_disarm();
         }
         self.step_phase(now, down_m);
         if self.phase != Phase::Idle
@@ -284,6 +292,7 @@ impl FixedWingUplink {
                 outcome: CommandOutcome::InProgress,
             });
         }
+        self.disarm_pending = false;
         self.phase = Phase::Warmup;
         self.warmup_since = Some(self.clock.now());
         self.send_sticks();
@@ -355,14 +364,22 @@ impl FixedWingUplink {
         self.send(&frame);
     }
 
-    /// Disarms and stops the stick stream.
+    /// Commands a disarm with the stick stream held until the FC confirms
+    /// it.
     pub(crate) fn send_disarm(&mut self) {
         let frame = encode_arm_command(self.seq, false, self.system_id, self.component_id);
         self.send(&frame);
-        self.stop_stream();
+        self.disarm_pending = self.phase != Phase::Idle;
         self.last_sent_arm = Some(false);
         self.last_arm_ack = None;
-        info!("disarm sent; stick stream stopped");
+        info!("disarm sent; stick stream held until the FC confirms");
+    }
+
+    fn finish_disarm(&mut self) {
+        if self.disarm_pending {
+            self.stop_stream();
+            info!("FC confirmed the disarm; stick stream stopped");
+        }
     }
 
     /// Link-loss enactment: one final neutral sample, then silence, so
@@ -375,6 +392,7 @@ impl FixedWingUplink {
     }
 
     fn stop_stream(&mut self) {
+        self.disarm_pending = false;
         self.phase = Phase::Idle;
         self.sticks = sticks::NEUTRAL;
         self.warmup_since = None;
@@ -452,6 +470,9 @@ impl FixedWingUplink {
             if arm {
                 self.stop_stream();
             }
+        }
+        if !arm && outcome == CommandOutcome::Accepted {
+            self.finish_disarm();
         }
         self.last_arm_ack = Some(FcCommandAck { arm, outcome });
     }

@@ -268,24 +268,6 @@ fn arm_sequence_streams_before_offboard_and_arm() {
 }
 
 #[test]
-fn disarm_stops_the_stream() {
-    let (fc, addr) = fake_fc();
-    let mut uplink = uplink_to(addr);
-    uplink.begin_arm(0.0);
-    uplink.send_disarm();
-    assert!(!uplink.streaming(), "disarm stops the stream");
-    let mut disarmed = false;
-    for _ in 0..3 {
-        let (msg_id, command) = received_kind(&fc);
-        if msg_id == 76 && command == Some(400) {
-            disarmed = true;
-            break;
-        }
-    }
-    assert!(disarmed, "disarm command reached the FC");
-}
-
-#[test]
 fn sticks_report_uplink_idle_until_an_arm_sequence_starts() {
     let (fc, addr) = fake_fc();
     let mut uplink = uplink_to(addr);
