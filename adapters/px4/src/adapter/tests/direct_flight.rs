@@ -216,6 +216,7 @@ fn a_disarm_is_never_resumed_by_a_frame() {
     let uplink = adapter.uplink.as_mut().expect("uplink");
     uplink.begin_arm(0.0);
     uplink.send_disarm();
+    uplink.observe_fc_armed(Some(false));
     uplink.admit_flight_frame(pilotage_protocol::Generation::new(9), true, 0.0, None);
     assert!(!uplink.streaming());
 }

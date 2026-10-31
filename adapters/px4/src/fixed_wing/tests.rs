@@ -22,6 +22,8 @@ use crate::pinning::ParamRefusal;
 
 mod physical;
 
+mod disarm;
+
 const SYSTEM: u8 = 7;
 const MANUAL_CONTROL: u32 = 69;
 const PARAM_SET: u32 = 23;
@@ -415,16 +417,6 @@ fn re_arming_an_airborne_plane_resumes_position_mode_without_a_takeoff() {
     assert!(sent.contains(&POSITION_MODE), "{sent:?}");
     assert!(!sent.contains(&TAKEOFF_MODE), "{sent:?}");
     assert!(!sent.contains(&Sent::Arm(true)), "{sent:?}");
-}
-
-#[test]
-fn disarm_stops_the_stream() {
-    let mut harness = taking_off();
-    harness.uplink.send_disarm();
-    assert!(harness.sent().contains(&Sent::Arm(false)));
-    harness.tick(Duration::from_millis(200), Some(0.0));
-    let sent = harness.sent();
-    assert!(sticks_of(&sent).is_empty(), "{sent:?}");
 }
 
 #[test]
