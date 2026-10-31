@@ -2,6 +2,7 @@
 
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
+use pilotage_mavlink::codec::HIL_STATE_QUATERNION_ID;
 use pilotage_mavlink::{AuthorizationSource, CommandTarget, LinkConfig};
 use pilotage_protocol::VehicleClass;
 
@@ -142,21 +143,40 @@ impl Px4Config {
         // default, and a camera view steered by the stick follows the gimbal
         // only as often as it hears where it points. PX4 sends no faster than
         // its gimbal reports, so the request asks only for what it measures.
-        config.stream_interval_requests = &[
-            (24, 200_000),
-            (31, 33_333),
-            (32, 33_333),
-            (147, 1_000_000),
-            (230, 100_000),
-            (285, 20_000),
-        ];
+        // HIL_STATE_QUATERNION at 25 Hz, in simulation only: the truth a
+        // verifier judges a flight against, which PX4 streams to nobody by
+        // default.
+        config.stream_interval_requests = match self.profile {
+            Px4Profile::Simulation => &SIMULATION_STREAMS,
+            Px4Profile::Physical => &PHYSICAL_STREAMS,
+        };
         config
     }
 }
 
+const PHYSICAL_STREAMS: [(u32, u32); 6] = [
+    (24, 200_000),
+    (31, 33_333),
+    (32, 33_333),
+    (147, 1_000_000),
+    (230, 100_000),
+    (285, 20_000),
+];
+
+const SIMULATION_STREAMS: [(u32, u32); 7] = [
+    PHYSICAL_STREAMS[0],
+    PHYSICAL_STREAMS[1],
+    PHYSICAL_STREAMS[2],
+    PHYSICAL_STREAMS[3],
+    PHYSICAL_STREAMS[4],
+    PHYSICAL_STREAMS[5],
+    (HIL_STATE_QUATERNION_ID, 40_000),
+];
+
 #[cfg(test)]
 mod tests {
     use pilotage_mavlink::ResetPolicy;
+    use pilotage_mavlink::codec::HIL_STATE_QUATERNION_ID;
 
     use super::{Px4Airframe, Px4Config, Px4Profile};
 
@@ -164,6 +184,19 @@ mod tests {
     fn the_battery_report_is_requested_at_one_hertz() {
         let config = Px4Config::new(Px4Profile::Simulation).link_config();
         assert!(config.stream_interval_requests.contains(&(147, 1_000_000)));
+    }
+
+    #[test]
+    fn only_a_simulation_requests_the_truth_stream() {
+        let requested = |profile| {
+            Px4Config::new(profile)
+                .link_config()
+                .stream_interval_requests
+                .iter()
+                .any(|(id, _)| *id == HIL_STATE_QUATERNION_ID)
+        };
+        assert!(requested(Px4Profile::Simulation));
+        assert!(!requested(Px4Profile::Physical));
     }
 
     #[test]

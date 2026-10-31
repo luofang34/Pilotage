@@ -22,8 +22,10 @@ use crate::{AttitudeUpdate, KinematicsUpdate, LinkState};
 
 mod battery;
 mod fc_state;
+mod sim_truth;
 pub use battery::{BATTERY_SOURCE_ID, battery_sample};
 pub use fc_state::{ArmReport, ArmTracker, fc_state_sample, landed_state_sample};
+pub use sim_truth::sim_truth_sample;
 #[cfg(test)]
 mod tests;
 

@@ -21,7 +21,7 @@ use pilotage_mavlink::sampling::{
 };
 use pilotage_mavlink::{CameraEndpoints, LinkState, MavlinkLink, camera_endpoint, gimbal_endpoint};
 
-use crate::config::Px4Config;
+use crate::config::{Px4Config, Px4Profile};
 use crate::error::Px4AdapterError;
 use crate::uplink::Px4Uplink;
 
@@ -108,6 +108,9 @@ pub struct Px4Adapter {
     // fixed identity+epoch.
     gimbal_stamp: gimbal_endpoint::GimbalStamp,
     started_at: std::time::Instant,
+    // Whether the simulator's truth report may reach telemetry. A physical
+    // profile must not publish one, whatever arrives on its link.
+    publishes_sim_truth: bool,
     last_reset: Option<std::time::Instant>,
     // Commanded-reset latch: engaged when a sim reset is requested,
     // cleared only by a fresh estimate source epoch plus demonstrated
@@ -205,6 +208,7 @@ impl Px4Adapter {
                 pilotage_adapter_api::SourceIncarnation::new(rand_incarnation()),
             ),
             started_at,
+            publishes_sim_truth: config.profile() == Px4Profile::Simulation,
             last_reset: None,
             reset_latch: None,
             #[cfg(test)]
@@ -405,6 +409,7 @@ impl VehicleAdapter for Px4Adapter {
             batch.samples.push(report_only_sample(self.vehicle, tick));
         }
         reports.attach(&mut batch);
+        self.attach_sim_truth(&mut batch);
         if let Some(payload) = payload {
             if batch.samples.is_empty() {
                 batch
