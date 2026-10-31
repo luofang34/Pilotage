@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds the JSBSim release the JSBSim sidecar links: clones it into
+# Builds the JSBSim release the sidecar's `cpp` feature links: clones it into
 # JSBSIM_DIR (else ~/jsbsim) when absent, then configures, builds, and
 # installs a static library into its install/ tree. It needs only git,
 # CMake, and a C++ compiler: no Python module, no documentation.

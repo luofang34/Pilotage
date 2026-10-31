@@ -4,17 +4,18 @@
 
 #![allow(clippy::unwrap_used)]
 
-use std::path::PathBuf;
-
 use pilotage_world::{MagneticEpoch, N51, UniformTerrain, World};
 
 use super::{Simulation, Start, Vehicle};
 use crate::aircraft::Aircraft;
-use crate::engine::ModelPaths;
+use crate::engine::{EngineKind, ModelPaths};
 use crate::hil::{
     ActuatorControls, Encoder, HIL_GPS, HIL_SENSOR, HIL_STATE_QUATERNION, MODE_ARMED,
 };
 use crate::sensors::DEFAULT_NOISE;
+
+#[cfg(feature = "cpp")]
+mod parity;
 
 const GROUND_M: f64 = 120.0;
 
@@ -38,6 +39,7 @@ fn vehicle(
     Vehicle {
         aircraft,
         paths,
+        engine: EngineKind::default(),
         start,
         seed: 3,
         noise: DEFAULT_NOISE,
@@ -48,7 +50,7 @@ fn vehicle(
 
 fn x500(world: &mut World<UniformTerrain>) -> Simulation {
     let paths = ModelPaths {
-        root: PathBuf::from(env!("PILOTAGE_JSBSIM_ROOT")),
+        root: None,
         aircraft_dir: Aircraft::X500.bundled_dir(),
         model: "x500".to_owned(),
     };
@@ -132,7 +134,7 @@ fn full_motor_commands_lift_the_x500_and_disarmed_ones_do_not() {
 fn one_second(step_ms: u32) -> ([usize; 3], f64) {
     let mut world = world();
     let paths = ModelPaths {
-        root: PathBuf::from(env!("PILOTAGE_JSBSIM_ROOT")),
+        root: None,
         aircraft_dir: Aircraft::X500.bundled_dir(),
         model: "x500".to_owned(),
     };
@@ -218,7 +220,7 @@ fn a_powered_landing_comes_to_rest_without_ringing() {
     for heading in [0.0, -45.0] {
         let mut world = world();
         let paths = ModelPaths {
-            root: PathBuf::from(env!("PILOTAGE_JSBSIM_ROOT")),
+            root: None,
             aircraft_dir: Aircraft::X500.bundled_dir(),
             model: "x500".to_owned(),
         };
@@ -274,7 +276,7 @@ fn a_powered_landing_comes_to_rest_without_ringing() {
 
 fn rascal(world: &mut World<UniformTerrain>) -> Simulation {
     let paths = ModelPaths {
-        root: PathBuf::from(env!("PILOTAGE_JSBSIM_ROOT")),
+        root: None,
         aircraft_dir: Aircraft::Rascal.bundled_dir(),
         model: "rascal".to_owned(),
     };
@@ -345,7 +347,7 @@ fn the_rascal_steers_its_roll_with_px4s_yaw_output() {
 fn px4s_gimbal_outputs_point_the_gimbal() {
     let mut world = world();
     let paths = ModelPaths {
-        root: PathBuf::from(env!("PILOTAGE_JSBSIM_ROOT")),
+        root: None,
         aircraft_dir: Aircraft::X500.bundled_dir(),
         model: "x500".to_owned(),
     };
@@ -423,7 +425,7 @@ impl pilotage_world::TerrainSource for Hill {
 fn the_x500_settles_on_sloped_terrain() {
     let mut world = World::new(N51, Hill, MagneticEpoch::from_decimal_year(2026.8));
     let paths = ModelPaths {
-        root: PathBuf::from(env!("PILOTAGE_JSBSIM_ROOT")),
+        root: None,
         aircraft_dir: Aircraft::X500.bundled_dir(),
         model: "x500".to_owned(),
     };

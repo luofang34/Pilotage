@@ -1,16 +1,27 @@
 //! A safe JSBSim engine: load an aircraft, install the ground, read and
-//! write properties, and step.
+//! write properties, and step. The pure-Rust port flies by default; the
+//! `cpp` feature adds JSBSim's C++ library as a second choice with the
+//! same surface.
 
+#[cfg(feature = "cpp")]
+mod cpp;
+#[cfg(feature = "cpp")]
 mod ffi;
+mod port;
 
-use std::ffi::{CString, c_int};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::ground::GroundModel;
 
 /// Why the engine could not do what was asked.
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
+    /// This build has no C++ engine.
+    #[error("this sidecar has no C++ engine: build it with the cpp feature")]
+    CppNotBuilt,
+    /// The C++ engine needs a JSBSim checkout and has none.
+    #[error("the C++ engine needs --jsbsim-root")]
+    NoRoot,
     /// A path or name holds a NUL byte, which C cannot carry.
     #[error("{what} {value:?} holds a NUL byte")]
     Nul {
@@ -60,55 +71,85 @@ pub enum EngineError {
 /// Where one engine finds its model and JSBSim's shared data.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelPaths {
-    /// The JSBSim checkout: the root of its engine and systems data.
-    pub root: PathBuf,
+    /// The JSBSim checkout, the root of its engine and systems data. A
+    /// self-contained model needs none on the Rust engine.
+    pub root: Option<PathBuf>,
     /// The directory holding the model's XML file (and its `Engines`).
     pub aircraft_dir: PathBuf,
     /// The model name: its directory and its XML file's stem.
     pub model: String,
 }
 
+/// Which implementation of JSBSim flies.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum EngineKind {
+    /// The pure-Rust port, the `jsbsim` crate.
+    #[default]
+    Rust,
+    /// JSBSim's C++ library, in a build with the `cpp` feature.
+    Cpp,
+}
+
+impl EngineKind {
+    /// The kind a command line names.
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "rust" => Some(Self::Rust),
+            "cpp" => Some(Self::Cpp),
+            _ => None,
+        }
+    }
+}
+
 /// A property of one engine, resolved once so a step reads numbers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Property(c_int);
+pub struct Property(usize);
+
+/// What one implementation of JSBSim provides. Properties are indices
+/// into a table the backend keeps; a failure is reported the same way by
+/// both, so everything above [`Engine`] flies either unchanged.
+trait Backend {
+    /// Makes `ground` the terrain every gear contact stands on.
+    fn set_ground(&mut self, ground: Box<dyn GroundModel>) -> bool;
+    /// Replaces the installed ground, keeping what it remembers.
+    fn replace_ground(&mut self, ground: Box<dyn GroundModel>) -> bool;
+    /// The table index of a property, created on request.
+    fn property(&mut self, name: &str, create: bool) -> Result<Option<usize>, EngineError>;
+    /// A property's value; NaN when it cannot be read.
+    fn get(&mut self, index: usize) -> f64;
+    /// Sets a property; false when it was refused or its code failed.
+    fn set(&mut self, index: usize, value: f64) -> bool;
+    /// Applies the initial conditions.
+    fn run_ic(&mut self) -> bool;
+    /// Advances one step; false when it failed or asked to stop.
+    fn run(&mut self) -> bool;
+    /// The simulation time, s.
+    fn sim_time_s(&self) -> f64;
+}
 
 /// One JSBSim flight-dynamics instance.
 pub struct Engine {
-    raw: ffi::RawEngine,
-}
-
-fn c_string(what: &'static str, value: &str) -> Result<CString, EngineError> {
-    CString::new(value).map_err(|_| EngineError::Nul {
-        what,
-        value: value.to_owned(),
-    })
-}
-
-fn c_path(what: &'static str, path: &Path) -> Result<CString, EngineError> {
-    c_string(what, &path.display().to_string())
+    raw: Box<dyn Backend>,
 }
 
 impl Engine {
-    /// Loads `paths.model` and sets the step to `dt_s`.
+    /// Loads `paths.model` on the `kind` engine and sets the step to
+    /// `dt_s`.
     ///
     /// # Errors
     ///
     /// Returns [`EngineError::Load`] when JSBSim cannot load the model,
-    /// or [`EngineError::Nul`] for an unrepresentable path.
-    pub fn load(paths: &ModelPaths, dt_s: f64) -> Result<Self, EngineError> {
-        let args = ffi::CreateArgs {
-            root: c_path("JSBSim root", &paths.root)?,
-            aircraft_dir: c_path("aircraft directory", &paths.aircraft_dir)?,
-            engine_dir: c_path("engine directory", &paths.root.join("engine"))?,
-            systems_dir: c_path("systems directory", &paths.root.join("systems"))?,
-            model: c_string("model", &paths.model)?,
-            dt_s,
+    /// [`EngineError::Nul`] for an unrepresentable path, and
+    /// [`EngineError::CppNotBuilt`] or [`EngineError::NoRoot`] when the
+    /// C++ engine is not available.
+    pub fn load(kind: EngineKind, paths: &ModelPaths, dt_s: f64) -> Result<Self, EngineError> {
+        let raw: Box<dyn Backend> = match kind {
+            EngineKind::Rust => Box::new(port::PortBackend::load(paths, dt_s)?),
+            #[cfg(feature = "cpp")]
+            EngineKind::Cpp => Box::new(cpp::CppBackend::load(paths, dt_s)?),
+            #[cfg(not(feature = "cpp"))]
+            EngineKind::Cpp => return Err(EngineError::CppNotBuilt),
         };
-        let raw = ffi::RawEngine::create(&args).map_err(|message| EngineError::Load {
-            model: paths.model.clone(),
-            aircraft_dir: paths.aircraft_dir.clone(),
-            message,
-        })?;
         Ok(Self { raw })
     }
 
@@ -127,13 +168,7 @@ impl Engine {
 
     /// Replaces the installed ground between steps.
     pub fn replace_ground(&mut self, ground: Box<dyn GroundModel>) -> bool {
-        match self.raw.ground_mut() {
-            Some(slot) => {
-                *slot = ground;
-                true
-            }
-            None => false,
-        }
+        self.raw.replace_ground(ground)
     }
 
     /// Resolves an existing property.
@@ -157,9 +192,8 @@ impl Engine {
     }
 
     fn resolve(&mut self, name: &str, create: bool) -> Result<Property, EngineError> {
-        let c_name = c_string("property", name)?;
         self.raw
-            .property(&c_name, create)
+            .property(name, create)?
             .map(Property)
             .ok_or_else(|| EngineError::NoProperty {
                 name: name.to_owned(),
@@ -167,7 +201,7 @@ impl Engine {
     }
 
     /// A property's value.
-    pub fn get(&self, property: Property) -> f64 {
+    pub fn get(&mut self, property: Property) -> f64 {
         self.raw.get(property.0)
     }
 

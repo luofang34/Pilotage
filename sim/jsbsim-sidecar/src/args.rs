@@ -8,6 +8,7 @@ use std::time::Duration;
 use pilotage_world::{DEFAULT_SITE, Site};
 
 use crate::aircraft::{AIRCRAFT_NAMES, Aircraft};
+use crate::engine::EngineKind;
 use crate::gimbal::GimbalLimits;
 use crate::simulation::STEP_MS_CHOICES;
 
@@ -20,8 +21,11 @@ pub struct Args {
     pub aircraft: Aircraft,
     /// The directory of the aircraft's model, if not its bundled one.
     pub aircraft_dir: Option<PathBuf>,
+    /// The flight-dynamics engine.
+    pub engine: EngineKind,
     /// The JSBSim checkout whose engine and systems data the model uses.
-    pub jsbsim_root: PathBuf,
+    /// The bundled models need none on the Rust engine.
+    pub jsbsim_root: Option<PathBuf>,
     /// The site: its declared elevation stands where the terrain has no
     /// coverage.
     pub site: Site,
@@ -83,7 +87,8 @@ impl Default for Args {
             port: 4_560,
             aircraft: Aircraft::X500,
             aircraft_dir: None,
-            jsbsim_root: PathBuf::from(env!("PILOTAGE_JSBSIM_ROOT")),
+            engine: EngineKind::default(),
+            jsbsim_root: option_env!("PILOTAGE_JSBSIM_ROOT").map(PathBuf::from),
             site: DEFAULT_SITE,
             latitude_deg: DEFAULT_SITE.latitude_deg,
             longitude_deg: DEFAULT_SITE.longitude_deg,
@@ -176,7 +181,15 @@ impl Args {
                     })?;
                 }
                 "--aircraft-dir" => args.aircraft_dir = Some(PathBuf::from(value()?)),
-                "--jsbsim-root" => args.jsbsim_root = PathBuf::from(value()?),
+                "--engine" => {
+                    let name = value()?;
+                    args.engine = EngineKind::parse(&name).ok_or(ArgsError::Invalid {
+                        flag: flag.clone(),
+                        value: name,
+                        reason: "rust or cpp",
+                    })?;
+                }
+                "--jsbsim-root" => args.jsbsim_root = Some(PathBuf::from(value()?)),
                 "--site-elevation-m" => args.site.elevation_m = finite(flag, value()?)?,
                 "--latitude-deg" => args.latitude_deg = finite(flag, value()?)?,
                 "--longitude-deg" => args.longitude_deg = finite(flag, value()?)?,
@@ -225,7 +238,7 @@ impl Args {
 pub fn usage() -> String {
     format!(
         "pilotage-jsbsim-sidecar [--port 4560] [--aircraft {}] [--aircraft-dir DIR] \
-         [--jsbsim-root DIR] [--latitude-deg D --longitude-deg D --heading-deg D] \
+         [--engine rust|cpp] [--jsbsim-root DIR] [--latitude-deg D --longitude-deg D --heading-deg D] \
          [--site-elevation-m M] [--terrain ARCHIVE.mbtiles] [--epoch-unix-s S] [--seed N] \
          [--realtime-factor F] [--lockstep-timeout-s S] \
          [--gimbal RANGE_ROLL,MAX_PITCH,MIN_PITCH,RANGE_YAW] [--truth-addr HOST:PORT] [--step-ms 1|2|4]",

@@ -13,9 +13,9 @@ build = "build.rs"
 [workspace]
 
 # The Pilotage workspace lint table, repeated, with one change: unsafe code is denied
-# instead of forbidden. Calling JSBSim's C++ library needs it; every
-# unsafe use sits in src/engine/ffi.rs, and the production-rust-lints
-# guard refuses it anywhere else in this crate.
+# instead of forbidden. The `cpp` feature's call into JSBSim's C++ library
+# needs it; every unsafe use sits in src/engine/ffi.rs, and the
+# production-rust-lints guard refuses it anywhere else in this crate.
 [lints.rust]
 unsafe_code = "deny"
 missing_docs = "deny"
@@ -30,11 +30,17 @@ await_holding_lock = "deny"
 disallowed_types = "deny"
 disallowed_macros = "deny"
 
+[features]
+# Adds JSBSim's C++ library as a second engine, chosen with `--engine cpp`.
+# It needs the external checkout `scripts/build-jsbsim.sh` produces.
+cpp = ["dep:cc"]
+
 [[bin]]
 name = "pilotage-jsbsim-sidecar"
 path = "src/main.rs"
 
 [dependencies]
+jsbsim = "0.1.1"
 pilotage-mavlink-framing = { path = "../../crates/pilotage-mavlink-framing" }
 pilotage-terrain-query = { path = "../../crates/pilotage-terrain-query" }
 pilotage-world = { path = "../../crates/pilotage-world", default-features = false, features = ["archive"] }
@@ -50,4 +56,4 @@ world-core = { git = "https://github.com/luofang34/world", rev = "8da6f84c0959d1
 pilotage-geo = { path = "../../crates/pilotage-geo" }
 
 [build-dependencies]
-cc = "1.2.66"
+cc = { version = "1.2.66", optional = true }
