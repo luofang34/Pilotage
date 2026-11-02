@@ -3,6 +3,7 @@ name = "pilotage-jsbsim-sidecar"
 description = "JSBSim flight-dynamics sidecar: rigid-body truth on the shared world, synthetic sensors, and PX4's MAVLink simulator link"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.99"
 publish = false
 build = "build.rs"
 
@@ -40,7 +41,7 @@ name = "pilotage-jsbsim-sidecar"
 path = "src/main.rs"
 
 [dependencies]
-jsbsim = "0.1.1"
+jsbsim = "0.2.0"
 pilotage-mavlink-framing = { path = "../../crates/pilotage-mavlink-framing" }
 pilotage-terrain-query = { path = "../../crates/pilotage-terrain-query" }
 pilotage-world = { path = "../../crates/pilotage-world", default-features = false, features = ["archive"] }

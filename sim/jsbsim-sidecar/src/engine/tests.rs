@@ -8,6 +8,8 @@ use std::path::PathBuf;
 use super::{Engine, EngineError, EngineKind, ModelPaths};
 use crate::ground::{GroundAnswer, GroundModel};
 
+mod loading;
+
 /// The engines this build has.
 const ENGINES: &[EngineKind] = &[
     EngineKind::Rust,
@@ -224,4 +226,27 @@ fn the_rust_engine_needs_no_checkout() {
     let mut paths = x500();
     paths.root = None;
     Engine::load(EngineKind::Rust, &paths, 0.004).unwrap();
+}
+
+#[test]
+fn an_invalid_step_is_refused_before_loading() {
+    for &kind in ENGINES {
+        for dt_s in [0.0, -0.001, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(matches!(
+                Engine::load(kind, &x500(), dt_s),
+                Err(EngineError::InvalidStep { .. })
+            ));
+        }
+    }
+}
+
+#[cfg(feature = "cpp")]
+#[test]
+fn the_cpp_engine_requires_its_data_root() {
+    let mut paths = x500();
+    paths.root = None;
+    assert!(matches!(
+        Engine::load(EngineKind::Cpp, &paths, 0.004),
+        Err(EngineError::NoRoot)
+    ));
 }

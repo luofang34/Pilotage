@@ -198,9 +198,9 @@ dependencies = [
 
 [[package]]
 name = "jsbsim"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a07ac32b18356e187b6abaf33308a346ab19a964a5ae125362ebc091fcf6512"
+checksum = "345e7d619061165407016d8450017fadfb2353685db543c9b78281daff948a9b"
 dependencies = [
  "libm",
  "roxmltree",

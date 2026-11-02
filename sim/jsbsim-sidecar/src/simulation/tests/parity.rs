@@ -11,10 +11,15 @@ use super::{
 };
 use crate::truth::Truth;
 
+mod samples;
+
 /// The widest the two tracks may part at any step of a flight.
 const POSITION_M: f64 = 1e-3;
 const VELOCITY_M_S: f64 = 1e-3;
 const ATTITUDE_RAD: f64 = 1e-4;
+// Contact forces differ more than the integrated state. Bound the
+// accelerometer difference by one default noise standard deviation.
+const FORCE_M_S2: f64 = 0.02;
 /// Metres per degree of latitude, near enough to bound a difference.
 const M_PER_DEG: f64 = 111_000.0;
 
@@ -47,7 +52,10 @@ fn fly(kind: EngineKind, aircraft: Aircraft, script: &[ActuatorControls]) -> Vec
 }
 
 fn largest(differences: impl Iterator<Item = f64>) -> f64 {
-    differences.fold(0.0, |widest, d| widest.max(d.abs()))
+    differences.fold(0.0, |widest, d| {
+        assert!(d.is_finite(), "non-finite flight value: {d}");
+        widest.max(d.abs())
+    })
 }
 
 fn assert_same_flight(rust: &[Truth], cpp: &[Truth]) {
@@ -64,9 +72,9 @@ fn assert_same_flight(rust: &[Truth], cpp: &[Truth]) {
         let velocity = largest((0..3).map(|i| r.velocity_ned[i] - c.velocity_ned[i]));
         let attitude = largest(
             [
-                r.attitude.roll - c.attitude.roll,
-                r.attitude.pitch - c.attitude.pitch,
-                r.attitude.yaw - c.attitude.yaw,
+                angle(r.attitude.roll - c.attitude.roll),
+                angle(r.attitude.pitch - c.attitude.pitch),
+                angle(r.attitude.yaw - c.attitude.yaw),
             ]
             .into_iter(),
         );
@@ -74,6 +82,56 @@ fn assert_same_flight(rust: &[Truth], cpp: &[Truth]) {
             position < POSITION_M && velocity < VELOCITY_M_S && attitude < ATTITUDE_RAD,
             "step {step}: {position} m, {velocity} m/s, {attitude} rad apart"
         );
+        close(step, "time", r.time_s, c.time_s, 1e-9);
+        for i in 0..3 {
+            close(step, "rate", r.rates_frd[i], c.rates_frd[i], 1e-4);
+            close(
+                step,
+                "specific force",
+                r.specific_force_frd[i],
+                c.specific_force_frd[i],
+                FORCE_M_S2,
+            );
+        }
+        close(
+            step,
+            "dynamic pressure",
+            r.dynamic_pressure_pa,
+            c.dynamic_pressure_pa,
+            1e-2,
+        );
+        close(
+            step,
+            "true airspeed",
+            r.true_airspeed_mps,
+            c.true_airspeed_mps,
+            VELOCITY_M_S,
+        );
+        close(
+            step,
+            "calibrated airspeed",
+            r.calibrated_airspeed_mps,
+            c.calibrated_airspeed_mps,
+            VELOCITY_M_S,
+        );
+    }
+}
+
+fn angle(d: f64) -> f64 {
+    d.sin().atan2(d.cos())
+}
+
+fn close(step: usize, field: &str, r: f64, c: f64, limit: f64) {
+    assert!(
+        r.is_finite() && c.is_finite() && (r - c).abs() < limit,
+        "step {step}: {field}: Rust {r}, C++ {c}, limit {limit}"
+    );
+}
+
+#[test]
+fn a_non_finite_flight_value_cannot_pass_the_comparison() {
+    for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert!(std::panic::catch_unwind(|| largest([0.0, value].into_iter())).is_err());
     }
 }
 
@@ -121,7 +179,10 @@ fn both_engines_fly_the_rascal_alike() {
         .collect();
     let rust = fly(EngineKind::Rust, Aircraft::Rascal, &script);
     let cpp = fly(EngineKind::Cpp, Aircraft::Rascal, &script);
-    let peak = largest(rust.iter().map(|t| t.altitude_m - GROUND_M));
+    let peak = rust
+        .iter()
+        .map(|t| t.altitude_m - GROUND_M)
+        .fold(f64::NEG_INFINITY, f64::max);
     let bank = largest(rust.iter().map(|t| t.attitude.roll));
     assert!(peak > 15.0, "the flight stayed low: {peak} m");
     assert!(bank > 0.3, "the flight stayed level: {bank} rad");

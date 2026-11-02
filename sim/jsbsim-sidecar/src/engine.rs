@@ -16,6 +16,12 @@ use crate::ground::GroundModel;
 /// Why the engine could not do what was asked.
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
+    /// The time step is not finite and positive.
+    #[error("JSBSim time step must be finite and positive, got {dt_s} s")]
+    InvalidStep {
+        /// The time step, s.
+        dt_s: f64,
+    },
     /// This build has no C++ engine.
     #[error("this sidecar has no C++ engine: build it with the cpp feature")]
     CppNotBuilt,
@@ -138,11 +144,15 @@ impl Engine {
     ///
     /// # Errors
     ///
-    /// Returns [`EngineError::Load`] when JSBSim cannot load the model,
+    /// Returns [`EngineError::InvalidStep`] for an invalid time step,
+    /// [`EngineError::Load`] when JSBSim cannot load the model,
     /// [`EngineError::Nul`] for an unrepresentable path, and
     /// [`EngineError::CppNotBuilt`] or [`EngineError::NoRoot`] when the
     /// C++ engine is not available.
     pub fn load(kind: EngineKind, paths: &ModelPaths, dt_s: f64) -> Result<Self, EngineError> {
+        if !dt_s.is_finite() || dt_s <= 0.0 {
+            return Err(EngineError::InvalidStep { dt_s });
+        }
         let raw: Box<dyn Backend> = match kind {
             EngineKind::Rust => Box::new(port::PortBackend::load(paths, dt_s)?),
             #[cfg(feature = "cpp")]
