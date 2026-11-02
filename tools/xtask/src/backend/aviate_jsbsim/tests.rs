@@ -8,6 +8,7 @@ use super::{AviateJsbsim, command_port, plan_with_dirs};
 use crate::backend::{Placement, SessionContext, SimBackend, backend_for};
 use crate::conflicts::Claim;
 use crate::error::XtaskError;
+use crate::jsbsim::SidecarEngine;
 
 fn scratch(tag: &str) -> PathBuf {
     let dir =
@@ -18,28 +19,12 @@ fn scratch(tag: &str) -> PathBuf {
 }
 
 /// An Aviate checkout with the JSBSim FC built, and a built JSBSim.
-fn scaffold(tag: &str) -> (PathBuf, PathBuf, PathBuf) {
+fn scaffold(tag: &str) -> (PathBuf, PathBuf) {
     let root = scratch(tag);
     let aviate = root.join("Aviate");
     std::fs::create_dir_all(aviate.join("target/debug")).unwrap();
     std::fs::write(aviate.join("target/debug/sitl-jsbsim-x500"), "").unwrap();
-    let jsbsim = root.join("jsbsim");
-    for dir in [
-        "aircraft",
-        "engine",
-        "install/include/JSBSim",
-        "install/lib/pkgconfig",
-    ] {
-        std::fs::create_dir_all(jsbsim.join(dir)).unwrap();
-    }
-    std::fs::write(jsbsim.join("install/include/JSBSim/FGFDMExec.h"), "").unwrap();
-    std::fs::write(jsbsim.join("install/lib/libJSBSim.a"), "").unwrap();
-    std::fs::write(
-        jsbsim.join("install/lib/pkgconfig/JSBSim.pc"),
-        "Version: 1.3.3\n",
-    )
-    .unwrap();
-    (root, aviate, jsbsim)
+    (root, aviate)
 }
 
 fn context(root: &Path, instance: u16) -> SessionContext {
@@ -70,8 +55,8 @@ fn the_backend_is_selected_by_name_and_flies_a_quad_on_a_field() {
 
 #[test]
 fn the_fc_dials_the_sidecar_of_its_own_instance() {
-    let (root, aviate, jsbsim) = scaffold("plan");
-    let stages = plan_with_dirs(&context(&root, 20), &aviate, &jsbsim).unwrap();
+    let (root, aviate) = scaffold("plan");
+    let stages = plan_with_dirs(&context(&root, 20), &aviate, &SidecarEngine::Rust).unwrap();
     assert_eq!(stages.len(), 2);
     let sidecar = &stages[0].spec;
     assert_eq!(sidecar.name, "jsbsim");
@@ -101,9 +86,9 @@ fn the_fc_dials_the_sidecar_of_its_own_instance() {
 
 #[test]
 fn missing_artifacts_name_their_fix() {
-    let (root, aviate, jsbsim) = scaffold("missing");
+    let (root, aviate) = scaffold("missing");
     std::fs::remove_file(aviate.join("target/debug/sitl-jsbsim-x500")).unwrap();
-    match plan_with_dirs(&context(&root, 0), &aviate, &jsbsim) {
+    match plan_with_dirs(&context(&root, 0), &aviate, &SidecarEngine::Rust) {
         Err(XtaskError::MissingArtifact { hint, .. }) => {
             assert!(
                 hint.contains("cargo build --bin sitl-jsbsim-x500"),
@@ -114,23 +99,27 @@ fn missing_artifacts_name_their_fix() {
         Ok(_) => panic!("planned without the FC"),
     }
     assert!(matches!(
-        plan_with_dirs(&context(&root, 0), &root.join("nowhere"), &jsbsim),
+        plan_with_dirs(
+            &context(&root, 0),
+            &root.join("nowhere"),
+            &SidecarEngine::Rust
+        ),
         Err(XtaskError::MissingArtifact {
             what: "Aviate checkout",
             ..
         })
     ));
     assert!(matches!(
-        plan_with_dirs(&context(&root, 30), &aviate, &jsbsim),
+        plan_with_dirs(&context(&root, 30), &aviate, &SidecarEngine::Rust),
         Err(XtaskError::Usage { .. })
     ));
 }
 
 #[test]
 fn a_fleet_moves_the_vehicle_and_the_fc_origin_together() {
-    let (root, aviate, jsbsim) = scaffold("spawn");
+    let (root, aviate) = scaffold("spawn");
     let ctx = context(&root, 3);
-    let mut stages = plan_with_dirs(&ctx, &aviate, &jsbsim).unwrap();
+    let mut stages = plan_with_dirs(&ctx, &aviate, &SidecarEngine::Rust).unwrap();
     let point = Placement {
         latitude_deg: 40.578,
         longitude_deg: -74.737,

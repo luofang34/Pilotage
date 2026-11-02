@@ -75,7 +75,7 @@ pub fn serve_blocking<T: TerrainSource>(
     loop {
         // A vehicle is built before PX4 connects, so a model error shows
         // at start-up rather than at PX4's first step.
-        let simulation = Simulation::new(&config.vehicle, world)?;
+        let mut simulation = Simulation::new(&config.vehicle, world)?;
         let truth = simulation.truth();
         tracing::info!(
             latitude_deg = truth.latitude_deg,

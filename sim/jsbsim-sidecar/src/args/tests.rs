@@ -4,6 +4,7 @@
 
 use super::{Args, ArgsError};
 use crate::aircraft::Aircraft;
+use crate::engine::EngineKind;
 
 fn argv(list: &[&str]) -> Vec<String> {
     list.iter().map(|s| (*s).to_owned()).collect()
@@ -68,6 +69,17 @@ fn every_flag_parses() {
     assert_eq!(args.step_ms, 1);
     let gimbal = args.gimbal.unwrap();
     assert_eq!((gimbal.pitch.min_deg, gimbal.yaw.max_deg), (-135.0, 360.0));
+}
+
+#[test]
+fn the_rust_engine_flies_unless_the_cpp_one_is_named() {
+    assert_eq!(Args::parse(&[]).unwrap().engine, EngineKind::Rust);
+    let cpp = Args::parse(&argv(&["--engine", "cpp"])).unwrap();
+    assert_eq!(cpp.engine, EngineKind::Cpp);
+    assert!(matches!(
+        Args::parse(&argv(&["--engine", "fortran"])),
+        Err(ArgsError::Invalid { .. })
+    ));
 }
 
 #[test]

@@ -10,6 +10,7 @@ mod ffi;
 const BINDING: FfiCrate = FfiCrate {
     workspace_package: None,
     dir: "sim/binding",
+    feature: None,
     unsafe_module: "src/ffi.rs",
 };
 
@@ -52,6 +53,7 @@ fn mixed_ffi_plan_excludes_only_registered_workspace_members() {
     let member = FfiCrate {
         workspace_package: Some("binding-member"),
         dir: "adapters/binding-member",
+        feature: None,
         unsafe_module: "src/ffi.rs",
     };
     let invocations = clippy_invocations(&[BINDING, member]);

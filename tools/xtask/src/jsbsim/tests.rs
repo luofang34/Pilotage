@@ -4,7 +4,9 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{BUILD_SCRIPT, JSBSIM_TAG, JsbsimInstall, jsbsim_dir_from, pc_version};
+use super::{
+    BUILD_SCRIPT, JSBSIM_TAG, JsbsimInstall, SidecarEngine, cpp_chosen, jsbsim_dir_from, pc_version,
+};
 use crate::error::XtaskError;
 
 fn scratch(tag: &str) -> PathBuf {
@@ -152,5 +154,29 @@ fn the_sidecar_builds_alone_on_the_workspace_world_rev() {
     assert!(
         !sidecar.contains("workspace = true"),
         "the sidecar inherits nothing from the workspace"
+    );
+}
+
+#[test]
+fn the_rust_port_flies_unless_the_cpp_library_is_chosen() {
+    assert!(!cpp_chosen(None).unwrap());
+    assert!(!cpp_chosen(Some("".into())).unwrap());
+    assert!(!cpp_chosen(Some("rust".into())).unwrap());
+    assert!(cpp_chosen(Some("cpp".into())).unwrap());
+    assert!(matches!(
+        cpp_chosen(Some("fortran".into())),
+        Err(XtaskError::Usage { .. })
+    ));
+}
+
+#[test]
+fn only_the_cpp_library_needs_a_checkout_on_the_sidecars_command_line() {
+    assert!(SidecarEngine::Rust.sidecar_args().is_empty());
+    let cpp = SidecarEngine::Cpp(JsbsimInstall {
+        root: "/opt/jsbsim".into(),
+    });
+    assert_eq!(
+        cpp.sidecar_args(),
+        ["--engine", "cpp", "--jsbsim-root", "/opt/jsbsim"]
     );
 }

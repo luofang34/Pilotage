@@ -4,7 +4,7 @@
 use pilotage_world::{TerrainSource, World, WorldError};
 
 use crate::aircraft::{Actuation, Aircraft};
-use crate::engine::{Engine, EngineError, ModelPaths};
+use crate::engine::{Engine, EngineError, EngineKind, ModelPaths};
 use crate::gimbal::{GIMBAL_OUTPUTS, Gimbal, GimbalLimits};
 use crate::ground::{GroundPatch, HALF_CELLS};
 use crate::hil::{
@@ -37,6 +37,8 @@ pub struct Vehicle {
     pub aircraft: Aircraft,
     /// Where its model lives.
     pub paths: ModelPaths,
+    /// The flight-dynamics engine that flies it.
+    pub engine: EngineKind,
     /// Where it starts.
     pub start: Start,
     /// The sensor noise seed.
@@ -99,7 +101,7 @@ impl Simulation {
         world: &mut World<T>,
     ) -> Result<Self, SimulationError> {
         let start = vehicle.start;
-        let mut engine = Engine::load(&vehicle.paths, PHYSICS_DT_S)?;
+        let mut engine = Engine::load(vehicle.engine, &vehicle.paths, PHYSICS_DT_S)?;
         let patch = GroundPatch::sample_blocking(
             world,
             start.latitude_deg,
@@ -155,8 +157,8 @@ impl Simulation {
     }
 
     /// The vehicle's true state now.
-    pub fn truth(&self) -> Truth {
-        self.truth.read(&self.engine)
+    pub fn truth(&mut self) -> Truth {
+        self.truth.read(&mut self.engine)
     }
 
     /// Advances one step under `controls`, and returns the frames PX4

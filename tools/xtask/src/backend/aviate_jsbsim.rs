@@ -20,7 +20,7 @@ use super::{Placement, SessionContext, SimBackend, Stage};
 use crate::cli::Profile;
 use crate::conflicts::{Claim, Remedy};
 use crate::error::XtaskError;
-use crate::jsbsim::{JsbsimInstall, jsbsim_dir};
+use crate::jsbsim::SidecarEngine;
 use crate::process::ProcessSpec;
 use crate::readiness::{Readiness, stage_log};
 
@@ -89,7 +89,11 @@ impl SimBackend for AviateJsbsim {
     }
 
     fn plan(&self, ctx: &SessionContext) -> Result<Vec<Stage>, XtaskError> {
-        plan_with_dirs(ctx, &super::aviate_dir(&ctx.repo_root), &jsbsim_dir()?)
+        plan_with_dirs(
+            ctx,
+            &super::aviate_dir(&ctx.repo_root),
+            &SidecarEngine::select()?,
+        )
     }
 
     fn spawn(
@@ -190,7 +194,7 @@ fn origin_value(point: &Placement) -> String {
 fn plan_with_dirs(
     ctx: &SessionContext,
     aviate: &Path,
-    jsbsim: &Path,
+    engine: &SidecarEngine,
 ) -> Result<Vec<Stage>, XtaskError> {
     if ctx.profile != Profile::Simulation {
         return Err(XtaskError::Usage {
@@ -223,9 +227,8 @@ fn plan_with_dirs(
             hint: "build it: cargo build --bin sitl-jsbsim-x500 in the Aviate checkout",
         });
     }
-    let install = JsbsimInstall::validate(jsbsim)?;
     let mut stages = vec![
-        sidecar_stage(ctx, &install, MODEL, None)?,
+        sidecar_stage(ctx, engine, MODEL, None)?,
         fc_stage(ctx, aviate, &fc),
     ];
     // A plain `sim` session stands on the default site; a fleet moves it.

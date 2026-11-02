@@ -9,6 +9,7 @@ use super::BINDING;
 const USB: FfiCrate = FfiCrate {
     workspace_package: Some("pilotage-dji-usb"),
     dir: "adapters/dji-usb",
+    feature: None,
     unsafe_module: "src/ffi.rs",
 };
 
@@ -35,6 +36,19 @@ fn dji_usb_registers_only_its_ffi_source_file() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let findings = unsafe_findings(&root, &[USB]).unwrap();
     assert!(findings.is_empty(), "{findings:?}");
+}
+
+#[test]
+fn an_optional_binding_is_linted_with_its_feature_on() {
+    let sidecar = FfiCrate {
+        workspace_package: None,
+        dir: "sim/jsbsim-sidecar",
+        feature: Some("cpp"),
+        unsafe_module: "src/engine/ffi.rs",
+    };
+    assert!(FFI_CRATES.contains(&sidecar));
+    let plan = clippy_invocations(&[sidecar]);
+    assert!(plan[1].join(" ").contains("--features cpp"));
 }
 
 #[test]

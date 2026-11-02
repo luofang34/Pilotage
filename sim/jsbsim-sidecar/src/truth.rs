@@ -100,19 +100,21 @@ impl TruthProperties {
     }
 
     /// Reads the current state.
-    pub fn read(&self, engine: &Engine) -> Truth {
-        let get3 = |p: [Property; 3], scale: f64| p.map(|p| engine.get(p) * scale);
-        let [roll, pitch, yaw] = get3(self.euler_rad, 1.0);
+    pub fn read(&self, engine: &mut Engine) -> Truth {
+        fn get3(engine: &mut Engine, p: [Property; 3], scale: f64) -> [f64; 3] {
+            p.map(|p| engine.get(p) * scale)
+        }
+        let [roll, pitch, yaw] = get3(engine, self.euler_rad, 1.0);
         let mass_kg = engine.get(self.mass_slug) * KG_PER_SLUG;
-        let force_n = get3(self.forces_lbf, N_PER_LBF);
+        let force_n = get3(engine, self.forces_lbf, N_PER_LBF);
         Truth {
             time_s: engine.sim_time_s(),
             latitude_deg: engine.get(self.latitude_deg),
             longitude_deg: engine.get(self.longitude_deg),
             altitude_m: engine.get(self.altitude_m),
-            velocity_ned: get3(self.velocity_ned_fps, M_PER_FT),
+            velocity_ned: get3(engine, self.velocity_ned_fps, M_PER_FT),
             attitude: Euler { roll, pitch, yaw },
-            rates_frd: get3(self.rates_rad_s, 1.0),
+            rates_frd: get3(engine, self.rates_rad_s, 1.0),
             specific_force_frd: force_n.map(|f| f / mass_kg),
             dynamic_pressure_pa: engine.get(self.qbar_psf) * PA_PER_PSF,
             true_airspeed_mps: engine.get(self.vtrue_fps) * M_PER_FT,

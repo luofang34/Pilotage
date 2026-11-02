@@ -1,11 +1,14 @@
-//! The JSBSim flight-dynamics library the JSBSim sidecar links: where its
-//! checkout lives, which release it must be, and how to build it.
+//! Which JSBSim the sidecar flies. The pure-Rust port is a dependency of
+//! the sidecar and needs nothing here. `JSBSIM_ENGINE=cpp` chooses
+//! JSBSim's C++ library instead: where its checkout lives, which release
+//! it must be, and how to build it.
 //!
-//! JSBSim is an external checkout, like PX4-Autopilot and ArduPilot. The
-//! checkout holds the aircraft, engine, and systems data the sidecar
-//! loads at run time; its `install` tree holds the static library and
-//! headers the sidecar links at build time. `cargo xtask build-jsbsim`
-//! produces both from the pinned release with `scripts/build-jsbsim.sh`.
+//! The C++ library is an external checkout, like PX4-Autopilot and
+//! ArduPilot. The checkout holds the aircraft, engine, and systems data
+//! the sidecar loads at run time; its `install` tree holds the static
+//! library and headers the sidecar links at build time. `cargo xtask
+//! build-jsbsim` produces both from the pinned release with
+//! `scripts/build-jsbsim.sh`.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -40,6 +43,69 @@ fn jsbsim_dir_from(
         _ => Err(XtaskError::Usage {
             message: "set JSBSIM_DIR to the JSBSim checkout (HOME is not set either)".to_owned(),
         }),
+    }
+}
+
+/// The implementation of JSBSim a session flies.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SidecarEngine {
+    /// The pure-Rust port.
+    Rust,
+    /// The C++ library of a validated checkout.
+    Cpp(JsbsimInstall),
+}
+
+/// Whether `JSBSIM_ENGINE` names the C++ library. Unset or `rust` is the
+/// Rust port.
+fn cpp_chosen(engine: Option<OsString>) -> Result<bool, XtaskError> {
+    let Some(engine) = engine else {
+        return Ok(false);
+    };
+    match engine.to_str() {
+        Some("" | "rust") => Ok(false),
+        Some("cpp") => Ok(true),
+        _ => Err(XtaskError::Usage {
+            message: format!("JSBSIM_ENGINE must be rust or cpp (got {engine:?})"),
+        }),
+    }
+}
+
+impl SidecarEngine {
+    /// Whether this session chose the C++ library.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`XtaskError::Usage`] for another `JSBSIM_ENGINE`.
+    pub(crate) fn cpp_selected() -> Result<bool, XtaskError> {
+        cpp_chosen(std::env::var_os("JSBSIM_ENGINE"))
+    }
+
+    /// The engine this session chose, validated.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`XtaskError::Usage`] for another `JSBSIM_ENGINE`, and the
+    /// errors of [`jsbsim_dir`] and [`JsbsimInstall::validate`] for the
+    /// C++ library.
+    pub(crate) fn select() -> Result<Self, XtaskError> {
+        if Self::cpp_selected()? {
+            Ok(Self::Cpp(JsbsimInstall::validate(&jsbsim_dir()?)?))
+        } else {
+            Ok(Self::Rust)
+        }
+    }
+
+    /// The sidecar's flags for this engine.
+    pub(crate) fn sidecar_args(&self) -> Vec<String> {
+        match self {
+            Self::Rust => vec![],
+            Self::Cpp(install) => vec![
+                "--engine".to_owned(),
+                "cpp".to_owned(),
+                "--jsbsim-root".to_owned(),
+                install.root.display().to_string(),
+            ],
+        }
     }
 }
 

@@ -1,4 +1,5 @@
-//! Compiles the C++ shim over JSBSim and links JSBSim's static library.
+//! With the `cpp` feature, compiles the C++ shim over JSBSim and links
+//! JSBSim's static library. Without it there is nothing to build.
 //!
 //! JSBSim is an external checkout: `JSBSIM_DIR`, else `~/jsbsim`, with
 //! its build installed in `install/` by `scripts/build-jsbsim.sh` (which
@@ -11,16 +12,24 @@
 //! otherwise bans it in favor of `tracing`.
 #![allow(clippy::disallowed_macros)]
 
-use std::path::PathBuf;
 use std::process::ExitCode;
 
-fn jsbsim_dir() -> Option<PathBuf> {
+#[cfg(not(feature = "cpp"))]
+fn main() -> ExitCode {
+    ExitCode::SUCCESS
+}
+
+#[cfg(feature = "cpp")]
+fn jsbsim_dir() -> Option<std::path::PathBuf> {
+    use std::path::PathBuf;
+
     match std::env::var_os("JSBSIM_DIR") {
         Some(dir) if !dir.is_empty() => Some(PathBuf::from(dir)),
         _ => std::env::var_os("HOME").map(|home| PathBuf::from(home).join("jsbsim")),
     }
 }
 
+#[cfg(feature = "cpp")]
 fn main() -> ExitCode {
     println!("cargo:rerun-if-changed=shim");
     println!("cargo:rerun-if-env-changed=JSBSIM_DIR");

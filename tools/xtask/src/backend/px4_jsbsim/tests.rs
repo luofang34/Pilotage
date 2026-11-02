@@ -9,6 +9,7 @@ use crate::backend::{Placement, SessionContext, SimBackend, backend_for};
 use crate::cli::Profile;
 use crate::conflicts::Claim;
 use crate::error::XtaskError;
+use crate::jsbsim::{JsbsimInstall, SidecarEngine};
 
 fn scratch(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("plt_xt_px4_jsbsim_{tag}_{}", std::process::id()));
@@ -18,28 +19,12 @@ fn scratch(tag: &str) -> PathBuf {
 }
 
 /// A PX4 checkout with a SITL build, and a built JSBSim.
-fn scaffold(tag: &str) -> (PathBuf, PathBuf, PathBuf) {
+fn scaffold(tag: &str) -> (PathBuf, PathBuf) {
     let root = scratch(tag);
     let px4 = root.join("PX4-Autopilot");
     std::fs::create_dir_all(px4.join("build/px4_sitl_default/bin")).unwrap();
     std::fs::write(px4.join("build/px4_sitl_default/bin/px4"), "").unwrap();
-    let jsbsim = root.join("jsbsim");
-    for dir in [
-        "aircraft",
-        "engine",
-        "install/include/JSBSim",
-        "install/lib/pkgconfig",
-    ] {
-        std::fs::create_dir_all(jsbsim.join(dir)).unwrap();
-    }
-    std::fs::write(jsbsim.join("install/include/JSBSim/FGFDMExec.h"), "").unwrap();
-    std::fs::write(jsbsim.join("install/lib/libJSBSim.a"), "").unwrap();
-    std::fs::write(
-        jsbsim.join("install/lib/pkgconfig/JSBSim.pc"),
-        "Version: 1.3.3\n",
-    )
-    .unwrap();
-    (root, px4, jsbsim)
+    (root, px4)
 }
 
 fn context(root: &Path, instance: u16) -> SessionContext {
@@ -79,8 +64,14 @@ fn the_backend_is_selected_by_name_with_its_models() {
 
 #[test]
 fn the_quad_plans_the_sidecar_then_px4_on_the_instance_port() {
-    let (root, px4, jsbsim) = scaffold("quad");
-    let stages = plan_with_dirs(&context(&root, 21), &px4, &jsbsim, JsbsimModel::Quad).unwrap();
+    let (root, px4) = scaffold("quad");
+    let stages = plan_with_dirs(
+        &context(&root, 21),
+        &px4,
+        &SidecarEngine::Rust,
+        JsbsimModel::Quad,
+    )
+    .unwrap();
     assert_eq!(stages.len(), 2);
     let sidecar = &stages[0].spec;
     assert_eq!(sidecar.name, "jsbsim");
@@ -93,10 +84,9 @@ fn the_quad_plans_the_sidecar_then_px4_on_the_instance_port() {
     assert_eq!(arg(&sidecar.args, "--aircraft"), Some("x500"));
     assert_eq!(arg(&sidecar.args, "--truth-addr"), Some("127.0.0.1:19581"));
     assert_eq!(arg(&sidecar.args, "--aircraft-dir"), None);
-    assert_eq!(
-        arg(&sidecar.args, "--jsbsim-root"),
-        Some(jsbsim.to_str().unwrap())
-    );
+    // The Rust port is the default, and needs no checkout.
+    assert_eq!(arg(&sidecar.args, "--engine"), None);
+    assert_eq!(arg(&sidecar.args, "--jsbsim-root"), None);
     let px4_stage = &stages[1].spec;
     assert_eq!(px4_stage.name, "flight-controller");
     assert_eq!(arg(&px4_stage.args, "-i"), Some("21"));
@@ -127,13 +117,25 @@ fn the_quad_plans_the_sidecar_then_px4_on_the_instance_port() {
 
 #[test]
 fn the_sidecar_stands_on_the_site_terrain_once_it_is_built() {
-    let (root, px4, jsbsim) = scaffold("terrain");
-    let stages = plan_with_dirs(&context(&root, 0), &px4, &jsbsim, JsbsimModel::Quad).unwrap();
+    let (root, px4) = scaffold("terrain");
+    let stages = plan_with_dirs(
+        &context(&root, 0),
+        &px4,
+        &SidecarEngine::Rust,
+        JsbsimModel::Quad,
+    )
+    .unwrap();
     assert_eq!(arg(&stages[0].spec.args, "--terrain"), None);
     let archive = crate::sim_terrain::archive_path(&root, "n51");
     std::fs::create_dir_all(archive.parent().unwrap()).unwrap();
     std::fs::write(&archive, "").unwrap();
-    let stages = plan_with_dirs(&context(&root, 0), &px4, &jsbsim, JsbsimModel::Quad).unwrap();
+    let stages = plan_with_dirs(
+        &context(&root, 0),
+        &px4,
+        &SidecarEngine::Rust,
+        JsbsimModel::Quad,
+    )
+    .unwrap();
     assert_eq!(
         arg(&stages[0].spec.args, "--terrain"),
         Some(archive.to_str().unwrap())
@@ -142,8 +144,14 @@ fn the_sidecar_stands_on_the_site_terrain_once_it_is_built() {
 
 #[test]
 fn the_plane_flies_the_rascal_with_airframe_1033() {
-    let (root, px4, jsbsim) = scaffold("plane");
-    let stages = plan_with_dirs(&context(&root, 0), &px4, &jsbsim, JsbsimModel::Plane).unwrap();
+    let (root, px4) = scaffold("plane");
+    let stages = plan_with_dirs(
+        &context(&root, 0),
+        &px4,
+        &SidecarEngine::Rust,
+        JsbsimModel::Plane,
+    )
+    .unwrap();
     let sidecar = &stages[0].spec;
     assert_eq!(arg(&sidecar.args, "--port"), Some("4560"));
     assert_eq!(arg(&sidecar.args, "--aircraft"), Some("rascal"));
@@ -163,17 +171,31 @@ fn the_plane_flies_the_rascal_with_airframe_1033() {
 }
 
 #[test]
+fn the_cpp_library_goes_on_the_sidecars_command_line() {
+    let (root, px4) = scaffold("cpp");
+    let engine = SidecarEngine::Cpp(JsbsimInstall {
+        root: root.join("jsbsim"),
+    });
+    let stages = plan_with_dirs(&context(&root, 0), &px4, &engine, JsbsimModel::Quad).unwrap();
+    let sidecar = &stages[0].spec;
+    assert_eq!(arg(&sidecar.args, "--engine"), Some("cpp"));
+    assert_eq!(
+        arg(&sidecar.args, "--jsbsim-root"),
+        root.join("jsbsim").to_str()
+    );
+}
+
+#[test]
 fn missing_artifacts_name_their_fix() {
-    let (root, px4, jsbsim) = scaffold("missing");
-    std::fs::remove_file(jsbsim.join("install/lib/libJSBSim.a")).unwrap();
-    match plan_with_dirs(&context(&root, 0), &px4, &jsbsim, JsbsimModel::Quad) {
-        Err(XtaskError::MissingArtifact { hint, .. }) => assert!(hint.contains("build-jsbsim")),
-        other => panic!("expected a missing JSBSim, got {other:?}"),
-    }
-    let (root, px4, jsbsim) = scaffold("no_px4");
+    let (root, px4) = scaffold("no_px4");
     std::fs::remove_file(px4.join("build/px4_sitl_default/bin/px4")).unwrap();
     assert!(matches!(
-        plan_with_dirs(&context(&root, 0), &px4, &jsbsim, JsbsimModel::Plane),
+        plan_with_dirs(
+            &context(&root, 0),
+            &px4,
+            &SidecarEngine::Rust,
+            JsbsimModel::Plane
+        ),
         Err(XtaskError::MissingArtifact {
             what: "PX4 SITL binary",
             ..
@@ -182,20 +204,25 @@ fn missing_artifacts_name_their_fix() {
     let mut physical = context(&root, 0);
     physical.profile = Profile::Physical;
     assert!(matches!(
-        plan_with_dirs(&physical, &px4, &jsbsim, JsbsimModel::Quad),
+        plan_with_dirs(&physical, &px4, &SidecarEngine::Rust, JsbsimModel::Quad),
         Err(XtaskError::Usage { .. })
     ));
     assert!(matches!(
-        plan_with_dirs(&context(&root, 30), &px4, &jsbsim, JsbsimModel::Quad),
+        plan_with_dirs(
+            &context(&root, 30),
+            &px4,
+            &SidecarEngine::Rust,
+            JsbsimModel::Quad
+        ),
         Err(XtaskError::Usage { .. })
     ));
 }
 
 #[test]
 fn a_fleet_places_the_vehicle_through_the_sidecar() {
-    let (root, px4, jsbsim) = scaffold("spawn");
+    let (root, px4) = scaffold("spawn");
     let ctx = context(&root, 3);
-    let mut stages = plan_with_dirs(&ctx, &px4, &jsbsim, JsbsimModel::Quad).unwrap();
+    let mut stages = plan_with_dirs(&ctx, &px4, &SidecarEngine::Rust, JsbsimModel::Quad).unwrap();
     let point = Placement {
         latitude_deg: 40.578,
         longitude_deg: -74.737,
