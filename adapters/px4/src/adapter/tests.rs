@@ -7,6 +7,7 @@
 mod battery;
 mod direct_flight;
 mod fixed_wing_advertisement;
+mod sim_truth;
 mod uplink_ack;
 
 use std::net::UdpSocket;

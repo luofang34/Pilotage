@@ -2,8 +2,11 @@
 //! gets, and the fixed-wing control path beside the multicopter one in
 //! `control.rs`.
 
-use pilotage_adapter_api::{ActionResult, ApplyOutcome, Disposition, FcCommandAck, RejectReason};
+use pilotage_adapter_api::{
+    ActionResult, ApplyOutcome, Disposition, FcCommandAck, RejectReason, TelemetryBatch,
+};
 use pilotage_mavlink::LinkConfig;
+use pilotage_mavlink::sampling::sim_truth_sample;
 use pilotage_protocol::{ActionKind, ControlIntent, ScopedControlFrame};
 use pilotage_timing::SimTick;
 
@@ -49,6 +52,22 @@ impl Px4Adapter {
             (Some(uplink), _) => uplink.last_arm_ack(),
             (None, Some(fixed_wing)) => fixed_wing.last_arm_ack(),
             (None, None) => None,
+        }
+    }
+
+    /// Attaches the simulator's truth to the batch's sample, under its own
+    /// role. It carries no sample of its own: without an estimate or a
+    /// vehicle report there is nothing for it to be compared against.
+    pub(super) fn attach_sim_truth(&self, batch: &mut TelemetryBatch) {
+        if !self.publishes_sim_truth {
+            return;
+        }
+        let truth = self
+            .estimate
+            .as_ref()
+            .and_then(|source| sim_truth_sample(&*source.state.lock().ok()?));
+        if let Some(sample) = batch.samples.first_mut() {
+            sample.sim_truth = truth;
         }
     }
 

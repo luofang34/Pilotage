@@ -29,6 +29,7 @@ impl Px4Adapter {
                 pilotage_adapter_api::SourceIncarnation::new([0x60; 16]),
             ),
             started_at: std::time::Instant::now(),
+            publishes_sim_truth: false,
             last_reset: None,
             reset_latch: None,
             reset_spawns: 0,
