@@ -13,16 +13,13 @@ use pilotage_mission_core::{
     MissionTerminal as CoreTerminal, NavigationObservation, TickInput,
     TickOutput as CoreTickOutput, VehicleObservation, WallDeadline,
 };
-use pilotage_protocol::{ControlIntent, ReferenceFrame, VelocityIntent};
+use pilotage_protocol::ControlIntent;
 
-use crate::body_frame::{bearing_rad, cap_horizontal, clamp_symmetric, ned_to_body, wrap_to_pi};
+use crate::body_frame::{project_guidance_setpoint, project_ned_velocity};
 use crate::policy::OPERATIONAL_WALL_DEADLINE_NS;
 
 use super::document::{ARM_PHASE_ID, CLIMB_CAPTURE_MARGIN_M};
 use super::{MissionAction, MissionEngine, MissionEvent, MissionOutput, MissionState};
-
-/// Commanded horizontal speed below which course has no useful direction.
-const YAW_COURSE_FLOOR_MPS: f64 = 0.05;
 
 mod directives;
 mod outputs;
@@ -379,15 +376,23 @@ impl MissionEngine {
 
     fn guided_intent(&mut self, setpoint: GuidanceSetpoint) -> Option<ControlIntent> {
         self.last_refusal = None;
-        let GuidanceSetpoint::Velocity { velocity } = setpoint else {
+        if !matches!(
+            setpoint,
+            GuidanceSetpoint::Velocity { .. } | GuidanceSetpoint::DeviationTracking { .. }
+        ) {
             self.counters.guidance_refused = self.counters.guidance_refused.wrapping_add(1);
             return None;
-        };
+        }
         let Some(yaw) = self.last_yaw_rad else {
             self.counters.missing_yaw = self.counters.missing_yaw.wrapping_add(1);
             return None;
         };
-        Some(self.compose_intent(&velocity, yaw))
+        project_guidance_setpoint(
+            &setpoint,
+            yaw,
+            &self.config.limits,
+            self.config.yaw_gain_per_s,
+        )
     }
 
     fn commanded_groundspeed_mps(&self) -> f64 {
@@ -396,31 +401,13 @@ impl MissionEngine {
             .min(self.config.limits.max_horizontal_mps)
     }
 
+    #[allow(dead_code)]
     fn compose_intent(&self, velocity: &NedVelocity, yaw_rad: f64) -> ControlIntent {
-        let limits = &self.config.limits;
-        let (vn, ve) = cap_horizontal(
-            velocity.north_mps,
-            velocity.east_mps,
-            limits.max_horizontal_mps,
-        );
-        let vd = clamp_symmetric(velocity.down_mps, limits.max_vertical_mps);
-        let (vx, vy) = ned_to_body(vn, ve, yaw_rad);
-        let horizontal_mps = (vn * vn + ve * ve).sqrt();
-        let yaw_rate = if horizontal_mps < YAW_COURSE_FLOOR_MPS {
-            0.0
-        } else {
-            let course = bearing_rad(vn, ve);
-            clamp_symmetric(
-                self.config.yaw_gain_per_s * wrap_to_pi(course - yaw_rad),
-                limits.max_yaw_rate_rps,
-            )
-        };
-        ControlIntent::Velocity(VelocityIntent {
-            frame: ReferenceFrame::BodyFrd,
-            vx: vx as f32,
-            vy: vy as f32,
-            vz: vd as f32,
-            yaw_rate: yaw_rate as f32,
-        })
+        project_ned_velocity(
+            velocity,
+            yaw_rad,
+            &self.config.limits,
+            self.config.yaw_gain_per_s,
+        )
     }
 }
