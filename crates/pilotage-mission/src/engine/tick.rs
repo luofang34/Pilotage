@@ -13,9 +13,9 @@ use pilotage_mission_core::{
     MissionTerminal as CoreTerminal, NavigationObservation, TickInput,
     TickOutput as CoreTickOutput, VehicleObservation, WallDeadline,
 };
-use pilotage_protocol::ControlIntent;
+use pilotage_protocol::{ControlIntent, ReferenceFrame, VelocityIntent};
 
-use crate::body_frame::{project_guidance_setpoint, project_ned_velocity};
+use crate::body_frame::{clamp_symmetric, project_guidance_setpoint, project_ned_velocity};
 use crate::policy::OPERATIONAL_WALL_DEADLINE_NS;
 
 use super::document::{ARM_PHASE_ID, CLIMB_CAPTURE_MARGIN_M};
