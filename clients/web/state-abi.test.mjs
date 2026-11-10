@@ -66,7 +66,7 @@ function fullState() {
   return {
     attitude: { quat: { w: 0.5, x: 0.5, y: 0.5, z: 0.5 }, rates: [0.02, -0.01, 0.05], ageMs: 80 },
     kinematics: { posNed: [1200, 340, -305], velNed: [52, 9, -2], ageMs: 80 },
-    air: { iasMps: 53, baroHpa: 1013.2, tasMps: 58, ageMs: 80 },
+    air: { iasMps: 53, baroHpa: 1013.2, tasMps: 58, vsiMps: -1.5, ageMs: 80 },
     nav: {
       source: 1,
       scale: 1,
@@ -131,6 +131,32 @@ function fullState() {
       altitudeOriginId: 7,
       altitudeModel: 0,
     },
+    // Three engines of three kinds and two tanks, as in the Rust
+    // fixture: every reading is different, so a writer that swaps two
+    // fields or two bits cannot match the golden frame.
+    engines: {
+      records: [
+        {
+          manifoldPressureHpa: 812.5,
+          rpm: 2300,
+          oilTemperatureC: 71.5,
+          oilPressureKpa: 482,
+          fuelPressureKpa: 110.5,
+          coolantTemperatureC: 104,
+          cylinderHeadTemperatureC: 187,
+          carburettorAirTemperatureC: -3.5,
+          shaftAngleDeg: 127.5,
+        },
+        { rpm: 2310 },
+        {},
+      ],
+      ageMs: 80,
+    },
+    fuelTanks: {
+      records: [{ quantityL: 310, capacityL: 352 }, { quantityKg: 180.5 }],
+      ageMs: 80,
+    },
+    clock: { timeOfDayS: 37815.5, ageMs: 80 },
   };
 }
 
@@ -180,19 +206,19 @@ function flightControllerState() {
   };
 }
 
-check("writer version is the pinned wire version", STATE_ABI_VERSION === 8);
+check("writer version is the pinned wire version", STATE_ABI_VERSION === 9);
 
 for (const [stem, build] of [
-  ["state-abi-v8.full", fullState],
-  ["state-abi-v8.data-gateway", dataGatewayState],
-  ["state-abi-v8.flight-controller", flightControllerState],
+  ["state-abi-v9.full", fullState],
+  ["state-abi-v9.data-gateway", dataGatewayState],
+  ["state-abi-v9.flight-controller", flightControllerState],
 ]) {
   check(`${stem} matches the committed golden frame byte for byte`, encodedHex(build()) === goldenHex(stem));
 }
 
 {
   // Presence is meaning: an empty state is exactly the two-byte header.
-  check("an empty state encodes the empty frame", encodedHex({}) === "0800");
+  check("an empty state encodes the empty frame", encodedHex({}) === "0900");
 }
 
 {
@@ -212,14 +238,14 @@ for (const [stem, build] of [
   // Canonicalization: a trust group whose quality, flags, and snapshot
   // all equal their fail-closed defaults encodes as absent — matching
   // the Rust encoder, so equal states produce equal bytes.
-  check("an all-default trust group encodes as absent", encodedHex({ valid: {} }) === "0800");
+  check("an all-default trust group encodes as absent", encodedHex({ valid: {} }) === "0900");
   check(
     "explicitly declared defaults still omit the trust group",
-    encodedHex({ quality: 255, valid: {}, snapshot: { coherence: 0, generation: 0 } }) === "0800",
+    encodedHex({ quality: 255, valid: {}, snapshot: { coherence: 0, generation: 0 } }) === "0900",
   );
   check(
     "one set flag makes the trust group present",
-    encodedHex({ valid: { attitude: true } }) !== "0800",
+    encodedHex({ valid: { attitude: true } }) !== "0900",
   );
 }
 
@@ -262,8 +288,10 @@ for (const [stem, build] of [
   };
   const air = payload({ air: { iasMps: 40, ageMs: 10 } });
   check(
-    "an air group with no true airspeed writes 16 bytes with a NaN tail",
-    air.len === 16 && air.bytes.slice(12, 16).join(",") === "0,0,192,127",
+    "an air group with no true airspeed and no indicated vertical speed writes 20 bytes with NaN tails",
+    air.len === 20 &&
+      air.bytes.slice(12, 16).join(",") === "0,0,192,127" &&
+      air.bytes.slice(16, 20).join(",") === "0,0,192,127",
   );
   const nav = payload({ nav: { source: 1, ageMs: 10 } });
   check(

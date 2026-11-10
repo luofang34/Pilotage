@@ -15,11 +15,13 @@
 // frames in the state crate's fixtures/ (at the pinned upstream rev) via
 // state-abi.test.mjs; the Rust codec pins against the same files, so
 // the two sides of the wasm boundary can only drift by turning CI red.
-// The equipment groups live in state-abi-equipment.js.
+// The equipment groups live in state-abi-equipment.js, and the engine,
+// fuel tank and clock groups live in state-abi-records.js.
 
 import { EQUIPMENT_ENCODERS, EQUIPMENT_PROBE_STATE } from "./state-abi-equipment.js";
+import { RECORD_ENCODERS, RECORD_PROBE_STATE } from "./state-abi-records.js";
 
-export const STATE_ABI_VERSION = 8;
+export const STATE_ABI_VERSION = 9;
 
 const TAG = Object.freeze({
   ATTITUDE: 0x01,
@@ -133,7 +135,10 @@ function groupEncoders() {
         // The display cannot derive true airspeed. A source that does
         // not supply it writes NaN, and the readout shows Missing.
         f(view, off + 12, air.tasMps);
-        return 16;
+        // The rate-of-climb instrument's own reading. The writer never
+        // fills it from the kinematic vertical speed.
+        f(view, off + 16, air.vsiMps);
+        return 20;
       },
     ],
     [
@@ -316,9 +321,11 @@ function groupEncoders() {
   ];
 }
 
-// Every equipment tag sorts after every flight-state tag, so the joined
-// list stays in strictly ascending tag order.
-const ENCODERS = [...groupEncoders(), ...EQUIPMENT_ENCODERS];
+// The frame needs strictly ascending tags, and the record tags fall
+// between the equipment tags, so the joined list is sorted by tag.
+const ENCODERS = [...groupEncoders(), ...EQUIPMENT_ENCODERS, ...RECORD_ENCODERS].sort(
+  (a, b) => a[0] - b[0],
+);
 
 // Encodes `state` as a canonical frame into `view` (a DataView over
 // the wasm state buffer). Returns the used length, or throws RangeError
@@ -361,6 +368,7 @@ const PROBE_STATE = {
   dynamics: { ageMs: 0 },
   monitorText: { revision: 0, lines: [], ageMs: 0 },
   ...EQUIPMENT_PROBE_STATE,
+  ...RECORD_PROBE_STATE,
 };
 
 // The largest frame this writer can produce, measured by encoding the
