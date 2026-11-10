@@ -19,7 +19,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # The Navigate crates are private git dependencies; libgit2
+  # Airmass and Surveillance are private git dependencies; libgit2
   # cannot use the runner's rewritten ssh credentials, the git CLI can.
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   PROTOC_SHA256: a7be2928c0454f132c599e25b79b7ad1b57663f2337d7f7e468a1d59b98ec1b0
@@ -44,22 +44,13 @@ jobs:
       # Building xtask resolves the whole workspace graph, private git
       # dependencies included, before compiling one package — so this
       # job carries the same read-only deploy keys the quality gates do.
-      - name: Authorize the private git dependency (Navigate)
-        env:
-          NAVIGATE_DEPLOY_KEY: ${{ secrets.NAVIGATE_DEPLOY_KEY }}
-        run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "$NAVIGATE_DEPLOY_KEY" > ~/.ssh/navigate_ci
-          chmod 600 ~/.ssh/navigate_ci
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
-          printf 'Host github-navigate\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/navigate_ci\n  IdentitiesOnly yes\n' >> ~/.ssh/config
-          git config --global url."ssh://git@github-navigate/luofang34/Navigate".insteadOf "https://github.com/luofang34/Navigate"
-
       - name: Authorize the private situation domain dependencies
         env:
           AIRMASS_DEPLOY_KEY: ${{ secrets.AIRMASS_DEPLOY_KEY }}
           SURVEILLANCE_DEPLOY_KEY: ${{ secrets.SURVEILLANCE_DEPLOY_KEY }}
         run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
           printf '%s\n' "$AIRMASS_DEPLOY_KEY" > ~/.ssh/airmass_ci
           printf '%s\n' "$SURVEILLANCE_DEPLOY_KEY" > ~/.ssh/surveillance_ci
           chmod 600 ~/.ssh/airmass_ci ~/.ssh/surveillance_ci
@@ -102,20 +93,6 @@ jobs:
           # base commit must be present locally; a shallow clone would hide it.
           fetch-depth: 0
 
-      - name: Authorize the private git dependency (Navigate)
-        env:
-          NAVIGATE_DEPLOY_KEY: ${{ secrets.NAVIGATE_DEPLOY_KEY }}
-        run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "$NAVIGATE_DEPLOY_KEY" > ~/.ssh/navigate_ci
-          chmod 600 ~/.ssh/navigate_ci
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
-          # A read-only deploy key, bound by GitHub to the one repository
-          # whose key it is, offered through a dedicated host alias.
-          # Indicate is public and needs no credential.
-          printf 'Host github-navigate\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/navigate_ci\n  IdentitiesOnly yes\n' >> ~/.ssh/config
-          git config --global url."ssh://git@github-navigate/luofang34/Navigate".insteadOf "https://github.com/luofang34/Navigate"
-
       - name: Authorize the private situation domain dependencies
         env:
           AIRMASS_DEPLOY_KEY: ${{ secrets.AIRMASS_DEPLOY_KEY }}
@@ -125,6 +102,8 @@ jobs:
             echo "::error::AIRMASS_DEPLOY_KEY and SURVEILLANCE_DEPLOY_KEY must contain private deploy keys." >&2
             exit 1
           fi
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
           printf '%s\n' "$AIRMASS_DEPLOY_KEY" > ~/.ssh/airmass_ci
           printf '%s\n' "$SURVEILLANCE_DEPLOY_KEY" > ~/.ssh/surveillance_ci
           chmod 600 ~/.ssh/airmass_ci ~/.ssh/surveillance_ci

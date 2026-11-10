@@ -84,8 +84,8 @@ turret-mavlink = { git = "https://github.com/luofang34/Turret", rev = "30f6ba972
 # The Aviate XIL contract crates are consumed only at one exact upstream
 # revision: both crates must always pin the identical rev so the layout
 # types, the transport, and the canonical object name cannot drift apart.
-aviate-xil-contract = { git = "https://github.com/luofang34/Aviate.git", rev = "ac9bd248406a892fbe97a712d921326c96abd8b6" }
-aviate-xil-shm = { git = "https://github.com/luofang34/Aviate.git", rev = "ac9bd248406a892fbe97a712d921326c96abd8b6" }
+aviate-xil-contract = { git = "https://github.com/luofang34/Aviate.git", rev = "816b1a65cf05b9aaf3b149fcd97ab428afc29b6d" }
+aviate-xil-shm = { git = "https://github.com/luofang34/Aviate.git", rev = "816b1a65cf05b9aaf3b149fcd97ab428afc29b6d" }
 # The Navigate crates are consumed only at one exact upstream revision:
 # all five crates must always pin the identical rev so the contract
 # vocabulary, fusion, plan sequencing, guidance, and geodesy cannot
@@ -188,9 +188,9 @@ pilotage-terrain-query = { path = "crates/pilotage-terrain-query" }
 # The shared world model (luofang34/world): every crate of that workspace
 # is pinned to the identical rev so geodesy, gravity, atmosphere, and the
 # magnetic field come from one release.
-world-core = { git = "https://github.com/luofang34/world", rev = "8da6f84c0959d13b4554ade6e0fb166dfe8e2236" }
-world-geomag = { git = "https://github.com/luofang34/world", rev = "8da6f84c0959d13b4554ade6e0fb166dfe8e2236" }
-world-atmosphere = { git = "https://github.com/luofang34/world", rev = "8da6f84c0959d13b4554ade6e0fb166dfe8e2236" }
+world-core = { git = "https://github.com/luofang34/world", rev = "075e2cafee7fa3dc044f28d750f6b1094d5c5ab2" }
+world-geomag = { git = "https://github.com/luofang34/world", rev = "075e2cafee7fa3dc044f28d750f6b1094d5c5ab2" }
+world-atmosphere = { git = "https://github.com/luofang34/world", rev = "075e2cafee7fa3dc044f28d750f6b1094d5c5ab2" }
 pilotage-world = { path = "crates/pilotage-world", default-features = false }
 flight-tune = { path = "tools/flight-tune" }
 flight-tune-campaign = { path = "tools/flight-tune-campaign" }

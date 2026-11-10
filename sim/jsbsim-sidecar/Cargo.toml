@@ -50,8 +50,8 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 # The rev the root manifest pins for the shared world model; xtask's
 # tests hold the two equal.
-world-atmosphere = { git = "https://github.com/luofang34/world", rev = "8da6f84c0959d13b4554ade6e0fb166dfe8e2236" }
-world-core = { git = "https://github.com/luofang34/world", rev = "8da6f84c0959d13b4554ade6e0fb166dfe8e2236" }
+world-atmosphere = { git = "https://github.com/luofang34/world", rev = "075e2cafee7fa3dc044f28d750f6b1094d5c5ab2" }
+world-core = { git = "https://github.com/luofang34/world", rev = "075e2cafee7fa3dc044f28d750f6b1094d5c5ab2" }
 
 [dev-dependencies]
 pilotage-geo = { path = "../../crates/pilotage-geo" }
