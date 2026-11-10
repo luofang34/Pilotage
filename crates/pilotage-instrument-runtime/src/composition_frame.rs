@@ -1,14 +1,14 @@
 //! Atomic production of all panel scenes in the screen composition.
 
 use indicate_alerts::{AlertContext, ManagerHealth};
-use indicate_instrument_registry::{ConfigBlob, PanelDrawError};
+use indicate_instrument_registry::{ConfigBlob, DrawContext};
 use indicate_instrument_scene::SceneWriter;
-use indicate_instrument_state::abi::v8::{self, AbiError};
+use indicate_instrument_state::abi::v9::{self, AbiError};
 use indicate_instrument_state::{AircraftState, FreshnessPolicy, PanelData, Stamped};
 
 use crate::RenderStatus;
 use crate::composition::composition;
-use crate::registry::{canonical_frame, descriptor, panel_index};
+use crate::registry::{canonical_frame, descriptor, draw_planar, panel_index};
 use crate::runtime::{
     AlertStepOutcome, Runtime, derive_alert_events, scene_error_status, validate_panel_scene,
 };
@@ -94,7 +94,7 @@ impl Runtime {
         if !self.reset_composition_panels() {
             return self.fail_composition(RenderStatus::InvalidPanel);
         }
-        let report = match v8::decode_state(&self.state) {
+        let report = match v9::decode_state(&self.state) {
             Ok(report) => report,
             Err(error) => return self.fail_composition(abi_error_status(error)),
         };
@@ -210,7 +210,7 @@ impl Runtime {
             let Some(panel_idx) = panel_index(slot.panel) else {
                 return false;
             };
-            let frame = descriptor(panel_idx as u32).map(canonical_frame);
+            let frame = descriptor(panel_idx as u32).and_then(canonical_frame);
             *outcome = CompositionPanelOutcome {
                 panel: panel_idx as u32,
                 status: RenderStatus::InvalidPanel,
@@ -236,12 +236,11 @@ impl Runtime {
         let config_bytes = self.config.get(panel_idx).map_or(&[][..], Vec::as_slice);
         let config = ConfigBlob::parse(config_bytes).map_err(|_| RenderStatus::ConfigInvalid)?;
         let mut writer = SceneWriter::new(&mut self.scene).map_err(scene_error_status)?;
-        let frame = canonical_frame(panel);
-        let len = match (panel.draw)(data, &config, Some(alerts), frame, &mut writer) {
-            Ok(()) => writer.finish(),
-            Err(PanelDrawError::Scene(error)) => return Err(scene_error_status(error)),
-            Err(PanelDrawError::Config(_)) => return Err(RenderStatus::ConfigInvalid),
-        };
+        let context = DrawContext::new(data)
+            .with_config(config)
+            .with_alerts(Some(alerts));
+        draw_planar(panel, &context, &mut writer)?;
+        let len = writer.finish();
         let status = validate_panel_scene(panel_idx, &self.scene[..len]);
         if status != RenderStatus::Ok {
             return Err(status);
@@ -255,7 +254,7 @@ impl Runtime {
         offset: usize,
         len: usize,
     ) -> CompositionPanelOutcome {
-        let frame = descriptor(panel_idx as u32).map(canonical_frame);
+        let frame = descriptor(panel_idx as u32).and_then(canonical_frame);
         CompositionPanelOutcome {
             panel: panel_idx as u32,
             status: RenderStatus::Ok,
@@ -307,9 +306,10 @@ fn abi_error_status(error: AbiError) -> RenderStatus {
     match error {
         AbiError::Truncated => RenderStatus::StateTruncated,
         AbiError::BadVersion { .. } => RenderStatus::StateBadVersion,
-        AbiError::NonCanonicalOrder { .. } | AbiError::GroupTruncated { .. } => {
-            RenderStatus::StateMalformed
-        }
+        AbiError::NonCanonicalOrder { .. }
+        | AbiError::GroupTruncated { .. }
+        | AbiError::EngineCountMismatch { .. }
+        | AbiError::TankCountMismatch { .. } => RenderStatus::StateMalformed,
     }
 }
 

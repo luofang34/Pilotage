@@ -1448,7 +1448,7 @@ dependencies = [
 [[package]]
 name = "indicate-alerts"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=ae32a218f963ee7133a0a8ccfdbcc4afd491b184#ae32a218f963ee7133a0a8ccfdbcc4afd491b184"
+source = "git+https://github.com/luofang34/Indicate.git?rev=11ee0fbc8c759200614186fb333722232ac3caee#11ee0fbc8c759200614186fb333722232ac3caee"
 dependencies = [
  "thiserror",
 ]
@@ -1456,7 +1456,7 @@ dependencies = [
 [[package]]
 name = "indicate-frames"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=ae32a218f963ee7133a0a8ccfdbcc4afd491b184#ae32a218f963ee7133a0a8ccfdbcc4afd491b184"
+source = "git+https://github.com/luofang34/Indicate.git?rev=11ee0fbc8c759200614186fb333722232ac3caee#11ee0fbc8c759200614186fb333722232ac3caee"
 dependencies = [
  "libm",
  "thiserror",
@@ -1465,18 +1465,22 @@ dependencies = [
 [[package]]
 name = "indicate-instrument-descriptor"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=ae32a218f963ee7133a0a8ccfdbcc4afd491b184#ae32a218f963ee7133a0a8ccfdbcc4afd491b184"
+source = "git+https://github.com/luofang34/Indicate.git?rev=11ee0fbc8c759200614186fb333722232ac3caee#11ee0fbc8c759200614186fb333722232ac3caee"
 dependencies = [
  "indicate-alerts",
+ "indicate-frames",
  "indicate-instrument-scene",
  "indicate-instrument-state",
+ "indicate-intent",
+ "indicate-interaction",
+ "libm",
  "thiserror",
 ]
 
 [[package]]
 name = "indicate-instrument-feeder"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=ae32a218f963ee7133a0a8ccfdbcc4afd491b184#ae32a218f963ee7133a0a8ccfdbcc4afd491b184"
+source = "git+https://github.com/luofang34/Indicate.git?rev=11ee0fbc8c759200614186fb333722232ac3caee#11ee0fbc8c759200614186fb333722232ac3caee"
 dependencies = [
  "indicate-instrument-state",
 ]
@@ -1484,33 +1488,37 @@ dependencies = [
 [[package]]
 name = "indicate-instrument-glyphs"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=ae32a218f963ee7133a0a8ccfdbcc4afd491b184#ae32a218f963ee7133a0a8ccfdbcc4afd491b184"
+source = "git+https://github.com/luofang34/Indicate.git?rev=11ee0fbc8c759200614186fb333722232ac3caee#11ee0fbc8c759200614186fb333722232ac3caee"
 dependencies = [
  "indicate-sha256",
+ "libm",
  "thiserror",
 ]
 
 [[package]]
 name = "indicate-instrument-panels"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=ae32a218f963ee7133a0a8ccfdbcc4afd491b184#ae32a218f963ee7133a0a8ccfdbcc4afd491b184"
+source = "git+https://github.com/luofang34/Indicate.git?rev=11ee0fbc8c759200614186fb333722232ac3caee#11ee0fbc8c759200614186fb333722232ac3caee"
 dependencies = [
  "indicate-alerts",
  "indicate-instrument-descriptor",
  "indicate-instrument-scene",
  "indicate-instrument-state",
  "indicate-instrument-symbology",
+ "indicate-intent",
  "libm",
 ]
 
 [[package]]
 name = "indicate-instrument-registry"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=ae32a218f963ee7133a0a8ccfdbcc4afd491b184#ae32a218f963ee7133a0a8ccfdbcc4afd491b184"
+source = "git+https://github.com/luofang34/Indicate.git?rev=11ee0fbc8c759200614186fb333722232ac3caee#11ee0fbc8c759200614186fb333722232ac3caee"
 dependencies = [
  "indicate-instrument-descriptor",
  "indicate-instrument-scene",
  "indicate-instrument-state",
+ "indicate-intent",
+ "indicate-interaction",
  "indicate-sha256",
  "thiserror",
 ]
@@ -1518,15 +1526,17 @@ dependencies = [
 [[package]]
 name = "indicate-instrument-scene"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=ae32a218f963ee7133a0a8ccfdbcc4afd491b184#ae32a218f963ee7133a0a8ccfdbcc4afd491b184"
+source = "git+https://github.com/luofang34/Indicate.git?rev=11ee0fbc8c759200614186fb333722232ac3caee#11ee0fbc8c759200614186fb333722232ac3caee"
 dependencies = [
+ "indicate-frames",
+ "libm",
  "thiserror",
 ]
 
 [[package]]
 name = "indicate-instrument-state"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=ae32a218f963ee7133a0a8ccfdbcc4afd491b184#ae32a218f963ee7133a0a8ccfdbcc4afd491b184"
+source = "git+https://github.com/luofang34/Indicate.git?rev=11ee0fbc8c759200614186fb333722232ac3caee#11ee0fbc8c759200614186fb333722232ac3caee"
 dependencies = [
  "indicate-alerts",
  "indicate-frames",
@@ -1537,18 +1547,40 @@ dependencies = [
 [[package]]
 name = "indicate-instrument-symbology"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=ae32a218f963ee7133a0a8ccfdbcc4afd491b184#ae32a218f963ee7133a0a8ccfdbcc4afd491b184"
+source = "git+https://github.com/luofang34/Indicate.git?rev=11ee0fbc8c759200614186fb333722232ac3caee#11ee0fbc8c759200614186fb333722232ac3caee"
 dependencies = [
  "indicate-alerts",
  "indicate-instrument-scene",
  "indicate-instrument-state",
+ "libm",
+ "thiserror",
+]
+
+[[package]]
+name = "indicate-intent"
+version = "0.1.0"
+source = "git+https://github.com/luofang34/Indicate.git?rev=11ee0fbc8c759200614186fb333722232ac3caee#11ee0fbc8c759200614186fb333722232ac3caee"
+dependencies = [
+ "indicate-alerts",
+ "indicate-instrument-feeder",
+ "indicate-instrument-state",
+ "thiserror",
+]
+
+[[package]]
+name = "indicate-interaction"
+version = "0.1.0"
+source = "git+https://github.com/luofang34/Indicate.git?rev=11ee0fbc8c759200614186fb333722232ac3caee#11ee0fbc8c759200614186fb333722232ac3caee"
+dependencies = [
+ "indicate-frames",
+ "libm",
  "thiserror",
 ]
 
 [[package]]
 name = "indicate-sha256"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=ae32a218f963ee7133a0a8ccfdbcc4afd491b184#ae32a218f963ee7133a0a8ccfdbcc4afd491b184"
+source = "git+https://github.com/luofang34/Indicate.git?rev=11ee0fbc8c759200614186fb333722232ac3caee#11ee0fbc8c759200614186fb333722232ac3caee"
 
 [[package]]
 name = "intent-pilot"

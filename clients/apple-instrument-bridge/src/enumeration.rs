@@ -14,11 +14,11 @@ pub fn panel_count() -> u32 {
 }
 
 /// The descriptor at `index` in composition order, or `None` for an
-/// unknown index.
+/// unknown index or for a panel that is not in the planar render space.
 #[uniffi::export]
 pub fn panel_descriptor(index: u32) -> Option<BridgePanelDescriptor> {
     let descriptor = descriptor(index)?;
-    let frame = canonical_frame(descriptor);
+    let frame = canonical_frame(descriptor)?;
     Some(BridgePanelDescriptor {
         id: descriptor.id.to_string(),
         title: descriptor.title.to_string(),

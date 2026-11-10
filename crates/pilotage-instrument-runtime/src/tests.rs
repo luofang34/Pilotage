@@ -3,7 +3,7 @@
 use indicate_instrument_scene::{
     LayerId, MAX_LAYER_COMMANDS, MAX_SCENE_BYTES, SceneCmds, SceneWriter,
 };
-use indicate_instrument_state::abi::v8::{CAPACITY, VERSION, encode_state};
+use indicate_instrument_state::abi::v9::{CAPACITY, VERSION, encode_state};
 use indicate_instrument_state::{AircraftState, Attitude, Quat, Stamped};
 
 use crate::runtime::SCENE_CAPACITY;
@@ -258,6 +258,31 @@ fn every_encode_error_maps_to_its_own_status() {
         scene_error_status(SceneError::TextTooLong),
         RenderStatus::SceneCommandLimit
     );
+    assert_eq!(
+        scene_error_status(SceneError::InvalidGeometry),
+        RenderStatus::SceneCommandLimit
+    );
+}
+
+#[test]
+fn shipped_panels_keep_their_frames_and_background_codes() {
+    use crate::{background_capability_code, panel_count, panel_design_width, panel_id};
+
+    // The underlay contract replaces the background capability. The
+    // PFD cedes its ground to a synthetic-vision underlay (code 2); the
+    // other shipped panels own an opaque background (code 1).
+    assert!(panel_count() > 0);
+    for panel in 0..panel_count() {
+        let expected = if panel_id(panel) == "pfd" { 2 } else { 1 };
+        assert_eq!(
+            background_capability_code(panel),
+            expected,
+            "{}",
+            panel_id(panel)
+        );
+        assert!(panel_design_width(panel) > 0.0, "{}", panel_id(panel));
+    }
+    assert_eq!(background_capability_code(panel_count()), 255);
 }
 
 #[test]
