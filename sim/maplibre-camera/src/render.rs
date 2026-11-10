@@ -170,7 +170,7 @@ impl Camera {
         // Terrain is requested by frames, so a height above an unknown ground
         // still draws one, over sea level, to fetch the ground it stands on;
         // that image is not sent.
-        let ground = self.map.terrain_elevation_at(position);
+        let ground = self.map.context().loaded_ground_cached(position);
         let (altitude_meters, ground_known) = match (pose.height, ground) {
             (Height::Msl(metres), _) => (metres, true),
             (Height::Agl(metres), Some(ground)) => (ground + metres, true),
