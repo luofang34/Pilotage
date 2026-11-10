@@ -10,13 +10,13 @@ use indicate_alerts::{
     AlertCondition, AlertContext, AlertEvent, AlertManager, AlertOutput, AlertProfile, AltFault,
     DynFault, ManagerHealth, NavFault,
 };
-use indicate_instrument_registry::{ConfigBlob, PanelDrawError};
+use indicate_instrument_registry::{ConfigBlob, DrawContext};
 use indicate_instrument_scene::{LayerError, SceneError, SceneWriter, validate_layers};
 use indicate_instrument_state::FreshnessPolicy;
-use indicate_instrument_state::abi::v8::{self, AbiError};
+use indicate_instrument_state::abi::v9::{self, AbiError};
 use indicate_instrument_state::{NavSource, SignalStatus};
 
-use crate::registry::{canonical_frame, descriptor, registry, splice_v_speeds};
+use crate::registry::{descriptor, draw_planar, registry, splice_v_speeds};
 use crate::render_status::RenderStatus;
 
 pub(crate) const SCENE_CAPACITY: usize = 64 * 1024;
@@ -79,7 +79,7 @@ impl Runtime {
         let panels = registry().map_or(0, |registry| registry.panels().count());
         let slots = crate::composition_slot_count() as usize;
         Self {
-            state: vec![0u8; v8::CAPACITY],
+            state: vec![0u8; v9::CAPACITY],
             scene: vec![0u8; SCENE_CAPACITY],
             generation: vec![0; panels],
             composition_scene: vec![0; SCENE_CAPACITY.saturating_mul(slots)],
@@ -111,7 +111,7 @@ impl Runtime {
     /// self-delimiting, so the writer needs a bound, not an exact size;
     /// growing the capacity is not a wire break.
     pub const fn state_capacity() -> usize {
-        v8::CAPACITY
+        v9::CAPACITY
     }
 
     /// The encoded-scene scratch buffer. Its committed prefix is the
@@ -168,7 +168,7 @@ impl Runtime {
         };
         let panel_idx = panel as usize;
         let generation = self.panel_generation(panel_idx);
-        let state = match v8::decode_state(&self.state) {
+        let state = match v9::decode_state(&self.state) {
             Ok(report) => report.state,
             Err(AbiError::Truncated) => {
                 return RenderOutcome::failure(RenderStatus::StateTruncated, generation);
@@ -176,7 +176,12 @@ impl Runtime {
             Err(AbiError::BadVersion { .. }) => {
                 return RenderOutcome::failure(RenderStatus::StateBadVersion, generation);
             }
-            Err(AbiError::NonCanonicalOrder { .. } | AbiError::GroupTruncated { .. }) => {
+            Err(
+                AbiError::NonCanonicalOrder { .. }
+                | AbiError::GroupTruncated { .. }
+                | AbiError::EngineCountMismatch { .. }
+                | AbiError::TankCountMismatch { .. },
+            ) => {
                 return RenderOutcome::failure(RenderStatus::StateMalformed, generation);
             }
         };
@@ -197,15 +202,12 @@ impl Runtime {
         let alerts = self.alert_output.as_ref();
         // The same canonical frame the design-dimension helpers publish,
         // so the frame this scene is emitted at is the one the shell maps.
-        let frame = canonical_frame(panel_descriptor);
-        let len = match (panel_descriptor.draw)(&data, &config, alerts, frame, &mut writer) {
+        let context = DrawContext::new(&data)
+            .with_config(config)
+            .with_alerts(alerts);
+        let len = match draw_planar(panel_descriptor, &context, &mut writer) {
             Ok(()) => writer.finish(),
-            Err(PanelDrawError::Scene(error)) => {
-                return RenderOutcome::failure(scene_error_status(error), generation);
-            }
-            Err(PanelDrawError::Config(_)) => {
-                return RenderOutcome::failure(RenderStatus::ConfigInvalid, generation);
-            }
+            Err(status) => return RenderOutcome::failure(status, generation),
         };
         self.validate_and_commit_scene(panel_idx, len)
     }
@@ -218,7 +220,7 @@ impl Runtime {
     /// display/alerting path monitor faulted, which flags the output
     /// untrusted without suppressing it.
     pub fn step_alerts(&mut self, now_ms: u64, path_healthy: bool) -> AlertStepOutcome {
-        let state = match v8::decode_state(&self.state) {
+        let state = match v9::decode_state(&self.state) {
             Ok(report) => {
                 // Counted here, once per frame step, so a frame rendered
                 // across N panels does not multiply its tag counts.
@@ -236,7 +238,12 @@ impl Runtime {
             Err(AbiError::BadVersion { .. }) => {
                 return AlertStepOutcome::failure(RenderStatus::StateBadVersion);
             }
-            Err(AbiError::NonCanonicalOrder { .. } | AbiError::GroupTruncated { .. }) => {
+            Err(
+                AbiError::NonCanonicalOrder { .. }
+                | AbiError::GroupTruncated { .. }
+                | AbiError::EngineCountMismatch { .. }
+                | AbiError::TankCountMismatch { .. },
+            ) => {
                 return AlertStepOutcome::failure(RenderStatus::StateMalformed);
             }
         };
@@ -399,7 +406,11 @@ impl AlertStepOutcome {
 pub fn scene_error_status(error: SceneError) -> RenderStatus {
     match error {
         SceneError::BufferFull => RenderStatus::SceneBufferFull,
-        SceneError::TooManyPoints | SceneError::TextTooLong => RenderStatus::SceneCommandLimit,
+        // A non-finite or out-of-bound argument is a panel defect, like a
+        // per-command limit, not a capacity budget.
+        SceneError::TooManyPoints | SceneError::TextTooLong | SceneError::InvalidGeometry => {
+            RenderStatus::SceneCommandLimit
+        }
     }
 }
 
@@ -414,7 +425,7 @@ pub(crate) fn validate_panel_scene(panel_idx: usize, scene: &[u8]) -> RenderStat
         Err(LayerError::Decode(_)) => return RenderStatus::SceneStructure,
         Err(_) => return RenderStatus::SceneLayerContract,
     };
-    if report.present & required != required {
+    if u16::from(report.present) & required != required {
         return RenderStatus::SceneCriticalLayersMissing;
     }
     RenderStatus::Ok
@@ -453,7 +464,7 @@ pub fn derive_alert_events(data: &indicate_instrument_state::PanelData) -> [Aler
 
 /// The state-frame ABI version this crate was built against.
 pub fn abi_version() -> u32 {
-    u32::from(v8::VERSION)
+    u32::from(v9::VERSION)
 }
 
 /// The scene format version this crate was built against.

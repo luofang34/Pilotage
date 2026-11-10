@@ -8,8 +8,13 @@
 
 use indicate_instrument_panels::BUILTIN_SET;
 use indicate_instrument_registry::{
-    BackgroundCapability, ConfigBlob, DesignFrame, PanelDescriptor, Registry, keys,
+    ConfigBlob, DesignFrame, DrawContext, PanelDescriptor, PanelDrawError, Registry, RenderSpace,
+    SceneTarget, UnderlayContract, keys,
 };
+use indicate_instrument_scene::SceneWriter;
+
+use crate::render_status::RenderStatus;
+use crate::runtime::scene_error_status;
 
 /// The validated runtime composition, or `None` if the shipped sets no
 /// longer compose — which the panels crate's own tests make
@@ -33,18 +38,43 @@ pub(crate) fn panel_index(id: &str) -> Option<usize> {
 
 /// The frame this runtime requests for a panel: its first canonical
 /// frame, falling back to the floor for a descriptor that declares none.
+/// The runtime draws planar panels only, so a descriptor in another
+/// render space has no frame here (`None`).
 /// The canonical frames are where the digest, admission matrix, and
 /// raster baselines are pinned, so drawing at one keeps every emitted
 /// scene comparable with the recorded artefacts. The same value feeds
 /// the draw call and the design-dimension helpers, so the frame the
 /// producer emits at and the frame the backend maps into pixels cannot
 /// diverge.
-pub fn canonical_frame(descriptor: &PanelDescriptor) -> DesignFrame {
-    descriptor
-        .canonical_frames
-        .first()
-        .copied()
-        .unwrap_or(descriptor.frame_min)
+pub fn canonical_frame(descriptor: &PanelDescriptor) -> Option<DesignFrame> {
+    match descriptor.space {
+        RenderSpace::Planar2D {
+            frame_min,
+            canonical_frames,
+            ..
+        } => Some(canonical_frames.first().copied().unwrap_or(frame_min)),
+        RenderSpace::AngularSphere { .. } | RenderSpace::Volume3D { .. } => None,
+    }
+}
+
+/// Draws `panel` at its canonical frame into `writer` and returns the
+/// used scene length. A panel outside the planar render space, or a
+/// panel that refuses the planar target or asks for an auxiliary
+/// channel this runtime does not supply, is an invalid panel here.
+pub(crate) fn draw_planar(
+    panel: &PanelDescriptor,
+    context: &DrawContext<'_>,
+    writer: &mut SceneWriter<'_>,
+) -> Result<(), RenderStatus> {
+    let frame = canonical_frame(panel).ok_or(RenderStatus::InvalidPanel)?;
+    match (panel.draw)(context, SceneTarget::Planar2D { frame, writer }) {
+        Ok(()) => Ok(()),
+        Err(PanelDrawError::Scene(error)) => Err(scene_error_status(error)),
+        Err(PanelDrawError::Config(_)) => Err(RenderStatus::ConfigInvalid),
+        Err(PanelDrawError::WrongTarget | PanelDrawError::InvalidAux(_)) => {
+            Err(RenderStatus::InvalidPanel)
+        }
+    }
 }
 
 /// Number of composed panels.
@@ -78,22 +108,38 @@ pub fn panel_required_groups(panel: u32) -> u32 {
 /// hands the panel's draw entry point, so the backend that sizes its
 /// canvas from this maps exactly the frame the scene was emitted at.
 pub fn panel_design_width(panel: u32) -> f32 {
-    descriptor(panel).map_or(0.0, |d| canonical_frame(d).width)
+    descriptor(panel)
+        .and_then(canonical_frame)
+        .map_or(0.0, |frame| frame.width)
 }
 
 /// Height of the frame this runtime draws the panel at, in logical
 /// units, or zero.
 pub fn panel_design_height(panel: u32) -> f32 {
-    descriptor(panel).map_or(0.0, |d| canonical_frame(d).height)
+    descriptor(panel)
+        .and_then(canonical_frame)
+        .map_or(0.0, |frame| frame.height)
 }
 
 /// Background capability code: 0 not-used, 1 opaque, 2 cedeable;
 /// 255 for an unknown index (fail-closed, never a default capability).
+///
+/// The codes come from the descriptor's underlay contract. `None` does
+/// not use the background. `Opaque` owns it. A planar underlay (map,
+/// synthetic vision, video, or combined vision) is cedeable: the panel
+/// owns the background until a host underlay takes it. A volumetric
+/// underlay has no planar background, so it is also 255.
 pub fn background_capability_code(panel: u32) -> u32 {
-    descriptor(panel).map_or(255, |d| match d.background {
-        BackgroundCapability::NotUsed => 0,
-        BackgroundCapability::Opaque => 1,
-        BackgroundCapability::Cedeable => 2,
+    descriptor(panel).map_or(255, |d| match d.underlay {
+        UnderlayContract::None => 0,
+        UnderlayContract::Opaque => 1,
+        UnderlayContract::Map2D
+        | UnderlayContract::ConformalSvs3D
+        | UnderlayContract::CalibratedVideo
+        | UnderlayContract::CombinedXvs => 2,
+        UnderlayContract::VolumetricTerrain3D
+        | UnderlayContract::PlanetaryGlobe3D
+        | UnderlayContract::CelestialSystem3D => 255,
     })
 }
 

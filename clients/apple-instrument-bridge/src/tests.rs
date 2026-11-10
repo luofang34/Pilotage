@@ -4,7 +4,7 @@
 
 #![allow(clippy::expect_used, clippy::panic)]
 
-use indicate_instrument_state::abi::v8::{VERSION, encode_state};
+use indicate_instrument_state::abi::v9::{VERSION, encode_state};
 use indicate_instrument_state::{AircraftState, Attitude, Quat, Stamped};
 use pilotage_instrument_runtime::RenderStatus;
 
@@ -15,9 +15,9 @@ use crate::{
 };
 
 const PINNED_SCENE_DIGEST: &str =
-    "edf5815cc83179cfa7f5b8871bbe6e945dbf04d0339e9f5e55cb3a2922deff51";
+    "c61cb54b60c31a2cbc614e809c29e7c8d363178d3c30bc01c55552092d236459";
 const PINNED_COMPOSITION_DIGEST: &str =
-    "87acb725dedfe7455383f157f583dab1d13af914639d5f69736ed3b0866633a7";
+    "5f259d1a1410f06fe5cab40bfdbec9c6cfcbb786254218f35d4a25c5f267c094";
 const PINNED_CORPUS_DIGEST: &str =
     "0b0c7ccb135bfc4107bc110e4b24dceffd84adf1b767fcd14d2c5ace7391f962";
 
@@ -44,7 +44,7 @@ fn attitude_state() -> AircraftState {
 }
 
 fn encode(state: &AircraftState) -> Vec<u8> {
-    let mut block = vec![0u8; indicate_instrument_state::abi::v8::CAPACITY];
+    let mut block = vec![0u8; indicate_instrument_state::abi::v9::CAPACITY];
     let len = encode_state(state, &mut block).expect("encodes");
     block.truncate(len);
     block
@@ -180,7 +180,7 @@ fn a_truncated_state_fails_with_unchanged_generation() {
 #[test]
 fn state_write_accepts_exact_capacity_and_refuses_capacity_plus_one() {
     let bridge = InstrumentBridge::new();
-    let capacity = indicate_instrument_state::abi::v8::CAPACITY;
+    let capacity = indicate_instrument_state::abi::v9::CAPACITY;
     assert_eq!(bridge.write_state(&vec![0; capacity], 0).status, 0);
 
     let error = bridge.write_state(&vec![0; capacity + 1], 0);
@@ -198,7 +198,7 @@ fn oversized_valid_prefix_is_not_truncated_into_an_accepted_frame() {
     assert_eq!(first.status, RenderStatus::Ok as u32);
 
     let mut oversized = encoded;
-    oversized.resize(indicate_instrument_state::abi::v8::CAPACITY + 1, 0);
+    oversized.resize(indicate_instrument_state::abi::v9::CAPACITY + 1, 0);
     assert_eq!(bridge.write_state(&oversized, 1).status, 1);
     let refused = bridge.composition_frame(1, true);
     assert_ne!(refused.status, RenderStatus::Ok as u32);
