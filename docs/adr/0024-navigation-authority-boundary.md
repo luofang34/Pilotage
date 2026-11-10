@@ -26,12 +26,24 @@ would let a navigation fault propagate into stabilization.
   authoritative, this record decides the boundary rules.
 - **Guidance interface:** Navigate flies the vehicle by streaming setpoints
   through the FC's declared command surface (position and velocity setpoints,
-  deviation tracking, as the FC declares them); a trajectory-level handoff,
+  deviation tracking, thrust-vector pointing, entry bank angle, and Cartesian
+  body velocity, as the FC declares them); a trajectory-level handoff,
   if ever adopted, is an FC-side surface extension, not an assumption. These
   commands enter through the host's fenced control path as an
   automation-class principal
   ([ADR-0025](0025-client-optional-operation-automation-principals.md)); the
   FC does not distinguish Navigate from any other commander.
+- **Atmospheric and space guidance parity:** Atmospheric guidance (`L1` lateral
+  path tracking, vertical glideslope, and heading/velocity commands) and space
+  trajectory guidance (`burn` Lambert/Q-guidance, `rendezvous`
+  Clohessy-Wiltshire relative guidance, `entry` drag-acceleration corridor bank
+  guidance, and `powered_descent` E-guidance) both belong to Navigate in
+  double-precision (`f64`). Pilotage sequences operational mission phases,
+  evaluates the active Navigate law, and projects the `GuidanceSetpoint` into
+  single-precision (`f32`) FC inner-loop setpoints. The FC (`Aviate`) executes
+  the 1 kHz attitude, angular-rate, SAS pointing, proper-acceleration-limit, and
+  actuator-allocation loops (`mc`, `fw`, `vtol`, `spacecraft`, including
+  reaction wheels and rotational/translational RCS).
 - **Aiding interface:** Navigate MAY supply timestamped, bounded aiding
   observations with covariance and integrity metadata. The FC independently
   validates, fuses, or rejects each observation; acceptance is never assumed,

@@ -49,45 +49,12 @@ The mission document contains ordered phases. Each phase contains:
 - its entry conditions;
 - one action;
 - its completion conditions;
-- its abort conditions;
-- an optional deadline on the clock that it names; and
-- the phases that it depends on, if any.
-
-The engine runs one phase at a time. It starts the first phase in list order
-whose dependencies have all completed. A phase completes when its completion
-conditions hold. This is the end of its execution only. It does not mean that
-the evidence of the task is settled, or that the task meets its objective. A
-step that needs the evidence or the judgment of a task waits for that fact on
-the mission lane (ADR-0052). A document is refused when a dependency
-names a phase that the document does not have, names the phase itself, or
-makes a cycle.
-
-A phase deadline is on the mission clock or on the simulator clock. The host
-supplies the mission clock. It is monotonic, and it stops while the mission is
-held. Only a simulator supplies the simulator clock. A phase needs the simulator
-clock, and declares the simulator-time capability, only when its deadline or a
-condition uses that clock. A phase without a deadline, such as a phase that
-waits for a person, continues until its conditions end it. A flight-plan
-reference names its own navigation data, so a document names navigation data
-only when one data set applies to all of the document.
+- its abort conditions; and
+- its maximum simulator time.
 
 The action vocabulary uses nested enums. `MissionAction::Flight(FlightAction)`
 contains operational flight actions. `MissionAction::Trial(TrialAction)`
-contains calibration actions. `MissionAction::Bound(BoundAction)` names a host
-executor, an operation, its version, and its parameters, for a task that is
-not flight, such as a wait for a person or a reading. A host registers each
-operation that it can do, with its version, its typed parameters and results,
-the capabilities that it needs, how a cancel ends it, whether a repeat with
-the same action identity is harmless, and whether the host can tell after a
-restart that it occurred. The engine admits a document only when each bound
-action names a registered operation in its version, with parameters of the
-declared types. Thus a host refuses an action that it cannot do before the
-run starts, not while the run continues. A mission lane makes the same check
-against its host's registry when a plan of operations is proposed. `FlightAction::FollowSegment` flies part of one
-plan, so that a survey compiles into one phase for each task: toward a line,
-along the line, and home. The vehicle flies the one plan continuously. The
-acquisition requirement of a line stays with the mission lane, which reads it
-from the task that the phase identifier names. An implementation can recognize an action before
+contains calibration actions. An implementation can recognize an action before
 it implements that action. It returns a typed refusal for an action that it
 does not implement.
 
@@ -103,8 +70,7 @@ The core owns:
 - mission admission and capability checks;
 - the active phase index and all phase transitions;
 - caller-supplied logical time;
-- phase deadlines on the mission or simulator clock, and the wall-time
-  deadline;
+- simulator-time and wall-time deadlines;
 - action IDs and correlated receipts;
 - retries and typed refusals;
 - abort behavior and cleanup inside one mission;
@@ -142,11 +108,11 @@ runs.
 | Component | Owns | Does not own |
 |---|---|---|
 | Mission core crate | Mission documents, identity, phases, actions, conditions, validation, content digests, admission, phase transitions, deadlines, receipts, cleanup, evidence events, and terminal results | Navigate algorithms, campaign policy, host I/O, or vehicle actuation |
-| Flight handlers crate | Navigate-backed directives for flight phases and flight-plan reference resolution | Phase transitions, campaign policy, or transport I/O |
-| Navigate | Route geometry, leg sequencing, fusion, and guidance algorithms | Mission phase transitions, flight-control actuation, or calibration policy |
+| Flight handlers crate | Navigate-backed directives for atmospheric and space flight phases (`burn`, `rendezvous`, `entry`, `powered_descent`), `GuidanceSetpoint` projection, and flight-plan reference resolution | Phase transitions, campaign policy, inner-loop rate/actuator control, or transport I/O |
+| Navigate | Route geometry, leg sequencing, fusion, integrity admission, and outer-loop atmospheric and space trajectory guidance laws (`f64`) | Operational mission phase transitions with operator receipts, inner-loop flight-control actuation, or calibration policy |
 | `flight-tune` | Candidate search, campaign scheduling, scoring, promotion, and the evidence journal | Mission phase transitions or simulator command execution |
 | `pilotage-trial` | Trial samples, evidence contracts, condition artifacts, and manifests | Mission phase transitions or host I/O |
-| Aviate | Typed command execution, plant-condition application, telemetry, and receipts | Pilotage product mission sequencing |
+| Aviate | Typed inner-loop command execution (`f32`, 1 kHz attitude/rate/envelope/proper-acceleration control and actuator mixing across `mc`, `fw`, `vtol`, `spacecraft`), plant-condition application, telemetry, and receipts | Pilotage product mission sequencing or `f64` orbital/entry trajectory guidance |
 | Session host | The operational instance of the mission engine and its operational I/O | Calibration lane injection or test-stand control |
 | Campaign runtime | The calibration instance of the mission engine and its calibration I/O | Operational session commands or campaign scoring policy |
 

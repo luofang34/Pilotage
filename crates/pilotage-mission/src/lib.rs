@@ -24,6 +24,10 @@ pub mod survey;
 
 mod body_frame;
 
+pub use body_frame::{
+    project_cartesian_velocity_body, project_cartesian_velocity_ned, project_entry_bank_ned,
+    project_guidance_setpoint, project_ned_velocity, project_thrust_vector_ned,
+};
 pub use config::{MissionConfig, MissionLimits, OwnshipSource};
 pub use engine::{
     MissionAction, MissionCounters, MissionEngine, MissionEvent, MissionOutput, MissionState,
