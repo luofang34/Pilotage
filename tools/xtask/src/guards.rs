@@ -14,6 +14,7 @@
 mod aviate_control_feel;
 mod pipefail_pipelines;
 mod production_lints;
+mod terrain_base_layer;
 mod vehicle_writes;
 
 use std::path::{Path, PathBuf};
@@ -68,7 +69,22 @@ fn run_rust_guards(repo_root: &Path, failed: &mut Vec<String>) {
     run_fc_vocabulary(repo_root, failed);
     run_pipefail_pipelines(repo_root, failed);
     run_production_lints(repo_root, failed);
+    run_terrain_base_layer(repo_root, failed);
     run_vehicle_writes(repo_root, failed);
+}
+
+fn run_terrain_base_layer(repo_root: &Path, failed: &mut Vec<String>) {
+    let name = terrain_base_layer::NAME;
+    let refusals = terrain_base_layer::check(repo_root);
+    if refusals.is_empty() {
+        print_line(&format!("guard {name}: ok"));
+    } else {
+        for refusal in &refusals {
+            print_line(refusal);
+        }
+        print_line(&format!("guard {name}: FAILED at the check"));
+        failed.push(name.to_owned());
+    }
 }
 
 fn run_production_lints(repo_root: &Path, failed: &mut Vec<String>) {

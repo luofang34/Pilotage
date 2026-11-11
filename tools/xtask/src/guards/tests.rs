@@ -55,7 +55,6 @@ fn repository_guards_are_discovered() {
         "situation-ownship-wiring",
         "situation-presentation-boundary",
         "structure",
-        "terrain-base-layer",
         "web-situation-map",
     ] {
         assert!(
