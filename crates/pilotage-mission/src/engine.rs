@@ -93,6 +93,8 @@ pub struct MissionEngine {
     hold_events: Vec<MissionEvent>,
     /// The vehicle's latest status and the arm request held for it.
     vehicle: vehicle_status::VehicleReadiness,
+    /// Whether a simulation-truth sample was ever fused.
+    truth_sampled: bool,
 }
 
 impl MissionEngine {
@@ -278,6 +280,7 @@ impl MissionEngine {
             held_total_ns: 0,
             hold_events: Vec::new(),
             vehicle: vehicle_status::VehicleReadiness::default(),
+            truth_sampled: false,
         })
     }
 

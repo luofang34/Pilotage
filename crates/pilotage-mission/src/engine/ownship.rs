@@ -11,9 +11,9 @@ use navigate_geodesy::NedOffset;
 use crate::config::OwnshipSource;
 use crate::ownship::{OwnshipAltitude, OwnshipSample, TruthRole};
 
-use super::MissionEngine;
 use super::estimate::EstimateBudget;
 use super::onboard::OnboardLimits;
+use super::{MissionEngine, StartWithheldReason};
 
 /// The single synthesized-GNSS source identity the engine stamps its
 /// observations with.
@@ -41,6 +41,7 @@ impl MissionEngine {
             self.estimate.accept(sample);
             return;
         }
+        self.truth_sampled = true;
         self.fuse_truth(sample, now);
     }
 
@@ -130,6 +131,37 @@ impl MissionEngine {
         );
         if !self.filter.ingest(&observation, now).is_accepted() {
             self.counters.fusion_rejected = self.counters.fusion_rejected.wrapping_add(1);
+        }
+    }
+}
+
+impl MissionEngine {
+    /// Why the configured source gives no solution at `now`: for the
+    /// onboard navigator, its own reason; for the other sources, no sample
+    /// yet or none recent enough to fly.
+    pub(super) fn solution_absence(&self, now: MonotonicNanos) -> StartWithheldReason {
+        match self.config.ownship_source {
+            OwnshipSource::OnboardNavigation {
+                max_age,
+                max_horizontal_1sigma_m,
+            } => self
+                .onboard_absence(
+                    now,
+                    OnboardLimits {
+                        max_age,
+                        max_horizontal_1sigma_m,
+                    },
+                )
+                .unwrap_or(StartWithheldReason::NavigationStale),
+            OwnshipSource::VehicleEstimate { .. } if !self.estimate.has_sample() => {
+                StartWithheldReason::NavigationNotStarted
+            }
+            OwnshipSource::SimulationTruth if !self.truth_sampled => {
+                StartWithheldReason::NavigationNotStarted
+            }
+            OwnshipSource::VehicleEstimate { .. } | OwnshipSource::SimulationTruth => {
+                StartWithheldReason::NavigationStale
+            }
         }
     }
 }

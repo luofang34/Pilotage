@@ -7,7 +7,8 @@
 //! held until the vehicle reports itself ready, with a typed event naming
 //! the reason instead of a silent wait.
 
-use navigate_contract::MonotonicNanos;
+use navigate_contract::{MonotonicNanos, NavigationSolution};
+use pilotage_mission_core::VehicleLifecycleState;
 
 use super::{MissionAction, MissionEngine, MissionEvent};
 
@@ -29,12 +30,27 @@ pub struct VehicleStatus {
 }
 
 /// Why the engine holds back the start of the mission.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum StartWithheldReason {
     /// No vehicle status has said, within
     /// [`VEHICLE_STATUS_MAX_AGE_NS`], that the vehicle is ready to arm.
     VehicleNotReady,
+    /// The ownship source has given nothing yet.
+    NavigationNotStarted,
+    /// The latest navigation solution is older than the source's age
+    /// limit.
+    NavigationStale,
+    /// The navigator grades its solution unusable.
+    NavigationUnusable,
+    /// The navigator's horizontal uncertainty is above the limit the
+    /// mission flies under.
+    NavigationTooUncertain {
+        /// The solution's 1-sigma horizontal uncertainty, metres.
+        horizontal_1sigma_m: f64,
+        /// The limit, metres.
+        limit_m: f64,
+    },
 }
 
 /// The latest vehicle status and the arm request held for it.
@@ -42,6 +58,8 @@ pub enum StartWithheldReason {
 pub(super) struct VehicleReadiness {
     latest: Option<VehicleStatus>,
     held_arm: Option<MissionAction>,
+    /// The reason last announced for holding the start, while it holds.
+    withheld: Option<StartWithheldReason>,
 }
 
 impl MissionEngine {
@@ -67,6 +85,18 @@ impl MissionEngine {
         })
     }
 
+    /// The vehicle's lifecycle as the mission core reads it: ready while
+    /// a fresh status says so, converging while the latest says it is not
+    /// or has aged out, and unknown before any status.
+    pub(super) fn vehicle_lifecycle(&self, now: MonotonicNanos) -> Option<VehicleLifecycleState> {
+        self.vehicle.latest?;
+        Some(if self.vehicle_ready(now) {
+            VehicleLifecycleState::Ready
+        } else {
+            VehicleLifecycleState::Converging
+        })
+    }
+
     /// The arm request the core emitted at `now`: sent now, or held until
     /// the vehicle is ready when the configuration asks for that.
     pub(super) fn gate_arm(
@@ -82,10 +112,45 @@ impl MissionEngine {
             return Some(action);
         }
         self.vehicle.held_arm = Some(action);
-        events.push(MissionEvent::StartWithheld {
-            reason: StartWithheldReason::VehicleNotReady,
-        });
+        self.announce_start(Some(StartWithheldReason::VehicleNotReady), events);
         None
+    }
+
+    /// Announces why the start is held, once for each reason in a row: a
+    /// changed reason is announced again, a changed uncertainty under the
+    /// same reason is not. `None` clears it, silently: the start announces
+    /// itself.
+    pub(super) fn announce_start(
+        &mut self,
+        reason: Option<StartWithheldReason>,
+        events: &mut Vec<MissionEvent>,
+    ) {
+        let changed = match (self.vehicle.withheld, reason) {
+            (Some(held), Some(now)) => {
+                core::mem::discriminant(&held) != core::mem::discriminant(&now)
+            }
+            (None, Some(_)) => true,
+            (_, None) => false,
+        };
+        self.vehicle.withheld = reason;
+        if let (true, Some(reason)) = (changed, reason) {
+            events.push(MissionEvent::StartWithheld { reason });
+        }
+    }
+
+    /// Why the start is held at `now`, before the arm request goes out:
+    /// no solution to fly, or a vehicle that is not ready when the
+    /// configuration waits for it.
+    pub(super) fn start_withheld_reason(
+        &self,
+        solution: Option<&NavigationSolution>,
+        now: MonotonicNanos,
+    ) -> Option<StartWithheldReason> {
+        if solution.is_none() {
+            return Some(self.solution_absence(now));
+        }
+        (self.config.arm_when_vehicle_ready && !self.vehicle_ready(now))
+            .then_some(StartWithheldReason::VehicleNotReady)
     }
 
     /// The held arm request, once the vehicle is ready at `now`.

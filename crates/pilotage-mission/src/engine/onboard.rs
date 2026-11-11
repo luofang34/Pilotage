@@ -20,7 +20,7 @@ use navigate_contract::{
 
 use crate::config::OwnshipSource;
 
-use super::MissionEngine;
+use super::{MissionEngine, StartWithheldReason};
 
 /// How far a quaternion norm may be from one and still give a heading.
 const UNIT_NORM_TOLERANCE: f64 = 1e-3;
@@ -123,6 +123,39 @@ impl MissionEngine {
             return None;
         }
         Some(held)
+    }
+}
+
+impl MissionEngine {
+    /// Why the onboard navigator gives no solution to fly at `now`: none
+    /// published yet, the held one too old, graded unusable, or with a
+    /// horizontal uncertainty above the limit. `None` when the held
+    /// solution is fit. Reads the same judgments as
+    /// [`Self::onboard_solution`] and counts nothing.
+    pub(super) fn onboard_absence(
+        &self,
+        now: MonotonicNanos,
+        limits: OnboardLimits,
+    ) -> Option<StartWithheldReason> {
+        let Some(held) = self.onboard.latest else {
+            return Some(StartWithheldReason::NavigationNotStarted);
+        };
+        let fresh = now
+            .elapsed_since(held.stamp.solved_at)
+            .is_some_and(|age| age.as_nanos() <= limits.max_age.as_nanos());
+        if !fresh {
+            return Some(StartWithheldReason::NavigationStale);
+        }
+        if held.integrity.quality == SolutionQuality::Unusable {
+            return Some(StartWithheldReason::NavigationUnusable);
+        }
+        let sigma = held.integrity.horizontal_1sigma_m;
+        (sigma > limits.max_horizontal_1sigma_m).then_some(
+            StartWithheldReason::NavigationTooUncertain {
+                horizontal_1sigma_m: sigma,
+                limit_m: limits.max_horizontal_1sigma_m,
+            },
+        )
     }
 }
 

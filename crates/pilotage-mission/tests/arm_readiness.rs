@@ -176,3 +176,26 @@ fn intents_stream_from_the_arm_request_before_its_confirmation() {
     let after = bench.tick();
     assert!(after.intent.is_some(), "the climb continues with no gap");
 }
+
+#[test]
+fn a_long_wait_for_a_ready_vehicle_neither_fails_nor_repeats_the_hold() {
+    let mut bench = Bench::new(true);
+    let mut withheld_ticks = 0;
+    // Thirty seconds of a vehicle that is not ready.
+    for _ in 0..600 {
+        bench.status(false);
+        let output = bench.tick();
+        assert!(output.action.is_none());
+        assert_ne!(output.state, MissionState::Failed, "{:?}", output.events);
+        if withheld(&output) {
+            withheld_ticks += 1;
+        }
+    }
+    assert_eq!(withheld_ticks, 1, "the hold is announced once");
+    bench.status(true);
+    let output = bench.tick();
+    assert!(
+        output.action.is_some(),
+        "the arm goes out once ready: {output:?}"
+    );
+}
