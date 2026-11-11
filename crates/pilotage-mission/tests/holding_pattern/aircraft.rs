@@ -1,6 +1,7 @@
-//! Two fixed wings with Aviate's C172 lateral laws: one that flies heading
-//! and altitude demands in a steady wind, as on the onboard navigator, and
-//! one that flies velocity demands in still air, as on simulation truth.
+//! A fixed wing with Aviate's C172 lateral laws: the proportional
+//! heading-to-bank law for heading and altitude demands, as on the onboard
+//! navigator, and the trimmed course law for velocity demands, as on
+//! simulation truth. It flies in a steady wind.
 
 use navigate_contract::{
     AttitudeQuaternion, ClockDomainId, Ellipsoid, FaultDetection, GeodeticPosition,
@@ -74,8 +75,10 @@ impl Aircraft {
     pub fn fly(&mut self, intent: Option<&ControlIntent>) {
         let mut wanted = self.heading_rad;
         let mut altitude_m = None;
+        let mut heading_law = false;
         match intent {
             Some(ControlIntent::HeadingAltitude(demand)) => {
+                heading_law = true;
                 wanted = f64::from(demand.heading_rad);
                 altitude_m = Some(f64::from(demand.altitude_m));
                 if let Some(airspeed) = demand.airspeed_mps {
@@ -97,7 +100,15 @@ impl Aircraft {
         let error = (wanted - self.heading_rad)
             .sin()
             .atan2((wanted - self.heading_rad).cos());
-        let wanted_bank = self.bank_command(error, rate_per_tangent);
+        // Aviate holds a heading demand with the proportional heading-to-bank
+        // law, and a velocity demand's course with the trimmed course law.
+        let wanted_bank = if heading_law {
+            (error / COURSE_TIME_CONSTANT_S / rate_per_tangent)
+                .atan()
+                .clamp(-BANK_LIMIT_RAD, BANK_LIMIT_RAD)
+        } else {
+            self.bank_command(error, rate_per_tangent)
+        };
         let roll_rate = ((wanted_bank - self.bank_rad) / ROLL_TIME_CONSTANT_S)
             .clamp(-MAX_ROLL_RATE_RPS, MAX_ROLL_RATE_RPS);
         self.bank_rad += roll_rate * STEP_S;

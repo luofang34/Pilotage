@@ -425,3 +425,49 @@ fn a_new_plan_takes_the_aircraft_out_of_the_pattern() {
         .fold(f64::NEG_INFINITY, f64::max);
     assert!(farthest_east > new_fix[1] - 200.0, "{farthest_east} m east");
 }
+
+#[test]
+fn an_aircraft_handed_back_far_from_the_pattern_enters_by_its_sector() {
+    // Someone else flew the aircraft away: it comes back to the fix and
+    // enters by the course it reaches the fix on.
+    for (ned, heading_deg, entry) in [
+        (
+            [FIX_NED[0] + 3_000.0, 7_000.0],
+            225.0_f64,
+            HoldingEntry::Parallel,
+        ),
+        (
+            [FIX_NED[0] + 3_000.0, -3_000.0],
+            135.0,
+            HoldingEntry::Teardrop,
+        ),
+        ([FIX_NED[0] - 9_000.0, -3_000.0], 20.0, HoldingEntry::Direct),
+    ] {
+        let mut run = Run::new(Feed::Navigator, [-8.485, 8.485]);
+        run.fly_and_hold(400.0);
+        run.aircraft = Aircraft::new(
+            [ned[0], ned[1], 0.0],
+            heading_deg.to_radians(),
+            [-8.485, 8.485],
+        );
+        let handed_back = run.samples.len();
+        run.fly_and_hold(1_200.0);
+        let summary = format!(
+            "from {ned:?} on {heading_deg}°: entries {:?}",
+            run.entries()
+        );
+        assert_eq!(run.entries().last(), Some(&entry), "{summary}");
+        let after = run.samples.get(handed_back..).unwrap_or_default();
+        assert!(after.iter().all(|s| s.commanded), "{summary}");
+        assert!(after.last().is_some_and(|s| s.circuits >= 3), "{summary}");
+        let settled_s = fix_turn_start(after, 2);
+        let worst = excursions(after, &run.pattern(), 12.0, settled_s);
+        assert!(
+            worst
+                .iter()
+                .all(|reach| *reach < 0.25 * run.pattern().turn_radius_m),
+            "outside the pattern by {worst:.0?} m: {summary}"
+        );
+        assert!(worst_left_turn(after) < 0.2_f64.to_radians(), "{summary}");
+    }
+}
