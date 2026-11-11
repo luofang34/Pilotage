@@ -106,30 +106,11 @@ impl MissionRoute {
         event
     }
 
-    /// A `PlanExecution` at the kept progress. `None` only if the owned
-    /// plan stops activating, which cannot occur: the plan and the
-    /// config do not change after `activate`.
-    ///
-    /// `PlanExecution` has no constructor that starts at a leg, so this
-    /// replays the kept progress: one sample at each passed waypoint.
-    /// A sample at a fix is at distance zero, which is less than the
-    /// positive capture radius that activation requires, so each sample
-    /// sequences exactly one leg.
+    /// A `PlanExecution` at the kept progress. `None` only if Navigate
+    /// refuses to resume, which cannot occur: the plan and the config do
+    /// not change after `activate`, and the kept progress is always a
+    /// state that a `PlanExecution` reported, never one this type makes.
     fn execution(&self) -> Option<PlanExecution<'_>> {
-        let mut execution = PlanExecution::new(self.plan(), self.config).ok()?;
-        let passed = if self.complete {
-            self.waypoints.len()
-        } else {
-            self.active_index
-        };
-        for waypoint in self.waypoints.iter().take(passed) {
-            if matches!(
-                execution.advance(&waypoint.position, 0.0),
-                SequenceEvent::None
-            ) {
-                return None;
-            }
-        }
-        Some(execution)
+        PlanExecution::resume(self.plan(), self.config, self.active_index, self.complete).ok()
     }
 }
