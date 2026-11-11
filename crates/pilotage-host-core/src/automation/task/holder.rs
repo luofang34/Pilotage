@@ -43,6 +43,7 @@ impl MissionTask {
                 let Some(stop) = self.stop_intent().or(unarmed) else {
                     return true;
                 };
+                self.filler_sequence = Some(self.sequence.wrapping_add(1));
                 stop
             }
             None => return true,

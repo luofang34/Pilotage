@@ -161,7 +161,7 @@ impl HostCore {
                 self.set_times(self.next_engine_tick);
                 let mut readiness = Readiness::default();
                 self.actor.tick_with(&mut readiness);
-                self.report_readiness(readiness.ready_to_arm, self.next_engine_tick);
+                self.report_status(&readiness, self.next_engine_tick);
                 self.next_engine_tick = self.next_engine_tick.saturating_add(nanos(TICK_INTERVAL));
             } else {
                 self.set_times(self.next_mission_tick);
@@ -340,17 +340,17 @@ impl HostCore {
         }
     }
 
-    /// Hands the mission engine the flight controller's readiness to
-    /// arm, received at `now_ns` on the mission clock.
-    fn report_readiness(&mut self, ready_to_arm: Option<bool>, now_ns: u64) {
-        let Some(ready_to_arm) = ready_to_arm else {
+    /// Hands the mission engine the flight controller's status, received
+    /// at `now_ns` on the mission clock.
+    fn report_status(&mut self, readiness: &Readiness, now_ns: u64) {
+        let Some(ready_to_arm) = readiness.ready_to_arm else {
             return;
         };
+        let mut status = VehicleStatus::ready(ready_to_arm, MonotonicNanos::from_nanos(now_ns));
+        status.position_valid = readiness.position_valid;
+        status.height_above_origin_m = readiness.height_above_origin_m;
         if let Some(mission) = self.principal.as_mut().and_then(MissionTask::mission_mut) {
-            mission.on_vehicle_status(VehicleStatus::ready(
-                ready_to_arm,
-                MonotonicNanos::from_nanos(now_ns),
-            ));
+            mission.on_vehicle_status(status);
         }
     }
 
@@ -380,11 +380,18 @@ impl HostCore {
     }
 }
 
-/// The flight controller's readiness to arm, as the adapter's last
-/// telemetry sample of a tick reports it.
+/// The estimate authorization bit of a valid position (bit 2 of
+/// `AvionicsSample::valid_flags`).
+const VALID_POSITION: u32 = 0b0100;
+
+/// The flight controller's status, as the adapter's last telemetry sample
+/// of a tick reports it: its readiness to arm, whether its estimate
+/// states a valid position, and its height above its local origin.
 #[derive(Debug, Default)]
 struct Readiness {
     ready_to_arm: Option<bool>,
+    position_valid: Option<bool>,
+    height_above_origin_m: Option<f64>,
 }
 
 impl TelemetryTap for Readiness {
@@ -394,6 +401,24 @@ impl TelemetryTap for Readiness {
         if let Some(ready) = sample.fc_state.and_then(|state| state.ready_to_arm) {
             self.ready_to_arm = Some(ready);
         }
+        // The flags authorize only under an estimator status stamp. The
+        // group states no height bit of its own, so the local height is
+        // read under the position authorization.
+        let Some(avionics) = sample
+            .avionics
+            .as_ref()
+            .filter(|avionics| avionics.estimator_status_stamp.is_some())
+        else {
+            return;
+        };
+        let position_valid = avionics.valid_flags & VALID_POSITION != 0;
+        self.position_valid = Some(position_valid);
+        self.height_above_origin_m = avionics
+            .kinematics
+            .as_ref()
+            .filter(|_| position_valid)
+            .map(|kinematics| -f64::from(kinematics.pos_ned_m[2]))
+            .filter(|height| height.is_finite());
     }
 }
 

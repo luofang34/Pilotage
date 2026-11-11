@@ -33,6 +33,7 @@ impl MissionTask {
             held: false,
             neutral_frames: 0,
             can_stop: true,
+            filler_sequence: None,
             awaiting_launch: false,
             lease_due: false,
             lease_wanted: false,

@@ -5,8 +5,8 @@
 
 use pilotage_mission::{MissionEngine, MissionLimits, MissionState};
 use pilotage_protocol::{
-    ControlAction, ControlActionResult, FrameRejected, FrameRejectionReason, LeaseRequest,
-    LeaseResponse, ProfileActivation, ScopeId, ServerWelcome, wire,
+    ControlAction, ControlActionResult, FrameRejected, LeaseRequest, LeaseResponse,
+    ProfileActivation, ScopeId, ServerWelcome, wire,
 };
 use pilotage_session::DomainEnvelope;
 use prost::Message;
@@ -311,25 +311,6 @@ impl MissionTask {
         }
         if result.accepted && matches!(result.action, ControlAction::Arm) {
             self.update(|status| status.arm_accepted = true);
-        }
-    }
-
-    fn on_frame_rejected(&mut self, rejection: &FrameRejected) {
-        warn!(
-            reason = ?rejection.reason,
-            sequence = rejection.sequence.as_u32(),
-            current_generation = rejection.current_generation.as_u64(),
-            "mission frame rejected"
-        );
-        self.update(|status| status.frames_rejected = status.frames_rejected.wrapping_add(1));
-        // A stale-generation or no-holder rejection means authority moved
-        // on while an event was still in flight; stop framing rather than
-        // keep hammering a superseded grant.
-        if matches!(
-            rejection.reason,
-            FrameRejectionReason::StaleGeneration | FrameRejectionReason::NoHolder
-        ) {
-            self.fence("frames are rejected under a superseded authority");
         }
     }
 

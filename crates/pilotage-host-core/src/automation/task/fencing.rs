@@ -7,16 +7,48 @@
 //! closed connection fences the task for good.
 
 use pilotage_protocol::{
-    Generation, PrincipalId, ScopeId, ScopeTransferAccept, ScopeTransferOffer, wire,
+    FrameRejected, FrameRejectionReason, Generation, PrincipalId, ScopeId, ScopeTransferAccept,
+    ScopeTransferOffer, wire,
 };
 use pilotage_session::DomainEnvelope;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::HOST_VEHICLE;
 
 use super::{MISSION_SCOPE, MissionTask};
 
 impl MissionTask {
+    pub(super) fn on_frame_rejected(&mut self, rejection: &FrameRejected) {
+        // The holder's stop frame meets an adapter that has no measurement
+        // yet at power-up: the refusal is expected, and the frame has
+        // already kept the lease.
+        let filler = rejection.reason == FrameRejectionReason::AdapterRejected
+            && self.filler_sequence == Some(rejection.sequence.as_u32());
+        if filler {
+            debug!(
+                sequence = rejection.sequence.as_u32(),
+                "the vehicle refused the holder's stop frame; it has no measurement yet"
+            );
+        } else {
+            warn!(
+                reason = ?rejection.reason,
+                sequence = rejection.sequence.as_u32(),
+                current_generation = rejection.current_generation.as_u64(),
+                "mission frame rejected"
+            );
+        }
+        self.update(|status| status.frames_rejected = status.frames_rejected.wrapping_add(1));
+        // A stale-generation or no-holder rejection means authority moved
+        // on while an event was still in flight; stop framing rather than
+        // keep hammering a superseded grant.
+        if matches!(
+            rejection.reason,
+            FrameRejectionReason::StaleGeneration | FrameRejectionReason::NoHolder
+        ) {
+            self.fence("frames are rejected under a superseded authority");
+        }
+    }
+
     /// Handles one authority event. Returns the reply the event asks
     /// for: an offer to a human who requested the scope, or the
     /// acceptance of an offer back to this principal.

@@ -100,6 +100,9 @@ pub struct MissionTask {
     /// Whether the vehicle can stop in place: false for a fixed wing,
     /// whose stop is a held heading and altitude.
     can_stop: bool,
+    /// The sequence of the last frame the holder sent as its stop, not as
+    /// the engine's intent.
+    filler_sequence: Option<u32>,
     /// Frames still owed as neutral input under a new generation.
     neutral_frames: u8,
     /// A real vehicle's mission waits for the pilot's launch before it
@@ -152,6 +155,7 @@ impl MissionTask {
             ownship_source,
             held: false,
             neutral_frames: 0,
+            filler_sequence: None,
             can_stop: true,
             awaiting_launch: false,
             lease_due: false,
