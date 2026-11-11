@@ -11,7 +11,7 @@ mod nav_guidance;
 mod run_control;
 mod session_flow;
 
-pub(crate) use run_control::RunControl;
+pub use run_control::RunControl;
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -62,10 +62,10 @@ const NO_DEVICE_DIGEST: [u8; 32] = [0; 32];
 
 /// Mission tick cadence. Matches the `MissionConfig::frame_interval`
 /// default and sits well inside the holder-silence watchdog window.
-pub(crate) const TICK_INTERVAL: Duration = Duration::from_millis(50);
+pub const TICK_INTERVAL: Duration = Duration::from_millis(50);
 
 /// The in-process mission principal's state.
-pub(crate) struct MissionTask {
+pub struct MissionTask {
     /// The commands for the engine since the core last took them.
     outbox: Vec<ToEngine>,
     /// The time of the current call, nanoseconds since the core's origin.
@@ -119,7 +119,11 @@ pub(crate) struct MissionTask {
 }
 
 impl MissionTask {
-    pub(crate) fn new(plan: MissionPlan, planar_pose_is_truth: bool) -> Self {
+    /// A principal that flies `plan`. `planar_pose_is_truth` declares
+    /// whether the host's unstamped planar poses are the simulator's own
+    /// state: true only for the deterministic reference adapter.
+    #[must_use]
+    pub fn new(plan: MissionPlan, planar_pose_is_truth: bool) -> Self {
         let config = plan.config();
         let ownship_source = config.ownship_source;
         let real_vehicle = config.execution_target == ExecutionTarget::RealVehicle;
@@ -156,7 +160,7 @@ impl MissionTask {
 
     /// Registers with the engine and opens the session: the commands go
     /// to the outbox for the core to deliver.
-    pub(crate) fn start(&mut self) -> bool {
+    pub fn start(&mut self) -> bool {
         let connected = self.send_command(ToEngine::ClientConnected {
             client: self.client,
         });
@@ -173,42 +177,57 @@ impl MissionTask {
 
     /// Sets the time of the current call, nanoseconds since the core's
     /// origin.
-    pub(crate) fn set_now(&mut self, now_ns: u64) {
+    pub fn set_now(&mut self, now_ns: u64) {
         self.now_ns = now_ns;
     }
 
     /// Takes the commands for the engine, in order.
-    pub(crate) fn take_outbox(&mut self) -> Vec<ToEngine> {
+    pub fn take_outbox(&mut self) -> Vec<ToEngine> {
         core::mem::take(&mut self.outbox)
     }
 
     /// The principal's status.
-    pub(crate) fn status(&self) -> &AutomationStatus {
+    pub fn status(&self) -> &AutomationStatus {
         &self.status
     }
 
     /// The mission engine, once built.
-    pub(crate) fn mission_mut(&mut self) -> Option<&mut MissionEngine> {
+    pub fn mission_mut(&mut self) -> Option<&mut MissionEngine> {
         self.mission.as_mut()
     }
 
     /// Whether no command waits for the engine.
-    pub(crate) fn outbox_is_empty(&self) -> bool {
+    pub fn outbox_is_empty(&self) -> bool {
         self.outbox.is_empty()
     }
 
     /// Takes the mission events, in order.
-    pub(crate) fn take_events(&mut self) -> Vec<MissionEvent> {
+    pub fn take_events(&mut self) -> Vec<MissionEvent> {
         core::mem::take(&mut self.events)
     }
 
+    /// Registers the principal under `client` instead of
+    /// [`super::MISSION_CLIENT`], as a mission lane's run is.
+    pub fn bind_client(&mut self, client: ClientKey) {
+        self.client = client;
+    }
+
+    /// Ends the principal: it clears the guidance group, so no instrument
+    /// keeps a frozen leg on screen after it is gone, and logs its
+    /// counters.
+    pub fn finish(&mut self) {
+        let nanos = self.elapsed_nanos();
+        self.publish_nav_guidance(None, nanos);
+        self.log_counters();
+    }
+
     /// The principal's client key.
-    pub(crate) fn client(&self) -> ClientKey {
+    pub fn client(&self) -> ClientKey {
         self.client
     }
 
     /// Handles one engine-actor delivery; `false` stops the task.
-    pub(crate) fn on_connection_message(&mut self, message: ToConnection) -> bool {
+    pub fn on_connection_message(&mut self, message: ToConnection) -> bool {
         match message {
             ToConnection::BootstrapMessage { bytes, .. } => self.on_bootstrap(&bytes),
             ToConnection::AuthorityMessage(bytes) => match self.on_authority(&bytes) {
@@ -232,7 +251,7 @@ impl MissionTask {
     /// nothing. A held task ticks the engine so its ownship and status
     /// stay fresh, and sends nothing: the human holds the scope
     /// (ADR-0025, ADR-0051).
-    pub(crate) fn on_tick(&mut self) -> bool {
+    pub fn on_tick(&mut self) -> bool {
         if self.fenced {
             return true;
         }
@@ -418,7 +437,7 @@ impl MissionTask {
     /// The exit record: every named mission counter plus the frame
     /// bookkeeping, so a run's refusals are visible even without a
     /// status watcher.
-    pub(crate) fn log_counters(&self) {
+    pub fn log_counters(&self) {
         let status = self.status.clone();
         let Some(mission) = self.mission.as_ref() else {
             info!("mission principal exiting before the engine was built");

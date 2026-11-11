@@ -467,6 +467,13 @@ fn build_mission(
     config: pilotage_mission::MissionConfig,
 ) -> Result<MissionEngine, pilotage_mission::MissionBuildError> {
     match source {
+        PlanSource::Route {
+            snapshot,
+            provenance,
+        } => MissionEngine::new(snapshot, provenance.clone(), config).map(|(engine, record)| {
+            info!(route = %record.route_input, "mission plan is a route");
+            engine
+        }),
         PlanSource::Survey(request) => {
             MissionEngine::from_survey(request, config).map(|(engine, record)| {
                 info!(

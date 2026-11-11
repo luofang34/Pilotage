@@ -8,7 +8,7 @@ use pilotage_timing::MonoTimestamp;
 
 /// One command an in-core client submits to the engine.
 #[derive(Debug)]
-pub(crate) enum ToEngine {
+pub enum ToEngine {
     /// A client connected; its messages queue under `client`.
     ClientConnected {
         /// The new client's key.

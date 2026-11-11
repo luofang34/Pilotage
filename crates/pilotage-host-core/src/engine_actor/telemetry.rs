@@ -340,7 +340,11 @@ fn fc_state_to_wire(sample: FcStateSample) -> wire::FcState {
 }
 
 impl<A: pilotage_adapter_api::VehicleAdapter> super::EngineActor<A> {
-    pub(super) fn broadcast_telemetry(&mut self, now: MonoTimestamp) {
+    pub(super) fn broadcast_telemetry(
+        &mut self,
+        now: MonoTimestamp,
+        tap: &mut impl super::TelemetryTap,
+    ) {
         let batch = self.adapter.sample_telemetry();
         let capabilities = self.adapter.capabilities();
         let references: Vec<_> = capabilities
@@ -352,12 +356,14 @@ impl<A: pilotage_adapter_api::VehicleAdapter> super::EngineActor<A> {
         self.enact(refreshed);
         for sample in batch.samples {
             let mut sample = sample;
+            tap.fill(&mut sample);
             let vehicle = sample.vehicle;
             let reference = references
                 .iter()
                 .find(|(id, _)| *id == vehicle)
                 .and_then(|(_, reference)| *reference);
             self.magnetic.apply(&mut sample, reference);
+            tap.record(&sample, now);
             let mut wire_sample = sample_to_wire(sample, now);
             // Guidance is a host-internal side input, not adapter output
             // (ADR-0031): the assembly attaches the vehicle's latest

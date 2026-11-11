@@ -18,17 +18,20 @@ const ABORT_STOP_FRAMES: u8 = 20;
 
 /// One instruction from the mission lane to its run.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum RunControl {
+pub enum RunControl {
     /// Stop in place and pause the sequencing clock.
     Hold,
     /// Continue a held run from its active leg.
     Resume,
     /// Stop in place, release the lease and end the run.
     Abort,
+    /// A person's answer to the operation that asked.
+    Answer(pilotage_mission::OperationAnswer),
 }
 
 impl MissionTask {
-    pub(crate) fn on_control(&mut self, control: RunControl) {
+    /// Applies one run control: hold, resume, abort or an answer.
+    pub fn on_control(&mut self, control: RunControl) {
         let now = MonotonicNanos::from_nanos(self.elapsed_nanos());
         match control {
             RunControl::Hold => {
@@ -46,6 +49,8 @@ impl MissionTask {
                     mission.resume(now);
                 }
             }
+            // A flight asks no person anything.
+            RunControl::Answer(_) => {}
             RunControl::Abort => {
                 self.operator_hold = true;
                 self.stopping.get_or_insert(ABORT_STOP_FRAMES);

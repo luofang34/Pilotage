@@ -10,9 +10,9 @@
 
 pub mod automation;
 mod config;
-mod connection;
+pub mod connection;
 mod core;
-mod engine_actor;
+pub mod engine_actor;
 mod error;
 mod output;
 mod registry;

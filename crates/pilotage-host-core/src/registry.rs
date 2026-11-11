@@ -30,6 +30,11 @@ impl ClientRegistry {
         self.clients.remove(&client);
     }
 
+    /// The connected clients, in key order.
+    pub(crate) fn keys(&self) -> Vec<ClientKey> {
+        self.clients.keys().copied().collect()
+    }
+
     /// Queues `message` for one client; false when it is not connected.
     pub(crate) fn send(&mut self, client: ClientKey, message: ToConnection) -> bool {
         match self.clients.get_mut(&client) {

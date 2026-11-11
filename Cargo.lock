@@ -2318,6 +2318,7 @@ dependencies = [
 name = "pilotage-host-core"
 version = "0.1.0"
 dependencies = [
+ "aerocontext-core",
  "navigate-contract",
  "pilotage-adapter-api",
  "pilotage-adapter-aviate",

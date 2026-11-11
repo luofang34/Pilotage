@@ -13,14 +13,15 @@ use pilotage_session::{ClientKey, DomainEnvelope, SessionAction, SessionEngine, 
 use pilotage_timing::MonoTimestamp;
 use tracing::{debug, error, info, warn};
 
-use crate::connection::ToConnection;
+use crate::connection::{DatagramClass, ToConnection};
 use crate::registry::ClientRegistry;
 
 mod command;
 mod outbound;
 mod telemetry;
-pub(crate) use command::ToEngine;
-use outbound::to_connection_message;
+pub use command::ToEngine;
+pub use drops::MessageClass;
+pub use outbound::to_connection_message;
 
 mod action_dedup;
 mod apply;
@@ -28,19 +29,35 @@ mod drops;
 mod link_loss;
 mod rejection_dedup;
 use action_dedup::ActionDedup;
-use drops::MessageClass;
 use pilotage_protocol::ScopedControlFrame;
 use rejection_dedup::RejectionDedup;
 
 /// How often the embedded adapter is stepped and telemetry broadcast
 /// (ADR-0005, ADR-0009's control/telemetry cadence).
-pub(crate) const TICK_INTERVAL: Duration = Duration::from_millis(10);
+pub const TICK_INTERVAL: Duration = Duration::from_millis(10);
 
-/// Owns the [`SessionEngine`], the vehicle adapter and the in-core client
-/// queues.
+/// What a host adds to each telemetry sample the engine broadcasts: a
+/// simulator's truth before the corrections, a recorder after them.
+pub trait TelemetryTap {
+    /// Fills the sample before the host's corrections.
+    fn fill(&mut self, sample: &mut pilotage_adapter_api::TelemetrySample);
+    /// Sees the corrected sample at `now`.
+    fn record(&mut self, sample: &pilotage_adapter_api::TelemetrySample, now: MonoTimestamp);
+}
+
+/// The tap of a host that adds nothing.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoTap;
+
+impl TelemetryTap for NoTap {
+    fn fill(&mut self, _sample: &mut pilotage_adapter_api::TelemetrySample) {}
+    fn record(&mut self, _sample: &pilotage_adapter_api::TelemetrySample, _now: MonoTimestamp) {}
+}
+
+/// Owns the [`SessionEngine`], the vehicle adapter and the client queues.
 ///
 /// Generic over the [`VehicleAdapter`], as the session host's actor is.
-pub(crate) struct EngineActor<A: VehicleAdapter> {
+pub struct EngineActor<A: VehicleAdapter> {
     engine: SessionEngine,
     adapter: A,
     clients: ClientRegistry,
@@ -67,7 +84,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
     /// An actor wrapping `engine` and `adapter`, with no clients, at time
     /// zero. The magnetic field is evaluated at `magnetic_epoch_unix_s`.
     #[must_use]
-    pub(crate) fn new(engine: SessionEngine, adapter: A, magnetic_epoch_unix_s: i64) -> Self {
+    pub fn new(engine: SessionEngine, adapter: A, magnetic_epoch_unix_s: i64) -> Self {
         Self {
             engine,
             adapter,
@@ -82,33 +99,61 @@ impl<A: VehicleAdapter> EngineActor<A> {
     }
 
     /// Sets the time of the current call.
-    pub(crate) fn set_now(&mut self, now: Duration) {
+    pub fn set_now(&mut self, now: Duration) {
         self.now = now;
     }
 
     /// The adapter, for the bytes and time of its links.
-    pub(crate) fn adapter_mut(&mut self) -> &mut A {
+    pub fn adapter_mut(&mut self) -> &mut A {
         &mut self.adapter
     }
 
     /// Takes the messages queued for `client`, in order.
-    pub(crate) fn take_messages(
-        &mut self,
-        client: ClientKey,
-    ) -> std::collections::VecDeque<ToConnection> {
+    pub fn take_messages(&mut self, client: ClientKey) -> std::collections::VecDeque<ToConnection> {
         self.clients.take(client)
     }
 
     /// Steps the adapter and the engine once and broadcasts telemetry.
-    pub(crate) fn tick(&mut self) {
-        self.on_tick();
+    pub fn tick(&mut self) {
+        self.on_tick(&mut NoTap);
+    }
+
+    /// [`Self::tick`], with `tap` given each telemetry sample before and
+    /// after the host's corrections.
+    pub fn tick_with(&mut self, tap: &mut impl TelemetryTap) {
+        self.on_tick(tap);
+    }
+
+    /// The clients the engine queues messages for, in key order.
+    #[must_use]
+    pub fn client_keys(&self) -> Vec<ClientKey> {
+        self.clients.keys()
+    }
+
+    /// Forgets a client whose connection is gone: its queue and its
+    /// deduplication records.
+    pub fn disconnect(&mut self, client: ClientKey) {
+        self.clients.remove(client);
+        self.action_dedup.forget(client);
+        self.adapter_rejection_dedup.forget(client);
+    }
+
+    /// Queues `message` for `client`, as an engine reply is.
+    pub fn send_message(&mut self, client: ClientKey, message: ToConnection) {
+        self.send_to(client, message, MessageClass::Unicast);
+    }
+
+    /// Queues `message` for every client, as an engine broadcast is.
+    pub fn broadcast_message(&mut self, message: ToConnection, class: MessageClass) {
+        self.broadcast(message, class);
     }
 
     fn current(&self) -> MonoTimestamp {
         MonoTimestamp::from_nanos(u64::try_from(self.now.as_nanos()).unwrap_or(u64::MAX))
     }
 
-    pub(crate) fn handle_command(&mut self, command: ToEngine) {
+    /// Handles one client command at the time of the current call.
+    pub fn handle_command(&mut self, command: ToEngine) {
         match command {
             ToEngine::ClientConnected { client } => {
                 self.clients.insert(client);
@@ -184,7 +229,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
         self.enact(outcome);
     }
 
-    fn on_tick(&mut self) {
+    fn on_tick(&mut self, tap: &mut impl TelemetryTap) {
         let now = self.current();
         let outcome = self.engine.handle_tick(now);
         self.enact(outcome);
@@ -197,7 +242,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
             self.enact(outcome);
         }
 
-        self.broadcast_telemetry(now);
+        self.broadcast_telemetry(now, tap);
     }
 
     fn enact(&mut self, outcome: SessionOutcome) {
@@ -233,7 +278,10 @@ impl<A: VehicleAdapter> EngineActor<A> {
                 let bytes = crate::wire_codec::encode_frame_rejected_datagram(&rejection);
                 self.send_to(
                     client,
-                    ToConnection::Datagram { bytes },
+                    ToConnection::Datagram {
+                        class: DatagramClass::FrameRejected,
+                        bytes,
+                    },
                     MessageClass::Unicast,
                 );
             }
@@ -289,7 +337,13 @@ impl<A: VehicleAdapter> EngineActor<A> {
     }
 
     fn broadcast_datagram(&mut self, bytes: Vec<u8>) {
-        self.broadcast(ToConnection::Datagram { bytes }, MessageClass::Telemetry);
+        self.broadcast(
+            ToConnection::Datagram {
+                class: DatagramClass::Telemetry,
+                bytes,
+            },
+            MessageClass::Telemetry,
+        );
     }
 
     /// Queues `message` for every connected client.

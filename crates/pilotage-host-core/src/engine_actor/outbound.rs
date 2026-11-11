@@ -1,6 +1,6 @@
 //! Maps engine-outbound envelopes onto their connection-task arms.
 
-use crate::connection::ToConnection;
+use crate::connection::{DatagramClass, ToConnection};
 use crate::wire_codec::{encode_envelope_message, encode_pong_datagram};
 
 /// Encodes an [`OutboundMessage`] on its [`ToConnection`] arm (ADR-0005); `Pong`
@@ -8,9 +8,10 @@ use crate::wire_codec::{encode_envelope_message, encode_pong_datagram};
 /// traffic cannot block it; every other arm uses the bootstrap stream.
 ///
 /// [`OutboundMessage`]: pilotage_session::OutboundMessage
-pub(super) fn to_connection_message(envelope: &pilotage_session::OutboundMessage) -> ToConnection {
+pub fn to_connection_message(envelope: &pilotage_session::OutboundMessage) -> ToConnection {
     match envelope {
         pilotage_session::OutboundMessage::Pong(pong) => ToConnection::Datagram {
+            class: DatagramClass::Pong,
             bytes: encode_pong_datagram(pong),
         },
         // The link-loss-cleared notice is a reliable broadcast; it rides the
@@ -27,6 +28,7 @@ pub(super) fn to_connection_message(envelope: &pilotage_session::OutboundMessage
         | pilotage_session::OutboundMessage::ControlActionResult(_)
         | pilotage_session::OutboundMessage::FrameRejected(_) => ToConnection::BootstrapMessage {
             bytes: encode_envelope_message(envelope),
+            opens_media: matches!(envelope, pilotage_session::OutboundMessage::Welcome(_)),
         },
     }
 }

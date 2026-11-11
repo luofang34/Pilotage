@@ -9,6 +9,7 @@ publish = false
 workspace = true
 
 [dependencies]
+aerocontext-core = { workspace = true }
 navigate-contract = { workspace = true }
 pilotage-adapter-api = { workspace = true }
 pilotage-adapter-aviate = { workspace = true }
