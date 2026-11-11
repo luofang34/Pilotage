@@ -3,6 +3,7 @@
 //! and reliable action commands, and the exit record. The session flow
 //! and authority fencing live in the submodules.
 
+mod arm_receipt;
 mod fencing;
 mod flight_watch;
 mod nav_guidance;
@@ -243,6 +244,7 @@ impl MissionTask {
             return true;
         }
         let now = self.elapsed_nanos();
+        self.settle_expired_arm(now);
         if self.lease_due || self.lease_retry_due(now) {
             self.lease_due = false;
             self.lease_retry_at = None;

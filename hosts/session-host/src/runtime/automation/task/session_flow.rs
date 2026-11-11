@@ -149,27 +149,7 @@ impl MissionTask {
         }
         self.update(|status| status.awaiting_capabilities = false);
         let limits = config.limits;
-        let built = match &plan.source {
-            PlanSource::Navdata(navdata) => {
-                MissionEngine::new(&navdata.snapshot, navdata.provenance.clone(), config).map(
-                    |(engine, record)| {
-                        info!(route = %record.route_input, "mission plan is a route");
-                        engine
-                    },
-                )
-            }
-            PlanSource::Survey(request) => {
-                MissionEngine::from_survey(request, config).map(|(engine, record)| {
-                    info!(
-                        lines = record.line_count,
-                        waypoints = record.waypoint_count,
-                        "mission plan is an area survey"
-                    );
-                    engine
-                })
-            }
-            PlanSource::Home => MissionEngine::home(config),
-        };
+        let built = build_mission(&plan.source, config);
         match built {
             Ok(engine) => {
                 info!(
@@ -312,6 +292,19 @@ impl MissionTask {
             detail = %result.detail,
             "mission action result"
         );
+        // An accepted arm is only a sent command: the receipt waits for
+        // the flight controller's answer (`arm_receipt`).
+        if result.accepted
+            && matches!(result.action, ControlAction::Arm)
+            && self.flight.reports_state()
+        {
+            if let Some(mission) = self.mission.as_ref() {
+                let timeout_ns = mission.arm_confirm_timeout().as_nanos();
+                let now = self.mission_now().as_nanos();
+                self.flight.arm.await_vehicle(mission_id, now, timeout_ns);
+            }
+            return;
+        }
         if let Some(mission) = self.mission.as_mut() {
             mission.on_action_result(mission_id, result.accepted);
         }
@@ -373,6 +366,13 @@ impl MissionTask {
             .and_then(|fc| self.flight.observe(fc))
         {
             self.on_vehicle_left_flight(reason);
+        }
+        if let Some((mission_id, verdict)) = sample
+            .fc_state
+            .as_ref()
+            .and_then(|fc| self.flight.arm.observe(fc))
+        {
+            self.settle_arm(mission_id, verdict);
         }
         let Some(mission) = self.mission.as_mut() else {
             return;
@@ -460,6 +460,40 @@ fn velocity_capability(capabilities: &wire::HostCapabilities) -> Option<&wire::I
         .intents
         .iter()
         .find(|intent| intent.family == wire::IntentFamily::Velocity as i32)
+}
+
+/// Builds the flight engine over the plan's source.
+fn build_mission(
+    source: &PlanSource,
+    config: pilotage_mission::MissionConfig,
+) -> Result<MissionEngine, pilotage_mission::MissionBuildError> {
+    match source {
+        PlanSource::Navdata(navdata) => {
+            MissionEngine::new(&navdata.snapshot, navdata.provenance.clone(), config).map(
+                |(engine, record)| {
+                    info!(route = %record.route_input, "mission plan is a route");
+                    engine
+                },
+            )
+        }
+        PlanSource::Survey(request) => {
+            MissionEngine::from_survey(request, config).map(|(engine, record)| {
+                info!(
+                    lines = record.line_count,
+                    waypoints = record.waypoint_count,
+                    "mission plan is an area survey"
+                );
+                engine
+            })
+        }
+        PlanSource::Home => MissionEngine::home(config),
+        PlanSource::Waypoints(waypoints) => {
+            MissionEngine::from_waypoints(waypoints, config).map(|(engine, record)| {
+                info!(waypoints = ?record.idents, "mission plan is a waypoint list");
+                engine
+            })
+        }
+    }
 }
 
 #[cfg(test)]

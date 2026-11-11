@@ -91,6 +91,10 @@ pub struct FlightUplink {
     send_failures: u64,
     expected_system_id: u8,
     expected_component_id: u8,
+    /// The arm (true) or disarm (false) last sent, until its ack arrives.
+    arm_sent: Option<bool>,
+    /// The FC's answer to the arm or disarm last sent.
+    arm_ack: Option<pilotage_adapter_api::FcCommandAck>,
 }
 
 impl FlightUplink {
@@ -165,6 +169,8 @@ impl FlightUplink {
             send_failures: 0,
             expected_system_id: 1,
             expected_component_id: 1,
+            arm_sent: None,
+            arm_ack: None,
         })
     }
 
@@ -238,8 +244,18 @@ impl FlightUplink {
             self.expected_system_id,
             self.expected_component_id,
         );
+        // A new arm or disarm: the answer to the previous one no longer
+        // describes the command in flight.
+        self.arm_sent = Some(arm);
+        self.arm_ack = None;
         self.send(&frame);
         info!(arm, "sent arm command to FC");
+    }
+
+    /// The FC's answer to the arm or disarm last sent, once its
+    /// COMMAND_ACK arrived.
+    pub fn arm_ack(&self) -> Option<pilotage_adapter_api::FcCommandAck> {
+        self.arm_ack
     }
 
     /// Sends a zero-velocity setpoint holding the current heading — the

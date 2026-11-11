@@ -10,12 +10,17 @@ use pilotage_protocol::wire;
 pub(super) struct FlightWatch {
     armed: bool,
     in_air: bool,
+    /// The flight controller has sent a stamped state report in this run.
+    reports: bool,
+    /// The arm that waits for the flight controller's answer.
+    pub(super) arm: super::arm_receipt::ArmReceipt,
 }
 
 impl FlightWatch {
     /// Takes one report; the reason the run must end when it shows the
     /// vehicle leaving the flight it was in.
     pub(super) fn observe(&mut self, fc: &wire::FcState) -> Option<&'static str> {
+        self.reports |= fc.stamp.is_some();
         if fc.stamp.is_some() {
             match fc.arm_state {
                 2 => self.armed = true,
@@ -36,6 +41,15 @@ impl FlightWatch {
             _ => {}
         }
         None
+    }
+}
+
+impl FlightWatch {
+    /// Whether the flight controller reports its state, so that its answer
+    /// to an arm can arrive. A vehicle with no flight-controller state
+    /// report (the reference skiff) has no answer but the command path.
+    pub(super) const fn reports_state(&self) -> bool {
+        self.reports
     }
 }
 

@@ -79,6 +79,24 @@ pub enum MissionBuildError {
         #[source]
         source: IdentError,
     },
+    /// A waypoint list holds no waypoint.
+    #[error("the waypoint list is empty")]
+    EmptyWaypointList,
+    /// A waypoint of a list is not a position on the Earth: a value is
+    /// not finite, or the latitude or longitude is out of range.
+    #[error(
+        "waypoint {index} is not on the Earth: latitude {latitude_deg}°, longitude {longitude_deg}°, altitude {altitude_m} m"
+    )]
+    WaypointPosition {
+        /// The waypoint's index in fly order.
+        index: usize,
+        /// Its latitude, degrees.
+        latitude_deg: f64,
+        /// Its longitude, degrees.
+        longitude_deg: f64,
+        /// Its altitude, metres.
+        altitude_m: f64,
+    },
     /// A Navigate plan value has no canonical identity encoding.
     #[error("flight-plan identity cannot encode {field} value {value}")]
     PlanIdentity {

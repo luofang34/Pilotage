@@ -32,12 +32,24 @@ impl FlightUplink {
                         armed = Some(a)
                     }
                     pilotage_mavlink::codec::FcMessage::CommandAck {
-                        command, result, ..
+                        command,
+                        result,
+                        target_system,
+                        target_component,
                     } => {
                         if result == 0 {
                             info!(command, "FC accepted command");
                         } else {
                             warn!(command, result, "FC rejected command");
+                        }
+                        if command == pilotage_mavlink::codec::MAV_CMD_COMPONENT_ARM_DISARM
+                            && addressed_to_gcs(target_system, target_component)
+                            && let Some(arm) = self.arm_sent
+                        {
+                            self.arm_ack = Some(pilotage_adapter_api::FcCommandAck {
+                                arm,
+                                outcome: pilotage_mavlink::command_outcome(result),
+                            });
                         }
                     }
                     _ => {}
@@ -47,3 +59,17 @@ impl FlightUplink {
         armed
     }
 }
+
+/// Whether an ack addresses this GCS (system 255, component 190). In
+/// MAVLink a zero target system addresses every system and a zero target
+/// component addresses every component of the system.
+fn addressed_to_gcs(target_system: u8, target_component: u8) -> bool {
+    matches!(target_system, 0 | pilotage_mavlink::codec::GCS_SYSTEM_ID)
+        && matches!(
+            target_component,
+            0 | pilotage_mavlink::codec::GCS_COMPONENT_ID
+        )
+}
+
+#[cfg(test)]
+mod tests;

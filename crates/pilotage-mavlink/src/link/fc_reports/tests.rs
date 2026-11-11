@@ -109,3 +109,28 @@ fn parameter_values_are_kept_by_name() {
     assert_eq!(report.value, crate::codec::ParamValue::Real32(0.39));
     assert!(latest.fc_reports.param("MOT_THST").is_none());
 }
+
+#[test]
+fn an_ack_reaches_this_gcs_by_its_system_and_component_or_by_broadcast() {
+    let addressed = |target_system, target_component| {
+        let state = Arc::new(Mutex::new(LinkState::default()));
+        apply(
+            &state,
+            FcMessage::CommandAck {
+                command: MAV_CMD_COMPONENT_ARM_DISARM,
+                result: 0,
+                target_system,
+                target_component,
+            },
+        );
+        state.lock().expect("lock").last_command_ack.is_some()
+    };
+    // This GCS is system 255, component 190. Zero addresses every system
+    // or every component of a system.
+    for (system, component) in [(0, 0), (255, 190), (255, 0), (0, 190)] {
+        assert!(addressed(system, component), "({system}, {component})");
+    }
+    for (system, component) in [(1, 0), (255, 1), (254, 190), (1, 1)] {
+        assert!(!addressed(system, component), "({system}, {component})");
+    }
+}

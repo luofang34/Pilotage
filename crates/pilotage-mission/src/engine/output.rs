@@ -42,6 +42,23 @@ pub struct MissionAction {
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum MissionEvent {
+    /// The last waypoint of the plan sequenced.
+    LastWaypointSequenced {
+        /// The sequencing rule: the capture radius, or a waypoint passed
+        /// outside it with the distance by which it was missed.
+        reason: SequenceReason,
+        /// The horizontal distance to the last waypoint at the sequence,
+        /// metres.
+        distance_m: f64,
+    },
+    /// A vehicle that cannot stop completed its plan and now orbits the
+    /// last waypoint clockwise.
+    OrbitStarted {
+        /// The orbit radius, metres.
+        radius_m: f64,
+        /// The orbit altitude on the WGS84 ellipsoid, metres.
+        altitude_m: f64,
+    },
     /// An arm action was emitted with this correlation id.
     ArmRequested {
         /// Correlation id of the emitted action.

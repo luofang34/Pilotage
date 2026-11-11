@@ -67,9 +67,12 @@ fn note_command_ack(command: u16, result: u8) {
 }
 
 /// Caches one command acknowledgement addressed to this GCS identity.
-/// Acks for another endpoint prove nothing about our commands; zero
-/// targets mean the sender omitted the v2 extension fields (accepted as
-/// unaddressed).
+/// Acks for another endpoint prove nothing about our commands. In MAVLink
+/// a zero target system addresses every system and a zero target
+/// component addresses every component of the system, so each field
+/// matches this GCS when it is zero or names this GCS: an ack to
+/// (255, 0) is an ack to every component of system 255, and a sender
+/// that omits the v2 extension fields sends (0, 0).
 fn apply_command_ack(latest: &mut LinkState, message: FcMessage, now: Instant) {
     let FcMessage::CommandAck {
         command,
@@ -80,9 +83,8 @@ fn apply_command_ack(latest: &mut LinkState, message: FcMessage, now: Instant) {
     else {
         return;
     };
-    let addressed_to_us = (target_system == 0 && target_component == 0)
-        || (target_system == crate::codec::GCS_SYSTEM_ID
-            && target_component == crate::codec::GCS_COMPONENT_ID);
+    let addressed_to_us = matches!(target_system, 0 | crate::codec::GCS_SYSTEM_ID)
+        && matches!(target_component, 0 | crate::codec::GCS_COMPONENT_ID);
     if !addressed_to_us {
         return;
     }
