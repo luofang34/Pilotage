@@ -72,6 +72,10 @@ pub enum RejectReason {
     /// not be queued even though session authority admitted it. The operator
     /// must explicitly arm to begin the enacted stream.
     UplinkIdle,
+    /// The frame names an altitude above the ellipsoid, and the adapter has
+    /// not been given the ellipsoidal height of the flight controller's
+    /// local origin, so it cannot place that altitude in the local frame.
+    LocalOriginHeightUnknown,
     /// The adapter rejected the frame for a reason not covered above.
     Other(String),
 }

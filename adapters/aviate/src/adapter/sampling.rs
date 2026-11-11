@@ -79,10 +79,15 @@ pub(super) fn measurement_pair_supports_pose(
     attitude: AttitudeUpdate,
     kinematics: KinematicsUpdate,
 ) -> bool {
-    attitude.quality <= QUALITY_DEGRADED
+    attitude_is_usable(attitude)
         && kinematics.quality <= QUALITY_DEGRADED
-        && attitude.valid_flags & 0b0001 != 0
         && kinematics.valid_flags & 0b0100 != 0
+}
+
+/// Whether the estimator declared this attitude valid at a quality that
+/// control may use.
+fn attitude_is_usable(attitude: AttitudeUpdate) -> bool {
+    attitude.quality <= QUALITY_DEGRADED && attitude.valid_flags & 0b0001 != 0
 }
 
 fn planar_projection(
@@ -339,15 +344,19 @@ impl super::AviateAdapter {
     /// A pose can be usable while velocity is not; a caller must never
     /// infer "stopped" from a missing velocity.
     pub(super) fn current_pose(&mut self) -> Option<CurrentPose> {
+        // The adapter's clock, so an embedding host's time decides what is
+        // fresh, as it decided when each update arrived.
+        let now = self.clock.now();
+        let fresh = |received_at| now.saturating_duration_since(received_at) <= WITHHOLD_AFTER;
         let latest = self.estimate.as_ref()?.state.lock().ok()?;
         let status_stamp = latest.estimator_status_stamp()?;
         let attitude = latest
             .attitude
-            .filter(|update| update.received_at.elapsed() <= WITHHOLD_AFTER)
+            .filter(|update| fresh(update.received_at))
             .filter(|update| update.stamp.role == SourceRole::OperationalEstimate)?;
         let kinematics = latest
             .kinematics
-            .filter(|update| update.received_at.elapsed() <= WITHHOLD_AFTER)
+            .filter(|update| fresh(update.received_at))
             .filter(|update| update.stamp.role == SourceRole::OperationalEstimate)?;
         let current_epoch = latest.source_epoch;
         if status_stamp.source_epoch != current_epoch
@@ -367,6 +376,30 @@ impl super::AviateAdapter {
             pos_ned_m: kinematics.pos_ned_m,
             velocity_ned_mps: validated_velocity(kinematics),
         })
+    }
+
+    /// The vehicle's current measured roll, pitch, and yaw, radians, under
+    /// the same estimate discipline as [`Self::current_pose`] with no
+    /// position or velocity. An arm and a heading with an altitude need no
+    /// more: the flight controller holds the heading, altitude, and
+    /// airspeed with its own sensors, so a vehicle without a position
+    /// estimate can still fly them.
+    pub(super) fn current_attitude(&mut self) -> Option<[f32; 3]> {
+        let now = self.clock.now();
+        let latest = self.estimate.as_ref()?.state.lock().ok()?;
+        let status_stamp = latest.estimator_status_stamp()?;
+        let attitude = latest
+            .attitude
+            .filter(|update| now.saturating_duration_since(update.received_at) <= WITHHOLD_AFTER)
+            .filter(|update| update.stamp.role == SourceRole::OperationalEstimate)?;
+        let current_epoch = latest.source_epoch;
+        if status_stamp.source_epoch != current_epoch
+            || attitude.stamp.source_epoch != current_epoch
+            || !attitude_is_usable(attitude)
+        {
+            return None;
+        }
+        attitude_euler_of(attitude.quat_wxyz)
     }
 }
 

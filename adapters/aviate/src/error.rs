@@ -37,6 +37,12 @@ pub enum AviateAdapterError {
         #[source]
         source: getrandom::Error,
     },
+    /// A heading-and-altitude setting the host gave is not usable.
+    #[error("the Aviate heading-and-altitude setting is invalid: {detail}")]
+    InvalidHeadingAltitude {
+        /// What is wrong with the setting.
+        detail: String,
+    },
     /// The in-memory uplink of an embedded adapter could not be built.
     #[error("building the embedded Aviate uplink failed: {source}")]
     EmbeddedUplink {

@@ -54,7 +54,10 @@ impl AviateAdapter {
                             .map(crate::uplink::FlightUplink::envelope);
                         let mut flight = envelope.map_or_else(Vec::new, |value| {
                             vec![
-                                flight_scope_descriptor(value),
+                                flight_scope_descriptor(
+                                    value,
+                                    self.heading_altitude.max_airspeed_mps,
+                                ),
                                 direct_scope_descriptor(value),
                             ]
                         });
@@ -185,7 +188,21 @@ fn direct_scope_descriptor(envelope: pilotage_control_feel::DemandEnvelope) -> S
     }
 }
 
-fn flight_scope_descriptor(envelope: pilotage_control_feel::DemandEnvelope) -> ScopeDescriptor {
+/// The flight scope, with a heading and altitude intent when the host has
+/// enabled one with an airspeed bound.
+fn flight_scope_descriptor(
+    envelope: pilotage_control_feel::DemandEnvelope,
+    heading_altitude_max_airspeed_mps: Option<f32>,
+) -> ScopeDescriptor {
+    let heading_altitude =
+        heading_altitude_max_airspeed_mps.map(|max_airspeed_mps| IntentCapability {
+            family: IntentFamily::HeadingAltitude,
+            frames: vec![],
+            max_linear: max_airspeed_mps,
+            max_vertical: 0.0,
+            max_angular: 0.0,
+            max_yaw_rate: 0.0,
+        });
     ScopeDescriptor {
         payload: None,
         authority_group: Some(FLIGHT_SCOPE.to_owned()),
@@ -206,7 +223,10 @@ fn flight_scope_descriptor(envelope: pilotage_control_feel::DemandEnvelope) -> S
             max_linear: envelope.horizontal_speed_mps,
             max_vertical: envelope.vertical_speed_mps,
             max_angular: envelope.yaw_rate_rps,
-        }],
+        }]
+        .into_iter()
+        .chain(heading_altitude)
+        .collect(),
         actions: flight_actions(),
         legacy: Some(LegacyCommandMap::Velocity {
             vx: Some(LegacyAxisRoute {
