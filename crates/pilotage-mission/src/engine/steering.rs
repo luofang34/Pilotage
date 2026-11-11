@@ -36,6 +36,9 @@ pub(super) struct Steering {
     wind: Option<([f64; 2], MonotonicNanos)>,
     /// Why the engine holds heading and altitude, while it does.
     holding: Option<StartWithheldReason>,
+    /// The indicated airspeed last commanded on the velocity path, m/s,
+    /// which the wind estimate takes as the air speed it is flown at.
+    indicated_mps: Option<f64>,
 }
 
 impl MissionEngine {
@@ -221,12 +224,15 @@ impl MissionEngine {
     /// velocity less the air velocity, which is the cruise true airspeed
     /// along the solution's heading. A solution without a heading leaves
     /// the estimate as it is.
-    fn update_wind(&mut self, solution: &NavigationSolution, now: MonotonicNanos) {
+    pub(super) fn update_wind(&mut self, solution: &NavigationSolution, now: MonotonicNanos) {
         let Some(heading) = self.last_yaw_rad else {
             return;
         };
-        let airspeed =
-            crate::true_airspeed_for(self.commanded_cruise_mps(), solution.position.altitude_m);
+        let indicated = self
+            .steering
+            .indicated_mps
+            .unwrap_or_else(|| self.commanded_cruise_mps());
+        let airspeed = crate::true_airspeed_for(indicated, solution.position.altitude_m);
         let sample = [
             solution.velocity.north_mps - airspeed * heading.cos(),
             solution.velocity.east_mps - airspeed * heading.sin(),
@@ -248,6 +254,51 @@ impl MissionEngine {
             }
         };
         self.steering.wind = Some((wind, now));
+    }
+
+    /// A fixed wing's velocity intent made good over the ground in the
+    /// estimated wind. Its flight controller reads the horizontal
+    /// direction as the course over the ground and the horizontal speed as
+    /// the indicated airspeed. The engine means a ground velocity: the
+    /// course it asks for and, as speed over the ground, the true airspeed
+    /// that the asked speed gives in still air at `altitude_m`. So the
+    /// direction stays the course, and the speed becomes the indicated
+    /// airspeed whose air velocity plus the wind is that ground velocity,
+    /// at most the horizontal ceiling. With no wind estimate, or an intent
+    /// with no direction, the intent stands as it is.
+    pub(super) fn airspeed_for_track(
+        &mut self,
+        intent: ControlIntent,
+        yaw_rad: f64,
+        altitude_m: f64,
+    ) -> ControlIntent {
+        let ControlIntent::Velocity(mut velocity) = intent else {
+            return intent;
+        };
+        let (forward, right) = (f64::from(velocity.vx), f64::from(velocity.vy));
+        let asked = forward.hypot(right);
+        let Some(([north, east], _)) = self.steering.wind else {
+            self.steering.indicated_mps = Some(asked);
+            return intent;
+        };
+        if !(asked > 0.0 && asked.is_finite()) {
+            return intent;
+        }
+        // The wind in the body frame the intent is written in.
+        let (sin, cos) = yaw_rad.sin_cos();
+        let wind = [north * cos + east * sin, -north * sin + east * cos];
+        let ground_speed = crate::true_airspeed_for(asked, altitude_m);
+        let ground = [forward / asked * ground_speed, right / asked * ground_speed];
+        let true_airspeed = (ground[0] - wind[0]).hypot(ground[1] - wind[1]);
+        let indicated = crate::indicated_airspeed_for(true_airspeed, altitude_m)
+            .min(self.config.limits.max_horizontal_mps);
+        if !indicated.is_finite() {
+            return intent;
+        }
+        self.steering.indicated_mps = Some(indicated);
+        velocity.vx = (forward / asked * indicated) as f32;
+        velocity.vy = (right / asked * indicated) as f32;
+        ControlIntent::Velocity(velocity)
     }
 
     /// The heading last commanded, or else the present one.
