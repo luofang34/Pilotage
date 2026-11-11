@@ -317,6 +317,11 @@ message FcState {
   MotorStateObservation motor_state = 7;
   // Downward ranging and descent feedback. Absence means unavailable.
   LandingApproachObservation landing_approach = 8;
+  // Whether the FC reports it would accept an arm now: its own pre-arm
+  // checks passed. Absence means the FC states no readiness, which is not
+  // a refusal: a reader that waits for readiness only waits where this is
+  // present.
+  optional bool ready_to_arm = 9;
 }
 
 // One coherent observation. It does not identify a landing-protection mode.

@@ -365,6 +365,7 @@ mod geodetic;
 mod landed_state;
 mod magnetic_variation;
 mod motor_state;
+mod ready_to_arm;
 
 #[test]
 fn a_battery_sample_survives_the_wire_with_unknown_values_as_nan() {
