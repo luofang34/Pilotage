@@ -62,6 +62,7 @@ impl AviateAdapter {
         let state = Arc::new(Mutex::new(LinkState::for_source(
             config,
             incarnations.estimate,
+            now,
         )));
         Ok(Self {
             vehicle,

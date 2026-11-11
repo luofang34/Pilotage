@@ -2,15 +2,19 @@
 //! toward the FC, or in-memory queues whose bytes an embedding host moves.
 
 use std::collections::VecDeque;
-use std::net::{SocketAddr, UdpSocket};
+use std::net::SocketAddr;
+#[cfg(feature = "net")]
+use std::net::UdpSocket;
 
 /// The largest FC reply datagram read from the socket.
+#[cfg(feature = "net")]
 const REPLY_BUFFER_BYTES: usize = 512;
 
 /// The uplink's byte transport.
 #[derive(Debug)]
 pub(super) enum UplinkTransport {
     /// A nonblocking UDP socket.
+    #[cfg(feature = "net")]
     Udp(UdpSocket),
     /// Frames sent and replies received, for the host to move.
     Memory {
@@ -27,9 +31,12 @@ impl UplinkTransport {
         }
     }
 
-    /// Sends one frame; false when the socket refused it.
+    /// Sends one frame; false when the socket refused it. An in-memory
+    /// transport has no target: the host addresses what it sends.
+    #[cfg_attr(not(feature = "net"), allow(unused_variables))]
     pub(super) fn send(&mut self, frame: &[u8], target: SocketAddr) -> bool {
         match self {
+            #[cfg(feature = "net")]
             Self::Udp(socket) => socket.send_to(frame, target).is_ok(),
             Self::Memory { sent, .. } => {
                 sent.push(frame.to_vec());
@@ -41,6 +48,7 @@ impl UplinkTransport {
     /// The next FC reply datagram, if one waits. Never blocks.
     pub(super) fn receive(&mut self) -> Option<Vec<u8>> {
         match self {
+            #[cfg(feature = "net")]
             Self::Udp(socket) => {
                 let mut buffer = [0u8; REPLY_BUFFER_BYTES];
                 let (len, _) = socket.recv_from(&mut buffer).ok()?;
@@ -54,6 +62,7 @@ impl UplinkTransport {
     /// receives its own replies.
     pub(super) fn push_reply(&mut self, datagram: &[u8]) -> bool {
         match self {
+            #[cfg(feature = "net")]
             Self::Udp(_) => false,
             Self::Memory { replies, .. } => {
                 replies.push_back(datagram.to_vec());
@@ -66,6 +75,7 @@ impl UplinkTransport {
     /// for a socket transport.
     pub(super) fn take_sent(&mut self) -> Vec<Vec<u8>> {
         match self {
+            #[cfg(feature = "net")]
             Self::Udp(_) => Vec::new(),
             Self::Memory { sent, .. } => core::mem::take(sent),
         }
@@ -74,6 +84,7 @@ impl UplinkTransport {
     /// The local socket address, for a socket transport.
     pub(super) fn local_addr(&self) -> std::io::Result<SocketAddr> {
         match self {
+            #[cfg(feature = "net")]
             Self::Udp(socket) => socket.local_addr(),
             Self::Memory { .. } => Err(std::io::Error::new(
                 std::io::ErrorKind::Unsupported,

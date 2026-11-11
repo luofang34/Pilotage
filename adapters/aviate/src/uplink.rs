@@ -15,7 +15,9 @@
 //! queues for an embedding host), the monotonic clock, and the count of
 //! refused sends.
 
-use std::net::{SocketAddr, UdpSocket};
+use std::net::SocketAddr;
+#[cfg(feature = "net")]
+use std::net::UdpSocket;
 
 use crate::clock::AdapterClock;
 use std::time::Duration;
@@ -23,7 +25,9 @@ use web_time::Instant;
 
 use tracing::{info, warn};
 
-use pilotage_control_feel::{FeelDigest, FlightFeelProfile, ValidatedFlightFeelProfile};
+use pilotage_control_feel::ValidatedFlightFeelProfile;
+#[cfg(feature = "net")]
+use pilotage_control_feel::{FeelDigest, FlightFeelProfile};
 use pilotage_flight_uplink::{ActivationStep, StickFrame, UplinkPolicy};
 
 mod direct;
@@ -62,6 +66,7 @@ impl FlightUplink {
     /// # Errors
     ///
     /// Returns an error if the default profile or socket cannot initialize.
+    #[cfg(feature = "net")]
     pub fn new() -> std::io::Result<Self> {
         let profile = ValidatedFlightFeelProfile::new(FlightFeelProfile::legacy_compatibility())
             .map_err(std::io::Error::other)?;
@@ -74,6 +79,7 @@ impl FlightUplink {
     ///
     /// Returns an error if the profile does not match Alia or the socket
     /// cannot initialize.
+    #[cfg(feature = "net")]
     pub(crate) fn new_with_profile(profile: ValidatedFlightFeelProfile) -> std::io::Result<Self> {
         Self::bind_with_profile(profile, default_command_endpoint())
     }
@@ -87,12 +93,14 @@ impl FlightUplink {
     /// # Errors
     ///
     /// Returns an error if the default profile or socket cannot initialize.
+    #[cfg(feature = "net")]
     pub fn bind_to(command_endpoint: SocketAddr) -> std::io::Result<Self> {
         let profile = ValidatedFlightFeelProfile::new(FlightFeelProfile::legacy_compatibility())
             .map_err(std::io::Error::other)?;
         Self::bind_with_profile(profile, command_endpoint)
     }
 
+    #[cfg(feature = "net")]
     fn bind_with_profile(
         profile: ValidatedFlightFeelProfile,
         target: SocketAddr,
@@ -442,6 +450,7 @@ impl FlightUplink {
     }
 }
 
+#[cfg(feature = "net")]
 fn default_command_endpoint() -> SocketAddr {
     std::env::var("PILOTAGE_AVIATE_FC_ADDR")
         .ok()

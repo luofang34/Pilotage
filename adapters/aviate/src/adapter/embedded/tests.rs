@@ -66,3 +66,23 @@ fn a_link_loss_neutral_is_a_frame_for_the_host_to_send() {
     assert_eq!(stats.crc_failures, 0, "a whole MAVLink frame");
     assert!(adapter.drain_uplink().is_empty(), "drained once");
 }
+
+/// The host's time is far from the process clock, so any stamp that came
+/// from a clock read instead of `set_now` would differ from it.
+#[test]
+fn the_embedded_path_takes_every_time_from_the_host() {
+    let start = Instant::now() + Duration::from_secs(10_000);
+    let mut adapter = embedded(start);
+    adapter.set_now(start + Duration::from_secs(3));
+    adapter.on_downlink(&encode_autopilot_heartbeat(0, false, 0, 1, 1));
+    assert!(adapter.on_uplink_reply(&encode_autopilot_heartbeat(1, false, 0, 1, 1)));
+    adapter.sample_telemetry();
+    let state = adapter.estimate.as_ref().unwrap().state.lock().unwrap();
+    assert_eq!(state.started_at, start);
+    assert_eq!(state.last_heartbeat, Some(start + Duration::from_secs(3)));
+    assert_eq!(adapter.started_at, start);
+    assert_eq!(
+        adapter.arm.map(|report| report.acquired_at),
+        Some(start + Duration::from_secs(3))
+    );
+}

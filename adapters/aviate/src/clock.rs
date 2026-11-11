@@ -7,7 +7,9 @@ use web_time::Instant;
 /// Where the adapter's monotonic time comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AdapterClock {
-    /// The process monotonic clock.
+    /// The process monotonic clock. An adapter built without `net` has
+    /// no process clock: its time comes only from the host.
+    #[cfg(feature = "net")]
     System,
     /// A time the host sets with [`Self::set`]; it moves only when the
     /// host moves it.
@@ -19,6 +21,7 @@ impl AdapterClock {
     #[must_use]
     pub fn now(&self) -> Instant {
         match self {
+            #[cfg(feature = "net")]
             Self::System => Instant::now(),
             Self::Manual(at) => *at,
         }
@@ -26,8 +29,10 @@ impl AdapterClock {
 
     /// Sets a manual clock to `now`; a system clock does not change.
     pub fn set(&mut self, now: Instant) {
-        if let Self::Manual(at) = self {
-            *at = now;
+        match self {
+            Self::Manual(at) => *at = now,
+            #[cfg(feature = "net")]
+            Self::System => {}
         }
     }
 }
