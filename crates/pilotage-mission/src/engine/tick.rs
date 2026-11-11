@@ -386,7 +386,12 @@ impl MissionEngine {
                 self.last_refusal = None;
                 self.steer(solution, &command.setpoint, to.position.altitude_m, now)
             }
-            Ok(command) => self.guided_intent(command.setpoint),
+            Ok(command) => {
+                if !self.config.can_stop() {
+                    self.update_wind(solution, now);
+                }
+                self.guided_intent(command.setpoint, solution.position.altitude_m)
+            }
             Err(refusal) => {
                 self.counters.guidance_refused = self.counters.guidance_refused.wrapping_add(1);
                 let kind = discriminant(&refusal);
@@ -399,7 +404,11 @@ impl MissionEngine {
         }
     }
 
-    fn guided_intent(&mut self, setpoint: GuidanceSetpoint) -> Option<ControlIntent> {
+    fn guided_intent(
+        &mut self,
+        setpoint: GuidanceSetpoint,
+        altitude_m: f64,
+    ) -> Option<ControlIntent> {
         self.last_refusal = None;
         if !matches!(
             setpoint,
@@ -418,11 +427,11 @@ impl MissionEngine {
             &self.config.limits,
             self.config.yaw_gain_per_s,
         )?;
-        Some(if self.config.can_stop() {
-            intent
-        } else {
-            speed::at_most_cruise(intent, self.commanded_cruise_mps())
-        })
+        if self.config.can_stop() {
+            return Some(intent);
+        }
+        let intent = speed::at_most_cruise(intent, self.commanded_cruise_mps());
+        Some(self.airspeed_for_track(intent, yaw, altitude_m))
     }
 
     #[allow(dead_code)]

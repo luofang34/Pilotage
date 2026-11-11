@@ -54,6 +54,25 @@ pub fn turn_radius_for(speed_mps: f64, bank_deg: f64, floor_m: f64) -> f64 {
 /// non-finite input gives the indicated airspeed.
 #[must_use]
 pub fn true_airspeed_for(indicated_mps: f64, altitude_m: f64) -> f64 {
+    if !(indicated_mps.is_finite() && altitude_m.is_finite()) {
+        return indicated_mps;
+    }
+    indicated_mps / isa_density_ratio(altitude_m).sqrt()
+}
+
+/// The indicated airspeed of a true airspeed `true_mps` at `altitude_m`,
+/// the inverse of [`true_airspeed_for`]. A non-finite input gives the true
+/// airspeed.
+#[must_use]
+pub fn indicated_airspeed_for(true_mps: f64, altitude_m: f64) -> f64 {
+    if !(true_mps.is_finite() && altitude_m.is_finite()) {
+        return true_mps;
+    }
+    true_mps * isa_density_ratio(altitude_m).sqrt()
+}
+
+/// The ISA density at `altitude_m` over the sea-level density.
+fn isa_density_ratio(altitude_m: f64) -> f64 {
     /// Temperature lapse over the sea-level temperature, 1/m.
     const LAPSE_PER_M: f64 = 0.0065 / 288.15;
     /// `g / (L·R) − 1` for dry air: the density exponent of the ISA
@@ -62,16 +81,12 @@ pub fn true_airspeed_for(indicated_mps: f64, altitude_m: f64) -> f64 {
     const TROPOPAUSE_M: f64 = 11_000.0;
     /// Density scale height of the isothermal layer above it, metres.
     const STRATOSPHERE_SCALE_M: f64 = 6_341.62;
-    if !(indicated_mps.is_finite() && altitude_m.is_finite()) {
-        return indicated_mps;
-    }
     let troposphere = |height_m: f64| (1.0 - LAPSE_PER_M * height_m).powf(DENSITY_EXPONENT);
-    let density_ratio = if altitude_m <= TROPOPAUSE_M {
+    if altitude_m <= TROPOPAUSE_M {
         troposphere(altitude_m)
     } else {
         troposphere(TROPOPAUSE_M) * (-(altitude_m - TROPOPAUSE_M) / STRATOSPHERE_SCALE_M).exp()
-    };
-    indicated_mps / density_ratio.sqrt()
+    }
 }
 
 fn at_least(value: f64, floor: f64) -> f64 {
