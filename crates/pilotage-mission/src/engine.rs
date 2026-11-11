@@ -210,7 +210,9 @@ impl MissionEngine {
         )?;
         // A survey line is flown at cruise speed to its end; the arrival
         // slowdown of a route would crawl the last 30 m of every line.
-        engine.guidance.arrival_slowdown_radius_m = 2.0 * survey.capture_radius_m;
+        if engine.guidance.arrival_slowdown_radius_m > 0.0 {
+            engine.guidance.arrival_slowdown_radius_m = 2.0 * survey.capture_radius_m;
+        }
         let record = SurveyPlanRecord {
             digest: survey.digest,
             line_count: survey.line_count,
@@ -480,12 +482,16 @@ fn build_waypoints(
 }
 
 /// Guidance shaped by the mission config: cruise speed and ceilings are
-/// the mission's; the lateral/vertical gains and the arrival slowdown
-/// keep the upstream defaults.
+/// the mission's; the lateral/vertical gains keep the upstream defaults.
+/// A fixed-wing aircraft flies at cruise speed to every fix: it has no
+/// arrival slowdown.
 fn guidance_config(config: &MissionConfig) -> VelocityGuidanceConfig {
     let mut guidance = VelocityGuidanceConfig::default();
     guidance.cruise_mps = config.cruise_mps;
     guidance.max_horizontal_mps = config.limits.max_horizontal_mps;
     guidance.max_vertical_mps = config.limits.max_vertical_mps;
+    if !config.can_stop() {
+        guidance.arrival_slowdown_radius_m = 0.0;
+    }
     guidance
 }

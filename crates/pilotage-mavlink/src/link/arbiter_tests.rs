@@ -18,7 +18,8 @@ use crate::codec::{
 };
 
 use super::outbound::OutboundLanes;
-use super::{CommandTarget, GimbalRateDemand, LinkConfig, LinkState, OutboundCommand, run_link};
+use super::task::run_link;
+use super::{CommandTarget, GimbalRateDemand, LinkConfig, LinkState, OutboundCommand};
 
 /// Receives one datagram and returns its MAVLink v2 message id, failing
 /// the test if nothing arrives promptly or the frame is not v2.

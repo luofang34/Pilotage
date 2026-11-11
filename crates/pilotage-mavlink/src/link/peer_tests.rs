@@ -19,9 +19,9 @@ use super::outbound::OutboundLanes;
 
 /// PARAM_REQUEST_READ message id.
 const PARAM_REQUEST_READ_ID: u32 = 20;
+use super::task::run_link;
 use super::{
     BodyVelocityDemand, CommandTarget, LinkConfig, LinkState, OffboardSetpoint, OutboundCommand,
-    run_link,
 };
 
 fn runtime() -> tokio::runtime::Runtime {

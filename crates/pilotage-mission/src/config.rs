@@ -2,6 +2,7 @@
 
 use navigate_contract::{ClockDomainId, DurationNanos, GeodeticPosition};
 use pilotage_mission_core::ExecutionTarget;
+use pilotage_protocol::VehicleClass;
 
 /// Where the engine's ownship position comes from.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -37,6 +38,20 @@ impl OwnshipSource {
             max_age: DurationNanos::from_millis(1_000),
         }
     }
+}
+
+/// The orbit a vehicle that cannot stop flies around the last waypoint
+/// after a waypoint plan completes. Each value left unset takes its
+/// default.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct TerminalOrbit {
+    /// The orbit radius, metres. Default: the turn radius at the cruise
+    /// speed and [`crate::DEFAULT_ORBIT_BANK_DEG`], and at least the
+    /// capture radius.
+    pub radius_m: Option<f64>,
+    /// The orbit altitude on the WGS84 ellipsoid, metres. Default: the
+    /// altitude of the last waypoint.
+    pub altitude_m: Option<f64>,
 }
 
 /// Ceilings every emitted intent is clamped within.
@@ -119,9 +134,27 @@ pub struct MissionConfig {
     /// answers the arm as refused. Default
     /// [`crate::policy::ARM_CONFIRM_TIMEOUT_NS`].
     pub arm_confirm_timeout: DurationNanos,
+    /// The class of the vehicle the mission flies. It sets how a waypoint
+    /// plan ends: a vehicle that can stop flies on to the last waypoint
+    /// and is then commanded to zero velocity; a
+    /// [`VehicleClass::FixedWing`], which cannot stop, completes the plan
+    /// when the last waypoint sequences and then flies
+    /// [`Self::terminal_orbit`]. Default [`VehicleClass::Multicopter`].
+    pub vehicle_class: VehicleClass,
+    /// The time at cruise speed that sizes the capture radius of a
+    /// waypoint plan that sets none, seconds. Default 2.0.
+    pub capture_time_s: f64,
+    /// The orbit after a waypoint plan for a vehicle that cannot stop.
+    pub terminal_orbit: TerminalOrbit,
 }
 
 impl MissionConfig {
+    /// Whether the vehicle can stop at a point and hold there.
+    #[must_use]
+    pub fn can_stop(&self) -> bool {
+        self.vehicle_class != VehicleClass::FixedWing
+    }
+
     /// A config over the documented defaults; the route, anchor, and
     /// clock domain have no meaningful default and are always the
     /// caller's.
@@ -142,6 +175,9 @@ impl MissionConfig {
             execution_target: ExecutionTarget::Simulator,
             task_ids: Vec::new(),
             arm_confirm_timeout: DurationNanos::from_nanos(crate::policy::ARM_CONFIRM_TIMEOUT_NS),
+            vehicle_class: VehicleClass::Multicopter,
+            capture_time_s: 2.0,
+            terminal_orbit: TerminalOrbit::default(),
         }
     }
 }

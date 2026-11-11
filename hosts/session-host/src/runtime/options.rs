@@ -60,7 +60,7 @@ use std::path::PathBuf;
 
 use chrono::NaiveDate;
 use pilotage_mission::fixture::GeoPointDegrees;
-use pilotage_mission::{ExecutionTarget, OwnshipSource, SurveyRequest};
+use pilotage_mission::{ExecutionTarget, OwnshipSource, SurveyRequest, WaypointPlan};
 
 use crate::error::HostError;
 
@@ -117,6 +117,8 @@ pub enum MissionPlanRequest {
     Route(String),
     /// An area survey planned at the cruise height above the anchor.
     Survey(SurveyRequest),
+    /// A waypoint list: each waypoint at its own position and altitude.
+    Waypoints(WaypointPlan),
 }
 
 /// Configuration of the in-process mission executor.
@@ -178,15 +180,19 @@ fn mission_from_env() -> Result<Option<MissionOptions>, HostError> {
     let plan = match (
         env_var("PILOTAGE_MISSION_ROUTE")?,
         env_var("PILOTAGE_MISSION_AREA")?,
+        env_var("PILOTAGE_MISSION_WAYPOINTS")?,
     ) {
-        (None, None) => return Ok(None),
-        (Some(_), Some(_)) => return Err(HostError::MissionPlanConflict),
-        (Some(route), None) => MissionPlanRequest::Route(if route == "fixture" {
+        (None, None, None) => return Ok(None),
+        (Some(route), None, None) => MissionPlanRequest::Route(if route == "fixture" {
             pilotage_mission::fixture::DEMO_ROUTE.to_owned()
         } else {
             route
         }),
-        (None, Some(area)) => MissionPlanRequest::Survey(survey_from_env(&area)?),
+        (None, Some(area), None) => MissionPlanRequest::Survey(survey_from_env(&area)?),
+        (None, None, Some(path)) => {
+            MissionPlanRequest::Waypoints(waypoints::read_blocking(&waypoints::path_of(path))?)
+        }
+        _ => return Err(HostError::MissionPlanConflict),
     };
     let navdata = match env_var("PILOTAGE_MISSION_NAVDATA")? {
         None => MissionNavdataSource::Fixture,
@@ -402,6 +408,8 @@ fn parse_anchor(value: &str) -> Result<GeoPointDegrees, HostError> {
         alt_m: parse(alt)?,
     })
 }
+
+mod waypoints;
 
 #[cfg(test)]
 mod tests;

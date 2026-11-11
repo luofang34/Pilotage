@@ -15,6 +15,7 @@ use crate::codec::{FcMessage, FrameSource};
 
 /// Folds decoded messages into the shared cache. Kept synchronous and
 /// lock-scoped: the lock is never held across an await.
+#[cfg(feature = "net")]
 pub(super) fn apply_messages(
     state: &Arc<Mutex<LinkState>>,
     messages: &[(FrameSource, FcMessage)],

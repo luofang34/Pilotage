@@ -95,6 +95,10 @@ pub struct AutomationStatus {
     pub mission_state: Option<MissionState>,
     /// Typed intent frames submitted to the session engine.
     pub frames_sent: u64,
+    /// The running digest of the wire bytes of every intent frame sent,
+    /// in order: two runs that send the same frames end with the same
+    /// digest.
+    pub frame_digest: [u8; 32],
     /// `FrameRejected` notices received back for submitted frames.
     pub frames_rejected: u64,
     /// The engine closed this principal's connection.
@@ -143,6 +147,8 @@ pub(crate) enum PlanSource {
     Survey(SurveyRequest),
     /// Home from wherever the vehicle is, at the cruise height.
     Home,
+    /// A waypoint list.
+    Waypoints(pilotage_mission::WaypointPlan),
 }
 
 /// A validated mission: the plan source and the config the flight engine
@@ -194,7 +200,7 @@ impl MissionPlan {
     fn config_for(options: &MissionOptions) -> MissionConfig {
         let route = match &options.plan {
             MissionPlanRequest::Route(route) => route.clone(),
-            MissionPlanRequest::Survey(_) => String::new(),
+            MissionPlanRequest::Survey(_) | MissionPlanRequest::Waypoints(_) => String::new(),
         };
         // The anchor in radians/meters, converted exactly once (ADR-0030).
         let anchor = GeodeticPosition::new(
@@ -231,7 +237,30 @@ pub(crate) fn prepare(options: &MissionOptions) -> Result<MissionPlan, HostError
     match &options.plan {
         MissionPlanRequest::Route(_) => prepare_route(options),
         MissionPlanRequest::Survey(request) => prepare_survey(options, request),
+        MissionPlanRequest::Waypoints(plan) => prepare_waypoints(options, plan),
     }
+}
+
+fn prepare_waypoints(
+    options: &MissionOptions,
+    waypoints: &pilotage_mission::WaypointPlan,
+) -> Result<MissionPlan, HostError> {
+    let plan = MissionPlan {
+        source: PlanSource::Waypoints(waypoints.clone()),
+        config: MissionPlan::config_for(options),
+    };
+    let (_, record) = MissionEngine::from_waypoints(waypoints, plan.config())
+        .map_err(|source| HostError::MissionBuild(Box::new(source)))?;
+    info!(
+        waypoints = ?record.idents,
+        capture_radius_m = record.capture_radius_m,
+        arrival_radius_m = waypoints.arrival_radius_m,
+        waypoint_digest = %record.digest,
+        mission_revision = %record.mission_identity.revision_id,
+        mission_digest = %record.mission_identity.content_digest,
+        "waypoint list planned for flight"
+    );
+    Ok(plan)
 }
 
 fn prepare_survey(

@@ -312,9 +312,20 @@ pub enum HostError {
         "PILOTAGE_MISSION_TARGET=real-vehicle requires PILOTAGE_MISSION_OWNSHIP=vehicle-estimate"
     )]
     MissionTruthOnRealVehicle,
-    /// Both a route and an area were given; a mission flies one plan.
-    #[error("set one of PILOTAGE_MISSION_ROUTE and PILOTAGE_MISSION_AREA, not both")]
+    /// More than one plan was given; a mission flies one plan.
+    #[error(
+        "set one of PILOTAGE_MISSION_ROUTE, PILOTAGE_MISSION_AREA and PILOTAGE_MISSION_WAYPOINTS"
+    )]
     MissionPlanConflict,
+    /// `PILOTAGE_MISSION_WAYPOINTS` named a file that is not a waypoint
+    /// list.
+    #[error("cannot read the waypoint list {path:?}: {reason}")]
+    MissionWaypoints {
+        /// The waypoint file.
+        path: std::path::PathBuf,
+        /// Why it was refused.
+        reason: String,
+    },
     /// `PILOTAGE_MISSION_AREA` was not at least three `lat_deg,lon_deg`
     /// pairs separated by semicolons.
     #[error(

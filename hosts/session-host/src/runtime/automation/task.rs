@@ -6,6 +6,7 @@
 mod arm_receipt;
 mod fencing;
 mod flight_watch;
+mod frames;
 mod nav_guidance;
 mod run_control;
 mod session_flow;
@@ -23,8 +24,7 @@ use pilotage_mission::{
 };
 use pilotage_protocol::{
     ClientHello, ControlActionCommand, ControlIntent, ControlPayload, Generation, PrincipalId,
-    ReferenceFrame, SESSION_PROTOCOL_VERSION, ScopeId, ScopedControlFrame, SequenceNum, SessionId,
-    VelocityIntent,
+    SESSION_PROTOCOL_VERSION, ScopeId, ScopedControlFrame, SequenceNum, SessionId,
 };
 use pilotage_session::DomainEnvelope;
 use pilotage_timing::MonoTimestamp;
@@ -37,6 +37,7 @@ use crate::runtime::connection::ToConnection;
 use crate::runtime::engine_actor::ToEngine;
 
 use super::ownship;
+use frames::{chain_digest, neutral_intent};
 use pilotage_session::ClientKey;
 
 use super::{AutomationStatus, MISSION_CLIENT, MissionPlan};
@@ -361,13 +362,17 @@ impl MissionTask {
             actions: Vec::new(),
             action_ids: Vec::new(),
         };
+        let digest = chain_digest(self.status.borrow().frame_digest, &frame);
         if !self
             .send_message_at(DomainEnvelope::Frame(frame), sampled_at)
             .await
         {
             return false;
         }
-        self.update(|status| status.frames_sent = status.frames_sent.wrapping_add(1));
+        self.update(|status| {
+            status.frames_sent = status.frames_sent.wrapping_add(1);
+            status.frame_digest = digest;
+        });
         true
     }
 
@@ -485,15 +490,4 @@ impl MissionTask {
     fn update(&self, apply: impl FnOnce(&mut AutomationStatus)) {
         self.status.send_modify(apply);
     }
-}
-
-/// Zero velocity: the frame that demonstrates neutral to the session.
-fn neutral_intent() -> ControlIntent {
-    ControlIntent::Velocity(VelocityIntent {
-        frame: ReferenceFrame::BodyFrd,
-        vx: 0.0,
-        vy: 0.0,
-        vz: 0.0,
-        yaw_rate: 0.0,
-    })
 }
