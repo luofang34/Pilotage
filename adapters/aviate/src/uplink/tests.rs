@@ -421,3 +421,41 @@ fn direct_output_stays_inside_the_advertised_bounds() {
         assert!((minimum_thrust..=1.0).contains(&field(&frame, 32)));
     }
 }
+
+#[test]
+fn an_arm_acknowledgement_pairs_with_the_arm_it_answers() {
+    use pilotage_mavlink::codec::{MAV_CMD_COMPONENT_ARM_DISARM, encode_command_ack};
+    use pilotage_protocol::CommandOutcome;
+
+    let fc = UdpSocket::bind("127.0.0.1:0").expect("fake FC socket");
+    let mut uplink = ready_uplink(&fc, validated(FlightFeelProfile::legacy_compatibility()));
+    let gcs = uplink.local_addr().expect("uplink address");
+    let answer = |result: u8| {
+        let ack = encode_command_ack(0, MAV_CMD_COMPONENT_ARM_DISARM, result, 1, 1);
+        fc.send_to(&ack, gcs).expect("ack sent");
+    };
+    let settle = |uplink: &mut FlightUplink| {
+        for _ in 0..200 {
+            uplink.poll_fc();
+            if uplink.arm_ack().is_some() {
+                return;
+            }
+            std::thread::yield_now();
+        }
+    };
+    // The first arm: a preflight check refuses it (MAV_RESULT_DENIED).
+    answer(2);
+    settle(&mut uplink);
+    let refused = uplink.arm_ack().expect("the refusal arrived");
+    assert!(refused.arm);
+    assert_eq!(refused.outcome, CommandOutcome::Denied);
+    // A new arm clears the answer to the old one until its own arrives.
+    uplink.send_arm(0.0);
+    assert_eq!(uplink.arm_ack(), None);
+    answer(0);
+    settle(&mut uplink);
+    assert_eq!(
+        uplink.arm_ack().map(|ack| ack.outcome),
+        Some(CommandOutcome::Accepted)
+    );
+}

@@ -178,7 +178,8 @@ impl AviateAdapter {
                 acquired_at: std::time::Instant::now(),
             });
         }
-        let fc_state = fc_state_sample(self.arm, self.arm_incarnation, self.started_at);
+        let arm_ack = self.uplink.as_ref().and_then(FlightUplink::arm_ack);
+        let fc_state = fc_state_sample(self.arm, arm_ack, self.arm_incarnation, self.started_at);
         let truth = self.take_truth_sample();
         let mut batch = match &self.estimate {
             Some(source) => mavlink_batch(self.vehicle, &source.state),

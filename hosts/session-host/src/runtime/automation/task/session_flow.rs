@@ -312,6 +312,19 @@ impl MissionTask {
             detail = %result.detail,
             "mission action result"
         );
+        // An accepted arm is only a sent command: the receipt waits for
+        // the flight controller's answer (`arm_receipt`).
+        if result.accepted
+            && matches!(result.action, ControlAction::Arm)
+            && self.flight.reports_state()
+        {
+            if let Some(mission) = self.mission.as_ref() {
+                let timeout_ns = mission.arm_confirm_timeout().as_nanos();
+                let now = self.mission_now().as_nanos();
+                self.flight.arm.await_vehicle(mission_id, now, timeout_ns);
+            }
+            return;
+        }
         if let Some(mission) = self.mission.as_mut() {
             mission.on_action_result(mission_id, result.accepted);
         }
@@ -373,6 +386,13 @@ impl MissionTask {
             .and_then(|fc| self.flight.observe(fc))
         {
             self.on_vehicle_left_flight(reason);
+        }
+        if let Some((mission_id, verdict)) = sample
+            .fc_state
+            .as_ref()
+            .and_then(|fc| self.flight.arm.observe(fc))
+        {
+            self.settle_arm(mission_id, verdict);
         }
         let Some(mission) = self.mission.as_mut() else {
             return;

@@ -63,6 +63,10 @@ pub struct FlightUplink {
     started: Instant,
     clock: UplinkClock,
     send_failures: u64,
+    /// The arm (true) or disarm (false) last sent, until its ack arrives.
+    arm_sent: Option<bool>,
+    /// The FC's answer to the arm or disarm last sent.
+    arm_ack: Option<pilotage_adapter_api::FcCommandAck>,
 }
 
 impl FlightUplink {
@@ -127,6 +131,8 @@ impl FlightUplink {
             started: Instant::now(),
             clock: UplinkClock::System,
             send_failures: 0,
+            arm_sent: None,
+            arm_ack: None,
         })
     }
 
@@ -182,6 +188,7 @@ impl FlightUplink {
     /// Arms and re-seeds heading from the measured yaw.
     pub fn send_arm(&mut self, current_yaw_rad: f32) {
         let frame = self.policy.arm(self.elapsed(), current_yaw_rad);
+        self.arm_command_sent(true);
         self.send(&frame);
         info!(arm = true, "sent arm command to FC");
     }
@@ -189,8 +196,22 @@ impl FlightUplink {
     /// Disarms without requiring a measurement that may have failed.
     pub fn send_disarm(&mut self) {
         let frame = self.policy.disarm(self.elapsed());
+        self.arm_command_sent(false);
         self.send(&frame);
         info!(arm = false, "sent arm command to FC");
+    }
+
+    /// A new arm or disarm: the answer to the previous one no longer
+    /// describes the command in flight.
+    fn arm_command_sent(&mut self, arm: bool) {
+        self.arm_sent = Some(arm);
+        self.arm_ack = None;
+    }
+
+    /// The FC's answer to the arm or disarm last sent, once its
+    /// COMMAND_ACK arrived.
+    pub fn arm_ack(&self) -> Option<pilotage_adapter_api::FcCommandAck> {
+        self.arm_ack
     }
 
     /// Sends a zero-velocity setpoint holding the current heading — the

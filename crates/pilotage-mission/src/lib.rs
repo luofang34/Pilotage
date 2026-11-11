@@ -21,6 +21,7 @@ pub mod ownship;
 pub mod policy;
 pub mod provenance;
 pub mod survey;
+pub mod waypoints;
 
 mod body;
 mod body_frame;
@@ -47,3 +48,4 @@ pub use pilotage_mission_core::ExecutionTarget;
 pub use pilotage_mission_core::executor;
 pub use provenance::{MissionPlanRecord, SnapshotProvenance, decode_snapshot};
 pub use survey::{SurveyError, SurveyPlan, SurveyPlanRecord, SurveyRequest, plan_survey};
+pub use waypoints::{PlannedWaypoint, WaypointPlan, WaypointPlanRecord, WaypointTurn};
