@@ -40,6 +40,9 @@ pub struct HostCore {
     events: Vec<HostEvent>,
     /// The mission's counters went to the log when the plan completed.
     counters_logged: bool,
+    /// The message ids on the telemetry link the core skips, each logged
+    /// once.
+    unknown_ids: std::collections::BTreeSet<u32>,
 }
 
 impl core::fmt::Debug for HostCore {
@@ -91,6 +94,7 @@ impl HostCore {
             status: HostStatus::default(),
             events: Vec::new(),
             counters_logged: false,
+            unknown_ids: std::collections::BTreeSet::new(),
         })
     }
 
@@ -165,10 +169,19 @@ impl HostCore {
         })
     }
 
-    /// One datagram the flight controller sent on its telemetry link.
+    /// One datagram the flight controller sent on its telemetry link. A
+    /// message id the core does not decode is logged once, at debug level.
     pub fn on_downlink(&mut self, datagram: &[u8], now: MonotonicNanos) {
         self.set_times(now.as_nanos().max(self.last_now.as_nanos()));
-        self.actor.adapter_mut().on_downlink(datagram);
+        let stats = self.actor.adapter_mut().on_downlink(datagram);
+        if let Some(id) = stats.last_unknown_id
+            && self.unknown_ids.insert(id)
+        {
+            tracing::debug!(
+                message_id = id,
+                "the flight controller sends a message the core skips"
+            );
+        }
     }
 
     /// One datagram the flight controller sent on its command link.

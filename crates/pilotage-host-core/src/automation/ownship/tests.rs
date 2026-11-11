@@ -84,13 +84,25 @@ fn an_attitude_group_supplies_the_yaw() {
 
 /// A vehicle's own fix on the wire: WGS-84, local-relative height with
 /// a declared origin, authorized position, degraded quality, and a
-/// canonical attitude with the same acquisition identity.
+/// canonical attitude of the same estimator solution.
 fn vehicle_estimate(role: wire::SourceRole) -> wire::TelemetrySample {
-    let stamp = wire::MeasurementStamp {
+    // Aviate's stream: each group counts its own sequence; the attitude
+    // (about 20 Hz) and the local position (10 Hz) are stamped on the
+    // vehicle's boot clock, the receiver fix on the host's receive clock.
+    let source = |sequence, acquired_at_ns, clock: wire::MeasurementClock| wire::MeasurementStamp {
         role: role as i32,
-        sequence: 11,
+        source_id: 1,
+        source_epoch: 1,
+        source_incarnation: vec![7; 16],
+        sequence,
+        acquired_at_ns,
+        clock: clock as i32,
         ..Default::default()
     };
+    let attitude = source(97, 5_048_000_000, wire::MeasurementClock::VehicleBoot);
+    let kinematics = source(48, 5_000_000_000, wire::MeasurementClock::VehicleBoot);
+    let fix = source(49, 5_008_000_000, wire::MeasurementClock::HostMonotonic);
+    let status = source(50, 5_000_000_000, wire::MeasurementClock::VehicleBoot);
     wire::TelemetrySample {
         flight_procedure: None,
         payload: None,
@@ -101,10 +113,10 @@ fn vehicle_estimate(role: wire::SourceRole) -> wire::TelemetrySample {
             valid_flags: 0b1101,
             quat_w: (0.75_f32).cos(),
             quat_z: (0.75_f32).sin(),
-            attitude_stamp: Some(stamp.clone()),
+            attitude_stamp: Some(attitude),
             quality: 1,
-            kinematics_stamp: Some(stamp.clone()),
-            estimator_status_stamp: Some(stamp.clone()),
+            kinematics_stamp: Some(kinematics),
+            estimator_status_stamp: Some(status),
             geodetic: Some(wire::GeodeticFix {
                 latitude_deg: 40.5442,
                 longitude_deg: -74.4565,
@@ -115,7 +127,7 @@ fn vehicle_estimate(role: wire::SourceRole) -> wire::TelemetrySample {
                 local_origin: 77,
                 ..Default::default()
             }),
-            geodetic_stamp: Some(stamp),
+            geodetic_stamp: Some(fix),
             ..Default::default()
         }),
         ..Default::default()
@@ -147,7 +159,7 @@ fn the_vehicle_fix_converts_through_the_anchor_with_an_authorized_heading() {
     assert!((ownship.ned_velocity[1] + 0.5).abs() < 1e-6);
     assert!((ownship.ned_velocity[2] - 0.3).abs() < 1e-6);
     assert!((ownship.yaw_rad.expect("canonical heading") - 1.5).abs() < 1e-6);
-    assert_eq!(ownship.sequence, 11);
+    assert_eq!(ownship.sequence, 49, "the fix lane orders the samples");
     assert_eq!(ownship.acquired_at, now());
 }
 
@@ -219,7 +231,7 @@ fn an_unauthorized_unusable_or_wrongly_labeled_estimate_is_refused() {
 #[test]
 fn geographic_guidance_refuses_unknown_stale_or_unauthorized_attitude() {
     type Mutation = fn(&mut wire::AvionicsState);
-    let cases: [Mutation; 5] = [
+    let cases: [Mutation; 8] = [
         |a| {
             a.attitude_stamp = None;
             a.reported_euler = Some(wire::ReportedEulerAttitude {
@@ -229,7 +241,17 @@ fn geographic_guidance_refuses_unknown_stale_or_unauthorized_attitude() {
             });
         },
         |a| a.valid_flags &= !1,
-        |a| a.attitude_stamp.as_mut().expect("attitude").sequence = 10,
+        // An attitude more than one estimator period from the position.
+        |a| a.attitude_stamp.as_mut().expect("attitude").acquired_at_ns = 5_300_000_000,
+        // An attitude of another estimator epoch.
+        |a| a.attitude_stamp.as_mut().expect("attitude").source_epoch = 2,
+        // An attitude on a clock the position is not on.
+        |a| {
+            a.attitude_stamp.as_mut().expect("attitude").clock =
+                wire::MeasurementClock::HostMonotonic as i32;
+        },
+        // A fix from another source.
+        |a| a.geodetic_stamp.as_mut().expect("fix").source_id = 9,
         |a| a.quat_w = f32::NAN,
         |a| {
             a.quat_w = 0.0;

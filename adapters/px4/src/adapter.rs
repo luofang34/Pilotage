@@ -238,7 +238,7 @@ impl Px4Adapter {
     /// The current operational pose from the FC estimate only.
     fn current_pose(&self) -> Option<pilotage_mavlink::sampling::OperationalPose> {
         let latest = self.estimate.as_ref()?.state.lock().ok()?;
-        pilotage_mavlink::sampling::operational_pose(&latest)
+        pilotage_mavlink::sampling::operational_pose(&latest, web_time::Instant::now())
     }
 
     fn validate_flight_frame(&self, frame: &ScopedControlFrame) -> Result<(), RejectReason> {
@@ -384,11 +384,12 @@ impl VehicleAdapter for Px4Adapter {
                 .and_then(|source| source.state.lock().ok()?.battery),
             self.arm_incarnation,
             self.started_at,
+            web_time::Instant::now(),
         );
         let mut batch = self
             .estimate
             .as_ref()
-            .map(|source| estimate_batch(self.vehicle, &source.state))
+            .map(|source| estimate_batch(self.vehicle, &source.state, web_time::Instant::now()))
             .unwrap_or_default();
         let payload = gimbal.payload;
         let reports = VehicleReports {

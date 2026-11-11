@@ -43,7 +43,7 @@ fn state_with_truth(lat_lon_alt: [i32; 3], age: Duration) -> Arc<Mutex<LinkState
 fn the_oracle_reports_the_position_the_simulator_sent() {
     let state = state_with_truth(REPORTED, Duration::ZERO);
     let latest = state.lock().expect("link state");
-    let sample = sim_truth_sample(&latest).expect("a fresh truth sample");
+    let sample = sim_truth_sample(&latest, web_time::Instant::now()).expect("a fresh truth sample");
     let fix = sample.geodetic.expect("the oracle declares a position");
 
     assert!((fix.position.latitude_deg - 47.397_741_9).abs() < 1e-9);
@@ -61,7 +61,7 @@ fn the_oracle_reports_the_position_the_simulator_sent() {
 fn the_fix_rides_the_truth_role_and_the_samples_own_stamp() {
     let state = state_with_truth(REPORTED, Duration::ZERO);
     let latest = state.lock().expect("link state");
-    let sample = sim_truth_sample(&latest).expect("a fresh truth sample");
+    let sample = sim_truth_sample(&latest, web_time::Instant::now()).expect("a fresh truth sample");
     let fix = sample.geodetic.expect("the oracle declares a position");
 
     assert_eq!(
@@ -81,7 +81,7 @@ fn a_position_the_contract_refuses_is_no_position() {
     // local frame; it does not carry a position the reader would draw.
     let state = state_with_truth([910_000_000, 0, 0], Duration::ZERO);
     let latest = state.lock().expect("link state");
-    let sample = sim_truth_sample(&latest).expect("a fresh truth sample");
+    let sample = sim_truth_sample(&latest, web_time::Instant::now()).expect("a fresh truth sample");
     assert!(
         sample.geodetic.is_none(),
         "a refused report leaves no position behind"
@@ -94,7 +94,7 @@ fn a_stale_report_carries_no_position_because_it_carries_no_sample() {
     let state = state_with_truth(REPORTED, Duration::from_secs(5));
     let latest = state.lock().expect("link state");
     assert!(
-        sim_truth_sample(&latest).is_none(),
+        sim_truth_sample(&latest, web_time::Instant::now()).is_none(),
         "a withheld truth report publishes nothing at all"
     );
 }
@@ -107,7 +107,7 @@ fn a_report_that_states_no_position_is_not_null_island() {
     // point could tell the two apart.
     let state = state_with_truth([0, 0, 0], Duration::ZERO);
     let latest = state.lock().expect("link state");
-    let sample = sim_truth_sample(&latest).expect("a fresh truth sample");
+    let sample = sim_truth_sample(&latest, web_time::Instant::now()).expect("a fresh truth sample");
     assert!(
         sample.geodetic.is_none(),
         "a simulator that stated no position declares none"

@@ -2,6 +2,8 @@
 
 use std::sync::{Arc, Mutex};
 
+use web_time::Instant;
+
 use pilotage_adapter_api::{
     AvionicsAttitudeSample, AvionicsKinematicsSample, AvionicsSample, GeodeticFixSample, Pose2d,
     SourceRole, TelemetryBatch, TelemetrySample,
@@ -215,10 +217,13 @@ fn truth_geodetic_fix(
 
 /// The fresh simulation-truth sample, stamped with its own source role so
 /// a consumer can never mistake it for the FC's operational estimate.
-fn sim_truth_sample(latest: &LinkState) -> Option<pilotage_adapter_api::SimTruthSample> {
+fn sim_truth_sample(
+    latest: &LinkState,
+    now: Instant,
+) -> Option<pilotage_adapter_api::SimTruthSample> {
     latest
         .sim_truth
-        .filter(|truth| truth.received_at.elapsed() <= WITHHOLD_AFTER)
+        .filter(|truth| now.saturating_duration_since(truth.received_at) <= WITHHOLD_AFTER)
         .map(|truth| {
             let stamp = pilotage_adapter_api::MeasurementStamp {
                 role: pilotage_adapter_api::SourceRole::SimulationTruth,
@@ -257,16 +262,20 @@ fn avionics_attitude(attitude: AttitudeUpdate) -> AvionicsAttitudeSample {
     }
 }
 
-pub(crate) fn mavlink_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -> TelemetryBatch {
+pub(crate) fn mavlink_batch(
+    vehicle: VehicleId,
+    state: &Arc<Mutex<LinkState>>,
+    now: Instant,
+) -> TelemetryBatch {
     let Ok(latest) = state.lock() else {
         return TelemetryBatch::default();
     };
     let kinematics = latest
         .kinematics
-        .filter(|kin| kin.received_at.elapsed() <= WITHHOLD_AFTER);
+        .filter(|kin| now.saturating_duration_since(kin.received_at) <= WITHHOLD_AFTER);
     let attitude = latest
         .attitude
-        .filter(|att| att.received_at.elapsed() <= WITHHOLD_AFTER);
+        .filter(|att| now.saturating_duration_since(att.received_at) <= WITHHOLD_AFTER);
     if attitude.is_none() && kinematics.is_none() {
         return TelemetryBatch::default();
     }
@@ -285,7 +294,7 @@ pub(crate) fn mavlink_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -
         // independently of the local frame beside it.
         geodetic: latest
             .gnss_fix
-            .filter(|fix| fix.received_at.elapsed() <= WITHHOLD_AFTER)
+            .filter(|fix| now.saturating_duration_since(fix.received_at) <= WITHHOLD_AFTER)
             .as_ref()
             .and_then(|fix| estimate_geodetic_fix(fix, &latest)),
         attitude: attitude.map(avionics_attitude),
@@ -296,7 +305,7 @@ pub(crate) fn mavlink_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -
         }),
         baro: latest
             .baro
-            .filter(|update| update.received_at.elapsed() <= WITHHOLD_AFTER)
+            .filter(|update| now.saturating_duration_since(update.received_at) <= WITHHOLD_AFTER)
             .map(|update| pilotage_adapter_api::AvionicsBaroSample {
                 pressure_alt_m: update.pressure_alt_m,
                 stamp: update.stamp,
@@ -306,7 +315,7 @@ pub(crate) fn mavlink_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -
         quality,
         magnetic_variation: latest
             .geomagnetic_reference
-            .filter(|update| update.received_at.elapsed() <= WITHHOLD_AFTER)
+            .filter(|update| now.saturating_duration_since(update.received_at) <= WITHHOLD_AFTER)
             .as_ref()
             .and_then(|update| fc_magnetic_variation(update, &latest)),
     });
@@ -323,7 +332,7 @@ pub(crate) fn mavlink_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -
             pose: planar_pose,
             speed: planar_speed,
             avionics,
-            sim_truth: sim_truth_sample(&latest),
+            sim_truth: sim_truth_sample(&latest, now),
             fc_state: None,
             gimbal: None,
             battery: None,

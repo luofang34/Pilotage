@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use pilotage_adapter_api::SourceIncarnation;
 use pilotage_control_feel::ValidatedFlightFeelProfile;
-use pilotage_mavlink::codec::parse_datagram;
+use pilotage_mavlink::codec::{ParseStats, parse_datagram};
 use pilotage_mavlink::link::{LinkConfig, LinkState, apply_messages_at};
 use pilotage_protocol::VehicleId;
 use web_time::Instant;
@@ -108,20 +108,20 @@ impl AviateAdapter {
     }
 
     /// Folds one datagram from the FC's telemetry link into the estimate
-    /// cache at the adapter's current time.
-    pub fn on_downlink(&mut self, datagram: &[u8]) {
-        let Some(source) = self.estimate.as_ref() else {
-            return;
-        };
+    /// cache at the adapter's current time, and returns how it parsed.
+    pub fn on_downlink(&mut self, datagram: &[u8]) -> ParseStats {
         let mut messages = Vec::new();
         let stats = parse_datagram(datagram, &mut messages);
-        apply_messages_at(
-            &source.state,
-            &messages,
-            stats.crc_failures,
-            stats.unknown_ids,
-            self.clock.now(),
-        );
+        if let Some(source) = self.estimate.as_ref() {
+            apply_messages_at(
+                &source.state,
+                &messages,
+                stats.crc_failures,
+                stats.unknown_ids,
+                self.clock.now(),
+            );
+        }
+        stats
     }
 
     /// Queues one datagram the FC sent on the command link (heartbeats

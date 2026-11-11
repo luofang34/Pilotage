@@ -54,7 +54,7 @@ fn decoded_authorized_unit_quaternions_and_finite_positions_support_control() {
     ] {
         let state = authorized_pose(quaternion, [1.0, 2.0, -3.0]);
         let latest = state.lock().expect("cache");
-        let pose = operational_pose(&latest).expect("valid pose");
+        let pose = operational_pose(&latest, web_time::Instant::now()).expect("valid pose");
         assert_eq!(pose.pos_ned_m, [1.0, 2.0, -3.0]);
         assert!(pose.yaw_rad.is_finite());
     }
@@ -70,7 +70,7 @@ fn decoded_zero_nonunit_and_nonfinite_quaternions_do_not_support_control() {
         [1.0, f32::INFINITY, 0.0, 0.0],
     ] {
         let state = authorized_pose(quaternion, [0.0; 3]);
-        assert!(operational_pose(&state.lock().expect("cache")).is_none());
+        assert!(operational_pose(&state.lock().expect("cache"), web_time::Instant::now()).is_none());
     }
 }
 
@@ -82,6 +82,6 @@ fn decoded_nonfinite_position_does_not_support_control_even_with_authorization()
         [0.0, 0.0, f32::NEG_INFINITY],
     ] {
         let state = authorized_pose([1.0, 0.0, 0.0, 0.0], position);
-        assert!(operational_pose(&state.lock().expect("cache")).is_none());
+        assert!(operational_pose(&state.lock().expect("cache"), web_time::Instant::now()).is_none());
     }
 }

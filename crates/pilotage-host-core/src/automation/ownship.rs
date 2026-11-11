@@ -194,7 +194,7 @@ pub(crate) fn estimate_from_wire(
         return None;
     }
     let altitude = estimate_altitude(fix)?;
-    let yaw_rad = authorized_yaw(avionics, fix_stamp)?;
+    let yaw_rad = authorized_yaw(avionics, kinematics, fix_stamp)?;
     Some(OwnshipSample {
         ned: ned_of(
             fix.latitude_deg.to_radians(),
@@ -226,10 +226,19 @@ fn estimate_altitude(fix: &wire::GeodeticFix) -> Option<OwnshipAltitude> {
     }
 }
 
+/// The widest gap, on the flight controller's own clock, between an
+/// attitude and the position solution it is paired with: one period of
+/// the slowest group of the estimator's stream (local position at 10 Hz).
+const ATTITUDE_POSITION_SKEW_NS: u64 = 100_000_000;
+
 // Geographic guidance needs a north-referenced body attitude, not a display value.
-fn authorized_yaw(avionics: &wire::AvionicsState, fix: &wire::MeasurementStamp) -> Option<f64> {
+fn authorized_yaw(
+    avionics: &wire::AvionicsState,
+    kinematics: &wire::MeasurementStamp,
+    fix: &wire::MeasurementStamp,
+) -> Option<f64> {
     let attitude = avionics.attitude_stamp.as_ref()?;
-    if avionics.valid_flags & 1 == 0 || attitude != fix {
+    if avionics.valid_flags & 1 == 0 || !same_solution(attitude, kinematics, fix) {
         return None;
     }
     let q = [
@@ -243,6 +252,32 @@ fn authorized_yaw(avionics: &wire::AvionicsState, fix: &wire::MeasurementStamp) 
         return None;
     }
     Some(quat_yaw(q[0], q[1], q[2], q[3]))
+}
+
+/// Whether an attitude belongs to the same estimator solution as the
+/// position beside it. The attitude, the local position and the fix come
+/// from one source in one epoch, and either the attitude carries the
+/// position's own stamp (an airframe that publishes one solution under
+/// one stamp), or both are stamped on the vehicle's boot clock within one
+/// estimator period of each other (an FC that streams each group under
+/// its own stamp and sequence, which are then never equal).
+fn same_solution(
+    attitude: &wire::MeasurementStamp,
+    kinematics: &wire::MeasurementStamp,
+    fix: &wire::MeasurementStamp,
+) -> bool {
+    let same_source = |a: &wire::MeasurementStamp, b: &wire::MeasurementStamp| {
+        a.role == b.role
+            && a.source_id == b.source_id
+            && a.source_incarnation == b.source_incarnation
+            && a.source_epoch == b.source_epoch
+    };
+    let boot = wire::MeasurementClock::VehicleBoot as i32;
+    let one_stamp = attitude == kinematics;
+    let one_period = attitude.clock == boot
+        && kinematics.clock == boot
+        && attitude.acquired_at_ns.abs_diff(kinematics.acquired_at_ns) <= ATTITUDE_POSITION_SKEW_NS;
+    same_source(attitude, kinematics) && same_source(attitude, fix) && (one_stamp || one_period)
 }
 
 /// Maps a wire source role onto the mission vocabulary; roles the mission

@@ -49,7 +49,7 @@ fn authorized_pose(state: &LinkState, now: Instant) -> Option<OperationalPose> {
     if !fresh(state.attitude?.received_at) || !fresh(state.kinematics?.received_at) {
         return None;
     }
-    operational_pose(state).filter(|pose| {
+    operational_pose(state, now).filter(|pose| {
         pose.yaw_rad.is_finite() && pose.pos_ned_m.iter().all(|value| value.is_finite())
     })
 }

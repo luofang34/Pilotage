@@ -314,6 +314,9 @@ pub struct ParseStats {
     /// Structurally valid frames carrying a message id this parser does
     /// not know (skipped whole).
     pub unknown_ids: u32,
+    /// The message id of the last frame counted in `unknown_ids`, so a
+    /// host can name what it skipped.
+    pub last_unknown_id: Option<u32>,
     /// Bytes discarded while hunting for a frame start.
     pub garbage_bytes: u32,
 }
@@ -477,6 +480,7 @@ pub fn parse_datagram(bytes: &[u8], out: &mut Vec<(FrameSource, FcMessage)>) -> 
             }
             None => {
                 stats.unknown_ids = stats.unknown_ids.wrapping_add(1);
+                stats.last_unknown_id = Some(msg_id);
             }
         }
         at = at.saturating_add(frame_len);

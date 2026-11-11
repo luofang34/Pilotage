@@ -186,7 +186,7 @@ impl AviateAdapter {
         let fc_state = fc_state_sample(self.arm, arm_ack, self.arm_incarnation, self.started_at);
         let truth = self.take_truth_sample();
         let mut batch = match &self.estimate {
-            Some(source) => mavlink_batch(self.vehicle, &source.state),
+            Some(source) => mavlink_batch(self.vehicle, &source.state, self.clock.now()),
             None => TelemetryBatch::default(),
         };
         if let Some(sample) = batch.samples.first_mut() {

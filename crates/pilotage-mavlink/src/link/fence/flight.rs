@@ -73,7 +73,7 @@ impl TakeoffWriteRequirement {
         let Some(altitude) = state.relative_altitude_cached(now, self.maximum_age) else {
             return false;
         };
-        let Some(pose) = operational_pose(state) else {
+        let Some(pose) = operational_pose(state, now) else {
             return false;
         };
         let current_offset = altitude.altitude_m + pose.pos_ned_m[2];

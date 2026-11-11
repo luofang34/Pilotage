@@ -82,7 +82,11 @@ impl Harness {
                 let reset_ready = {
                     let state = self.adapter.state.lock().unwrap();
                     state.source_resets > 0
-                        && pilotage_mavlink::sampling::operational_pose(&state).is_some()
+                        && pilotage_mavlink::sampling::operational_pose(
+                            &state,
+                            web_time::Instant::now(),
+                        )
+                        .is_some()
                         && state
                             .fc_reports
                             .relative_altitude
