@@ -260,6 +260,7 @@ fn truth_and_fc_sample() -> TelemetrySample {
             landed_state: None,
             motor_state: None,
             arm_state: 2,
+            ready_to_arm: None,
             last_command: None,
             stamp: Some(fc_stamp),
         }),
@@ -324,6 +325,7 @@ fn the_fc_command_verdict_crosses_the_wire() {
         landed_state: None,
         motor_state: None,
         arm_state: 1,
+        ready_to_arm: None,
         last_command: Some(pilotage_adapter_api::FcCommandAck {
             arm: true,
             outcome: pilotage_adapter_api::CommandOutcome::Failed,
@@ -348,6 +350,7 @@ fn the_fc_command_verdict_crosses_the_wire() {
         landed_state: None,
         motor_state: None,
         arm_state: 2,
+        ready_to_arm: None,
         last_command: None,
         stamp: Some(stamp),
     });
@@ -471,6 +474,7 @@ fn landing_approach_crosses_the_wire_without_an_arm_or_ground_inference() {
         landed_state: None,
         motor_state: None,
         arm_state: 0,
+        ready_to_arm: None,
         last_command: None,
         stamp: None,
     });

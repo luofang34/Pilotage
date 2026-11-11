@@ -79,6 +79,7 @@ impl BetaflightAdapter {
             landed_state: None,
             motor_state: None,
             arm_state: if snapshot.armed { 2 } else { 1 },
+            ready_to_arm: None,
             last_command,
             stamp: Some(self.stamp(&observed, SourceRole::FcState, FC_STATE_SOURCE_ID)),
         };

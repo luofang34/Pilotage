@@ -124,6 +124,7 @@ fn armed_heartbeat(state: &std::sync::Arc<std::sync::Mutex<pilotage_mavlink::Lin
         custom_mode: 0,
         autopilot: 12,
         mav_type: 2,
+        system_status: 0,
     };
     apply_messages_at(
         state,

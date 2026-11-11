@@ -128,6 +128,13 @@ pub enum MissionEvent {
         /// The typed refusal.
         reason: GuidanceRefusal,
     },
+    /// The engine holds back the start of the mission, and why. Emitted
+    /// each time a start is held; the start goes ahead, announced by its
+    /// own event, once the reason clears.
+    StartWithheld {
+        /// Why the start is held.
+        reason: super::StartWithheldReason,
+    },
     /// The vehicle passed the active fix outside its capture radius, and
     /// guidance now flies direct back to it. Emitted once per fix.
     FixOverflown {

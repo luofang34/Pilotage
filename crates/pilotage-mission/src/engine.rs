@@ -9,6 +9,7 @@ mod onboard;
 mod output;
 mod ownship;
 mod tick;
+mod vehicle_status;
 mod waypoints;
 
 use core::mem::Discriminant;
@@ -31,6 +32,7 @@ use pilotage_mission_core::{
 
 pub use nav_guidance::{NavGuidance, NavQuality};
 pub use output::{MissionAction, MissionCounters, MissionEvent, MissionOutput, MissionState};
+pub use vehicle_status::{StartWithheldReason, VEHICLE_STATUS_MAX_AGE_NS, VehicleStatus};
 
 use crate::config::MissionConfig;
 use crate::error::MissionBuildError;
@@ -89,6 +91,8 @@ pub struct MissionEngine {
     held_total_ns: u64,
     /// Hold and resume transitions the next tick announces.
     hold_events: Vec<MissionEvent>,
+    /// The vehicle's latest status and the arm request held for it.
+    vehicle: vehicle_status::VehicleReadiness,
 }
 
 impl MissionEngine {
@@ -273,6 +277,7 @@ impl MissionEngine {
             hold_started: None,
             held_total_ns: 0,
             hold_events: Vec::new(),
+            vehicle: vehicle_status::VehicleReadiness::default(),
         })
     }
 

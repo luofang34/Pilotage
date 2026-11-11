@@ -452,7 +452,16 @@ impl VehicleAdapter for AviateAdapter {
     }
 
     fn sample_telemetry(&mut self) -> TelemetryBatch {
-        self.collect_telemetry()
+        let mut batch = self.collect_telemetry();
+        let ready_to_arm = self.fc_ready_to_arm();
+        for fc_state in batch
+            .samples
+            .iter_mut()
+            .filter_map(|sample| sample.fc_state.as_mut())
+        {
+            fc_state.ready_to_arm = ready_to_arm;
+        }
+        batch
     }
 }
 

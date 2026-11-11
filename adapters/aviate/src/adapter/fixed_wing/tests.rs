@@ -406,3 +406,23 @@ fn an_origin_height_that_is_not_a_number_is_refused() {
     assert!(adapter.set_local_origin_height(f64::INFINITY).is_err());
     assert_eq!(adapter.fixed_wing.origin_ellipsoid_height_m, None);
 }
+
+#[test]
+fn the_fc_state_says_whether_the_fc_would_accept_an_arm() {
+    let start = host_start();
+    let mut adapter = fixed_wing(start);
+    adapter.set_now(start + Duration::from_millis(200));
+    let ready = |adapter: &mut AviateAdapter, system_status: u8| {
+        let payload = [0, 0, 0, 0, 1, 12, 0x01, system_status, 3];
+        assert!(adapter.on_uplink_reply(&frame_of(HEARTBEAT_ID, 50, &payload)));
+        adapter
+            .sample_telemetry()
+            .samples
+            .first()
+            .and_then(|sample| sample.fc_state)
+            .map(|fc_state| fc_state.ready_to_arm)
+    };
+    assert_eq!(ready(&mut adapter, 1), Some(Some(false)), "booting");
+    assert_eq!(ready(&mut adapter, 3), Some(Some(true)), "standing by");
+    assert_eq!(ready(&mut adapter, 0), Some(None), "uninitialized");
+}

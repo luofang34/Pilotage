@@ -34,7 +34,7 @@ pub use body_frame::{
 pub use config::{MissionConfig, MissionLimits, OwnshipSource, TerminalOrbit};
 pub use engine::{
     MissionAction, MissionCounters, MissionEngine, MissionEvent, MissionOutput, MissionState,
-    NavGuidance, NavQuality,
+    NavGuidance, NavQuality, StartWithheldReason, VEHICLE_STATUS_MAX_AGE_NS, VehicleStatus,
 };
 pub use error::MissionBuildError;
 pub use lane::{

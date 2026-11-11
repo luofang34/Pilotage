@@ -10,7 +10,7 @@
 //! owned slice, runs, and keeps the new progress.
 
 use navigate_contract::{
-    AltitudeConstraint, FlightPlan, GeodeticPosition, Ident, PlanRole, Waypoint,
+    AltitudeConstraint, FlightPlan, GeodeticPosition, Ident, PlanRole, TurnType, Waypoint,
 };
 use navigate_route::{ExecutionConfig, Leg, PlanExecution, SequenceEvent};
 
@@ -45,6 +45,11 @@ pub(crate) struct MissionRoute {
     complete: bool,
     end: PlanEnd,
     arrived: bool,
+    /// Whether a first waypoint the vehicle starts past is passed rather
+    /// than turned back for; see [`Self::pass_start`].
+    pass_first_behind: bool,
+    /// Whether [`Self::pass_start`] has judged the start.
+    start_judged: bool,
 }
 
 impl MissionRoute {
@@ -77,6 +82,8 @@ impl MissionRoute {
             complete: false,
             end: PlanEnd::Sequenced,
             arrived: false,
+            pass_first_behind: false,
+            start_judged: false,
         };
         PlanExecution::new(route.plan(), route.config)?;
         Ok(route)
@@ -86,6 +93,58 @@ impl MissionRoute {
     pub(crate) const fn with_end(mut self, end: PlanEnd) -> Self {
         self.end = end;
         self
+    }
+
+    /// Passes a first waypoint the vehicle starts past: see
+    /// [`Self::pass_start`].
+    pub(crate) const fn passing_a_first_waypoint_behind(mut self) -> Self {
+        self.pass_first_behind = true;
+        self
+    }
+
+    /// Judges the start of the plan, once, at the first position it flies
+    /// from. A vehicle already on the first leg, past the perpendicular
+    /// through the first waypoint and short of the second's, has passed
+    /// the first waypoint: the first leg becomes the active one, and the
+    /// vehicle joins it ahead instead of turning back. An airborne fixed
+    /// wing turning back would fly a reversal at its route bank for a
+    /// point it is already past. A first waypoint marked fly-over is still
+    /// turned back for: the plan asks for the vehicle over it.
+    ///
+    /// Returns the index of the leg made active and the cross-track
+    /// distance from the first leg, metres, positive right of it.
+    pub(crate) fn pass_start(&mut self, position: &GeodeticPosition) -> Option<(usize, f64)> {
+        if !self.pass_first_behind || self.start_judged {
+            return None;
+        }
+        self.start_judged = true;
+        let [first, second, ..] = self.waypoints.as_slice() else {
+            return None;
+        };
+        if self.active_index != 0 || self.complete || first.turn != TurnType::FlyBy {
+            return None;
+        }
+        let along_m = navigate_geodesy::along_track_m(
+            position,
+            &first.position,
+            &second.position,
+            body::GEODESY,
+        )
+        .ok()?;
+        let length_m =
+            navigate_geodesy::distance_m(&first.position, &second.position, body::GEODESY);
+        if !(along_m > 0.0 && along_m < length_m) {
+            return None;
+        }
+        let cross_track_m = navigate_geodesy::cross_track_m(
+            position,
+            &first.position,
+            &second.position,
+            body::GEODESY,
+        )
+        .ok()?;
+        self.active_index = 1;
+        Some((1, cross_track_m))
     }
 
     /// Whether the last waypoint sequenced and the vehicle still flies on

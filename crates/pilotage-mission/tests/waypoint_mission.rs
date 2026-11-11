@@ -327,3 +327,27 @@ fn the_capture_radius_follows_the_vehicle_unless_the_plan_sets_one() {
     assert_eq!(pilotage_mission::turn_radius_for(50.0, 90.0, 110.0), 110.0);
     assert_eq!(pilotage_mission::turn_radius_for(1.0, 25.0, 12.0), 12.0);
 }
+
+#[test]
+fn a_multicopter_past_the_first_waypoint_joins_the_first_leg_ahead() {
+    // The vehicle starts at the anchor, 50 m north of the first waypoint,
+    // on the first leg's line toward the second.
+    let plan = WaypointPlan::new(vec![
+        PlannedWaypoint::new(46.99955, 8.0, ANCHOR_ALT_M + 10.0),
+        PlannedWaypoint::new(47.0009, 8.0, ANCHOR_ALT_M + 10.0),
+        PlannedWaypoint::new(47.0009, 8.0008, ANCHOR_ALT_M + 10.0),
+    ]);
+    let (mut engine, _) = MissionEngine::from_waypoints(&plan, config()).expect("builds");
+    let flight = fly(&mut engine, 10);
+    assert!(
+        matches!(
+            flight.captured.first(),
+            Some((1, SequenceReason::Passed { .. }, _))
+        ),
+        "the first waypoint is passed at the start: {:?}",
+        flight.captured
+    );
+    let to: Vec<usize> = flight.captured.iter().map(|(index, _, _)| *index).collect();
+    assert_eq!(to, [1, 2], "the first waypoint is never flown back to");
+    assert!(flight.completed_at.is_some(), "the plan completes");
+}

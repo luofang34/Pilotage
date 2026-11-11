@@ -69,6 +69,9 @@ pub struct FcReports {
     /// HEARTBEAT `type` (MAV_TYPE) of the last FC heartbeat: the airframe
     /// the FC says it flies.
     pub mav_type: Option<u8>,
+    /// HEARTBEAT `system_status` (MAV_STATE) of the last FC heartbeat; see
+    /// [`crate::codec::ready_to_arm`].
+    pub system_status: Option<u8>,
     /// The latest acknowledgement of each command id. One slot per
     /// command, because an FC acknowledges every periodic message-interval
     /// request: a single latest-ack slot would bury an arm or mode verdict

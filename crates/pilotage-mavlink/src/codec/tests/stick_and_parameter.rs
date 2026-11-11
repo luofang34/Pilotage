@@ -123,7 +123,8 @@ fn heartbeat_carries_the_custom_flight_mode() {
                 armed: true,
                 custom_mode: 3 << 16,
                 autopilot: 12,
-                mav_type: 1, // MAV_TYPE_FIXED_WING
+                mav_type: 1,      // MAV_TYPE_FIXED_WING
+                system_status: 4, // MAV_STATE_ACTIVE
             }
         )]
     );
@@ -161,7 +162,8 @@ fn fc_side_param_value_and_heartbeat_parse_back() {
                 armed: true,
                 custom_mode: 3 << 16,
                 autopilot: 12,
-                mav_type: 0, // MAV_TYPE_GENERIC
+                mav_type: 0,      // MAV_TYPE_GENERIC
+                system_status: 4, // MAV_STATE_ACTIVE
             },
         ]
     );
