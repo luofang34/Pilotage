@@ -32,7 +32,7 @@ jobs:
   # classifier's own inputs, answers "run everything". The shell here
   # only invokes and forwards — it decides nothing.
   changes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       web: ${{ steps.decide.outputs.web }}
     steps:
@@ -84,7 +84,7 @@ jobs:
           fi
 
   quality-gates:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v7
