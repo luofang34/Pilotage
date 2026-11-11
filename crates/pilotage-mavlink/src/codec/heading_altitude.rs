@@ -28,8 +28,8 @@ const THROTTLE_NO_CHANGE: f32 = -1.0;
 /// Why an intent altitude has no down coordinate in the local frame.
 #[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
 pub enum LocalDownError {
-    /// The altitude is above the ellipsoid and the flight controller has
-    /// not stated the height of its local origin.
+    /// The altitude is above the ellipsoid and the height of the local
+    /// origin above the ellipsoid has not been given.
     #[error(
         "the altitude {altitude_m} m is above the ellipsoid and the height of the local origin is not known"
     )]
@@ -52,8 +52,9 @@ pub enum LocalDownError {
 /// third axis points down. An altitude above the local origin is that
 /// height with its sign changed. An altitude above the ellipsoid is first
 /// made a height above the origin: `origin_ellipsoid_height_m` is the
-/// height of the local origin above the same ellipsoid, as the flight
-/// controller states it.
+/// height of the local origin above the same ellipsoid, as the host that
+/// set the origin gives it. The flight controller's own origin report
+/// cannot supply it: its altitude is above mean sea level.
 ///
 /// # Errors
 ///

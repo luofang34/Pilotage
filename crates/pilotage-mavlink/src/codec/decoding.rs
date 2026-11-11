@@ -242,6 +242,7 @@ pub(super) fn decode_known(msg_id: u32, payload: &[u8]) -> Option<FcMessage> {
         }),
         HIL_STATE_QUATERNION_ID => Some(decode_sim_truth(payload)),
         GNSS_RAW_ID => decode_gnss_fix(payload),
+        super::GPS_GLOBAL_ORIGIN_ID => Some(super::global_origin::decode(payload)),
         LOCAL_POSITION_NED_ID => Some(FcMessage::LocalPositionNed {
             time_boot_ms: u32_at(payload, 0),
             pos_ned_m: [f32_at(payload, 4), f32_at(payload, 8), f32_at(payload, 12)],

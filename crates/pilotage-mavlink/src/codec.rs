@@ -13,6 +13,7 @@ mod attitude_target;
 mod camera;
 mod flight_state;
 mod gimbal_manager;
+mod global_origin;
 mod heading_altitude;
 pub use camera::{
     CAMERA_INFORMATION_ID, CAMERA_SETTINGS_ID, CameraMessage, MAV_CMD_SET_CAMERA_ZOOM,
@@ -22,6 +23,7 @@ pub use gimbal_manager::{
     GIMBAL_MANAGER_INFORMATION_ID, GIMBAL_MANAGER_STATUS_ID, GimbalManagerInformation,
     GimbalManagerStatus,
 };
+pub use global_origin::GPS_GLOBAL_ORIGIN_ID;
 pub use heading_altitude::{
     HEADING_ALTITUDE_TYPE_MASK, LocalDownError, MAV_CMD_DO_CHANGE_SPEED, encode_airspeed_command,
     encode_heading_altitude_setpoint, local_down_m,
@@ -144,6 +146,12 @@ pub enum FcMessage {
         severity: u8,
         /// The NUL-padded text, as the wire carries it.
         text: [u8; STATUS_TEXT_LEN],
+    },
+    /// The horizontal origin of the FC's local frame. It moves when the FC
+    /// rebases its local frame; the report's sea-level altitude is not read.
+    GlobalOrigin {
+        /// Latitude and longitude in degrees·1e7, as the wire carries them.
+        lat_lon: [i32; 2],
     },
     /// The attitude and collective thrust the FC commands now.
     AttitudeTarget {
@@ -356,6 +364,7 @@ fn crc_extra(msg_id: u32) -> Option<u8> {
         ATTITUDE_QUATERNION_ID => Some(246),
         LOCAL_POSITION_NED_ID => Some(185),
         GNSS_RAW_ID => Some(24),
+        GPS_GLOBAL_ORIGIN_ID => Some(39),
         SCALED_PRESSURE_ID => Some(115),
         HIL_STATE_QUATERNION_ID => Some(4),
         COMMAND_ACK_ID => Some(143),
