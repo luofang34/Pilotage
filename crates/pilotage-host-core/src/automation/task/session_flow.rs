@@ -356,6 +356,7 @@ impl MissionTask {
         {
             self.settle_arm(mission_id, verdict);
         }
+        self.report_vehicle_status(sample, now);
         let Some(mission) = self.mission.as_mut() else {
             return;
         };
