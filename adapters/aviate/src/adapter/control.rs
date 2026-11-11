@@ -3,9 +3,11 @@
 
 use std::time::Duration;
 
-use pilotage_adapter_api::{ApplyOutcome, Disposition, RejectReason};
+use pilotage_adapter_api::{ActionResult, ApplyOutcome, Disposition, RejectReason};
 use pilotage_control_feel::DemandEnvelope;
-use pilotage_protocol::{ActionKind, ControlIntent, ScopedControlFrame, VelocityIntent};
+use pilotage_protocol::{
+    ActionKind, ControlAction, ControlIntent, ScopedControlFrame, VelocityIntent,
+};
 
 use pilotage_timing::SimTick;
 
@@ -297,4 +299,56 @@ fn run_reset_command() {
     {
         tracing::warn!(%error, %script, "reset script failed to spawn");
     }
+}
+
+/// Disposes each typed flight action: arm fires through the caller's hook,
+/// the gate-honored sim reset acks, and anything unsupported here reports
+/// rejected (the session gates unadvertised actions before delivery —
+/// defensive, not a reachable path). Mode requests are unsupported: direct
+/// flight is its OWN scope with its own lease, never a mode flip that
+/// reinterprets this scope's numbers.
+pub(super) fn process_flight_actions(
+    actions: &[ControlAction],
+    mut send_arm: impl FnMut(f32),
+    current_yaw: f32,
+) -> Vec<ActionResult> {
+    let mut action_results = Vec::with_capacity(actions.len());
+    for action in actions {
+        match *action {
+            ControlAction::Arm => {
+                send_arm(current_yaw);
+                action_results.push(ActionResult::accepted(*action));
+            }
+            ControlAction::ModeRequest { .. } => {
+                action_results.push(ActionResult::rejected(
+                    *action,
+                    "no mode requests: direct flight is the vehicle.motion.direct scope",
+                ));
+            }
+            // Handled by the adapter before this point, which is where the
+            // control-feel artifact lives. Reaching here means it was not, and
+            // a request that quietly did nothing would leave an operator
+            // believing the law had changed.
+            ControlAction::FeelModeRequest { .. } => {
+                action_results.push(ActionResult::rejected(
+                    *action,
+                    "the control-feel artifact was not reachable for this request",
+                ));
+            }
+            ControlAction::SimReset
+            | ControlAction::Takeoff
+            | ControlAction::Land
+            | ControlAction::Disarm
+            | ControlAction::CameraZoom { .. }
+            | ControlAction::GimbalRecenter
+            | ControlAction::CameraZoomIn
+            | ControlAction::CameraZoomOut => {
+                action_results.push(ActionResult::rejected(
+                    *action,
+                    "not supported on the flight scope",
+                ));
+            }
+        }
+    }
+    action_results
 }

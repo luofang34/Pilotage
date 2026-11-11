@@ -7,12 +7,11 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use pilotage_adapter_api::{
-    ActionResult, AdapterCapabilities, ApplyOutcome, ControlFeelDescriptor, LinkLossPolicy,
-    RejectReason, SourceIncarnation, StepBudget, StepOutcome, TelemetryBatch, VehicleAdapter,
-    VideoSource,
+    AdapterCapabilities, ApplyOutcome, ControlFeelDescriptor, LinkLossPolicy, RejectReason,
+    SourceIncarnation, StepBudget, StepOutcome, TelemetryBatch, VehicleAdapter, VideoSource,
 };
 use pilotage_control_feel::{FeelDigest, FeelMode, FlightFeelProfile, ValidatedFlightFeelProfile};
-use pilotage_protocol::{ControlAction, LogicalAxisId, ScopeId, ScopedControlFrame, VehicleId};
+use pilotage_protocol::{LogicalAxisId, ScopeId, ScopedControlFrame, VehicleId};
 
 #[cfg(test)]
 use std::sync::{Arc, Mutex};
@@ -44,7 +43,7 @@ mod sampling;
 mod shm_sampling;
 mod sources;
 mod startup;
-use control::rejected_control;
+use control::{process_flight_actions, rejected_control};
 pub use embedded::EmbeddedIncarnations;
 use sampling::mavlink_batch;
 use sources::{ArmReport, EstimateSource};
@@ -393,58 +392,6 @@ impl AviateAdapter {
         }
         Ok(())
     }
-}
-
-/// Disposes each typed flight action: arm fires through the caller's hook,
-/// the gate-honored sim reset acks, and anything unsupported here reports
-/// rejected (the session gates unadvertised actions before delivery —
-/// defensive, not a reachable path). Mode requests are unsupported: direct
-/// flight is its OWN scope with its own lease, never a mode flip that
-/// reinterprets this scope's numbers.
-fn process_flight_actions(
-    actions: &[ControlAction],
-    mut send_arm: impl FnMut(f32),
-    current_yaw: f32,
-) -> Vec<ActionResult> {
-    let mut action_results = Vec::with_capacity(actions.len());
-    for action in actions {
-        match *action {
-            ControlAction::Arm => {
-                send_arm(current_yaw);
-                action_results.push(ActionResult::accepted(*action));
-            }
-            ControlAction::ModeRequest { .. } => {
-                action_results.push(ActionResult::rejected(
-                    *action,
-                    "no mode requests: direct flight is the vehicle.motion.direct scope",
-                ));
-            }
-            // Handled by the adapter before this point, which is where the
-            // control-feel artifact lives. Reaching here means it was not, and
-            // a request that quietly did nothing would leave an operator
-            // believing the law had changed.
-            ControlAction::FeelModeRequest { .. } => {
-                action_results.push(ActionResult::rejected(
-                    *action,
-                    "the control-feel artifact was not reachable for this request",
-                ));
-            }
-            ControlAction::SimReset
-            | ControlAction::Takeoff
-            | ControlAction::Land
-            | ControlAction::Disarm
-            | ControlAction::CameraZoom { .. }
-            | ControlAction::GimbalRecenter
-            | ControlAction::CameraZoomIn
-            | ControlAction::CameraZoomOut => {
-                action_results.push(ActionResult::rejected(
-                    *action,
-                    "not supported on the flight scope",
-                ));
-            }
-        }
-    }
-    action_results
 }
 
 impl VehicleAdapter for AviateAdapter {
