@@ -78,6 +78,9 @@ pub struct AutomationStatus {
     pub target_waypoint: Option<usize>,
     /// The plan's last waypoint is captured.
     pub plan_complete: bool,
+    /// The holding pattern a vehicle that cannot stop flies after its
+    /// plan, with no further instruction.
+    pub holding_pattern: Option<pilotage_mission::HoldingPatternStatus>,
     /// An operator's hold keeps the vehicle stopped in place.
     pub operator_held: bool,
     /// An abort stopped the vehicle, released the lease and ended the run.

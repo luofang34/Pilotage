@@ -2,7 +2,7 @@
 //! where it stands.
 
 use navigate_contract::{MonotonicNanos, NavigationSolution};
-use pilotage_mission::{MissionEvent, MissionState};
+use pilotage_mission::{HoldingPatternStatus, MissionEvent, MissionState};
 
 /// When the host calls [`crate::HostCore::tick`] next, nanoseconds since
 /// the core's origin. A host may call earlier; it should not call later.
@@ -41,6 +41,10 @@ pub struct HostStatus {
     pub armed: bool,
     /// Whether the plan's last waypoint is done.
     pub plan_complete: bool,
+    /// The holding pattern a vehicle that cannot stop flies once its plan
+    /// is complete and it has no further instruction: the fix, the
+    /// inbound course, the entry, and the leg flown now.
+    pub holding_pattern: Option<HoldingPatternStatus>,
     /// Intent frames the mission submitted to the session engine.
     pub frames_sent: u64,
     /// Frames the session engine refused.

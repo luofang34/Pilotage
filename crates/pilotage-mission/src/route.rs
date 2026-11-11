@@ -9,9 +9,7 @@
 //! the completion flag. Each operation builds the borrowed views over the
 //! owned slice, runs, and keeps the new progress.
 
-use navigate_contract::{
-    AltitudeConstraint, FlightPlan, GeodeticPosition, Ident, PlanRole, TurnType, Waypoint,
-};
+use navigate_contract::{FlightPlan, GeodeticPosition, Ident, PlanRole, TurnType, Waypoint};
 use navigate_route::{ExecutionConfig, Leg, PlanExecution, SequenceEvent};
 
 use crate::body;
@@ -29,9 +27,6 @@ pub(crate) enum PlanEnd {
     /// within `radius_m` of it: horizontally, and also vertically when
     /// `vertical` is set.
     Arrive { radius_m: f64, vertical: bool },
-    /// The plan completes when the last waypoint sequences, and the
-    /// vehicle then orbits it at `radius_m` and `altitude_m`.
-    Orbit { radius_m: f64, altitude_m: f64 },
 }
 
 /// One activated plan with its own waypoint storage.
@@ -185,24 +180,25 @@ impl MissionRoute {
         self.arrived
     }
 
-    /// The orbit after the plan: its centre at the orbit altitude, and its
-    /// radius. A plan without an orbit end orbits its last waypoint at the
-    /// capture radius.
-    pub(crate) fn terminal_orbit(&self) -> Option<(Waypoint, f64)> {
-        let mut centre = *self.waypoints.last()?;
-        match self.end {
-            PlanEnd::Orbit {
-                radius_m,
-                altitude_m,
-            } => {
-                centre.position.altitude_m = altitude_m;
-                centre.altitude = Some(AltitudeConstraint::At(altitude_m));
-                Some((centre, radius_m))
-            }
-            PlanEnd::Sequenced | PlanEnd::Arrive { .. } => {
-                Some((centre, self.config.capture_radius_m))
-            }
+    /// The radius within which a waypoint counts as reached, metres.
+    pub(crate) const fn capture_radius_m(&self) -> f64 {
+        self.config.capture_radius_m
+    }
+
+    /// The course of the last leg where it reaches the last waypoint,
+    /// radians clockwise from true north; `None` for a plan of one
+    /// waypoint, or a last leg too short to have a course.
+    pub(crate) fn final_course_rad(&self) -> Option<f64> {
+        let [.., previous, last] = self.waypoints.as_slice() else {
+            return None;
+        };
+        let length_m =
+            navigate_geodesy::distance_m(&previous.position, &last.position, body::GEODESY);
+        if length_m.is_nan() || length_m <= 1.0 {
+            return None;
         }
+        let back = navigate_geodesy::initial_bearing_rad(&last.position, &previous.position);
+        Some((back + core::f64::consts::PI).rem_euclid(core::f64::consts::TAU))
     }
 
     /// The plan as a Navigate view over the owned waypoints.

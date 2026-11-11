@@ -223,8 +223,13 @@ impl MissionTask {
         self.log_events(&output.events);
         self.events.extend(output.events.iter().cloned());
         let progress = self.mission.as_ref().map(MissionEngine::plan_progress);
+        let holding_pattern = self
+            .mission
+            .as_ref()
+            .and_then(MissionEngine::holding_pattern);
         self.update(|status| {
             status.mission_state = Some(output.state);
+            status.holding_pattern = holding_pattern;
             if let Some((target, complete)) = progress {
                 status.target_waypoint = Some(target);
                 status.plan_complete = complete;

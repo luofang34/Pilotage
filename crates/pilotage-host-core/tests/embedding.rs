@@ -119,6 +119,8 @@ fn a_fixed_wing_core_builds_with_its_envelope_and_origin() {
         core.status().mission_state.is_some(),
         "the C172 mission builds"
     );
+    // A loaded plan flies its waypoints first: no holding pattern yet.
+    assert_eq!(core.status().holding_pattern, None);
 }
 
 #[test]
