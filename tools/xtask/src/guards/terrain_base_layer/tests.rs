@@ -240,3 +240,11 @@ fn a_missing_required_file_is_refused_before_any_other_check() {
             .all(|r| r.contains("required terrain file is missing"))
     );
 }
+
+#[test]
+fn source_order_is_the_file_order_not_the_key_order() {
+    let style = br#"{"version": 8, "sources": {"zeta": {"url": "z"}, "alpha": {"url": "a"}}}"#;
+    assert_eq!(super::order::source_order(style), ["zeta", "alpha"]);
+    assert!(super::order::source_order(b"{}").is_empty());
+    assert!(super::order::source_order(b"not json").is_empty());
+}
