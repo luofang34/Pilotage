@@ -11,14 +11,19 @@ use super::{
 };
 use crate::truth::Truth;
 
+mod contact;
 mod samples;
+
+use contact::Bounds;
 
 /// The widest the two tracks may part at any step of a flight.
 const POSITION_M: f64 = 1e-3;
 const VELOCITY_M_S: f64 = 1e-3;
 const ATTITUDE_RAD: f64 = 1e-4;
-// Contact forces differ more than the integrated state. Bound the
-// accelerometer difference by one default noise standard deviation.
+const RATE_RAD_S: f64 = 1e-4;
+// Bound the accelerometer difference in the air by one default noise
+// standard deviation. On the gear, `contact::Bounds` adds what the
+// admitted height and attitude differences can cause.
 const FORCE_M_S2: f64 = 0.02;
 /// Metres per degree of latitude, near enough to bound a difference.
 const M_PER_DEG: f64 = 111_000.0;
@@ -61,13 +66,14 @@ fn largest(differences: impl Iterator<Item = f64>) -> f64 {
 fn assert_same_flight(rust: &[Truth], cpp: &[Truth]) {
     assert_eq!(rust.len(), cpp.len());
     for (step, (r, c)) in rust.iter().zip(cpp).enumerate() {
-        assert_same_state(&format!("step {step}"), r, c);
+        assert_same_state(&format!("step {step}"), r, c, Bounds::AIRBORNE);
     }
 }
 
 /// The two engines' states agree at one point of a flight; `at` names
-/// that point in a failure.
-fn assert_same_state(at: &str, r: &Truth, c: &Truth) {
+/// that point in a failure, and `bounds` widens the specific force and
+/// the body rates on the gear.
+fn assert_same_state(at: &str, r: &Truth, c: &Truth, bounds: Bounds) {
     let position = largest(
         [
             r.altitude_m - c.altitude_m,
@@ -91,13 +97,17 @@ fn assert_same_state(at: &str, r: &Truth, c: &Truth) {
     );
     close(at, "time", r.time_s, c.time_s, 1e-9);
     for i in 0..3 {
-        close(at, "rate", r.rates_frd[i], c.rates_frd[i], 1e-4);
-        close(
-            at,
-            "specific force",
-            r.specific_force_frd[i],
-            c.specific_force_frd[i],
-            FORCE_M_S2,
+        let (rr, cr) = (r.rates_frd[i], c.rates_frd[i]);
+        assert!(
+            rr.is_finite() && cr.is_finite() && (rr - cr).abs() < bounds.rate_limit(),
+            "{at}: rate: Rust {rr}, C++ {cr}, {}",
+            bounds.describe_rate()
+        );
+        let (rf, cf) = (r.specific_force_frd[i], c.specific_force_frd[i]);
+        assert!(
+            rf.is_finite() && cf.is_finite() && (rf - cf).abs() < bounds.force.limit(),
+            "{at}: specific force: Rust {rf}, C++ {cf}, {}",
+            bounds.force.describe()
         );
     }
     close(
