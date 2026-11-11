@@ -73,7 +73,12 @@ fn a_stale_report_is_withheld() {
     let Some(old) = now.checked_sub(WITHHOLD_AFTER + Duration::from_millis(1)) else {
         return;
     };
-    let sample = battery_sample(Some(report(old)), SourceIncarnation::new([0; 16]), old, Instant::now());
+    let sample = battery_sample(
+        Some(report(old)),
+        SourceIncarnation::new([0; 16]),
+        old,
+        Instant::now(),
+    );
     assert!(
         sample.is_none(),
         "a battery value past its freshness is not shown"

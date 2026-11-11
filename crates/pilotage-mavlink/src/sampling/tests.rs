@@ -70,7 +70,9 @@ fn decoded_zero_nonunit_and_nonfinite_quaternions_do_not_support_control() {
         [1.0, f32::INFINITY, 0.0, 0.0],
     ] {
         let state = authorized_pose(quaternion, [0.0; 3]);
-        assert!(operational_pose(&state.lock().expect("cache"), web_time::Instant::now()).is_none());
+        assert!(
+            operational_pose(&state.lock().expect("cache"), web_time::Instant::now()).is_none()
+        );
     }
 }
 
@@ -82,6 +84,8 @@ fn decoded_nonfinite_position_does_not_support_control_even_with_authorization()
         [0.0, 0.0, f32::NEG_INFINITY],
     ] {
         let state = authorized_pose([1.0, 0.0, 0.0, 0.0], position);
-        assert!(operational_pose(&state.lock().expect("cache"), web_time::Instant::now()).is_none());
+        assert!(
+            operational_pose(&state.lock().expect("cache"), web_time::Instant::now()).is_none()
+        );
     }
 }

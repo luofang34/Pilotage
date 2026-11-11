@@ -25,7 +25,8 @@ pub fn battery_sample(
     started_at: web_time::Instant,
     now: web_time::Instant,
 ) -> Option<BatterySample> {
-    let report = report.filter(|r| now.saturating_duration_since(r.received_at) <= WITHHOLD_AFTER)?;
+    let report =
+        report.filter(|r| now.saturating_duration_since(r.received_at) <= WITHHOLD_AFTER)?;
     let acquired = report
         .received_at
         .checked_duration_since(started_at)
