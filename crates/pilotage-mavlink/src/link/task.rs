@@ -3,7 +3,8 @@
 
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use tokio::net::UdpSocket;
 use tracing::{error, warn};

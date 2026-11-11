@@ -27,7 +27,7 @@ pub(super) type TruthOracle = super::shm_sampling::ShmSource;
 pub(super) type TruthOracle = std::convert::Infallible;
 
 /// The no-video triple of a flight build.
-#[cfg(not(feature = "sim"))]
+#[cfg(all(feature = "net", not(feature = "sim")))]
 pub(super) fn no_camera() -> (
     Option<tokio::sync::mpsc::Receiver<pilotage_adapter_api::RawVideoFrame>>,
     Option<CameraBridge>,

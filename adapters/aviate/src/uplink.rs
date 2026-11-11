@@ -11,11 +11,15 @@
 //! yaw), and throttle is a climb-rate demand.
 //!
 //! The sans-IO `pilotage_flight_uplink::UplinkPolicy` decides every
-//! frame. This module adds the UDP socket, the monotonic clock, and the
-//! count of refused sends.
+//! frame. This module adds the transport (a UDP socket, or in-memory
+//! queues for an embedding host), the monotonic clock, and the count of
+//! refused sends.
 
 use std::net::{SocketAddr, UdpSocket};
-use std::time::{Duration, Instant};
+
+use crate::clock::AdapterClock;
+use std::time::Duration;
+use web_time::Instant;
 
 use tracing::{info, warn};
 
@@ -24,6 +28,8 @@ use pilotage_flight_uplink::{ActivationStep, StickFrame, UplinkPolicy};
 
 mod direct;
 mod fc_replies;
+mod transport;
+use transport::UplinkTransport;
 #[cfg(test)]
 mod tests;
 
@@ -32,36 +38,15 @@ pub use direct::{
     TransmittedDirectSetpoint,
 };
 
-/// The uplink's time source. Production reads the system monotonic clock;
-/// tests substitute a manually advanced instant so timing behavior (the
-/// post-arm quiet window, the slew-limiter dt) is exercised without
-/// real-time sleeps.
-#[derive(Debug)]
-enum UplinkClock {
-    System,
-    #[cfg(test)]
-    Manual(Instant),
-}
-
-impl UplinkClock {
-    fn now(&self) -> Instant {
-        match self {
-            Self::System => Instant::now(),
-            #[cfg(test)]
-            Self::Manual(at) => *at,
-        }
-    }
-}
-
-/// The UDP MAVLink command uplink to the FC: the socket and the clock
+/// The MAVLink command uplink to the FC: the transport and the clock
 /// around the sans-IO [`UplinkPolicy`], which decides every frame.
 #[derive(Debug)]
 pub struct FlightUplink {
-    socket: UdpSocket,
+    transport: UplinkTransport,
     target: SocketAddr,
     policy: UplinkPolicy,
     started: Instant,
-    clock: UplinkClock,
+    clock: AdapterClock,
     send_failures: u64,
     /// The arm (true) or disarm (false) last sent, until its ack arrives.
     arm_sent: Option<bool>,
@@ -124,29 +109,80 @@ impl FlightUplink {
             feel_digest = %feel_digest,
             "Aviate flight uplink ready"
         );
-        Ok(Self {
-            socket,
+        Ok(Self::with_transport(
+            UplinkTransport::Udp(socket),
+            target,
+            profile,
+            AdapterClock::System,
+            Instant::now(),
+        ))
+    }
+
+    /// An uplink whose frames and FC replies stay in memory for an
+    /// embedding host to move, on a manual clock that starts at `now`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the profile does not match Alia.
+    pub fn in_memory(profile: ValidatedFlightFeelProfile, now: Instant) -> std::io::Result<Self> {
+        crate::adapter::validate_aviate_profile_bindings(&profile)
+            .map_err(std::io::Error::other)?;
+        Ok(Self::with_transport(
+            UplinkTransport::memory(),
+            SocketAddr::from(([0, 0, 0, 0], 0)),
+            profile,
+            AdapterClock::Manual(now),
+            now,
+        ))
+    }
+
+    fn with_transport(
+        transport: UplinkTransport,
+        target: SocketAddr,
+        profile: ValidatedFlightFeelProfile,
+        clock: AdapterClock,
+        started: Instant,
+    ) -> Self {
+        Self {
+            transport,
             target,
             policy: UplinkPolicy::new(profile),
-            started: Instant::now(),
-            clock: UplinkClock::System,
+            started,
+            clock,
             send_failures: 0,
             arm_sent: None,
             arm_ack: None,
-        })
+        }
+    }
+
+    /// Sets the time of a manual clock; a system clock does not change.
+    pub fn set_now(&mut self, now: Instant) {
+        self.clock.set(now);
+    }
+
+    /// Queues one FC reply datagram for the next [`Self::poll_fc`]; false
+    /// for a socket uplink, which receives its own replies.
+    pub fn push_fc_reply(&mut self, datagram: &[u8]) -> bool {
+        self.transport.push_reply(datagram)
+    }
+
+    /// Takes the frames an in-memory uplink sent since the last call, in
+    /// send order.
+    pub fn take_sent_frames(&mut self) -> Vec<Vec<u8>> {
+        self.transport.take_sent()
     }
 
     /// Switches to the manually advanced clock, anchored at construction
     /// time, so tests drive the quiet window and slew dt deterministically.
     #[cfg(test)]
     pub(crate) fn use_manual_clock(&mut self) {
-        self.clock = UplinkClock::Manual(self.started);
+        self.clock = AdapterClock::Manual(self.started);
     }
 
     /// Advances the manual clock; a no-op on the system clock.
     #[cfg(test)]
     pub(crate) fn advance_clock(&mut self, dt: Duration) {
-        if let UplinkClock::Manual(at) = &mut self.clock {
+        if let AdapterClock::Manual(at) = &mut self.clock {
             *at += dt;
         }
     }
@@ -173,7 +209,7 @@ impl FlightUplink {
     /// Sends one frame. A refused send counts, and the count is logged
     /// on the first refusal and on every hundredth.
     fn send(&mut self, frame: &[u8]) {
-        if self.socket.send_to(frame, self.target).is_err() {
+        if !self.transport.send(frame, self.target) {
             self.send_failures = self.send_failures.wrapping_add(1);
             if self.send_failures == 1 || self.send_failures.is_multiple_of(100) {
                 warn!(
@@ -383,7 +419,7 @@ impl FlightUplink {
     ///
     /// Returns the socket introspection error.
     pub fn local_addr(&self) -> std::io::Result<SocketAddr> {
-        self.socket.local_addr()
+        self.transport.local_addr()
     }
 
     /// Overrides the target, for tests.

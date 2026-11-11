@@ -1,5 +1,5 @@
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use web_time::Instant;
 
 /// A complete transport-write fact, independent of device acknowledgement.
 #[derive(Debug, Default, Clone)]

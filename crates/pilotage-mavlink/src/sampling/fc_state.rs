@@ -1,6 +1,6 @@
 //! The heartbeat-derived arm state as a telemetry sample.
 
-use std::time::Instant;
+use web_time::Instant;
 
 use pilotage_adapter_api::{
     FcCommandAck, FcStateSample, LandedStateSample, MeasurementClock, MeasurementStamp,

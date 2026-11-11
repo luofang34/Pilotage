@@ -1,7 +1,7 @@
 //! Bounded payload discovery and feedback, isolated from flight-state authorization.
 
 use std::collections::BTreeMap;
-use std::time::Instant;
+use web_time::Instant;
 
 use super::{CommandAckReport, GimbalDeviceAttitude, LinkState};
 use crate::codec::{FcMessage, FrameSource, GimbalManagerInformation, GimbalManagerStatus};

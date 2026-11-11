@@ -2,7 +2,7 @@
 //! drains and the sends that encode and write each frame.
 
 use std::net::SocketAddr;
-use std::time::Instant;
+use web_time::Instant;
 
 use tokio::net::UdpSocket;
 use tracing::warn;

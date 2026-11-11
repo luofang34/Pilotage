@@ -3,7 +3,7 @@
 //! measurement-group acquisition discipline.
 
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use web_time::Instant;
 
 use super::estimator::{accept_status, authorization_at, invalidate_cached_authorization};
 use super::measurement::{next_attitude_stamp, next_baro_stamp, next_kinematics_stamp};

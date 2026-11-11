@@ -10,7 +10,8 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use pilotage_adapter_api::SourceRole;
 use pilotage_geo::{HorizontalDatum, SIMULATOR_GEOID_MODEL_ID, VerticalDatum};

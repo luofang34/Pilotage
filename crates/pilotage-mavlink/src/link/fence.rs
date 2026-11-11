@@ -57,7 +57,7 @@ impl CameraGuard {
         };
         let fresh = report
             .information_received_at
-            .and_then(|received| std::time::Instant::now().checked_duration_since(received))
+            .and_then(|received| web_time::Instant::now().checked_duration_since(received))
             .is_some_and(|age| age < std::time::Duration::from_secs(6));
         if !report.available
             || report.epoch != expected.epoch
@@ -114,7 +114,7 @@ impl ManagerGuard {
             return Ok(false);
         }
         let owner = (report.primary_system, report.primary_component);
-        let fresh = std::time::Instant::now()
+        let fresh = web_time::Instant::now()
             .checked_duration_since(received)
             .is_some_and(|age| age < std::time::Duration::from_secs(1));
         let primary = owner == (crate::codec::GCS_SYSTEM_ID, crate::codec::GCS_COMPONENT_ID);

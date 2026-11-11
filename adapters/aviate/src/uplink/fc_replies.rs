@@ -7,20 +7,19 @@ use tracing::{info, warn};
 use super::FlightUplink;
 
 impl FlightUplink {
-    /// Drains FC replies off the uplink socket (COMMAND_ACK, heartbeats
+    /// Drains FC replies off the uplink transport (COMMAND_ACK, heartbeats
     /// the FC sends its learned commander), returning the latest
     /// armed-state report if any heartbeat arrived. Non-blocking; call
     /// from the sampling tick.
     pub fn poll_fc(&mut self) -> Option<bool> {
-        let mut buf = [0u8; 512];
         let mut messages: Vec<(
             pilotage_mavlink::codec::FrameSource,
             pilotage_mavlink::codec::FcMessage,
         )> = Vec::new();
         let mut armed: Option<bool> = None;
-        while let Ok((len, _)) = self.socket.recv_from(&mut buf) {
+        while let Some(datagram) = self.transport.receive() {
             messages.clear();
-            pilotage_mavlink::codec::parse_datagram(buf.get(..len).unwrap_or(&[]), &mut messages);
+            pilotage_mavlink::codec::parse_datagram(&datagram, &mut messages);
             for (source, message) in &messages {
                 let (system_id, component_id) = self.policy.target();
                 if source.system_id != system_id || source.component_id != component_id {

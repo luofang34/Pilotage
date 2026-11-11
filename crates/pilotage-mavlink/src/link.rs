@@ -2,7 +2,7 @@
 //! latest-state cache, and carries this GCS's commands and setpoints
 //! from the same socket.
 
-use std::time::Instant;
+use web_time::Instant;
 
 use pilotage_adapter_api::{MeasurementStamp, SourceIncarnation};
 

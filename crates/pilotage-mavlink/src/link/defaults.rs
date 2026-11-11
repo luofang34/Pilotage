@@ -1,6 +1,6 @@
 //! The state a link starts in, before any frame has been read.
 
-use std::time::Instant;
+use web_time::Instant;
 
 use pilotage_adapter_api::SourceIncarnation;
 

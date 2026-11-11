@@ -18,7 +18,7 @@ pub(crate) const NAME: &str = "wasm-portable-crates";
 const TARGET: &str = "wasm32-unknown-unknown";
 
 /// The packages that must stay portable without their default features.
-pub(crate) const PORTABLE_CRATES: &[&str] = &["pilotage-mavlink"];
+pub(crate) const PORTABLE_CRATES: &[&str] = &["pilotage-mavlink", "pilotage-adapter-aviate"];
 
 /// The crates a portable dependency tree must not hold.
 pub(crate) const FORBIDDEN_CRATES: &[&str] = &["tokio", "mio", "socket2"];

@@ -1,6 +1,6 @@
 //! Atomic control-feel profile selection.
 
-use std::time::Instant;
+use web_time::Instant;
 
 use pilotage_control_feel::{
     AxisResponse, FeelDigest, FeelMode, NeutralBand, NeutralLatch, ValidatedFlightFeelProfile,

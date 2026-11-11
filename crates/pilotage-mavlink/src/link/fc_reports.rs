@@ -2,7 +2,7 @@
 //! These reports do not authorize navigation estimates.
 
 use std::collections::{BTreeMap, VecDeque};
-use std::time::Instant;
+use web_time::Instant;
 
 use super::CommandAckReport;
 use crate::codec::{PARAM_ID_LEN, ParamValue, STATUS_TEXT_LEN};

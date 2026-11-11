@@ -23,6 +23,7 @@ pilotage-timing = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, optional = true, features = ["net", "rt", "sync", "time", "macros"] }
 tracing = { workspace = true }
+web-time = { workspace = true }
 turret-core = { workspace = true }
 turret-mavlink = { workspace = true }
 

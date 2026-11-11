@@ -3,7 +3,7 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use web_time::Instant;
 
 use pilotage_adapter_api::{MagneticVariationSource, MeasurementClock, SourceRole};
 

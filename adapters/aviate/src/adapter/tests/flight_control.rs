@@ -40,7 +40,7 @@ fn set_kinematics(state: &Arc<Mutex<LinkState>>, mutate: impl FnOnce(&mut Kinema
     let mut latest = state.lock().expect("state lock");
     let kin = latest.kinematics.as_mut().expect("kinematics fixture");
     mutate(kin);
-    kin.received_at = std::time::Instant::now();
+    kin.received_at = web_time::Instant::now();
 }
 
 /// Rewrites the fixture's measured velocity, fresh as of now.

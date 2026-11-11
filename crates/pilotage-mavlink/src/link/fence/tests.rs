@@ -39,7 +39,7 @@ fn status(state: &Arc<Mutex<super::super::LinkState>>, time: u32, device: u8, ow
     let stats = crate::parse_datagram(&bytes[..length], &mut messages);
     assert_eq!(stats.crc_failures, 0);
     assert_eq!(messages.len(), 1);
-    super::super::apply_messages_at(state, &messages, 0, 0, std::time::Instant::now());
+    super::super::apply_messages_at(state, &messages, 0, 0, web_time::Instant::now());
 }
 
 fn discovered_manager(
@@ -56,7 +56,7 @@ fn discovered_manager(
     let stats = crate::parse_datagram(&bytes[..length], &mut messages);
     assert_eq!(stats.crc_failures, 0);
     assert_eq!(messages.len(), 1);
-    super::super::apply_messages_at(state, &messages, 0, 0, std::time::Instant::now());
+    super::super::apply_messages_at(state, &messages, 0, 0, web_time::Instant::now());
     let state = state.lock().unwrap();
     let report = state.gimbals.managers.get(&(component, device)).unwrap();
     (report.epoch, report.capability_revision)
@@ -145,7 +145,7 @@ fn self_release_accepts_unowned_status_but_never_releases_a_new_owner() {
 
 fn camera_report(
     state: &Arc<Mutex<super::super::LinkState>>,
-    received: std::time::Instant,
+    received: web_time::Instant,
 ) -> CameraWriteRequirement {
     let mut payload = [0_u8; 237];
     payload[..4].copy_from_slice(&100_u32.to_le_bytes());
@@ -172,7 +172,7 @@ fn camera_report(
 #[test]
 fn camera_writer_requires_exact_discovery_binding_and_holds_receive_lock() {
     let state = Arc::new(Mutex::new(super::super::LinkState::default()));
-    let requirement = camera_report(&state, std::time::Instant::now());
+    let requirement = camera_report(&state, web_time::Instant::now());
     let fence = SendFence::default().for_camera(state.clone(), requirement);
     assert!(
         fence
@@ -227,7 +227,7 @@ fn camera_discovery_ttl_fences_write_without_adapter_expiry_poll() {
     let state = Arc::new(Mutex::new(super::super::LinkState::default()));
     let requirement = camera_report(
         &state,
-        std::time::Instant::now() - std::time::Duration::from_secs(7),
+        web_time::Instant::now() - std::time::Duration::from_secs(7),
     );
     assert!(
         state

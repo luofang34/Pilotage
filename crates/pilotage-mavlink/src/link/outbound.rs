@@ -9,7 +9,7 @@
 //! a stalled link coalesces stale demands away instead of queueing them
 //! behind fresh ones.
 
-use std::time::Instant;
+use web_time::Instant;
 
 use crate::codec::{AttitudeTargetKind, ParamValue};
 

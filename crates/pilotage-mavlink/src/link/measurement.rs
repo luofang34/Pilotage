@@ -1,6 +1,7 @@
 //! Measurement ordering and simulator reset quarantine.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use pilotage_adapter_api::{MeasurementClock, MeasurementStamp, SourceIntegrity, SourceRole};
 use tracing::warn;
