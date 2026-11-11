@@ -18,9 +18,12 @@ pub struct NextWake {
 pub enum HostEvent {
     /// A mission event.
     Mission(MissionEvent),
-    /// The flight controller confirmed the arm the mission asked for.
+    /// The flight controller confirmed the arm the mission asked for. The
+    /// mission event that carries it follows.
     ArmConfirmed,
-    /// The flight controller refused the arm, or did not answer in time.
+    /// The flight controller refused the arm the mission asked for, or did
+    /// not answer in time; the mission asks again under its retry limit.
+    /// The mission event that carries it follows.
     ArmRefused,
     /// The session engine refused an intent frame of the mission.
     FrameRejected,

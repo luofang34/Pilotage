@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use navigate_contract::{GeodeticPosition, MonotonicNanos, NavigationSolution};
 use pilotage_adapter_aviate::AviateAdapter;
-use pilotage_mission::{MissionEngine, WaypointPlan, WaypointPlanRecord};
+use pilotage_mission::{MissionEngine, MissionEvent, WaypointPlan, WaypointPlanRecord};
 use pilotage_session::{SessionConfig, SessionEngine};
 use pilotage_timing::StalenessPolicy;
 use web_time::Instant;
@@ -287,6 +287,14 @@ impl HostCore {
             }
         }
         for event in principal.take_events() {
+            // The engine's own answer to its arm: accepted only once the
+            // flight controller confirmed it (arm receipt), refused when
+            // the controller refused it or did not answer in time.
+            match event {
+                MissionEvent::ArmAccepted { .. } => self.events.push(HostEvent::ArmConfirmed),
+                MissionEvent::ArmRejected { .. } => self.events.push(HostEvent::ArmRefused),
+                _ => {}
+            }
             self.events.push(HostEvent::Mission(event));
         }
     }
@@ -302,10 +310,7 @@ impl HostCore {
         self.status.frames_sent = automation.frames_sent;
         self.status.frames_rejected = automation.frames_rejected;
         self.status.frame_digest = automation.frame_digest;
-        if automation.arm_accepted && !self.status.armed {
-            self.status.armed = true;
-            self.events.push(HostEvent::ArmConfirmed);
-        }
+        self.status.armed = automation.arm_accepted;
         if automation.frames_rejected != rejected_before {
             self.events.push(HostEvent::FrameRejected);
         }
