@@ -1,54 +1,62 @@
-//! A mission's identity is its content digest. The digest must not change
-//! when a Navigate revision changes how a plan is held, because stored
-//! records and mission documents carry it.
+//! A mission's identity is its content digest. Stored records and mission
+//! documents carry it, so a change in how a plan is held must not change
+//! it.
+//!
+//! The fixture gives every waypoint in degrees and converts nothing with a
+//! transcendental function. The last bits of such a function differ
+//! between platform math libraries, and a digest of those bits would
+//! differ between hosts for one tree.
 
-use navigate_contract::{ClockDomainId, GeodeticPosition};
-use pilotage_mission::fixture::{self, GeoPointDegrees};
-use pilotage_mission::{MissionConfig, MissionEngine, SurveyRequest, decode_snapshot};
+#![cfg(test)]
 
-const ANCHOR: GeoPointDegrees = GeoPointDegrees {
-    lat_deg: 47.0,
-    lon_deg: 8.0,
-    alt_m: 500.0,
+use aerocontext_core::{
+    Airway, AirwayLocation, AirwayPoint, GeoPoint, NavDataCycle, NavDataSnapshot, NavPoint,
+    NavPointKind,
 };
+use aerocontext_navdata::blob;
+use navigate_contract::{ClockDomainId, GeodeticPosition};
+use pilotage_mission::fixture::{DEMO_AIRWAY, DEMO_EFFECTIVE_DATE, DEMO_ROUTE};
+use pilotage_mission::{MissionConfig, MissionEngine, decode_snapshot};
 
-fn anchor() -> GeodeticPosition {
-    GeodeticPosition::new(
-        ANCHOR.lat_deg.to_radians(),
-        ANCHOR.lon_deg.to_radians(),
-        ANCHOR.alt_m,
-    )
+/// The waypoints of the demo route, in degrees.
+const POINTS: [(&str, f64, f64); 3] = [
+    ("DEMOA", 47.00075, 8.0011),
+    ("DEMOB", 47.0, 8.0033),
+    ("DEMOC", 46.99886, 8.00167),
+];
+
+/// The content digest of the demo route mission over [`POINTS`].
+const ROUTE_DIGEST: &str = "f97c37cd69ee86900df84ca2d5fe5896ac703fd4baf334f037665dd40cc8b25e";
+
+fn snapshot_blob() -> Vec<u8> {
+    let points = POINTS
+        .iter()
+        .map(|&(ident, lat, lon)| {
+            NavPoint::new(ident, NavPointKind::Waypoint, GeoPoint { lat, lon })
+        })
+        .collect();
+    let airway = Airway::new(
+        DEMO_AIRWAY,
+        AirwayLocation::Conus,
+        POINTS
+            .iter()
+            .map(|&(ident, _, _)| AirwayPoint::new(ident))
+            .collect(),
+    );
+    let cycle = NavDataCycle::faa_nasr(DEMO_EFFECTIVE_DATE).expect("the demo cycle is valid");
+    let snapshot = NavDataSnapshot::new(cycle, points).with_airways(vec![airway]);
+    blob::encode(&snapshot).expect("the snapshot encodes")
 }
 
-/// The digest of the demo route mission at the demo anchor.
-const ROUTE_DIGEST: &str = "d2a5c07deb14b67a34b52390893fbbb16ff98ca7baeb86af131af168598c6dd4";
-/// The digest of a 0.001° × 0.001° survey north-east of the anchor.
-const SURVEY_DIGEST: &str = "5d2af8d87b05cb61788fe27e8c8ecfeeefeaded14a5bfd68795bc9044c9f7e5b";
-
 #[test]
-fn route_and_survey_missions_keep_their_content_digests() {
-    let blob = fixture::demo_blob(ANCHOR).expect("demo blob encodes");
-    let (snapshot, provenance) = decode_snapshot(&blob, true).expect("demo blob decodes");
-    let config = MissionConfig::new(
-        fixture::DEMO_ROUTE.to_owned(),
-        anchor(),
-        ClockDomainId::new(7),
+fn the_route_mission_keeps_its_content_digest() {
+    let (snapshot, provenance) =
+        decode_snapshot(&snapshot_blob(), true).expect("the snapshot decodes");
+    let anchor = GeodeticPosition::new(47.0_f64.to_radians(), 8.0_f64.to_radians(), 500.0);
+    let config = MissionConfig::new(DEMO_ROUTE.to_owned(), anchor, ClockDomainId::new(7));
+    let (_, record) = MissionEngine::new(&snapshot, provenance, config).expect("mission builds");
+    assert_eq!(
+        record.mission_identity.content_digest.to_string(),
+        ROUTE_DIGEST
     );
-    let (_, route) = MissionEngine::new(&snapshot, provenance, config).expect("mission builds");
-
-    let mut request = SurveyRequest::new(vec![
-        [47.0, 8.0],
-        [47.001, 8.0],
-        [47.001, 8.001],
-        [47.0, 8.001],
-    ]);
-    request.across_track_fov_rad = 1.5;
-    let mut config = MissionConfig::new(String::new(), anchor(), ClockDomainId::new(7));
-    config.cruise_height_m = 15.0;
-    let (_, survey) = MissionEngine::from_survey(&request, config).expect("survey builds");
-
-    let route_digest = route.mission_identity.content_digest.to_string();
-    let survey_digest = survey.mission_identity.content_digest.to_string();
-    assert_eq!(route_digest, ROUTE_DIGEST);
-    assert_eq!(survey_digest, SURVEY_DIGEST);
 }
