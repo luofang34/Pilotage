@@ -11,7 +11,7 @@ use crate::config::MissionConfig;
 use crate::error::MissionBuildError;
 use crate::route::MissionRoute;
 use crate::waypoints::{
-    DEFAULT_TURN_ACCEL_MPS2, PlannedWaypoint, WaypointPlan, WaypointPlanRecord, WaypointTurn,
+    DEFAULT_MAX_BANK_DEG, PlannedWaypoint, WaypointPlan, WaypointPlanRecord, WaypointTurn,
     capture_radius_for,
 };
 
@@ -57,16 +57,13 @@ impl MissionEngine {
         let capture_radius_m = plan.capture_radius_m.unwrap_or_else(|| {
             capture_radius_for(
                 config.cruise_mps.min(config.limits.max_horizontal_mps),
-                DEFAULT_TURN_ACCEL_MPS2,
+                DEFAULT_MAX_BANK_DEG,
             )
         });
-        let route = MissionRoute::activate(
-            &name,
-            PlanRole::Mission,
-            waypoints,
-            ExecutionConfig::new(capture_radius_m),
-        )?
-        .with_arrival_radius(plan.arrival_radius_m);
+        let mut execution = ExecutionConfig::new(capture_radius_m);
+        execution.bank_limit_rad = DEFAULT_MAX_BANK_DEG.to_radians();
+        let route = MissionRoute::activate(&name, PlanRole::Mission, waypoints, execution)?
+            .with_terminal_overfly(capture_radius_m);
         let engine = Self::from_route(
             route,
             &plan_id,

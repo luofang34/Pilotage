@@ -25,8 +25,9 @@ use super::{MissionAction, MissionEngine, MissionEvent, MissionOutput, MissionSt
 mod directives;
 mod outputs;
 mod overflight;
+mod terminal;
 
-use outputs::{failed_output, terminal_output, zero_velocity_intent};
+use outputs::{failed_output, terminal_output};
 
 impl MissionEngine {
     /// Advances the operational mission with one caller clock value.
@@ -35,7 +36,7 @@ impl MissionEngine {
     /// wall time. It performs no clock read and no input or output operation.
     pub fn tick(&mut self, now: MonotonicNanos) -> MissionOutput {
         match self.state() {
-            MissionState::Complete => return terminal_output(MissionState::Complete),
+            MissionState::Complete => return self.complete_output(now),
             MissionState::Failed => return terminal_output(MissionState::Failed),
             MissionState::Held => return self.held_output(now),
             MissionState::AwaitSolution
@@ -223,7 +224,7 @@ impl MissionEngine {
         match state {
             MissionState::Climb => self.climb_intent(solution),
             MissionState::Enroute => self.follow_plan_intent(solution, now, events),
-            MissionState::Complete => Some(zero_velocity_intent()),
+            MissionState::Complete => self.end_of_plan_intent(solution, now, events),
             MissionState::AwaitSolution
             | MissionState::Arming
             | MissionState::Held
@@ -287,17 +288,10 @@ impl MissionEngine {
             return None;
         }
         if self.plan_complete {
-            return Some(zero_velocity_intent());
+            return self.end_of_plan_intent(Some(solution), now, events);
         }
         if self.route.approaching() {
-            let last = *self.route.last_waypoint()?;
-            return self.guide_to(
-                solution,
-                LateralReference::PresentPosition,
-                &last,
-                now,
-                events,
-            );
+            return self.guide_past_last(solution, now, events);
         }
         self.guide_active_leg(solution, now, events)
     }
@@ -322,7 +316,7 @@ impl MissionEngine {
             return;
         }
         if self.route.approaching() {
-            self.plan_complete = self.route.arrive(&solution.position);
+            self.plan_complete = self.route.pass_last(&solution.position);
             return;
         }
         match self
@@ -372,7 +366,7 @@ impl MissionEngine {
     }
 
     /// Guides along `reference` to `to`.
-    fn guide_to(
+    pub(super) fn guide_to(
         &mut self,
         solution: &NavigationSolution,
         reference: LateralReference,

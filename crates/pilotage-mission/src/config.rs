@@ -2,6 +2,7 @@
 
 use navigate_contract::{ClockDomainId, DurationNanos, GeodeticPosition};
 use pilotage_mission_core::ExecutionTarget;
+use pilotage_protocol::VehicleClass;
 
 /// Where the engine's ownship position comes from.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -119,6 +120,12 @@ pub struct MissionConfig {
     /// answers the arm as refused. Default
     /// [`crate::policy::ARM_CONFIRM_TIMEOUT_NS`].
     pub arm_confirm_timeout: DurationNanos,
+    /// The class of the vehicle the mission flies. It sets what the
+    /// vehicle does after the plan completes: a
+    /// [`VehicleClass::FixedWing`] cannot hover, so it orbits the last
+    /// waypoint at the capture radius; every other class is commanded to
+    /// zero velocity. Default [`VehicleClass::Multicopter`].
+    pub vehicle_class: VehicleClass,
 }
 
 impl MissionConfig {
@@ -142,6 +149,7 @@ impl MissionConfig {
             execution_target: ExecutionTarget::Simulator,
             task_ids: Vec::new(),
             arm_confirm_timeout: DurationNanos::from_nanos(crate::policy::ARM_CONFIRM_TIMEOUT_NS),
+            vehicle_class: VehicleClass::Multicopter,
         }
     }
 }

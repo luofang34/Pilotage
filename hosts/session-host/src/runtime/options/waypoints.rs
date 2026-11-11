@@ -12,9 +12,8 @@
 //!
 //! `alt_m` is the height above the WGS84 ellipsoid. `turn` is `fly-by`
 //! (the default) or `fly-over`. `capture_radius_m` is optional: without
-//! it the radius follows the mission's cruise speed. `arrival_radius_m`
-//! is optional: the distance to the last waypoint at which the plan
-//! completes, 1 m without it.
+//! it the radius follows the mission's cruise speed. The plan completes
+//! when the vehicle passes the last waypoint.
 
 use std::path::{Path, PathBuf};
 
@@ -28,8 +27,6 @@ use crate::error::HostError;
 struct File {
     #[serde(default)]
     capture_radius_m: Option<f64>,
-    #[serde(default)]
-    arrival_radius_m: Option<f64>,
     waypoints: Vec<Point>,
 }
 
@@ -91,9 +88,6 @@ pub(super) fn parse(text: &str) -> Result<WaypointPlan, String> {
         .capture_radius_m
         .map(|radius| positive("capture_radius_m", radius))
         .transpose()?;
-    if let Some(radius) = file.arrival_radius_m {
-        plan.arrival_radius_m = positive("arrival_radius_m", radius)?;
-    }
     Ok(plan)
 }
 

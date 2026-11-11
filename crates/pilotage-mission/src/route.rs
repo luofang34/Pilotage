@@ -27,10 +27,10 @@ pub(crate) struct MissionRoute {
     config: ExecutionConfig,
     active_index: usize,
     complete: bool,
-    /// The distance to the last waypoint at which the plan completes,
-    /// when the plan flies on to it after its capture.
-    arrival_radius_m: Option<f64>,
-    arrived: bool,
+    /// The radius of the orbit around the last waypoint after the plan
+    /// completes, when the plan flies on to pass its last waypoint.
+    terminal_orbit_m: Option<f64>,
+    passed_last: bool,
 }
 
 impl MissionRoute {
@@ -61,46 +61,61 @@ impl MissionRoute {
             config: config.with_surface_gravity_mps2(body::SURFACE_GRAVITY_MPS2),
             active_index: 0,
             complete: false,
-            arrival_radius_m: None,
-            arrived: false,
+            terminal_orbit_m: None,
+            passed_last: false,
         };
         PlanExecution::new(route.plan(), route.config)?;
         Ok(route)
     }
 
-    /// The route flies on to its last waypoint after the sequencer
-    /// captures it, until the vehicle is within `radius_m` of it
-    /// horizontally and vertically. A capture radius sized for turns
-    /// would otherwise end the plan that far short of its last waypoint.
-    pub(crate) fn with_arrival_radius(mut self, radius_m: f64) -> Self {
-        self.arrival_radius_m = Some(radius_m);
+    /// The route flies on along its last leg after the sequencer captures
+    /// the last waypoint, until the vehicle passes it. A capture radius
+    /// sized for turns would otherwise end the plan that far short of its
+    /// last waypoint. After the pass, a vehicle that cannot hover orbits
+    /// the last waypoint at `orbit_radius_m`.
+    pub(crate) fn with_terminal_overfly(mut self, orbit_radius_m: f64) -> Self {
+        self.terminal_orbit_m = Some(orbit_radius_m);
         self
     }
 
-    /// Whether the sequencer completed the plan and the vehicle still
-    /// flies on to the last waypoint.
+    /// Whether the sequencer completed the plan and the vehicle has not
+    /// yet passed the last waypoint.
     pub(crate) fn approaching(&self) -> bool {
-        self.complete && self.arrival_radius_m.is_some() && !self.arrived
+        self.complete && self.terminal_orbit_m.is_some() && !self.passed_last
     }
 
-    /// The last waypoint, which an approaching route flies to.
-    pub(crate) fn last_waypoint(&self) -> Option<&Waypoint> {
-        self.waypoints.last()
+    /// The last leg: its start, if the plan has one, and the last waypoint.
+    pub(crate) fn last_leg(&self) -> Option<(Option<GeodeticPosition>, Waypoint)> {
+        let (last, earlier) = self.waypoints.split_last()?;
+        Some((earlier.last().map(|from| from.position), *last))
     }
 
-    /// Records the arrival at the last waypoint when `position` is within
-    /// the arrival radius of it; true at the arrival.
-    pub(crate) fn arrive(&mut self, position: &GeodeticPosition) -> bool {
-        let (Some(radius_m), Some(last)) = (self.arrival_radius_m, self.waypoints.last()) else {
-            return false;
-        };
+    /// The orbit around the last waypoint: its centre and radius. A plan
+    /// without a terminal overfly orbits at its capture radius.
+    pub(crate) fn terminal_orbit(&self) -> Option<(Waypoint, f64)> {
+        let radius_m = self
+            .terminal_orbit_m
+            .unwrap_or(self.config.capture_radius_m);
+        Some((*self.waypoints.last()?, radius_m))
+    }
+
+    /// Records the pass of the last waypoint when `position` lies beyond
+    /// it along the last leg; true at the pass. A plan of one waypoint
+    /// passes it at its capture.
+    pub(crate) fn pass_last(&mut self, position: &GeodeticPosition) -> bool {
         if !self.approaching() {
             return false;
         }
-        let horizontal_m = navigate_geodesy::distance_m(position, &last.position, body::GEODESY);
-        let vertical_m = (position.altitude_m - last.position.altitude_m).abs();
-        self.arrived = horizontal_m <= radius_m && vertical_m <= radius_m;
-        self.arrived
+        let Some((from, last)) = self.last_leg() else {
+            return false;
+        };
+        self.passed_last = from.is_none_or(|from| {
+            navigate_geodesy::along_track_m(position, &from, &last.position, body::GEODESY)
+                .is_ok_and(|along| {
+                    along >= navigate_geodesy::distance_m(&from, &last.position, body::GEODESY)
+                })
+        });
+        self.passed_last
     }
 
     /// The plan as a Navigate view over the owned waypoints.

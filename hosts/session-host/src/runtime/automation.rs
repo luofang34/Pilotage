@@ -250,7 +250,6 @@ fn prepare_waypoints(
     info!(
         waypoints = ?record.idents,
         capture_radius_m = record.capture_radius_m,
-        arrival_radius_m = waypoints.arrival_radius_m,
         waypoint_digest = %record.digest,
         mission_revision = %record.mission_identity.revision_id,
         mission_digest = %record.mission_identity.content_digest,
