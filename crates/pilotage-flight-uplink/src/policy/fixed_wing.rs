@@ -1,5 +1,7 @@
-//! The heading and altitude frames of a flight controller that holds
-//! heading, altitude, and airspeed with its own sensors.
+//! The frames of a fixed wing, whose flight controller holds a course or
+//! a heading, an altitude or a climb rate, and an airspeed with its own
+//! sensors. None of them goes through the multirotor stick law: a fixed
+//! wing has no hover to brake to and no climb input that opens its stream.
 
 use std::time::Duration;
 
@@ -24,6 +26,30 @@ pub struct HeadingAltitudeDemand {
 }
 
 impl UplinkPolicy {
+    /// The velocity setpoint of a fixed wing, in the local NED frame, with
+    /// the yaw the flight controller holds when the velocity has no
+    /// horizontal direction. Nothing inside the post-arm quiet interval.
+    ///
+    /// The flight controller reads the horizontal velocity as a course and
+    /// an airspeed and the down component as a sink rate; the caller has
+    /// already bounded each by the airframe's envelope.
+    pub fn fixed_wing_velocity_frame(
+        &mut self,
+        now: Duration,
+        velocity_ned_mps: [f32; 3],
+        yaw_rad: f32,
+    ) -> Option<Vec<u8>> {
+        if self.in_quiet_interval(now) {
+            return None;
+        }
+        self.airborne = true;
+        self.heading = HeadingState {
+            heading_rad: yaw_rad,
+            valid: yaw_rad.is_finite(),
+        };
+        Some(self.velocity_frame(now, velocity_ned_mps))
+    }
+
     /// The frames of one heading and altitude demand: the airspeed command
     /// when it is due, then the setpoint. Nothing inside the post-arm quiet
     /// interval, whose frames would overwrite the arm in the flight

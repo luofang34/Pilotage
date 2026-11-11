@@ -91,7 +91,7 @@ impl AviateAdapter {
             #[cfg(feature = "sim")]
             view_publish_failed: false,
             reset_latch: None,
-            heading_altitude: super::heading_altitude::HeadingAltitudeSettings::default(),
+            fixed_wing: super::fixed_wing::FixedWingSettings::default(),
             #[cfg(test)]
             reset_spawns: 0,
             link_loss_policy: BTreeMap::new(),

@@ -8,14 +8,14 @@ use tracing::info;
 
 mod control;
 mod feel;
-mod heading_altitude;
+mod fixed_wing;
 #[cfg(test)]
 mod tests;
 
 pub use control::{
     ActivationStep, AttitudeOutcome, DirectFrame, DirectRefusal, StickFrame, StickOutcome,
 };
-pub use heading_altitude::{AIRSPEED_REPEAT, HeadingAltitudeDemand};
+pub use fixed_wing::{AIRSPEED_REPEAT, HeadingAltitudeDemand};
 
 /// Longest believable gap between control frames when integrating the
 /// yaw-rate stick; anything longer is a stall, not a dt.

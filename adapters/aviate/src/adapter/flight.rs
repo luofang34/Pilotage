@@ -11,13 +11,14 @@ use pilotage_timing::SimTick;
 
 #[cfg(feature = "sim")]
 use super::GIMBAL_SCOPE;
-use super::heading_altitude::{ControlMeasurement, heading_altitude_demand};
+use super::fixed_wing::{ControlMeasurement, fixed_wing_velocity};
 use super::sources::{ArmReport, fc_state_sample};
 use super::{
     AviateAdapter, DIRECT_SCOPE, FLIGHT_SCOPE, StepBudget, StepOutcome, control::rejected_control,
     control::sticks_from_velocity, mavlink_batch, process_flight_actions,
 };
 use crate::uplink::FlightUplink;
+use pilotage_control_feel::FixedWingEnvelope;
 use pilotage_flight_uplink::HeadingAltitudeDemand;
 
 fn send_motion_intent(
@@ -25,9 +26,15 @@ fn send_motion_intent(
     frame: &ScopedControlFrame,
     measurement: &ControlMeasurement,
     heading_altitude: Option<HeadingAltitudeDemand>,
+    fixed_wing: Option<FixedWingEnvelope>,
 ) -> Option<bool> {
     let envelope = uplink.envelope();
     match (frame.scope.as_str(), frame.intent) {
+        (FLIGHT_SCOPE, Some(ControlIntent::Velocity(velocity))) if fixed_wing.is_some() => {
+            let yaw = measurement.attitude_rad[2];
+            let (velocity_ned, constrained) = fixed_wing_velocity(&velocity, yaw, &fixed_wing?);
+            Some(!uplink.send_fixed_wing_velocity(velocity_ned, yaw) || constrained)
+        }
         (FLIGHT_SCOPE, Some(ControlIntent::Velocity(velocity))) => {
             let pose = measurement.pose.as_ref()?;
             let (sticks, constrained) = sticks_from_velocity(&velocity, envelope);
@@ -94,16 +101,9 @@ impl AviateAdapter {
                 RejectReason::Other("intent family does not belong to this scope".to_owned()),
             );
         }
-        // Settled before any action rides the frame, so an arm is not sent
-        // beside a demand the adapter then refuses.
-        let heading_altitude = match &frame.intent {
-            Some(ControlIntent::HeadingAltitude(intent)) => {
-                match heading_altitude_demand(intent, self.heading_altitude) {
-                    Ok(demand) => Some(demand),
-                    Err(reason) => return rejected_control(tick, reason),
-                }
-            }
-            _ => None,
+        let heading_altitude = match self.airframe_preconditions(frame) {
+            Ok(demand) => demand,
+            Err(reason) => return rejected_control(tick, reason),
         };
         let Some(current) = self.control_measurement(frame) else {
             return rejected_control(tick, RejectReason::MeasurementUnavailable);
@@ -120,6 +120,7 @@ impl AviateAdapter {
         // changes the law the rest of this frame is shaped by.
         let feel_results = self.answer_feel_requests(&frame.actions, frame.generation);
 
+        let fixed_wing = self.fixed_wing_envelope();
         let Some(uplink) = self.uplink.as_mut() else {
             return rejected_control(tick, RejectReason::UnknownScope);
         };
@@ -138,7 +139,8 @@ impl AviateAdapter {
                 action_results,
             };
         }
-        let Some(constrained) = send_motion_intent(uplink, frame, &current, heading_altitude)
+        let Some(constrained) =
+            send_motion_intent(uplink, frame, &current, heading_altitude, fixed_wing)
         else {
             return rejected_control(
                 tick,

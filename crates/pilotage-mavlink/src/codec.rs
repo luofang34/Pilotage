@@ -132,6 +132,8 @@ pub enum FcMessage {
         custom_mode: u32,
         /// MAV_AUTOPILOT of the sender.
         autopilot: u8,
+        /// MAV_TYPE of the sender: the airframe it says it flies.
+        mav_type: u8,
     },
     /// ArduPilot's EKF health summary (ardupilotmega EKF_STATUS_REPORT).
     /// The message has no timestamp of its own.

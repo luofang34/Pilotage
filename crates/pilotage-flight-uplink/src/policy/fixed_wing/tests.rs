@@ -105,3 +105,24 @@ fn nothing_goes_out_in_the_quiet_interval_and_an_arm_forgets_the_airspeed() {
         "the airspeed goes out again after the arm"
     );
 }
+
+#[test]
+fn a_fixed_wing_velocity_needs_no_climb_input_to_go_out() {
+    let mut policy = policy();
+    policy.arm(Duration::from_secs(1), 0.2);
+    assert_eq!(
+        policy.fixed_wing_velocity_frame(Duration::from_millis(1_050), [55.0, 0.0, 0.0], 0.2),
+        None,
+        "nothing in the quiet interval"
+    );
+    let frame = policy
+        .fixed_wing_velocity_frame(Duration::from_millis(1_200), [55.0, 0.0, 0.0], 0.2)
+        .expect("a level cruise demand goes out");
+    assert_eq!(message_id(&frame), 84);
+    assert_eq!(
+        f32::from_le_bytes(frame[10 + 16..10 + 20].try_into().expect("four bytes")),
+        55.0,
+        "north velocity"
+    );
+    assert!(policy.airborne(), "the stream is open for the keep-alive");
+}

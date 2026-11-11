@@ -3,12 +3,14 @@
 pub mod airframe;
 mod binding;
 mod digest;
+mod fixed_wing;
 mod profile;
 mod shaper;
 mod validation;
 
 pub use airframe::AirframeLimits;
 pub use digest::{FeelDigest, FeelDigestError};
+pub use fixed_wing::{FixedWingEnvelope, ValidatedFixedWingEnvelope};
 pub use profile::{
     AxisCurve, AxisDynamics, AxisResponse, DemandEnvelope, DirectDynamics, FeelMode,
     FlightFeelProfile, HoldTransition, NeutralBand, SCHEMA_VERSION,

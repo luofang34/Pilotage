@@ -66,6 +66,9 @@ pub struct FcReports {
     pub custom_mode: Option<u32>,
     /// HEARTBEAT `autopilot` of the last FC heartbeat.
     pub autopilot: Option<u8>,
+    /// HEARTBEAT `type` (MAV_TYPE) of the last FC heartbeat: the airframe
+    /// the FC says it flies.
+    pub mav_type: Option<u8>,
     /// The latest acknowledgement of each command id. One slot per
     /// command, because an FC acknowledges every periodic message-interval
     /// request: a single latest-ack slot would bury an arm or mode verdict

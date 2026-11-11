@@ -93,6 +93,7 @@ impl Harness {
                 armed,
                 custom_mode: 4,
                 autopilot: 3,
+                mav_type: 2,
             },
             FcMessage::AttitudeQuaternion {
                 time_boot_ms: t,
