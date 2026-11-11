@@ -490,7 +490,7 @@ fn guidance_config(config: &MissionConfig) -> VelocityGuidanceConfig {
     guidance.cruise_mps = config.cruise_mps;
     guidance.max_horizontal_mps = config.limits.max_horizontal_mps;
     guidance.max_vertical_mps = config.limits.max_vertical_mps;
-    if config.vehicle_class == pilotage_protocol::VehicleClass::FixedWing {
+    if !config.can_stop() {
         guidance.arrival_slowdown_radius_m = 0.0;
     }
     guidance

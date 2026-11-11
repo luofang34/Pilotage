@@ -291,7 +291,14 @@ impl MissionEngine {
             return self.end_of_plan_intent(Some(solution), now, events);
         }
         if self.route.approaching() {
-            return self.guide_past_last(solution, now, events);
+            let last = *self.route.last_waypoint()?;
+            return self.guide_to(
+                solution,
+                LateralReference::PresentPosition,
+                &last,
+                now,
+                events,
+            );
         }
         self.guide_active_leg(solution, now, events)
     }
@@ -316,7 +323,7 @@ impl MissionEngine {
             return;
         }
         if self.route.approaching() {
-            self.plan_complete = self.route.pass_last(&solution.position);
+            self.plan_complete = self.route.arrive(&solution.position);
             return;
         }
         match self
@@ -326,7 +333,9 @@ impl MissionEngine {
             SequenceEvent::LegAdvanced {
                 to_index, reason, ..
             } => events.push(MissionEvent::LegAdvanced { to_index, reason }),
-            SequenceEvent::PlanComplete { .. } => self.plan_complete = !self.route.approaching(),
+            SequenceEvent::PlanComplete { reason, .. } => {
+                self.last_waypoint_sequenced(&solution.position, reason, events);
+            }
             _ => {}
         }
     }

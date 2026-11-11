@@ -5,14 +5,15 @@ use navigate_contract::{
 };
 use navigate_route::ExecutionConfig;
 use pilotage_mission_core::NavigationDataIdentity;
+use pilotage_protocol::VehicleClass;
 
 use super::{MissionEngine, document};
 use crate::config::MissionConfig;
 use crate::error::MissionBuildError;
-use crate::route::MissionRoute;
+use crate::route::{MissionRoute, PlanEnd};
 use crate::waypoints::{
-    DEFAULT_MAX_BANK_DEG, PlannedWaypoint, WaypointPlan, WaypointPlanRecord, WaypointTurn,
-    capture_radius_for,
+    DEFAULT_ORBIT_BANK_DEG, PlannedWaypoint, WaypointPlan, WaypointPlanRecord, WaypointTurn,
+    capture_radius_for, turn_radius_for,
 };
 
 impl MissionEngine {
@@ -54,16 +55,18 @@ impl MissionEngine {
         let plan_id = format!("waypoints:{digest}");
         let name =
             document::navigate_plan_name("waypoints", &plan_id, PlanRole::Mission, &waypoints)?;
-        let capture_radius_m = plan.capture_radius_m.unwrap_or_else(|| {
-            capture_radius_for(
-                config.cruise_mps.min(config.limits.max_horizontal_mps),
-                DEFAULT_MAX_BANK_DEG,
-            )
-        });
-        let mut execution = ExecutionConfig::new(capture_radius_m);
-        execution.bank_limit_rad = DEFAULT_MAX_BANK_DEG.to_radians();
-        let route = MissionRoute::activate(&name, PlanRole::Mission, waypoints, execution)?
-            .with_terminal_overfly(capture_radius_m);
+        let cruise_mps = config.cruise_mps.min(config.limits.max_horizontal_mps);
+        let capture_radius_m = plan
+            .capture_radius_m
+            .unwrap_or_else(|| capture_radius_for(cruise_mps, config.capture_time_s));
+        let end = plan_end(plan, &config, &waypoints, cruise_mps, capture_radius_m);
+        let route = MissionRoute::activate(
+            &name,
+            PlanRole::Mission,
+            waypoints,
+            ExecutionConfig::new(capture_radius_m),
+        )?
+        .with_end(end);
         let engine = Self::from_route(
             route,
             &plan_id,
@@ -79,6 +82,38 @@ impl MissionEngine {
             mission_identity: engine.document.identity.clone(),
         };
         Ok((engine, record))
+    }
+}
+
+/// How the plan ends for the configured vehicle: a vehicle that can stop
+/// arrives at the last waypoint, checked vertically too for an aircraft;
+/// one that cannot stop orbits it.
+fn plan_end(
+    plan: &WaypointPlan,
+    config: &MissionConfig,
+    waypoints: &[Waypoint],
+    cruise_mps: f64,
+    capture_radius_m: f64,
+) -> PlanEnd {
+    if config.can_stop() {
+        let vertical = matches!(
+            config.vehicle_class,
+            VehicleClass::Multicopter | VehicleClass::Vtol
+        );
+        return PlanEnd::Arrive {
+            radius_m: plan.arrival_radius_m,
+            vertical,
+        };
+    }
+    let orbit = config.terminal_orbit;
+    let last_altitude_m = waypoints
+        .last()
+        .map_or(config.anchor.altitude_m, |last| last.position.altitude_m);
+    PlanEnd::Orbit {
+        radius_m: orbit.radius_m.unwrap_or_else(|| {
+            turn_radius_for(cruise_mps, DEFAULT_ORBIT_BANK_DEG, capture_radius_m)
+        }),
+        altitude_m: orbit.altitude_m.unwrap_or(last_altitude_m),
     }
 }
 

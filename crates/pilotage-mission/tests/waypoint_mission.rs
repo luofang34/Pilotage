@@ -56,6 +56,8 @@ struct Flight {
     /// The NED position and horizontal speed at each tick after the
     /// mission completed.
     after: Vec<([f64; 3], f64)>,
+    /// The events at the end of the plan.
+    end_events: Vec<MissionEvent>,
 }
 
 fn fly(engine: &mut MissionEngine, ticks_after_complete: usize) -> Flight {
@@ -65,6 +67,7 @@ fn fly(engine: &mut MissionEngine, ticks_after_complete: usize) -> Flight {
         captured: Vec::new(),
         completed_at: None,
         after: Vec::new(),
+        end_events: Vec::new(),
     };
     for sequence in 0..40_000_u32 {
         now = MonotonicNanos::from_nanos(now.as_nanos() + STEP_NANOS);
@@ -89,10 +92,16 @@ fn fly(engine: &mut MissionEngine, ticks_after_complete: usize) -> Flight {
             yaw += f64::from(v.yaw_rate) * STEP_S;
         }
         for event in &output.events {
-            if let MissionEvent::LegAdvanced { to_index, reason } = event {
-                flight
-                    .captured
-                    .push((*to_index, *reason, ANCHOR_ALT_M - ned[2]));
+            match event {
+                MissionEvent::LegAdvanced { to_index, reason } => {
+                    flight
+                        .captured
+                        .push((*to_index, *reason, ANCHOR_ALT_M - ned[2]));
+                }
+                MissionEvent::LastWaypointSequenced { .. } | MissionEvent::OrbitStarted { .. } => {
+                    flight.end_events.push(event.clone());
+                }
+                _ => {}
             }
         }
         if output.state == MissionState::Complete {
@@ -145,19 +154,25 @@ fn a_waypoint_list_flies_each_waypoint_at_its_own_altitude() {
             "{altitude_m} m at a waypoint planned at {expected_m} m above the anchor"
         );
     }
-    // The plan completes as the vehicle passes the last waypoint, not a
-    // capture radius short of it.
+    // A multicopter flies on after the last waypoint sequences and
+    // completes the plan at it, within the arrival radius, not a capture
+    // radius short of it.
     let completed_at = flight.completed_at.expect("the plan completes");
     let (horizontal_m, vertical_m) = from_last_waypoint(&plan, completed_at);
+    let limit_m = plan.arrival_radius_m + 0.1;
     assert!(
-        horizontal_m < 1.0,
+        horizontal_m <= limit_m,
         "{horizontal_m} m from the last waypoint"
     );
     assert!(
-        vertical_m < 1.0,
-        "{vertical_m} m above or below the last waypoint"
+        vertical_m <= limit_m,
+        "{vertical_m} m off the last waypoint"
     );
-    // A multicopter then stops.
+    assert!(matches!(
+        flight.end_events.as_slice(),
+        [MissionEvent::LastWaypointSequenced { .. }]
+    ));
+    // It then stops.
     let (_, speed_mps) = flight.after.last().expect("ticks after completion");
     assert!(*speed_mps < 1e-6, "{speed_mps} m/s after completion");
 }
@@ -170,25 +185,70 @@ fn a_fixed_wing_orbits_the_last_waypoint_after_the_plan() {
     config.vehicle_class = VehicleClass::FixedWing;
     let (mut engine, record) = MissionEngine::from_waypoints(&plan, config).expect("builds");
     let flight = fly(&mut engine, 1_200);
+    // The plan completes when the last waypoint sequences: the aircraft
+    // cannot stop at it.
     let completed_at = flight.completed_at.expect("the plan completes");
     let (horizontal_m, _) = from_last_waypoint(&plan, completed_at);
     assert!(
-        horizontal_m < 1.0,
-        "{horizontal_m} m from the last waypoint"
+        horizontal_m <= record.capture_radius_m + 0.5,
+        "{horizontal_m} m"
     );
+    let [
+        MissionEvent::LastWaypointSequenced { distance_m, .. },
+        MissionEvent::OrbitStarted {
+            radius_m,
+            altitude_m,
+        },
+    ] = flight.end_events.as_slice()
+    else {
+        panic!("{:?}", flight.end_events);
+    };
+    assert!((distance_m - horizontal_m).abs() < 0.5, "{distance_m} m");
+    let last = plan.waypoints.last().expect("a last waypoint");
+    assert_eq!(*altitude_m, last.altitude_m);
+    // 6 m/s at a 25° bank turns on 7.9 m, inside the 12 m capture radius,
+    // so the orbit takes the capture radius.
+    assert_eq!(*radius_m, record.capture_radius_m);
     // After a settling turn, the aircraft keeps its speed and stays on
-    // the orbit at the capture radius around the last waypoint.
+    // the orbit around the last waypoint.
     let settled = flight.after.get(400..).expect("40 s of orbit");
-    let radius_m = record.capture_radius_m;
     for (ned, speed_mps) in settled {
         let (distance_m, vertical_m) = from_last_waypoint(&plan, *ned);
-        assert!(*speed_mps > 4.0, "{speed_mps} m/s in the orbit");
+        assert!(*speed_mps > 5.9, "{speed_mps} m/s in the orbit");
         assert!(
             (distance_m - radius_m).abs() < 0.1 * radius_m,
             "{distance_m} m from the centre of a {radius_m} m orbit"
         );
         assert!(vertical_m < 1.0, "{vertical_m} m off the orbit altitude");
     }
+}
+
+#[test]
+fn a_configured_orbit_overrides_the_default() {
+    let mut plan = plan();
+    plan.capture_radius_m = None;
+    let mut config = config();
+    config.vehicle_class = VehicleClass::FixedWing;
+    config.terminal_orbit.radius_m = Some(30.0);
+    config.terminal_orbit.altitude_m = Some(ANCHOR_ALT_M + 25.0);
+    let (mut engine, _) = MissionEngine::from_waypoints(&plan, config).expect("builds");
+    let flight = fly(&mut engine, 1_600);
+    assert!(
+        flight.end_events.contains(&MissionEvent::OrbitStarted {
+            radius_m: 30.0,
+            altitude_m: ANCHOR_ALT_M + 25.0,
+        }),
+        "{:?}",
+        flight.end_events
+    );
+    let (ned, _) = flight.after.last().expect("ticks after completion");
+    let (distance_m, _) = from_last_waypoint(&plan, *ned);
+    assert!((distance_m - 30.0).abs() < 3.0, "{distance_m} m");
+    assert!(
+        (-ned[2] - 25.0).abs() < 1.0,
+        "{} m above the anchor",
+        -ned[2]
+    );
 }
 
 #[test]
@@ -233,24 +293,37 @@ fn a_changed_waypoint_changes_the_plan_identity() {
 
 #[test]
 fn the_capture_radius_follows_the_vehicle_unless_the_plan_sets_one() {
-    // 6 m/s at a 25° bank turns on a radius of v² / (g tan 25°).
+    // 6 m/s for the default 2 s.
     let mut derived = plan();
     derived.capture_radius_m = None;
     let (_, record) = MissionEngine::from_waypoints(&derived, config()).expect("builds");
-    let expected_m = 36.0 / (9.806_65 * 25.0_f64.to_radians().tan());
     assert!(
-        (record.capture_radius_m - expected_m).abs() < 1e-3,
+        (record.capture_radius_m - 12.0).abs() < 1e-9,
         "{}",
         record.capture_radius_m
     );
+    // A C172 at 55 m/s, on legs of some kilometres.
+    let mut fast = config();
+    fast.cruise_mps = 55.0;
+    fast.limits.max_horizontal_mps = 55.0;
+    let long = WaypointPlan::new(vec![
+        PlannedWaypoint::new(47.03, 8.0, ANCHOR_ALT_M + 300.0),
+        PlannedWaypoint::new(47.03, 8.05, ANCHOR_ALT_M + 300.0),
+    ]);
+    let (_, record) = MissionEngine::from_waypoints(&long, fast).expect("builds");
+    assert!(
+        (record.capture_radius_m - 110.0).abs() < 1e-9,
+        "{}",
+        record.capture_radius_m
+    );
+    // The plan's own radius wins.
     let (_, record) = MissionEngine::from_waypoints(&plan(), config()).expect("builds");
     assert_eq!(record.capture_radius_m, 4.0);
     // A slow vehicle keeps the minimum radius.
-    assert_eq!(pilotage_mission::capture_radius_for(1.0, 25.0), 2.0);
-    // A bank outside 0° to 90° gives the minimum.
-    assert_eq!(pilotage_mission::capture_radius_for(50.0, 90.0), 2.0);
-    assert_eq!(pilotage_mission::capture_radius_for(50.0, 0.0), 2.0);
-    let vehicle = WaypointPlan::for_vehicle(plan().waypoints, 10.0, 45.0);
-    let radius_m = vehicle.capture_radius_m.expect("a radius");
-    assert!((radius_m - 100.0 / 9.806_65).abs() < 1e-6, "{radius_m}");
+    assert_eq!(pilotage_mission::capture_radius_for(0.5, 2.0), 2.0);
+    // The orbit radius: v² / (g tan φ), never below its floor.
+    let turn_m = pilotage_mission::turn_radius_for(10.0, 45.0, 2.0);
+    assert!((turn_m - 100.0 / 9.806_65).abs() < 1e-6, "{turn_m}");
+    assert_eq!(pilotage_mission::turn_radius_for(50.0, 90.0, 110.0), 110.0);
+    assert_eq!(pilotage_mission::turn_radius_for(1.0, 25.0, 12.0), 12.0);
 }

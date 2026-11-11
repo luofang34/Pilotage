@@ -7,28 +7,46 @@ use sha2::{Digest as _, Sha256};
 
 const WAYPOINT_LIST_DIGEST_DOMAIN: &[u8] = b"pilotage.waypoint-list.v1\0";
 
-/// The bank angle that sizes a capture radius from a cruise speed when
-/// the plan sets none, degrees: a moderate coordinated turn for a light
-/// fixed-wing aircraft. A multicopter uses the same rule.
-pub const DEFAULT_MAX_BANK_DEG: f64 = 25.0;
-
 /// The smallest capture radius derived from a speed, metres: below it a
 /// position estimate of ordinary quality can circle a fix.
 pub const MIN_CAPTURE_RADIUS_M: f64 = 2.0;
 
-/// The capture radius for a vehicle at `speed_mps` that turns at a bank
-/// of `max_bank_deg`: its coordinated turn radius `v² / (g tan φ)`, and
-/// at least [`MIN_CAPTURE_RADIUS_M`]. A non-finite input, or a bank
-/// outside 0° to 90°, gives the minimum.
+/// The distance to the last waypoint at which a vehicle that can stop
+/// completes a waypoint list, unless the plan sets another, metres.
+pub const DEFAULT_ARRIVAL_RADIUS_M: f64 = 1.0;
+
+/// The bank angle that sizes the default orbit after a plan for a
+/// vehicle that cannot stop, degrees: a moderate coordinated turn.
+pub const DEFAULT_ORBIT_BANK_DEG: f64 = 25.0;
+
+/// The capture radius for a vehicle at `speed_mps`: the distance it
+/// flies in `capture_time_s`, and at least [`MIN_CAPTURE_RADIUS_M`]. The
+/// turn ahead of a fly-by waypoint is Navigate's turn anticipation, and a
+/// waypoint that the vehicle passes outside the radius still sequences,
+/// so the radius need not hold a turn. A non-finite or negative input
+/// gives the minimum.
 #[must_use]
-pub fn capture_radius_for(speed_mps: f64, max_bank_deg: f64) -> f64 {
-    let lateral_mps2 = crate::body::SURFACE_GRAVITY_MPS2 * max_bank_deg.to_radians().tan();
-    let radius = speed_mps * speed_mps / lateral_mps2;
-    let bank_ok = max_bank_deg > 0.0 && max_bank_deg < 90.0;
-    if bank_ok && radius.is_finite() && radius > MIN_CAPTURE_RADIUS_M {
-        radius
+pub fn capture_radius_for(speed_mps: f64, capture_time_s: f64) -> f64 {
+    at_least(speed_mps * capture_time_s, MIN_CAPTURE_RADIUS_M)
+}
+
+/// The coordinated turn radius `v² / (g tan φ)` at `speed_mps` and a bank
+/// of `bank_deg`, and at least `floor_m`. A non-finite input, or a bank
+/// outside 0° to 90°, gives `floor_m`.
+#[must_use]
+pub fn turn_radius_for(speed_mps: f64, bank_deg: f64, floor_m: f64) -> f64 {
+    if !(bank_deg > 0.0 && bank_deg < 90.0) {
+        return floor_m;
+    }
+    let lateral_mps2 = crate::body::SURFACE_GRAVITY_MPS2 * bank_deg.to_radians().tan();
+    at_least(speed_mps * speed_mps / lateral_mps2, floor_m)
+}
+
+fn at_least(value: f64, floor: f64) -> f64 {
+    if value.is_finite() && value > floor {
+        value
     } else {
-        MIN_CAPTURE_RADIUS_M
+        floor
     }
 }
 
@@ -73,40 +91,32 @@ impl PlannedWaypoint {
 }
 
 /// A list of waypoints in fly order and the distance at which each one
-/// captures. The plan completes when the vehicle passes the last
-/// waypoint: it crosses the line through the last waypoint square to the
-/// last leg.
+/// captures. A vehicle that can stop completes the plan at the last
+/// waypoint, inside the arrival radius; a vehicle that cannot stop
+/// completes it when the last waypoint sequences.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WaypointPlan {
     /// The waypoints in fly order.
     pub waypoints: Vec<PlannedWaypoint>,
     /// The distance to a waypoint at which it captures, metres. `None`
     /// derives it from the mission's cruise speed with
-    /// [`capture_radius_for`] and [`DEFAULT_MAX_BANK_DEG`].
+    /// [`capture_radius_for`] and the mission's capture time.
     pub capture_radius_m: Option<f64>,
+    /// The distance to the last waypoint, horizontally and, for an
+    /// aircraft, vertically, at which a vehicle that can stop completes
+    /// the plan, metres.
+    pub arrival_radius_m: f64,
 }
 
 impl WaypointPlan {
-    /// A plan whose capture radius follows the mission's cruise speed.
+    /// A plan whose capture radius follows the mission's cruise speed,
+    /// with the default arrival radius.
     #[must_use]
     pub const fn new(waypoints: Vec<PlannedWaypoint>) -> Self {
         Self {
             waypoints,
             capture_radius_m: None,
-        }
-    }
-
-    /// A plan for a vehicle that cruises at `cruise_mps` and banks at most
-    /// `max_bank_deg`: the capture radius is [`capture_radius_for`].
-    #[must_use]
-    pub fn for_vehicle(
-        waypoints: Vec<PlannedWaypoint>,
-        cruise_mps: f64,
-        max_bank_deg: f64,
-    ) -> Self {
-        Self {
-            capture_radius_m: Some(capture_radius_for(cruise_mps, max_bank_deg)),
-            ..Self::new(waypoints)
+            arrival_radius_m: DEFAULT_ARRIVAL_RADIUS_M,
         }
     }
 
@@ -140,6 +150,7 @@ impl WaypointPlan {
             }
             None => hasher.update([0]),
         }
+        hasher.update(self.arrival_radius_m.to_le_bytes());
         Digest::from_bytes(hasher.finalize().into())
     }
 }

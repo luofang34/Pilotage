@@ -1,12 +1,15 @@
-//! The end of a waypoint plan. The vehicle flies on along the last leg
-//! until it passes the last waypoint, so the plan does not complete a
-//! capture radius short of it. After that, a vehicle that can stop is
-//! commanded to zero velocity, and a fixed-wing aircraft, which cannot
-//! stop, orbits the last waypoint clockwise at its altitude.
+//! The end of a plan. A vehicle that can stop flies on to the last
+//! waypoint, so the plan does not complete a capture radius short of it,
+//! and is then commanded to zero velocity. A fixed-wing aircraft cannot
+//! stop: its plan completes when the last waypoint sequences, and it then
+//! orbits the last waypoint clockwise.
 
-use navigate_contract::{LateralReference, MonotonicNanos, NavigationSolution, Waypoint};
+use navigate_contract::{
+    GeodeticPosition, LateralReference, MonotonicNanos, NavigationSolution, Waypoint,
+};
 use navigate_geodesy::NedOffset;
-use pilotage_protocol::{ControlIntent, VehicleClass};
+use navigate_route::SequenceReason;
+use pilotage_protocol::ControlIntent;
 
 use crate::body;
 
@@ -21,7 +24,7 @@ const ORBIT_LEAD_RAD: f64 = core::f64::consts::FRAC_PI_4;
 impl MissionEngine {
     /// The output of a tick after the mission completed.
     pub(super) fn complete_output(&mut self, now: MonotonicNanos) -> MissionOutput {
-        if self.config.vehicle_class != VehicleClass::FixedWing {
+        if self.config.can_stop() {
             return terminal_output(MissionState::Complete);
         }
         let mut events = core::mem::take(&mut self.hold_events);
@@ -42,7 +45,7 @@ impl MissionEngine {
         now: MonotonicNanos,
         events: &mut Vec<MissionEvent>,
     ) -> Option<ControlIntent> {
-        if self.config.vehicle_class != VehicleClass::FixedWing {
+        if self.config.can_stop() {
             return Some(zero_velocity_intent());
         }
         let solution = solution?;
@@ -57,16 +60,27 @@ impl MissionEngine {
         )
     }
 
-    /// Guides along the last leg until the vehicle passes its end.
-    pub(super) fn guide_past_last(
+    /// Records the sequence of the last waypoint. A vehicle that can stop
+    /// flies on to arrive at it; one that cannot completes the plan here
+    /// and starts its orbit.
+    pub(super) fn last_waypoint_sequenced(
         &mut self,
-        solution: &NavigationSolution,
-        now: MonotonicNanos,
+        position: &GeodeticPosition,
+        reason: SequenceReason,
         events: &mut Vec<MissionEvent>,
-    ) -> Option<ControlIntent> {
-        let (from, last) = self.route.last_leg()?;
-        let reference = from.map_or(LateralReference::PresentPosition, LateralReference::track);
-        self.guide_to(solution, reference, &last, now, events)
+    ) {
+        let distance_m = self.route.distance_to_last_m(position).unwrap_or(f64::NAN);
+        events.push(MissionEvent::LastWaypointSequenced { reason, distance_m });
+        self.plan_complete = !self.route.approaching();
+        if !self.plan_complete || self.config.can_stop() {
+            return;
+        }
+        if let Some((centre, radius_m)) = self.route.terminal_orbit() {
+            events.push(MissionEvent::OrbitStarted {
+                radius_m,
+                altitude_m: centre.position.altitude_m,
+            });
+        }
     }
 }
 
