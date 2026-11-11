@@ -134,7 +134,14 @@ pub struct MissionPlan {
 }
 
 impl MissionPlan {
+    /// A plan from `source` under `config`.
+    #[must_use]
+    pub fn new(source: PlanSource, config: MissionConfig) -> Self {
+        Self { source, config }
+    }
+
     /// A waypoint plan under `config`.
+    #[must_use]
     pub fn waypoints(plan: pilotage_mission::WaypointPlan, config: MissionConfig) -> Self {
         Self {
             source: PlanSource::Waypoints(plan),

@@ -39,3 +39,6 @@ pub(super) fn to_wire(sample: FlightProcedureSample) -> wire::FlightProcedureSta
             }) as i32,
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -491,3 +491,6 @@ impl MissionTask {
         apply(&mut self.status);
     }
 }
+
+#[cfg(test)]
+mod test_support;

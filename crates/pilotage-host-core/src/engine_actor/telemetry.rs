@@ -378,3 +378,8 @@ impl<A: pilotage_adapter_api::VehicleAdapter> super::EngineActor<A> {
         }
     }
 }
+
+#[cfg(test)]
+mod mission_estimate;
+#[cfg(test)]
+mod tests;

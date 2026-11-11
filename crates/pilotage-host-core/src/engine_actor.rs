@@ -357,3 +357,6 @@ impl<A: VehicleAdapter> EngineActor<A> {
 fn hex_digest(digest: &[u8; 32]) -> String {
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
+
+#[cfg(test)]
+mod tests;

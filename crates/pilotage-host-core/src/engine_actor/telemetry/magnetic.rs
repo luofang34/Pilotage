@@ -123,3 +123,6 @@ fn turned_about_down([w, x, y, z]: [f32; 4], angle: f32) -> [f32; 4] {
         cos * z + sin * w,
     ]
 }
+
+#[cfg(test)]
+mod tests;

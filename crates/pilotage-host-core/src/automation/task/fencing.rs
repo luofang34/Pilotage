@@ -303,3 +303,6 @@ fn our_pair(vehicle: Option<&wire::VehicleId>, scope: Option<&wire::ScopeId>) ->
     vehicle.is_some_and(|id| id.value == HOST_VEHICLE.as_u64())
         && scope.is_some_and(|id| id.value == MISSION_SCOPE)
 }
+
+#[cfg(test)]
+mod tests;

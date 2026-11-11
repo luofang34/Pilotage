@@ -51,3 +51,6 @@ pub(super) fn apply(sample: Option<AvionicsAttitudeSample>, state: &mut wire::Av
         None => {}
     }
 }
+
+#[cfg(test)]
+mod tests;

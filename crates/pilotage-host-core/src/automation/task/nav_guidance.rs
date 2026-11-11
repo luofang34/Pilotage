@@ -135,3 +135,6 @@ fn course_to_wire(course_rad: f64) -> f32 {
         narrowed
     }
 }
+
+#[cfg(test)]
+mod tests;

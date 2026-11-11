@@ -493,3 +493,6 @@ fn build_mission(
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

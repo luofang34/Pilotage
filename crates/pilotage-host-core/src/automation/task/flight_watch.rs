@@ -52,3 +52,6 @@ impl FlightWatch {
         self.reports
     }
 }
+
+#[cfg(test)]
+mod tests;

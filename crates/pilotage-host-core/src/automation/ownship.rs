@@ -267,3 +267,6 @@ fn quat_yaw(w: f32, x: f32, y: f32, z: f32) -> f64 {
     let (w, x, y, z) = (f64::from(w), f64::from(x), f64::from(y), f64::from(z));
     (2.0 * (w * z + x * y)).atan2(1.0 - 2.0 * (y * y + z * z))
 }
+
+#[cfg(test)]
+mod tests;
