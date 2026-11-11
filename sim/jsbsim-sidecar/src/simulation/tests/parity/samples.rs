@@ -4,8 +4,8 @@ use pilotage_world::{MagneticEpoch, UniformTerrain, World};
 
 use super::super::{message_id, vehicle};
 use super::{
-    Aircraft, Encoder, EngineKind, GROUND_M, ModelPaths, N51, Simulation, Start,
-    assert_same_flight, close, controls,
+    Aircraft, Encoder, EngineKind, GROUND_M, ModelPaths, N51, Simulation, Start, assert_same_state,
+    close, controls,
 };
 use crate::hil::{HIL_GPS, HIL_SENSOR};
 
@@ -21,12 +21,12 @@ fn i32_at(frame: &[u8], at: usize) -> i64 {
     ))
 }
 
-fn assert_frames(step: usize, rust: &[Vec<u8>], cpp: &[Vec<u8>]) {
-    assert_eq!(rust.len(), cpp.len(), "step {step}: frame count");
+fn assert_frames(at: &str, rust: &[Vec<u8>], cpp: &[Vec<u8>]) {
+    assert_eq!(rust.len(), cpp.len(), "{at}: frame count");
     for (r, c) in rust.iter().zip(cpp) {
         assert_eq!(message_id(r), message_id(c));
         if message_id(r) != 0 {
-            assert_eq!(&r[10..18], &c[10..18], "step {step}: time");
+            assert_eq!(&r[10..18], &c[10..18], "{at}: time");
         }
         if message_id(r) == HIL_SENSOR.0 {
             // Acceleration, rate, field, pressure, pitot, altitude, temperature.
@@ -35,20 +35,20 @@ fn assert_frames(step: usize, rust: &[Vec<u8>], cpp: &[Vec<u8>]) {
             ];
             for (i, limit) in limits.into_iter().enumerate() {
                 close(
-                    step,
+                    at,
                     "HIL_SENSOR",
                     f32_at(r, 8 + 4 * i),
                     f32_at(c, 8 + 4 * i),
                     limit,
                 );
             }
-            assert_eq!(&r[70..74], &c[70..74], "step {step}: sensor flags");
+            assert_eq!(&r[70..74], &c[70..74], "{at}: sensor flags");
         }
         if message_id(r) == HIL_GPS.0 {
             for at in [8, 12, 16] {
                 assert!(
                     (i32_at(r, at) - i32_at(c, at)).abs() <= 1,
-                    "step {step}: HIL_GPS at {at}"
+                    "{at}: HIL_GPS at {at}"
                 );
             }
             assert_eq!(&r[30..34], &c[30..34], "GNSS accuracy");
@@ -57,7 +57,7 @@ fn assert_frames(step: usize, rust: &[Vec<u8>], cpp: &[Vec<u8>]) {
                     |frame: &[u8]| i16::from_le_bytes(frame[10 + at..12 + at].try_into().unwrap());
                 assert!(
                     (i32::from(value(r)) - i32::from(value(c))).abs() <= 1,
-                    "step {step}: HIL_GPS velocity at {at}"
+                    "{at}: HIL_GPS velocity at {at}"
                 );
             }
             let u16_at = |frame: &[u8], at: usize| {
@@ -67,7 +67,7 @@ fn assert_frames(step: usize, rust: &[Vec<u8>], cpp: &[Vec<u8>]) {
             };
             assert!((u16_at(r, 24) - u16_at(c, 24)).abs() <= 1, "GNSS speed");
             let course = (u16_at(r, 32) - u16_at(c, 32) + 18_000).rem_euclid(36_000) - 18_000;
-            assert!(course.abs() <= 5, "step {step}: GNSS course");
+            assert!(course.abs() <= 5, "{at}: GNSS course");
             assert_eq!(&r[44..r.len() - 2], &c[44..c.len() - 2], "GNSS fix fields");
         }
     }
@@ -127,8 +127,11 @@ fn landing_truth_and_sensor_frames_agree_at_all_step_rates_and_sites() {
                 let c = cpp
                     .step(Some(&command), &mut world, &mut c_encoder)
                     .unwrap();
-                assert_same_flight(&[rust.truth()], &[cpp.truth()]);
-                assert_frames(step as usize, &r, &c);
+                let at = format!(
+                    "{latitude_deg}°, {longitude_deg}°, {ground} m, {step_ms} ms, step {step}"
+                );
+                assert_same_state(&at, &rust.truth(), &cpp.truth());
+                assert_frames(&at, &r, &c);
                 peak = peak.max(rust.truth().altitude_m - ground);
             }
             assert!(peak > 0.5, "the vehicle must leave the ground: {peak}");

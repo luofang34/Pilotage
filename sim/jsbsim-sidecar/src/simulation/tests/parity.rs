@@ -61,70 +61,76 @@ fn largest(differences: impl Iterator<Item = f64>) -> f64 {
 fn assert_same_flight(rust: &[Truth], cpp: &[Truth]) {
     assert_eq!(rust.len(), cpp.len());
     for (step, (r, c)) in rust.iter().zip(cpp).enumerate() {
-        let position = largest(
-            [
-                r.altitude_m - c.altitude_m,
-                (r.latitude_deg - c.latitude_deg) * M_PER_DEG,
-                (r.longitude_deg - c.longitude_deg) * M_PER_DEG,
-            ]
-            .into_iter(),
-        );
-        let velocity = largest((0..3).map(|i| r.velocity_ned[i] - c.velocity_ned[i]));
-        let attitude = largest(
-            [
-                angle(r.attitude.roll - c.attitude.roll),
-                angle(r.attitude.pitch - c.attitude.pitch),
-                angle(r.attitude.yaw - c.attitude.yaw),
-            ]
-            .into_iter(),
-        );
-        assert!(
-            position < POSITION_M && velocity < VELOCITY_M_S && attitude < ATTITUDE_RAD,
-            "step {step}: {position} m, {velocity} m/s, {attitude} rad apart"
-        );
-        close(step, "time", r.time_s, c.time_s, 1e-9);
-        for i in 0..3 {
-            close(step, "rate", r.rates_frd[i], c.rates_frd[i], 1e-4);
-            close(
-                step,
-                "specific force",
-                r.specific_force_frd[i],
-                c.specific_force_frd[i],
-                FORCE_M_S2,
-            );
-        }
+        assert_same_state(&format!("step {step}"), r, c);
+    }
+}
+
+/// The two engines' states agree at one point of a flight; `at` names
+/// that point in a failure.
+fn assert_same_state(at: &str, r: &Truth, c: &Truth) {
+    let position = largest(
+        [
+            r.altitude_m - c.altitude_m,
+            (r.latitude_deg - c.latitude_deg) * M_PER_DEG,
+            (r.longitude_deg - c.longitude_deg) * M_PER_DEG,
+        ]
+        .into_iter(),
+    );
+    let velocity = largest((0..3).map(|i| r.velocity_ned[i] - c.velocity_ned[i]));
+    let attitude = largest(
+        [
+            angle(r.attitude.roll - c.attitude.roll),
+            angle(r.attitude.pitch - c.attitude.pitch),
+            angle(r.attitude.yaw - c.attitude.yaw),
+        ]
+        .into_iter(),
+    );
+    assert!(
+        position < POSITION_M && velocity < VELOCITY_M_S && attitude < ATTITUDE_RAD,
+        "{at}: {position} m, {velocity} m/s, {attitude} rad apart"
+    );
+    close(at, "time", r.time_s, c.time_s, 1e-9);
+    for i in 0..3 {
+        close(at, "rate", r.rates_frd[i], c.rates_frd[i], 1e-4);
         close(
-            step,
-            "dynamic pressure",
-            r.dynamic_pressure_pa,
-            c.dynamic_pressure_pa,
-            1e-2,
-        );
-        close(
-            step,
-            "true airspeed",
-            r.true_airspeed_mps,
-            c.true_airspeed_mps,
-            VELOCITY_M_S,
-        );
-        close(
-            step,
-            "calibrated airspeed",
-            r.calibrated_airspeed_mps,
-            c.calibrated_airspeed_mps,
-            VELOCITY_M_S,
+            at,
+            "specific force",
+            r.specific_force_frd[i],
+            c.specific_force_frd[i],
+            FORCE_M_S2,
         );
     }
+    close(
+        at,
+        "dynamic pressure",
+        r.dynamic_pressure_pa,
+        c.dynamic_pressure_pa,
+        1e-2,
+    );
+    close(
+        at,
+        "true airspeed",
+        r.true_airspeed_mps,
+        c.true_airspeed_mps,
+        VELOCITY_M_S,
+    );
+    close(
+        at,
+        "calibrated airspeed",
+        r.calibrated_airspeed_mps,
+        c.calibrated_airspeed_mps,
+        VELOCITY_M_S,
+    );
 }
 
 fn angle(d: f64) -> f64 {
     d.sin().atan2(d.cos())
 }
 
-fn close(step: usize, field: &str, r: f64, c: f64, limit: f64) {
+fn close(at: &str, field: &str, r: f64, c: f64, limit: f64) {
     assert!(
         r.is_finite() && c.is_finite() && (r - c).abs() < limit,
-        "step {step}: {field}: Rust {r}, C++ {c}, limit {limit}"
+        "{at}: {field}: Rust {r}, C++ {c}, limit {limit}"
     );
 }
 
