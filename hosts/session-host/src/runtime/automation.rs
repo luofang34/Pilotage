@@ -131,6 +131,29 @@ pub(crate) mod plans {
 /// [`HostError::MissionNavdata`] when the snapshot cannot be loaded;
 /// [`HostError::MissionBuild`] when the plan does not build.
 pub(crate) fn prepare(options: &MissionOptions) -> Result<MissionPlan, HostError> {
+    prepare_for(options, false)
+}
+
+/// [`prepare`] for a host whose adapter states the flight controller's
+/// readiness to arm (the Aviate adapter): its mission arms when the
+/// vehicle is ready.
+///
+/// # Errors
+///
+/// As [`prepare`].
+pub(crate) fn prepare_for(
+    options: &MissionOptions,
+    vehicle_states_readiness: bool,
+) -> Result<MissionPlan, HostError> {
+    let plan = prepare_plan(options)?;
+    Ok(if vehicle_states_readiness {
+        plan.arming_when_vehicle_ready()
+    } else {
+        plan
+    })
+}
+
+fn prepare_plan(options: &MissionOptions) -> Result<MissionPlan, HostError> {
     match &options.plan {
         MissionPlanRequest::Route(_) => prepare_route(options),
         MissionPlanRequest::Survey(request) => prepare_survey(options, request),
