@@ -33,6 +33,49 @@ fn speed_of(frame: &[u8]) -> f64 {
     cm_s(26).hypot(cm_s(28)) / 100.0
 }
 
+/// Two `HIL_GPS` frames carry the same fix, within the bounds.
+fn assert_gps(at: &str, r: &[u8], c: &[u8], bounds: Bounds) {
+    for offset in [8, 12, 16] {
+        assert!(
+            (i32_at(r, offset) - i32_at(c, offset)).abs() <= 1,
+            "{at}: HIL_GPS at {offset}"
+        );
+    }
+    assert_eq!(&r[30..34], &c[30..34], "{at}: GNSS accuracy");
+    for offset in [26, 28, 30] {
+        let value =
+            |frame: &[u8]| i16::from_le_bytes(frame[10 + offset..12 + offset].try_into().unwrap());
+        assert!(
+            (i32::from(value(r)) - i32::from(value(c))).abs() <= 1,
+            "{at}: HIL_GPS velocity at {offset}"
+        );
+    }
+    let u16_at = |frame: &[u8], at: usize| {
+        i32::from(u16::from_le_bytes(
+            frame[10 + at..12 + at].try_into().unwrap(),
+        ))
+    };
+    assert!(
+        (u16_at(r, 24) - u16_at(c, 24)).abs() <= 1,
+        "{at}: GNSS speed"
+    );
+    let course = (u16_at(r, 32) - u16_at(c, 32) + 18_000).rem_euclid(36_000) - 18_000;
+    let speed_m_s = speed_of(r);
+    let limit = bounds.course_limit_cdeg(speed_m_s);
+    assert!(
+        f64::from(course.abs()) <= limit,
+        "{at}: GNSS course: Rust {} cdeg, C++ {} cdeg, bound {limit} cdeg at {speed_m_s} m/s, |Δv| {} m/s",
+        u16_at(r, 32),
+        u16_at(c, 32),
+        bounds.horizontal_velocity_m_s
+    );
+    assert_eq!(
+        &r[44..r.len() - 2],
+        &c[44..c.len() - 2],
+        "{at}: GNSS fix fields"
+    );
+}
+
 fn assert_frames(at: &str, rust: &[Vec<u8>], cpp: &[Vec<u8>], bounds: Bounds) {
     assert_eq!(rust.len(), cpp.len(), "{at}: frame count");
     for (r, c) in rust.iter().zip(cpp) {
@@ -71,46 +114,7 @@ fn assert_frames(at: &str, rust: &[Vec<u8>], cpp: &[Vec<u8>], bounds: Bounds) {
             assert_eq!(&r[70..74], &c[70..74], "{at}: sensor flags");
         }
         if message_id(r) == HIL_GPS.0 {
-            for offset in [8, 12, 16] {
-                assert!(
-                    (i32_at(r, offset) - i32_at(c, offset)).abs() <= 1,
-                    "{at}: HIL_GPS at {offset}"
-                );
-            }
-            assert_eq!(&r[30..34], &c[30..34], "{at}: GNSS accuracy");
-            for offset in [26, 28, 30] {
-                let value = |frame: &[u8]| {
-                    i16::from_le_bytes(frame[10 + offset..12 + offset].try_into().unwrap())
-                };
-                assert!(
-                    (i32::from(value(r)) - i32::from(value(c))).abs() <= 1,
-                    "{at}: HIL_GPS velocity at {offset}"
-                );
-            }
-            let u16_at = |frame: &[u8], at: usize| {
-                i32::from(u16::from_le_bytes(
-                    frame[10 + at..12 + at].try_into().unwrap(),
-                ))
-            };
-            assert!(
-                (u16_at(r, 24) - u16_at(c, 24)).abs() <= 1,
-                "{at}: GNSS speed"
-            );
-            let course = (u16_at(r, 32) - u16_at(c, 32) + 18_000).rem_euclid(36_000) - 18_000;
-            let speed_m_s = speed_of(r);
-            let limit = bounds.course_limit_cdeg(speed_m_s);
-            assert!(
-                f64::from(course.abs()) <= limit,
-                "{at}: GNSS course: Rust {} cdeg, C++ {} cdeg, bound {limit} cdeg at {speed_m_s} m/s, |Δv| {} m/s",
-                u16_at(r, 32),
-                u16_at(c, 32),
-                bounds.horizontal_velocity_m_s
-            );
-            assert_eq!(
-                &r[44..r.len() - 2],
-                &c[44..c.len() - 2],
-                "{at}: GNSS fix fields"
-            );
+            assert_gps(at, r, c, bounds);
         }
     }
 }
