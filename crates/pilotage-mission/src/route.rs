@@ -30,24 +30,24 @@ pub(crate) struct MissionRoute {
 }
 
 impl MissionRoute {
-    /// Validates and activates the plan. `kind` is the Navigate plan
-    /// identifier, for example `mission`, `survey`, or `home`; the
-    /// Pilotage plan identifier in the mission document is separate. The
+    /// Validates and activates the plan. `name` is the Navigate plan
+    /// identifier; the Pilotage plan identifier in the mission document
+    /// is separate. The
     /// plan is on [`body::ELLIPSOID`], and fly-by turns use
     /// [`body::SURFACE_GRAVITY_MPS2`].
     ///
     /// # Errors
     ///
-    /// [`MissionBuildError::NavigationIdent`] for a `kind` that is not an
+    /// [`MissionBuildError::NavigationIdent`] for a `name` that is not an
     /// identifier, and every refusal of `PlanExecution::new`.
     pub(crate) fn activate(
-        kind: &str,
+        name: &str,
         role: PlanRole,
         waypoints: Vec<Waypoint>,
         config: ExecutionConfig,
     ) -> Result<Self, MissionBuildError> {
-        let id = Ident::try_new(kind).map_err(|source| MissionBuildError::NavigationIdent {
-            ident: kind.to_owned(),
+        let id = Ident::try_new(name).map_err(|source| MissionBuildError::NavigationIdent {
+            ident: name.to_owned(),
             source,
         })?;
         let route = Self {

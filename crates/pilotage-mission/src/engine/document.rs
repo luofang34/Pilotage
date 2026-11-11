@@ -15,6 +15,9 @@ use crate::policy::{
     OPERATIONAL_RECEIPT_TIMEOUT_NS, OPERATIONAL_RETRY_LIMIT,
 };
 
+#[cfg(test)]
+mod tests;
+
 pub(super) const ARM_PHASE_ID: &str = "arm";
 pub(super) const CLIMB_PHASE_ID: &str = "climb";
 pub(super) const FOLLOW_PLAN_PHASE_ID: &str = "follow-plan";
@@ -90,7 +93,7 @@ pub(super) fn build_document(
     revision_prefix: &str,
     segments: &[Segment],
 ) -> Result<(MissionDocument, FlightPlanReference), MissionBuildError> {
-    let plan_content_digest = plan_digest(plan_id, plan)?;
+    let plan_content_digest = plan_digest(plan_id, plan.role, plan.waypoints)?;
     let plan_reference = FlightPlanReference {
         plan_id: plan_id.to_owned(),
         plan_content_digest,
@@ -237,21 +240,40 @@ fn follow_plan_phase(plan: FlightPlanReference) -> MissionPhase {
     }
 }
 
+/// The Navigate plan identifier: the plan kind and the first 16 hex
+/// digits of the plan content digest, for example `survey-0123456789abcdef`.
+/// Navigate names the plan in its refusals, so two plans of one kind give
+/// two different names there.
+pub(super) fn navigate_plan_name(
+    kind: &str,
+    plan_id: &str,
+    role: PlanRole,
+    waypoints: &[Waypoint],
+) -> Result<String, MissionBuildError> {
+    let digest = plan_digest(plan_id, role, waypoints)?.to_string();
+    let prefix: String = digest.chars().take(16).collect();
+    Ok(format!("{kind}-{prefix}"))
+}
+
 /// The content digest of a plan. It hashes the Pilotage plan identifier
 /// that the mission document carries, not the Navigate plan identifier.
-fn plan_digest(plan_id: &str, plan: &FlightPlan<'_>) -> Result<Digest, MissionBuildError> {
+fn plan_digest(
+    plan_id: &str,
+    role: PlanRole,
+    waypoints: &[Waypoint],
+) -> Result<Digest, MissionBuildError> {
     let mut hasher = Sha256::new();
     hasher.update(PLAN_DIGEST_DOMAIN);
     hash_string(&mut hasher, plan_id);
-    let role = match plan.role {
+    let role = match role {
         PlanRole::Mission => 1,
         PlanRole::LossOfComm => 2,
         PlanRole::Contingency => 3,
         other => return Err(unsupported("role", other)),
     };
     hasher.update([role]);
-    hash_len(&mut hasher, plan.waypoints.len());
-    for waypoint in plan.waypoints {
+    hash_len(&mut hasher, waypoints.len());
+    for waypoint in waypoints {
         hash_waypoint(&mut hasher, waypoint)?;
     }
     Ok(Digest::from_bytes(hasher.finalize().into()))

@@ -138,8 +138,10 @@ impl MissionEngine {
             .map(|wp| wp.ident.as_str().to_owned())
             .collect();
         let plan_id = format!("mission:{}", config.route);
+        let name =
+            document::navigate_plan_name("mission", &plan_id, PlanRole::Mission, &waypoints)?;
         let route = MissionRoute::activate(
-            "mission",
+            &name,
             PlanRole::Mission,
             waypoints,
             ExecutionConfig::default(),
@@ -188,8 +190,10 @@ impl MissionEngine {
             .map(|waypoint| waypoint.ident.as_str().to_owned())
             .collect();
         let plan_id = format!("survey:{}", survey.digest);
+        let name =
+            document::navigate_plan_name("survey", &plan_id, PlanRole::Mission, &survey.waypoints)?;
         let route = MissionRoute::activate(
-            "survey",
+            &name,
             PlanRole::Mission,
             survey.waypoints,
             ExecutionConfig::new(survey.capture_radius_m),

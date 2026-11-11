@@ -48,10 +48,12 @@ impl MissionEngine {
             snapshot_digest: digest,
         };
         let plan_id = format!("home:{digest}");
+        let waypoints = vec![home];
+        let name = document::navigate_plan_name("home", &plan_id, PlanRole::Mission, &waypoints)?;
         let route = MissionRoute::activate(
-            "home",
+            &name,
             PlanRole::Mission,
-            vec![home],
+            waypoints,
             ExecutionConfig::new(HOME_CAPTURE_M),
         )?;
         let segments = document::home_segments(route.waypoints().len(), &config.task_ids);
