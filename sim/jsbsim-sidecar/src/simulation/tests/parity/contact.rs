@@ -1,59 +1,66 @@
 //! How far the readings of a vehicle on its gear may part between the
 //! two engines.
 //!
-//! The comparison admits small differences in height, tilt, vertical
-//! speed and body rate between the two engines. On the gear the contact
-//! forces change with those differences, so a reading may part by what
-//! they cause. In the air nothing is added to `FORCE_M_S2` and
-//! `RATE_RAD_S`. Each term below has one source:
+//! The comparison admits small differences in height and tilt between the
+//! two engines. On the gear the contact forces change with those
+//! differences, so a reading may part by what they cause. In the air
+//! nothing is added to `FORCE_M_S2` and `RATE_RAD_S`. A difference counts
+//! at most up to its own fixed limit (`POSITION_M`, `ATTITUDE_RAD`), so a
+//! bound never grows with a difference that the comparison refuses. Each
+//! term has one source:
 //!
 //! - Strut force `k·x + c·ẋ` for a compression `x`, with `k` and `c` from
 //!   the model file: `FGLGear::ComputeVerticalStrutForce`.
 //! - A contact that enters the ground during a physics step has its
 //!   compression speed limited to `x/dt`: `FGLGear::GetBodyForces`
 //!   (`maxCompressSpeed`). Its force is `(k + c/dt)·x` for that step, so
-//!   its sensitivity is `k + c/dt` to height and zero to speed. A contact
-//!   that stays on the ground has the sensitivity `k` to height and `c`
-//!   to speed.
+//!   its height sensitivity is `k + c/dt`. A contact that stays on the
+//!   ground has the height sensitivity `k`.
 //! - A contact at body position `r` changes height by `r·Δθ` for a tilt
-//!   difference `Δθ` and speed by `r·Δω` for a rate difference `Δω`
-//!   (rigid-body kinematics of the contact point in `FGLGear::GetBodyForces`).
+//!   difference `Δθ`: the contact point position in
+//!   `FGLGear::GetBodyForces`.
 //! - The friction of a contact is at most its friction coefficient
 //!   (`static_friction`, `dynamic_friction`, both below 1 in the test
 //!   models) times its normal force: `FGLGear::ComputeJacobian` and
-//!   `FGLGear::UpdateForces`. So the per-contact normal-force change, summed
-//!   without sign, bounds the change on every axis.
-//! - Mass and principal inertias come from the engine (`inertia/mass-slugs`,
-//!   `inertia/ixx-slugs_ft2` and so on): `FGMassBalance`.
+//!   `FGLGear::UpdateForces`. So the per-contact normal-force change,
+//!   summed without sign, bounds the change on every axis.
+//! - Mass and principal inertias: `inertia/mass-slugs` and
+//!   `inertia/ixx-slugs_ft2` and so on, from `FGMassBalance`.
 //! - The contact moments add to the body moment (`FGGroundReactions`
 //!   sums `GetMoments` of each contact), and the body rates integrate the
 //!   moment divided by the inertia: `FGAccelerations::CalculatePQRdot`.
+//! - The strut damping opposes a rate difference `Δω` with the torque
+//!   `-Σc·r·rᵀ·Δω`: the damping term of
+//!   `FGLGear::ComputeVerticalStrutForce` at the contact speed `r × Δω`.
 //!
 //! The bounds:
 //!
-//! - Specific force, each axis: `Σ_contacts (k_h·(|Δh| + |r|·|Δθ|) +
-//!   k_v·(|Δvd| + |r|·|Δω|)) / m`, with `k_h` and `k_v` the height and
-//!   speed sensitivities above.
-//! - Body rate: a rate is integrated, so a difference that a contact
-//!   step causes stays. Each step adds the angular impulse that the
-//!   height, tilt and speed differences can cause, divided by the smallest
-//!   principal inertia. The torque of a common height or speed difference
-//!   is `|Σk·r|` times it, and the torque of a tilt difference is at most
-//!   the largest eigenvalue of `Σk·r·rᵀ` times it. The entry sensitivity
-//!   holds for one physics step. A rate difference meets the damping
-//!   torque `-Σc·r·rᵀ·Δω` that opposes it, so the allowance decays by
+//! - Specific force, each axis: `Σ_contacts k_h·(|Δh| + |r|·|Δθ|) / m`
+//!   added to `FORCE_M_S2`, with `k_h` the height sensitivity above.
+//! - Body rate: a rate is integrated, so a difference that a contact step
+//!   causes stays. Each step adds the angular impulse that the height and
+//!   tilt differences can cause, divided by the smallest principal
+//!   inertia: a common height difference gives `|Σk_h·r|·|Δh|`, and a tilt
+//!   difference at most `λ_max(Σk_h·r·rᵀ)·|Δθ|`. The entry sensitivity
+//!   holds for one physics step of a sample. The allowance decays by
 //!   `exp(-dt·λ_min(Σc·r·rᵀ)/I)` on each step, the slowest decay that the
-//!   damping gives.
+//!   damping torque gives.
+//! - Contact compression: the compressions of the two engines may part by
+//!   at most `(FORCE_CAP_M_S2 - FORCE_M_S2)·m / Σk`, the difference at
+//!   which the spring force alone takes the specific-force bound to its
+//!   cap. A larger difference makes the force comparison meaningless, so
+//!   it fails as a compression difference.
 
 use std::path::Path;
 
 use super::super::super::PHYSICS_DT_S;
-use super::{FORCE_M_S2, RATE_RAD_S, Simulation};
+use super::{ATTITUDE_RAD, FORCE_CAP_M_S2, FORCE_M_S2, POSITION_M, RATE_RAD_S, Simulation};
 use crate::engine::{Engine, Property};
 use crate::truth::Truth;
 
 const KG_PER_SLUG: f64 = 14.593_902_937_206_364;
 const KG_M2_PER_SLUG_FT2: f64 = 1.355_817_948_331_400_4;
+const M_PER_FT: f64 = 0.3048;
 
 /// One contact of the model file: its strut coefficients and its arm.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -148,16 +155,17 @@ impl Moments {
 }
 
 /// What one engine's contacts admit at one sample.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 struct Sensitivity {
-    /// Contact force per metre of height, N/m.
+    /// Contact force per metre of height: `k + c/dt` for a contact that
+    /// entered the ground in this step, `k` for the others, N/m.
     height: Moments,
-    /// Contact force per metre per second of compression speed, N·s/m.
-    speed: Moments,
     /// The strut spring of every contact on the ground, N/m.
     spring: Moments,
     /// The strut damping of every contact on the ground, N·s/m.
     damping: Moments,
+    /// The compression of each contact, zero in the air, metres.
+    compression_m: Vec<f64>,
     mass_kg: f64,
     smallest_inertia_kg_m2: f64,
 }
@@ -178,15 +186,19 @@ impl Probe {
             property("inertia/izz-slugs_ft2"),
         ];
         let mass_slug = property("inertia/mass-slugs");
+        let on_ground: Vec<Property> = (0..count).map(|i| unit(engine, i, "WOW")).collect();
+        // The vehicle starts standing on its gear: a contact on the ground
+        // at the start did not enter the ground in the first step.
+        let was_on_ground = on_ground.iter().map(|&p| engine.get(p) > 0.5).collect();
         Self {
-            on_ground: (0..count).map(|i| unit(engine, i, "WOW")).collect(),
+            on_ground,
             compression_ft: (0..count)
                 .map(|i| unit(engine, i, "compression-ft"))
                 .collect(),
             compression_speed_fps: (0..count)
                 .map(|i| unit(engine, i, "compression-velocity-fps"))
                 .collect(),
-            was_on_ground: vec![false; count],
+            was_on_ground,
             mass_slug,
             inertia_slug_ft2,
             struts,
@@ -209,25 +221,27 @@ impl Probe {
         };
         for (i, strut) in self.struts.iter().enumerate() {
             let on_ground = engine.get(self.on_ground[i]) > 0.5;
+            let compression_ft = engine.get(self.compression_ft[i]);
             let entered = on_ground
                 && (!self.was_on_ground[i]
-                    || speed_limited(
-                        engine.get(self.compression_ft[i]),
-                        engine.get(self.compression_speed_fps[i]),
-                    ));
+                    || speed_limited(compression_ft, engine.get(self.compression_speed_fps[i])));
             self.was_on_ground[i] = on_ground;
+            sensitivity.compression_m.push(if on_ground {
+                compression_ft * M_PER_FT
+            } else {
+                0.0
+            });
             if !on_ground {
                 continue;
             }
             sensitivity.spring.add(strut.spring_n_per_m, strut);
             sensitivity.damping.add(strut.damping_n_s_per_m, strut);
-            if entered {
-                let stiffness = strut.spring_n_per_m + strut.damping_n_s_per_m / PHYSICS_DT_S;
-                sensitivity.height.add(stiffness, strut);
+            let entry = if entered {
+                strut.damping_n_s_per_m / PHYSICS_DT_S
             } else {
-                sensitivity.height.add(strut.spring_n_per_m, strut);
-                sensitivity.speed.add(strut.damping_n_s_per_m, strut);
-            }
+                0.0
+            };
+            sensitivity.height.add(strut.spring_n_per_m + entry, strut);
         }
         sensitivity
     }
@@ -270,41 +284,40 @@ impl Contact {
         c: &Truth,
         step_s: f64,
     ) -> Bounds {
-        let height_m = (r.altitude_m - c.altitude_m).abs();
-        let speed_m_s = (r.velocity_ned[2] - c.velocity_ned[2]).abs();
-        let tilt_rad =
-            (r.attitude.roll - c.attitude.roll).hypot(r.attitude.pitch - c.attitude.pitch);
-        let rate_rad_s = (0..3)
-            .map(|i| (r.rates_frd[i] - c.rates_frd[i]).abs())
-            .fold(0.0, f64::max);
+        // Each difference counts at most up to its own fixed limit, so a
+        // bound never grows with a difference the comparison refuses.
+        let height_m = (r.altitude_m - c.altitude_m).abs().min(POSITION_M);
+        let tilt_rad = (r.attitude.roll - c.attitude.roll)
+            .hypot(r.attitude.pitch - c.attitude.pitch)
+            .min(ATTITUDE_RAD);
+        let senses = [self.rust.sense(rust), self.cpp.sense(cpp)];
         let mut force = ForceBound {
-            contact_n: 0.0,
+            contact_m_s2: 0.0,
             k_per_s2: 0.0,
             height_m,
             tilt_rad,
-            speed_m_s,
-            rate_rad_s,
+        };
+        let mut compression = CompressionBound {
+            difference_m: largest_difference(&senses[0].compression_m, &senses[1].compression_m),
+            limit_m: f64::INFINITY,
         };
         let mut rate_step = 0.0f64;
         let mut retained = 0.0f64;
-        for s in [self.rust.sense(rust), self.cpp.sense(cpp)] {
+        for s in &senses {
             force.k_per_s2 = force.k_per_s2.max(s.height.sum / s.mass_kg);
-            force.contact_n = force.contact_n.max(
-                (s.height.sum * height_m
-                    + s.height.arm * tilt_rad
-                    + s.speed.sum * speed_m_s
-                    + s.speed.arm * rate_rad_s)
-                    / s.mass_kg,
-            );
+            force.contact_m_s2 = force
+                .contact_m_s2
+                .max((s.height.sum * height_m + s.height.arm * tilt_rad) / s.mass_kg);
+            if s.spring.sum > 0.0 {
+                let limit = (FORCE_CAP_M_S2 - FORCE_M_S2) * s.mass_kg / s.spring.sum;
+                compression.limit_m = compression.limit_m.min(limit);
+            }
             // The entry sensitivity holds for the one physics step in
-            // which a contact enters; the rest of the step sees the strut.
-            // A rate difference meets the damping torque that opposes it;
-            // `retained` below is that decay, so it adds nothing here.
-            let torque = |height: &Moments, speed: &Moments| {
-                height.first() * height_m + height.second().0 * tilt_rad + speed.first() * speed_m_s
-            };
-            let impulse_n_m_s = PHYSICS_DT_S * torque(&s.height, &s.speed)
-                + (step_s - PHYSICS_DT_S).max(0.0) * torque(&s.spring, &s.damping);
+            // which a contact enters; the rest of the step sees the spring.
+            let torque =
+                |height: &Moments| height.first() * height_m + height.second().0 * tilt_rad;
+            let impulse_n_m_s = PHYSICS_DT_S * torque(&s.height)
+                + (step_s - PHYSICS_DT_S).max(0.0) * torque(&s.spring);
             rate_step = rate_step.max(impulse_n_m_s / s.smallest_inertia_kg_m2);
             let slowest = s.damping.second().1 / s.smallest_inertia_kg_m2;
             retained = retained.max((-step_s * slowest).exp());
@@ -312,6 +325,7 @@ impl Contact {
         self.rate_allowance_rad_s = self.rate_allowance_rad_s * retained + rate_step;
         Bounds {
             force,
+            compression,
             rate_allowance_rad_s: self.rate_allowance_rad_s,
             horizontal_velocity_m_s: (r.velocity_ned[0] - c.velocity_ned[0])
                 .hypot(r.velocity_ned[1] - c.velocity_ned[1]),
@@ -319,10 +333,19 @@ impl Contact {
     }
 }
 
+/// The largest difference between two lists of contact compressions.
+fn largest_difference(a: &[f64], b: &[f64]) -> f64 {
+    a.iter()
+        .zip(b)
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0, f64::max)
+}
+
 /// The bounds of one sample.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct Bounds {
     pub(super) force: ForceBound,
+    pub(super) compression: CompressionBound,
     /// The body-rate difference that the contact steps so far admit.
     pub(super) rate_allowance_rad_s: f64,
     /// The horizontal velocity difference of the two truths, m/s. Both
@@ -335,12 +358,14 @@ impl Bounds {
     /// A sample of a flight with no contact on the ground.
     pub(super) const AIRBORNE: Self = Self {
         force: ForceBound {
-            contact_n: 0.0,
+            contact_m_s2: 0.0,
             k_per_s2: 0.0,
             height_m: 0.0,
             tilt_rad: 0.0,
-            speed_m_s: 0.0,
-            rate_rad_s: 0.0,
+        },
+        compression: CompressionBound {
+            difference_m: 0.0,
+            limit_m: f64::INFINITY,
         },
         rate_allowance_rad_s: 0.0,
         horizontal_velocity_m_s: 0.0,
@@ -348,11 +373,17 @@ impl Bounds {
 
     /// The widest the reported courses may part, in centidegrees, at a
     /// reported ground speed of `ground_speed_m_s`: five centidegrees
-    /// plus the course change that the velocity difference makes at
-    /// that speed. A course of no speed is unbounded.
+    /// plus the largest turn that the velocity difference can give the
+    /// velocity, `asin(|Δv| / speed)`. When the difference is as large as
+    /// the speed the course has no direction, and any two courses agree.
+    /// The course is `atan2(ve, vn)` of the reported velocity
+    /// (`Encoder::hil_gps`).
     pub(super) fn course_limit_cdeg(self, ground_speed_m_s: f64) -> f64 {
+        if self.horizontal_velocity_m_s >= ground_speed_m_s {
+            return f64::INFINITY;
+        }
         5.0 + (self.horizontal_velocity_m_s / ground_speed_m_s)
-            .atan()
+            .asin()
             .to_degrees()
             * 100.0
     }
@@ -373,34 +404,48 @@ impl Bounds {
 /// The widest the two specific-force readings may part on one sample.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct ForceBound {
-    /// The specific-force change that the admitted differences can cause
-    /// at the contacts on the ground, m/s².
-    pub(super) contact_n: f64,
+    /// The specific-force change that the admitted height and tilt
+    /// differences can cause at the contacts on the ground, m/s².
+    pub(super) contact_m_s2: f64,
     /// The height sensitivity of the contacts on the ground, divided by
     /// the mass, per second².
     pub(super) k_per_s2: f64,
-    /// The differences between the engines that cause it.
+    /// The height difference between the engines, metres.
     pub(super) height_m: f64,
+    /// The tilt difference between the engines, radians.
     pub(super) tilt_rad: f64,
-    pub(super) speed_m_s: f64,
-    pub(super) rate_rad_s: f64,
 }
 
 impl ForceBound {
     pub(super) fn limit(self) -> f64 {
-        FORCE_M_S2 + self.contact_n
+        FORCE_M_S2 + self.contact_m_s2
     }
 
     pub(super) fn describe(self) -> String {
         format!(
-            "bound {} = {FORCE_M_S2} + contact {} m/s² (k {} /s², |Δh| {} m, |Δtilt| {} rad, |Δvd| {} m/s, |Δrate| {} rad/s)",
+            "bound {} = {FORCE_M_S2} + contact {} m/s² (k {} /s², |Δh| {} m, |Δtilt| {} rad)",
             self.limit(),
-            self.contact_n,
+            self.contact_m_s2,
             self.k_per_s2,
             self.height_m,
-            self.tilt_rad,
-            self.speed_m_s,
-            self.rate_rad_s
+            self.tilt_rad
         )
+    }
+}
+
+/// How far the compression of one contact may part between the engines.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct CompressionBound {
+    /// The largest difference over the contacts, metres.
+    pub(super) difference_m: f64,
+    /// `(FORCE_CAP_M_S2 - FORCE_M_S2)·m / Σk`: the compression difference
+    /// at which the spring force alone takes the specific-force bound to
+    /// its cap. Infinite with no contact on the ground.
+    pub(super) limit_m: f64,
+}
+
+impl CompressionBound {
+    pub(super) fn holds(self) -> bool {
+        self.difference_m <= self.limit_m
     }
 }
