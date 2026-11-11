@@ -149,27 +149,7 @@ impl MissionTask {
         }
         self.update(|status| status.awaiting_capabilities = false);
         let limits = config.limits;
-        let built = match &plan.source {
-            PlanSource::Navdata(navdata) => {
-                MissionEngine::new(&navdata.snapshot, navdata.provenance.clone(), config).map(
-                    |(engine, record)| {
-                        info!(route = %record.route_input, "mission plan is a route");
-                        engine
-                    },
-                )
-            }
-            PlanSource::Survey(request) => {
-                MissionEngine::from_survey(request, config).map(|(engine, record)| {
-                    info!(
-                        lines = record.line_count,
-                        waypoints = record.waypoint_count,
-                        "mission plan is an area survey"
-                    );
-                    engine
-                })
-            }
-            PlanSource::Home => MissionEngine::home(config),
-        };
+        let built = build_mission(&plan.source, config);
         match built {
             Ok(engine) => {
                 info!(
@@ -480,6 +460,40 @@ fn velocity_capability(capabilities: &wire::HostCapabilities) -> Option<&wire::I
         .intents
         .iter()
         .find(|intent| intent.family == wire::IntentFamily::Velocity as i32)
+}
+
+/// Builds the flight engine over the plan's source.
+fn build_mission(
+    source: &PlanSource,
+    config: pilotage_mission::MissionConfig,
+) -> Result<MissionEngine, pilotage_mission::MissionBuildError> {
+    match source {
+        PlanSource::Navdata(navdata) => {
+            MissionEngine::new(&navdata.snapshot, navdata.provenance.clone(), config).map(
+                |(engine, record)| {
+                    info!(route = %record.route_input, "mission plan is a route");
+                    engine
+                },
+            )
+        }
+        PlanSource::Survey(request) => {
+            MissionEngine::from_survey(request, config).map(|(engine, record)| {
+                info!(
+                    lines = record.line_count,
+                    waypoints = record.waypoint_count,
+                    "mission plan is an area survey"
+                );
+                engine
+            })
+        }
+        PlanSource::Home => MissionEngine::home(config),
+        PlanSource::Waypoints(waypoints) => {
+            MissionEngine::from_waypoints(waypoints, config).map(|(engine, record)| {
+                info!(waypoints = ?record.idents, "mission plan is a waypoint list");
+                engine
+            })
+        }
+    }
 }
 
 #[cfg(test)]
