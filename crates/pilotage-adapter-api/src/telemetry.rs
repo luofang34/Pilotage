@@ -126,6 +126,9 @@ pub struct AvionicsSample {
     pub kinematics: Option<AvionicsKinematicsSample>,
     /// Barometric group, or `None` when it was not supplied.
     pub baro: Option<AvionicsBaroSample>,
+    /// The measured airspeed, or `None` when the vehicle states none. Its
+    /// use is authorized by the airspeed bit of [`Self::valid_flags`].
+    pub airspeed: Option<AvionicsAirspeedSample>,
     /// The estimator's own geodetic fix, or `None` when the estimator
     /// supplied none. It advances independently of the kinematics group
     /// and carries its own stamp. A simulator's truth oracle publishes a
@@ -139,7 +142,9 @@ pub struct AvionicsSample {
     /// authorization was supplied.
     pub estimator_status_stamp: Option<MeasurementStamp>,
     /// Effective latched authorization bitmask: bit0 attitude, bit1 rates,
-    /// bit2 position, bit3 velocity. This can include fail-closed downgrades
+    /// bit2 position, bit3 velocity, bit4 height above the local origin
+    /// (valid without a position fix when a barometer holds it), bit5
+    /// airspeed. This can include fail-closed downgrades
     /// relative to the raw status observation and is meaningful only when
     /// [`Self::estimator_status_stamp`] is present.
     pub valid_flags: u32,
@@ -159,6 +164,15 @@ pub struct AvionicsSample {
 pub struct AvionicsBaroSample {
     /// Pressure altitude, meters, standard datum (1013.25 hPa).
     pub pressure_alt_m: f32,
+    /// Identity and acquisition stamp for this group update.
+    pub stamp: MeasurementStamp,
+}
+
+/// The airspeed group of one avionics publication.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AvionicsAirspeedSample {
+    /// Indicated airspeed, m/s.
+    pub indicated_mps: f32,
     /// Identity and acquisition stamp for this group update.
     pub stamp: MeasurementStamp,
 }

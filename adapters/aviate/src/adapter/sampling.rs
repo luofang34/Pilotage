@@ -5,8 +5,8 @@ use std::sync::{Arc, Mutex};
 use web_time::Instant;
 
 use pilotage_adapter_api::{
-    AvionicsAttitudeSample, AvionicsKinematicsSample, AvionicsSample, GeodeticFixSample, Pose2d,
-    SourceRole, TelemetryBatch, TelemetrySample,
+    AvionicsAirspeedSample, AvionicsAttitudeSample, AvionicsKinematicsSample, AvionicsSample,
+    GeodeticFixSample, Pose2d, SourceRole, TelemetryBatch, TelemetrySample,
 };
 use pilotage_protocol::VehicleId;
 use pilotage_timing::SimTick;
@@ -123,9 +123,18 @@ fn planar_projection(
     (pose, speed)
 }
 
+/// The authorization bits of the attitude group (attitude, rates).
+const ATTITUDE_FLAGS: u32 = 0b00_0011;
+/// The authorization bits of the kinematics group: position, velocity, and
+/// the height, which a barometer keeps valid without a position fix.
+const KINEMATICS_FLAGS: u32 = 0b01_1100;
+/// The authorization bit of the airspeed group.
+const AIRSPEED_FLAG: u32 = 0b10_0000;
+
 fn effective_authorization(
     attitude: Option<AttitudeUpdate>,
     kinematics: Option<KinematicsUpdate>,
+    airspeed_authorized: bool,
     has_authorization: bool,
 ) -> (u32, u32) {
     if !has_authorization {
@@ -133,11 +142,16 @@ fn effective_authorization(
     }
     let attitude_flags = attitude
         .filter(|att| att.quality <= QUALITY_DEGRADED)
-        .map_or(0, |att| att.valid_flags & 0b0011);
+        .map_or(0, |att| att.valid_flags & ATTITUDE_FLAGS);
     let kinematics_flags = kinematics
         .filter(|kin| kin.quality <= QUALITY_DEGRADED)
-        .map_or(0, |kin| kin.valid_flags & 0b1100);
-    let flags = attitude_flags | kinematics_flags;
+        .map_or(0, |kin| kin.valid_flags & KINEMATICS_FLAGS);
+    let airspeed_flags = if airspeed_authorized {
+        AIRSPEED_FLAG
+    } else {
+        0
+    };
+    let flags = attitude_flags | kinematics_flags | airspeed_flags;
     let quality = attitude
         .filter(|_| attitude_flags != 0)
         .map(|att| att.quality)
@@ -150,6 +164,36 @@ fn effective_authorization(
         .max()
         .unwrap_or(QUALITY_UNUSABLE);
     (flags, quality)
+}
+
+/// The fresh airspeed the FC measured, and whether its latest estimator
+/// status authorizes it. The report has no time of its own, so it is
+/// stamped on the receiving clock, as the geomagnetic reference is.
+fn airspeed_sample(latest: &LinkState, now: Instant) -> (Option<AvionicsAirspeedSample>, bool) {
+    let sample = latest
+        .air_data
+        .filter(|update| now.saturating_duration_since(update.received_at) <= WITHHOLD_AFTER)
+        .and_then(|update| {
+            Some(AvionicsAirspeedSample {
+                indicated_mps: update.indicated_airspeed_mps?,
+                stamp: pilotage_adapter_api::MeasurementStamp {
+                    role: SourceRole::OperationalEstimate,
+                    integrity: pilotage_adapter_api::SourceIntegrity::ChecksummedOnly,
+                    source_id: latest.source_id,
+                    source_incarnation: latest.source_incarnation,
+                    source_epoch: latest.source_epoch,
+                    sequence: update.sequence,
+                    acquired_at_ns: update.received_since_start_ns,
+                    clock: pilotage_adapter_api::MeasurementClock::HostMonotonic,
+                },
+            })
+        });
+    let authorized = sample.is_some()
+        && latest.estimator_status.is_some_and(|status| {
+            status.authorization.quality <= QUALITY_DEGRADED
+                && status.authorization.valid_flags & AIRSPEED_FLAG != 0
+        });
+    (sample, authorized)
 }
 
 /// The simulator's stated position as a typed fix.
@@ -288,7 +332,9 @@ pub(crate) fn mavlink_batch(
         latest.maximum_inter_group_skew_ms,
         has_authorization,
     );
-    let (valid_flags, quality) = effective_authorization(attitude, kinematics, has_authorization);
+    let (airspeed, airspeed_authorized) = airspeed_sample(&latest, now);
+    let (valid_flags, quality) =
+        effective_authorization(attitude, kinematics, airspeed_authorized, has_authorization);
     let avionics = Some(AvionicsSample {
         // The estimator's own fix, under its own stamp: it advances
         // independently of the local frame beside it.
@@ -310,6 +356,7 @@ pub(crate) fn mavlink_batch(
                 pressure_alt_m: update.pressure_alt_m,
                 stamp: update.stamp,
             }),
+        airspeed,
         estimator_status_stamp,
         valid_flags,
         quality,

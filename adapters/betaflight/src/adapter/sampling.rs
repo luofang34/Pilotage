@@ -68,6 +68,7 @@ impl BetaflightAdapter {
             }),
             kinematics,
             baro: None,
+            airspeed: None,
             geodetic: self.geodetic_fix(&observed, estimate_stamp),
             estimator_status_stamp: Some(estimate_stamp),
             valid_flags,

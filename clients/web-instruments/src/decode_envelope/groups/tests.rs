@@ -54,6 +54,8 @@ fn full_avionics() -> wire::AvionicsState {
         magnetic_variation: None,
         magnetic_variation_stamp: None,
         reported_euler: None,
+        indicated_airspeed_mps: 0.0,
+        airspeed_stamp: None,
     }
 }
 

@@ -10,7 +10,9 @@ use pilotage_protocol::wire;
 use pilotage_timing::MonoTimestamp;
 use tracing::warn;
 
-const ESTIMATOR_VALID_FLAGS_MASK: u32 = 0x0f;
+/// The authorization bits the wire defines: attitude, rates, position,
+/// velocity, height, airspeed.
+const ESTIMATOR_VALID_FLAGS_MASK: u32 = 0x3f;
 const ESTIMATOR_QUALITY_UNUSABLE: u32 = 2;
 
 mod attitude;
@@ -190,6 +192,10 @@ fn avionics_to_wire(sample: AvionicsSample) -> wire::AvionicsState {
             .and(sample.magnetic_variation.as_ref())
             .map(|variation| measurement_stamp_to_wire(variation.stamp)),
         magnetic_variation,
+        indicated_airspeed_mps: sample.airspeed.map_or(0.0, |group| group.indicated_mps),
+        airspeed_stamp: sample
+            .airspeed
+            .map(|group| measurement_stamp_to_wire(group.stamp)),
         ..wire::AvionicsState::default()
     };
     attitude::apply(sample.attitude, &mut state);

@@ -50,11 +50,11 @@ pub use pilotage_protocol::{
 };
 pub use step::{StepBudget, StepOutcome};
 pub use telemetry::{
-    AvionicsAttitudeSample, AvionicsBaroSample, AvionicsKinematicsSample, AvionicsSample,
-    BatterySample, FcCommandAck, FcStateSample, GeodeticFixSample, GimbalAttitudeSample,
-    LandedStateSample, LandingApproachSample, MagneticVariationSample, MeasurementClock,
-    MeasurementStamp, MotorStateSample, Pose2d, SimTruthSample, SourceIncarnation, SourceIntegrity,
-    SourceRole, TelemetryBatch, TelemetrySample, VideoSource,
+    AvionicsAirspeedSample, AvionicsAttitudeSample, AvionicsBaroSample, AvionicsKinematicsSample,
+    AvionicsSample, BatterySample, FcCommandAck, FcStateSample, GeodeticFixSample,
+    GimbalAttitudeSample, LandedStateSample, LandingApproachSample, MagneticVariationSample,
+    MeasurementClock, MeasurementStamp, MotorStateSample, Pose2d, SimTruthSample,
+    SourceIncarnation, SourceIntegrity, SourceRole, TelemetryBatch, TelemetrySample, VideoSource,
 };
 pub use vehicle_adapter::VehicleAdapter;
 pub use video::stamping::{

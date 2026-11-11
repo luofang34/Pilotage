@@ -122,7 +122,8 @@ message AvionicsState {
   float vel_e_mps = 12;
   float vel_d_mps = 13;
   // Effective latched authorization: bit0 attitude, bit1 rates, bit2 position,
-  // bit3 velocity. It can include fail-closed downgrades relative to the raw
+  // bit3 velocity, bit4 height above the local origin (pos_d_m and vel_d_mps;
+  // a barometer keeps it valid without a position fix), bit5 airspeed. It can include fail-closed downgrades relative to the raw
   // status observation and is meaningful only when estimator_status_stamp is
   // present.
   uint32 valid_flags = 14;
@@ -168,6 +169,12 @@ message AvionicsState {
   // canonical attitude/rates authorization or a north reference. Its numeric
   // values do not require canonical estimator quality to be present or usable.
   ReportedEulerAttitude reported_euler = 26;
+  // Indicated airspeed, m/s, as the vehicle measures it. It advances
+  // independently, so it carries its own stamp; both are meaningful only
+  // when that stamp is present, and its use needs the airspeed bit of
+  // valid_flags.
+  float indicated_airspeed_mps = 27;
+  MeasurementStamp airspeed_stamp = 28;
 }
 
 // Device-reported aircraft Euler angles, for numeric display only.

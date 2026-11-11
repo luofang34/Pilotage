@@ -53,6 +53,7 @@ fn publication_time_and_source_acquisition_stamps_stay_distinct() {
     let avionics = AvionicsSample {
         geodetic: None,
         baro: None,
+        airspeed: None,
         attitude: Some(AvionicsAttitudeSample::Canonical {
             quat_wxyz: [1.0, 0.0, 0.0, 0.0],
             rates_rps: Some([0.0; 3]),
@@ -121,6 +122,7 @@ fn estimator_authorization_is_normalized_at_wire_boundary() {
     let avionics = avionics_to_wire(AvionicsSample {
         geodetic: None,
         baro: None,
+        airspeed: None,
         attitude: None,
         kinematics: None,
         estimator_status_stamp: Some(simulation_stamp(1)),
@@ -129,7 +131,8 @@ fn estimator_authorization_is_normalized_at_wire_boundary() {
         magnetic_variation: None,
     });
 
-    assert_eq!(avionics.valid_flags, 0x0f);
+    // Attitude, rates, position, velocity, height, airspeed; nothing above.
+    assert_eq!(avionics.valid_flags, 0x3f);
     assert_eq!(avionics.quality, 2);
 }
 
@@ -145,6 +148,7 @@ fn kinematics_only_omits_planar_projection_while_group_flows() {
         avionics: Some(AvionicsSample {
             geodetic: None,
             baro: None,
+            airspeed: None,
             attitude: None,
             kinematics: Some(AvionicsKinematicsSample {
                 pos_ned_m: [12.0, 3.0, -40.0],
@@ -190,6 +194,7 @@ fn attitude_only_omits_planar_projection_while_group_flows() {
         avionics: Some(AvionicsSample {
             geodetic: None,
             baro: None,
+            airspeed: None,
             attitude: Some(AvionicsAttitudeSample::Canonical {
                 quat_wxyz: [0.7, 0.0, 0.0, 0.7],
                 rates_rps: Some([0.1, 0.2, 0.3]),
