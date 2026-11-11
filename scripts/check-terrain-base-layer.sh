@@ -197,10 +197,10 @@ if ! jq -e '
         .source == "pilotage-coastline" and .["source-layer"] == "rivers" and
         .paint["line-color"] == "#93cde5"
     )] | length == 1) and
-    (.layers | map(.id)) as $order |
+    ((.layers | map(.id)) as $order |
     (["pilotage-ocean-water", "pilotage-lake-water", "pilotage-river"] | all(. as $id |
         ($order | index($id)) != null and
-        ($order | index($id)) > ($order | index("pilotage-terrain-hillshade"))))
+        ($order | index($id)) > ($order | index("pilotage-terrain-hillshade")))))
 ' "$style" >/dev/null; then
     echo "FORBIDDEN: hydrography must draw over the relief" >&2
     status=1
