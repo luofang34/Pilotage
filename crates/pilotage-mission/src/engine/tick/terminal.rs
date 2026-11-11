@@ -39,7 +39,7 @@ impl MissionEngine {
     }
 
     /// The intent after the plan completed, by vehicle class.
-    pub(super) fn end_of_plan_intent(
+    pub(in crate::engine) fn end_of_plan_intent(
         &mut self,
         solution: Option<&NavigationSolution>,
         now: MonotonicNanos,

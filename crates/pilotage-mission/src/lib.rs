@@ -13,6 +13,7 @@
 
 pub mod change;
 pub mod config;
+pub mod declared_start;
 pub mod engine;
 pub mod error;
 pub mod fixture;
@@ -32,9 +33,14 @@ pub use body_frame::{
     project_guidance_setpoint, project_ned_velocity, project_thrust_vector_ned,
 };
 pub use config::{MissionConfig, MissionLimits, OwnshipSource, TerminalOrbit};
+pub use declared_start::{
+    DeclaredHeading, DeclaredHeight, DeclaredPosition, DeclaredSpeed, DeclaredStart,
+    DeclaredStartError, SpeedReference,
+};
 pub use engine::{
-    MissionAction, MissionCounters, MissionEngine, MissionEvent, MissionOutput, MissionState,
-    NavGuidance, NavQuality, StartWithheldReason, VEHICLE_STATUS_MAX_AGE_NS, VehicleStatus,
+    LaunchDetection, MissionAction, MissionCounters, MissionEngine, MissionEvent, MissionOutput,
+    MissionState, NavGuidance, NavQuality, StartWithheldReason, VEHICLE_STATUS_MAX_AGE_NS,
+    VehicleStatus,
 };
 pub use error::MissionBuildError;
 pub use lane::{

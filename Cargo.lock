@@ -2449,6 +2449,7 @@ dependencies = [
  "navigate-geodesy",
  "navigate-guidance",
  "navigate-route",
+ "pilotage-geo",
  "pilotage-mission-core",
  "pilotage-protocol",
  "prost",

@@ -1,0 +1,282 @@
+//! Steering a fixed wing on the onboard navigator's solution: heading,
+//! altitude, and airspeed demands instead of velocities.
+//!
+//! A fixed wing flown on the onboard navigator has no position or velocity
+//! of its own flight controller to fly a velocity with: without satellite
+//! navigation its estimator reports both invalid, while its attitude,
+//! height, and airspeed stay valid. So the engine turns guidance into what
+//! the flight controller can hold with its own sensors: a true heading, an
+//! altitude above the ellipsoid, and an indicated airspeed. The heading is
+//! the course guidance asks for over the ground, corrected for the wind
+//! the navigator's ground velocity shows against the air velocity.
+//!
+//! When the navigator has no solution fit to fly, the engine never goes
+//! silent: silence is the flight controller's command-loss descent. It
+//! holds the heading and altitude it last commanded, and says why.
+
+use navigate_contract::{GuidanceSetpoint, MonotonicNanos, NavigationSolution};
+use pilotage_protocol::{AltitudeReference, ControlIntent, HeadingAltitudeIntent};
+
+use crate::config::OwnshipSource;
+
+use super::{MissionEngine, MissionEvent, MissionState, StartWithheldReason};
+use pilotage_mission_core::FlightAction as CoreFlightAction;
+
+/// How long the wind estimate takes to follow a change, seconds: long
+/// against a turn, in which the air-velocity model is least exact, short
+/// against a change of wind along a route.
+const WIND_TIME_CONSTANT_S: f64 = 10.0;
+
+/// The steering state of a fixed wing on the onboard navigator.
+#[derive(Debug, Default)]
+pub(super) struct Steering {
+    /// The heading and altitude last commanded, radians and metres.
+    last: Option<(f64, f64)>,
+    /// The wind, north and east m/s, and when it was last updated.
+    wind: Option<([f64; 2], MonotonicNanos)>,
+    /// Why the engine holds heading and altitude, while it does.
+    holding: Option<StartWithheldReason>,
+}
+
+impl MissionEngine {
+    /// Whether the engine steers by heading and altitude: a fixed wing
+    /// flown on the onboard navigator.
+    pub(super) fn steers_by_heading(&self) -> bool {
+        !self.config.can_stop()
+            && matches!(
+                self.config.ownship_source,
+                OwnshipSource::OnboardNavigation { .. }
+            )
+    }
+
+    /// The heading and altitude demand for a guidance setpoint toward a
+    /// point at `altitude_m` above the ellipsoid. The setpoint's horizontal
+    /// direction is the course over the ground; with none, the last
+    /// commanded heading holds.
+    pub(super) fn steer(
+        &mut self,
+        solution: &NavigationSolution,
+        setpoint: &GuidanceSetpoint,
+        altitude_m: f64,
+        now: MonotonicNanos,
+    ) -> Option<ControlIntent> {
+        self.end_hold();
+        self.update_wind(solution, now);
+        let course = match setpoint {
+            GuidanceSetpoint::Velocity { velocity }
+                if velocity.north_mps.hypot(velocity.east_mps) > 0.0 =>
+            {
+                Some(velocity.east_mps.atan2(velocity.north_mps))
+            }
+            GuidanceSetpoint::DeviationTracking {
+                lateral_m,
+                course_rad,
+                ..
+            } => Some(course_rad + deviation_intercept(*lateral_m)),
+            _ => None,
+        };
+        let heading = match course {
+            Some(course) => self.wind_corrected_heading(course, solution.position.altitude_m),
+            None => self.current_heading()?,
+        };
+        Some(self.heading_altitude(heading, altitude_m))
+    }
+
+    /// The heading and altitude demand that climbs, or levels, at
+    /// `altitude_m` on the present heading.
+    pub(super) fn steer_level(&mut self, altitude_m: f64) -> Option<ControlIntent> {
+        self.end_hold();
+        let heading = self.current_heading()?;
+        Some(self.heading_altitude(heading, altitude_m))
+    }
+
+    /// The hold of the heading and altitude last commanded while no
+    /// solution is fit to fly, at `now`, announced once for each reason.
+    /// Before any command the present heading and the last known altitude
+    /// are held; with no heading known nothing can be held, and the event
+    /// still says why.
+    pub(super) fn hold_heading(
+        &mut self,
+        now: MonotonicNanos,
+        fallback_altitude_m: f64,
+        events: &mut Vec<MissionEvent>,
+    ) -> Option<ControlIntent> {
+        self.announce_hold(now, events);
+        let (heading, altitude_m) = match self.steering.last {
+            Some(last) => last,
+            None => (self.last_yaw_rad?, fallback_altitude_m),
+        };
+        Some(self.heading_altitude(heading, altitude_m))
+    }
+
+    /// The heading and altitude intent of a tick in `state`: guidance
+    /// steered by heading while a solution is fit, the climb or the level
+    /// flight of the arm request on the present heading, and the hold
+    /// while no solution is fit in flight.
+    pub(super) fn heading_intent_for_state(
+        &mut self,
+        state: MissionState,
+        solution: Option<&NavigationSolution>,
+        now: MonotonicNanos,
+        events: &mut Vec<MissionEvent>,
+    ) -> Option<ControlIntent> {
+        let cruise_altitude_m = self.config.anchor.altitude_m + self.config.cruise_height_m;
+        let in_flight = matches!(
+            state,
+            MissionState::Climb | MissionState::Enroute | MissionState::Complete
+        );
+        if in_flight && solution.is_none() {
+            return self.hold_heading(now, cruise_altitude_m, events);
+        }
+        // Launched with no solution fit to fly: climb on the present
+        // heading to the cruise altitude rather than leave the flight
+        // controller without a command.
+        if state == MissionState::AwaitSolution && solution.is_none() && self.launched(now) {
+            return self.hold_heading(now, cruise_altitude_m, events);
+        }
+        match state {
+            MissionState::Climb => {
+                let Some(CoreFlightAction::Climb { target_altitude_m }) =
+                    self.active_action.as_ref()
+                else {
+                    return None;
+                };
+                let target = *target_altitude_m;
+                self.steer_level(target)
+            }
+            MissionState::Enroute => self.follow_plan_intent(solution, now, events),
+            MissionState::Complete => self.end_of_plan_intent(solution, now, events),
+            MissionState::Arming if self.arm_request_sent() => {
+                let altitude_m = if self.config.cruise_height_m > 0.0 {
+                    cruise_altitude_m
+                } else {
+                    solution?.position.altitude_m
+                };
+                self.steer_level(altitude_m)
+            }
+            MissionState::AwaitSolution
+            | MissionState::Arming
+            | MissionState::Held
+            | MissionState::Failed => None,
+        }
+    }
+
+    /// Announces the hold of a vehicle with no solution fit to fly at
+    /// `now`, once for each reason in a row.
+    pub(super) fn announce_hold(&mut self, now: MonotonicNanos, events: &mut Vec<MissionEvent>) {
+        let reason = self.solution_absence(now);
+        let changed = self
+            .steering
+            .holding
+            .is_none_or(|held| core::mem::discriminant(&held) != core::mem::discriminant(&reason));
+        self.steering.holding = Some(reason);
+        if changed {
+            events.push(MissionEvent::NavigationHold { reason });
+        }
+    }
+
+    /// The position hold of a vehicle that can stop, in flight with no
+    /// solution fit to fly: zero velocity, which its flight controller
+    /// holds on its own estimate, and only while that estimate's position
+    /// is valid. Otherwise nothing, as before: a zero velocity on an
+    /// estimate with no position would drift.
+    pub(super) fn hold_position(
+        &mut self,
+        now: MonotonicNanos,
+        events: &mut Vec<MissionEvent>,
+    ) -> Option<ControlIntent> {
+        if !self.fc_position_valid(now) {
+            return None;
+        }
+        self.announce_hold(now, events);
+        self.last_yaw_rad?;
+        Some(super::tick::outputs::zero_velocity_intent())
+    }
+
+    /// A solution is fit again: the hold ends.
+    fn end_hold(&mut self) {
+        self.steering.holding = None;
+    }
+
+    /// The heading to fly so the track over the ground is `course`: the
+    /// air velocity at the cruise airspeed plus the wind must point along
+    /// the course, so the heading turns into the wind by
+    /// `asin(crosswind / airspeed)`. A crosswind beyond the airspeed
+    /// cannot be flown out; the heading then turns square into it.
+    fn wind_corrected_heading(&self, course: f64, altitude_m: f64) -> f64 {
+        let Some(([north, east], _)) = self.steering.wind else {
+            return course;
+        };
+        let airspeed = crate::true_airspeed_for(self.commanded_cruise_mps(), altitude_m);
+        if airspeed.is_nan() || airspeed <= 0.0 {
+            return course;
+        }
+        // The wind component to the right of the course pushes the track
+        // right; the heading turns left by as much.
+        let crosswind = -north * course.sin() + east * course.cos();
+        course - (crosswind / airspeed).clamp(-1.0, 1.0).asin()
+    }
+
+    /// Folds one solution into the wind estimate: the navigator's ground
+    /// velocity less the air velocity, which is the cruise true airspeed
+    /// along the solution's heading. A solution without a heading leaves
+    /// the estimate as it is.
+    fn update_wind(&mut self, solution: &NavigationSolution, now: MonotonicNanos) {
+        let Some(heading) = self.last_yaw_rad else {
+            return;
+        };
+        let airspeed =
+            crate::true_airspeed_for(self.commanded_cruise_mps(), solution.position.altitude_m);
+        let sample = [
+            solution.velocity.north_mps - airspeed * heading.cos(),
+            solution.velocity.east_mps - airspeed * heading.sin(),
+        ];
+        if !sample.iter().all(|value| value.is_finite()) {
+            return;
+        }
+        let wind = match self.steering.wind {
+            None => sample,
+            Some((wind, at)) => {
+                let dt_s = now
+                    .elapsed_since(at)
+                    .map_or(0.0, |elapsed| elapsed.as_nanos() as f64 * 1e-9);
+                let gain = (dt_s / WIND_TIME_CONSTANT_S).min(1.0);
+                [
+                    wind[0] + (sample[0] - wind[0]) * gain,
+                    wind[1] + (sample[1] - wind[1]) * gain,
+                ]
+            }
+        };
+        self.steering.wind = Some((wind, now));
+    }
+
+    /// The heading last commanded, or else the present one.
+    fn current_heading(&self) -> Option<f64> {
+        self.steering
+            .last
+            .map(|(heading, _)| heading)
+            .or(self.last_yaw_rad)
+    }
+
+    /// The intent for `heading` and `altitude_m` at the cruise airspeed,
+    /// recorded as the last command.
+    fn heading_altitude(&mut self, heading: f64, altitude_m: f64) -> ControlIntent {
+        let heading = heading.sin().atan2(heading.cos());
+        self.steering.last = Some((heading, altitude_m));
+        ControlIntent::HeadingAltitude(HeadingAltitudeIntent {
+            heading_rad: heading as f32,
+            altitude_m: altitude_m as f32,
+            reference: AltitudeReference::Ellipsoid,
+            airspeed_mps: Some(self.commanded_cruise_mps() as f32),
+        })
+    }
+}
+
+/// The angle, radians, a fixed wing turns toward a track it is
+/// `lateral_m` right of: steeper the farther it is, never square to it.
+fn deviation_intercept(lateral_m: f64) -> f64 {
+    /// The distance off the track at which the intercept is half its
+    /// greatest, 45 degrees, metres.
+    const HALF_INTERCEPT_M: f64 = 500.0;
+    -0.5 * (lateral_m / HALF_INTERCEPT_M).atan()
+}

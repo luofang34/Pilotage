@@ -135,6 +135,15 @@ pub enum MissionEvent {
         /// Why the start is held.
         reason: super::StartWithheldReason,
     },
+    /// The vehicle is held because no solution is fit to fly in flight, and
+    /// why: a fixed wing on the onboard navigator holds the heading and
+    /// altitude it last commanded, a vehicle that can stop holds its
+    /// position on its flight controller's own estimate. Emitted when the
+    /// hold begins and when its reason changes.
+    NavigationHold {
+        /// Why no solution is fit to fly.
+        reason: super::StartWithheldReason,
+    },
     /// The vehicle passed the active fix outside its capture radius, and
     /// guidance now flies direct back to it. Emitted once per fix.
     FixOverflown {

@@ -23,7 +23,7 @@ pub(super) fn failed_output(events: Vec<MissionEvent>) -> MissionOutput {
     }
 }
 
-pub(super) fn zero_velocity_intent() -> ControlIntent {
+pub(in crate::engine) fn zero_velocity_intent() -> ControlIntent {
     ControlIntent::Velocity(VelocityIntent {
         frame: ReferenceFrame::BodyFrd,
         vx: 0.0,

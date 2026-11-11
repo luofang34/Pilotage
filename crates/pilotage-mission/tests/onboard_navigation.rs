@@ -422,3 +422,41 @@ fn a_start_without_a_solution_to_fly_says_why_once_for_each_reason() {
     );
     assert!(out.action.is_some(), "a fit solution starts the mission");
 }
+
+#[test]
+fn a_multicopter_without_a_solution_holds_position_only_on_a_valid_fc_position() {
+    for position_valid in [Some(true), Some(false), None] {
+        let mut engine = build_engine();
+        let mut vehicle = Vehicle::new();
+        let mut navigator = Navigator::new();
+        let (_, mut now) = fly_until(&mut engine, &mut vehicle, &mut navigator, enroute);
+        let mut holds = 0;
+        let mut intents = Vec::new();
+        for _ in 0..60 {
+            now = MonotonicNanos::from_nanos(now.as_nanos() + STEP_NANOS);
+            let mut status = pilotage_mission::VehicleStatus::ready(true, now);
+            status.position_valid = position_valid;
+            engine.on_vehicle_status(status);
+            let out = tick(&mut engine, &mut vehicle, now);
+            holds += out
+                .events
+                .iter()
+                .filter(|event| matches!(event, MissionEvent::NavigationHold { .. }))
+                .count();
+            intents.push(out.intent);
+        }
+        // The navigator stopped: past its one-second age limit nothing is
+        // fit to fly.
+        let late = &intents[30..];
+        if position_valid == Some(true) {
+            assert_eq!(holds, 1, "the hold is announced once");
+            assert!(late.iter().all(|intent| matches!(
+                intent,
+                Some(ControlIntent::Velocity(v)) if v.vx == 0.0 && v.vy == 0.0 && v.vz == 0.0
+            )));
+        } else {
+            assert_eq!(holds, 0, "{position_valid:?}");
+            assert!(late.iter().all(Option::is_none), "{position_valid:?}");
+        }
+    }
+}

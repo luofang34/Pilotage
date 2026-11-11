@@ -78,10 +78,8 @@ impl Bench {
 
     fn status(&mut self, ready_to_arm: bool) {
         let acquired_at = self.now();
-        self.engine.on_vehicle_status(VehicleStatus {
-            ready_to_arm,
-            acquired_at,
-        });
+        self.engine
+            .on_vehicle_status(VehicleStatus::ready(ready_to_arm, acquired_at));
     }
 }
 
