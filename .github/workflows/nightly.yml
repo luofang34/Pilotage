@@ -19,7 +19,7 @@ env:
 
 jobs:
   certification:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Far above the healthy ~1 h, far below the 6 h default: a hang in
     # an unattended run burns a bounded amount, not a night.
     timeout-minutes: 90
