@@ -238,7 +238,7 @@ impl MissionEngine {
             revision_prefix,
             segments,
         )?;
-        let plane = navigate_geodesy::wgs84::tangent_plane(config.anchor)?;
+        let plane = crate::body::tangent_plane(config.anchor)?;
         let filter = NavigationFilter::new(FusionConfig::default(), config.clock);
         let guidance = guidance_config(&config);
         Ok(Self {

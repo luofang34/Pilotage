@@ -5,7 +5,9 @@
 //! fix instead: the vehicle turns back and captures it.
 
 use navigate_contract::{GeodeticPosition, Waypoint};
-use navigate_geodesy::wgs84::{along_track_m, distance_m};
+use navigate_geodesy::{along_track_m, distance_m};
+
+use crate::body::GEODESY;
 
 use super::super::{MissionEngine, MissionEvent};
 
@@ -41,5 +43,6 @@ pub(super) fn overflown(
     from: &GeodeticPosition,
     to: &GeodeticPosition,
 ) -> bool {
-    along_track_m(position, from, to).is_ok_and(|along| along > distance_m(from, to))
+    along_track_m(position, from, to, GEODESY)
+        .is_ok_and(|along| along > distance_m(from, to, GEODESY))
 }

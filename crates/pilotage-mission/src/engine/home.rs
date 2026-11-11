@@ -25,7 +25,7 @@ impl MissionEngine {
     ///
     /// The geodesy, activation and document errors of a survey engine.
     pub fn home(config: MissionConfig) -> Result<Self, MissionBuildError> {
-        let plane = navigate_geodesy::wgs84::tangent_plane(config.anchor)?;
+        let plane = crate::body::tangent_plane(config.anchor)?;
         let mut position = plane.from_ned(&NedOffset::new(0.0, 0.0, -config.cruise_height_m));
         let altitude_m = config.anchor.altitude_m + config.cruise_height_m;
         position.altitude_m = altitude_m;

@@ -102,7 +102,7 @@ impl SurveyRequest {
         self.overshoot_m = self.overshoot_m.max(turn_radius_m(
             cruise_mps,
             execution.bank_limit_rad,
-            execution.surface_gravity_mps2,
+            crate::body::SURFACE_GRAVITY_MPS2,
         ));
     }
 
@@ -244,7 +244,7 @@ pub fn plan_survey(
     height_above_anchor_m: f64,
 ) -> Result<SurveyPlan, SurveyError> {
     validate_parameters(request, height_above_anchor_m)?;
-    let plane = navigate_geodesy::wgs84::tangent_plane(*anchor)?;
+    let plane = crate::body::tangent_plane(*anchor)?;
     let vertices = project(request, anchor, &plane)?;
     let area_m2 = geometry::area_m2(&vertices);
     if area_m2 < MIN_AREA_M2 {

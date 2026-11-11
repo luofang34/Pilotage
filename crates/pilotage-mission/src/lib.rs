@@ -22,6 +22,7 @@ pub mod policy;
 pub mod provenance;
 pub mod survey;
 
+mod body;
 mod body_frame;
 mod route;
 

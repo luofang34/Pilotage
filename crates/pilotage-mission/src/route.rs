@@ -9,9 +9,10 @@
 //! the completion flag. Each operation builds the borrowed views over the
 //! owned slice, runs, and keeps the new progress.
 
-use navigate_contract::{Ellipsoid, FlightPlan, GeodeticPosition, Ident, PlanRole, Waypoint};
+use navigate_contract::{FlightPlan, GeodeticPosition, Ident, PlanRole, Waypoint};
 use navigate_route::{ExecutionConfig, Leg, PlanExecution, SequenceEvent};
 
+use crate::body;
 use crate::error::MissionBuildError;
 
 #[cfg(test)]
@@ -31,8 +32,9 @@ pub(crate) struct MissionRoute {
 impl MissionRoute {
     /// Validates and activates the plan. `kind` is the Navigate plan
     /// identifier, for example `mission`, `survey`, or `home`; the
-    /// Pilotage plan identifier in the mission document is separate. All
-    /// positions are on WGS84: Pilotage flies on the Earth.
+    /// Pilotage plan identifier in the mission document is separate. The
+    /// plan is on [`body::ELLIPSOID`], and fly-by turns use
+    /// [`body::SURFACE_GRAVITY_MPS2`].
     ///
     /// # Errors
     ///
@@ -52,7 +54,7 @@ impl MissionRoute {
             id,
             role,
             waypoints,
-            config,
+            config: config.with_surface_gravity_mps2(body::SURFACE_GRAVITY_MPS2),
             active_index: 0,
             complete: false,
         };
@@ -62,7 +64,7 @@ impl MissionRoute {
 
     /// The plan as a Navigate view over the owned waypoints.
     pub(crate) fn plan(&self) -> FlightPlan<'_> {
-        FlightPlan::new(self.id, self.role, Ellipsoid::WGS84, &self.waypoints)
+        FlightPlan::new(self.id, self.role, body::ELLIPSOID, &self.waypoints)
     }
 
     /// The waypoints in fly order.

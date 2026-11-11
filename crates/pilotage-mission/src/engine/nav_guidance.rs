@@ -10,7 +10,9 @@
 
 use navigate_contract::{AltitudeConstraint, GeodeticPosition, SolutionQuality};
 use navigate_geodesy::initial_bearing_rad;
-use navigate_geodesy::wgs84::{cross_track_m, distance_m};
+use navigate_geodesy::{cross_track_m, distance_m};
+
+use crate::body::GEODESY;
 use navigate_route::Leg;
 
 use super::{MissionEngine, MissionState};
@@ -129,9 +131,9 @@ fn leg_guidance(
         course_rad,
         lateral_deviation_m: leg
             .from
-            .and_then(|from| cross_track_m(position, &from.position, &to.position).ok()),
+            .and_then(|from| cross_track_m(position, &from.position, &to.position, GEODESY).ok()),
         vertical_deviation_m: profile_deviation_m(position.altitude_m, to.altitude.as_ref()),
-        distance_to_waypoint_m: distance_m(position, &to.position),
+        distance_to_waypoint_m: distance_m(position, &to.position, GEODESY),
         leg_index: u32::try_from(leg.index).unwrap_or(u32::MAX),
         waypoint_count: u32::try_from(waypoint_count).unwrap_or(u32::MAX),
         quality,
