@@ -12,8 +12,8 @@ use crate::config::MissionConfig;
 use crate::error::MissionBuildError;
 use crate::route::{MissionRoute, PlanEnd};
 use crate::waypoints::{
-    DEFAULT_ORBIT_BANK_DEG, PlannedWaypoint, WaypointPlan, WaypointPlanRecord, WaypointTurn,
-    capture_radius_for, turn_radius_for,
+    PlannedWaypoint, WaypointPlan, WaypointPlanRecord, WaypointTurn, capture_radius_for,
+    true_airspeed_for, turn_radius_for,
 };
 
 impl MissionEngine {
@@ -60,13 +60,11 @@ impl MissionEngine {
             .capture_radius_m
             .unwrap_or_else(|| capture_radius_for(cruise_mps, config.capture_time_s));
         let end = plan_end(plan, &config, &waypoints, cruise_mps, capture_radius_m);
-        let route = MissionRoute::activate(
-            &name,
-            PlanRole::Mission,
-            waypoints,
-            ExecutionConfig::new(capture_radius_m),
-        )?
-        .with_end(end);
+        let mut execution = ExecutionConfig::new(capture_radius_m);
+        execution.bank_limit_rad = config.route_bank_deg.to_radians();
+        let route = MissionRoute::activate(&name, PlanRole::Mission, waypoints, execution)?
+            .with_end(end)
+            .passing_a_first_waypoint_behind();
         let engine = Self::from_route(
             route,
             &plan_id,
@@ -109,11 +107,15 @@ fn plan_end(
     let last_altitude_m = waypoints
         .last()
         .map_or(config.anchor.altitude_m, |last| last.position.altitude_m);
+    let altitude_m = orbit.altitude_m.unwrap_or(last_altitude_m);
+    // A fixed wing holds its indicated airspeed, and the circle it can fly
+    // is set by its true airspeed in the orbit's thinner air.
+    let orbit_speed_mps = true_airspeed_for(cruise_mps, altitude_m);
     PlanEnd::Orbit {
         radius_m: orbit.radius_m.unwrap_or_else(|| {
-            turn_radius_for(cruise_mps, DEFAULT_ORBIT_BANK_DEG, capture_radius_m)
+            turn_radius_for(orbit_speed_mps, config.route_bank_deg, capture_radius_m)
         }),
-        altitude_m: orbit.altitude_m.unwrap_or(last_altitude_m),
+        altitude_m,
     }
 }
 

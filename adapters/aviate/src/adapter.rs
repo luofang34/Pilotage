@@ -7,12 +7,11 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use pilotage_adapter_api::{
-    ActionResult, AdapterCapabilities, ApplyOutcome, ControlFeelDescriptor, LinkLossPolicy,
-    RejectReason, SourceIncarnation, StepBudget, StepOutcome, TelemetryBatch, VehicleAdapter,
-    VideoSource,
+    AdapterCapabilities, ApplyOutcome, ControlFeelDescriptor, LinkLossPolicy, RejectReason,
+    SourceIncarnation, StepBudget, StepOutcome, TelemetryBatch, VehicleAdapter, VideoSource,
 };
 use pilotage_control_feel::{FeelDigest, FeelMode, FlightFeelProfile, ValidatedFlightFeelProfile};
-use pilotage_protocol::{ControlAction, LogicalAxisId, ScopeId, ScopedControlFrame, VehicleId};
+use pilotage_protocol::{LogicalAxisId, ScopeId, ScopedControlFrame, VehicleId};
 
 #[cfg(test)]
 use std::sync::{Arc, Mutex};
@@ -36,7 +35,9 @@ use sim_attachments::{CameraBridge, Pointing, TruthOracle};
 mod control;
 mod control_feel;
 mod embedded;
+mod fixed_wing;
 mod flight;
+pub use fixed_wing::AviateAirframe;
 #[cfg(feature = "sim")]
 mod pointing;
 mod sampling;
@@ -44,8 +45,8 @@ mod sampling;
 mod shm_sampling;
 mod sources;
 mod startup;
-use control::rejected_control;
-pub use embedded::EmbeddedIncarnations;
+use control::{process_flight_actions, rejected_control};
+pub use embedded::{AVIATE_GROUP_SKEW_MS, EmbeddedIncarnations};
 use sampling::mavlink_batch;
 use sources::{ArmReport, EstimateSource};
 pub(crate) use startup::validate_aviate_profile_bindings;
@@ -154,6 +155,9 @@ pub struct AviateAdapter {
     // neutral input (control::ResetLatch). While engaged, everything
     // except disarm is rejected.
     reset_latch: Option<control::ResetLatch>,
+    // The fixed-wing envelope and the local origin's height, when the
+    // host flies a fixed wing.
+    fixed_wing: fixed_wing::FixedWingSettings,
     // Reset script spawns recorded instead of executed, so tests can
     // press the reset button without running the real script (which
     // kills any live SITL FC on the machine).
@@ -321,6 +325,7 @@ impl AviateAdapter {
             #[cfg(feature = "sim")]
             view_publish_failed: false,
             reset_latch: None,
+            fixed_wing: fixed_wing::FixedWingSettings::default(),
             reset_spawns: 0,
             link_loss_policy: BTreeMap::new(),
         }
@@ -395,58 +400,6 @@ impl AviateAdapter {
     }
 }
 
-/// Disposes each typed flight action: arm fires through the caller's hook,
-/// the gate-honored sim reset acks, and anything unsupported here reports
-/// rejected (the session gates unadvertised actions before delivery —
-/// defensive, not a reachable path). Mode requests are unsupported: direct
-/// flight is its OWN scope with its own lease, never a mode flip that
-/// reinterprets this scope's numbers.
-fn process_flight_actions(
-    actions: &[ControlAction],
-    mut send_arm: impl FnMut(f32),
-    current_yaw: f32,
-) -> Vec<ActionResult> {
-    let mut action_results = Vec::with_capacity(actions.len());
-    for action in actions {
-        match *action {
-            ControlAction::Arm => {
-                send_arm(current_yaw);
-                action_results.push(ActionResult::accepted(*action));
-            }
-            ControlAction::ModeRequest { .. } => {
-                action_results.push(ActionResult::rejected(
-                    *action,
-                    "no mode requests: direct flight is the vehicle.motion.direct scope",
-                ));
-            }
-            // Handled by the adapter before this point, which is where the
-            // control-feel artifact lives. Reaching here means it was not, and
-            // a request that quietly did nothing would leave an operator
-            // believing the law had changed.
-            ControlAction::FeelModeRequest { .. } => {
-                action_results.push(ActionResult::rejected(
-                    *action,
-                    "the control-feel artifact was not reachable for this request",
-                ));
-            }
-            ControlAction::SimReset
-            | ControlAction::Takeoff
-            | ControlAction::Land
-            | ControlAction::Disarm
-            | ControlAction::CameraZoom { .. }
-            | ControlAction::GimbalRecenter
-            | ControlAction::CameraZoomIn
-            | ControlAction::CameraZoomOut => {
-                action_results.push(ActionResult::rejected(
-                    *action,
-                    "not supported on the flight scope",
-                ));
-            }
-        }
-    }
-    action_results
-}
-
 impl VehicleAdapter for AviateAdapter {
     fn capabilities(&self) -> AdapterCapabilities {
         self.advertised_capabilities()
@@ -499,7 +452,16 @@ impl VehicleAdapter for AviateAdapter {
     }
 
     fn sample_telemetry(&mut self) -> TelemetryBatch {
-        self.collect_telemetry()
+        let mut batch = self.collect_telemetry();
+        let ready_to_arm = self.fc_ready_to_arm();
+        for fc_state in batch
+            .samples
+            .iter_mut()
+            .filter_map(|sample| sample.fc_state.as_mut())
+        {
+            fc_state.ready_to_arm = ready_to_arm;
+        }
+        batch
     }
 }
 

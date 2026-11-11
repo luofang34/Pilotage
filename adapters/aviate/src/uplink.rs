@@ -32,6 +32,7 @@ use pilotage_flight_uplink::{ActivationStep, StickFrame, UplinkPolicy};
 
 mod direct;
 mod fc_replies;
+mod fixed_wing;
 mod transport;
 use transport::UplinkTransport;
 #[cfg(test)]
@@ -56,6 +57,10 @@ pub struct FlightUplink {
     arm_sent: Option<bool>,
     /// The FC's answer to the arm or disarm last sent.
     arm_ack: Option<pilotage_adapter_api::FcCommandAck>,
+    /// The MAV_TYPE of the FC's last heartbeat on this link.
+    fc_mav_type: Option<u8>,
+    /// The MAV_STATE of the FC's last heartbeat on this link.
+    fc_system_status: Option<u8>,
 }
 
 impl FlightUplink {
@@ -160,6 +165,8 @@ impl FlightUplink {
             send_failures: 0,
             arm_sent: None,
             arm_ack: None,
+            fc_mav_type: None,
+            fc_system_status: None,
         }
     }
 

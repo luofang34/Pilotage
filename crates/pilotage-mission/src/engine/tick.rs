@@ -7,24 +7,25 @@ use navigate_contract::{
     NedVelocity, Waypoint,
 };
 use navigate_guidance::guide_velocity;
-use navigate_route::SequenceEvent;
+use navigate_route::{SequenceEvent, SequenceReason};
 use pilotage_mission_core::{
-    EngineEvent as CoreEvent, EngineStart, FlightAction as CoreFlightAction,
-    MissionEngine as CoreMissionEngine, MissionObservation as CoreObservation,
-    MissionTerminal as CoreTerminal, NavigationObservation, TickInput,
-    TickOutput as CoreTickOutput, VehicleObservation, WallDeadline,
+    EngineEvent as CoreEvent, EngineStart, MissionEngine as CoreMissionEngine,
+    MissionObservation as CoreObservation, MissionTerminal as CoreTerminal, NavigationObservation,
+    TickInput, TickOutput as CoreTickOutput, VehicleObservation, WallDeadline,
 };
-use pilotage_protocol::{ControlIntent, ReferenceFrame, VelocityIntent};
+use pilotage_protocol::ControlIntent;
 
-use crate::body_frame::{clamp_symmetric, project_guidance_setpoint, project_ned_velocity};
+use crate::body_frame::{project_guidance_setpoint, project_ned_velocity};
 use crate::policy::OPERATIONAL_WALL_DEADLINE_NS;
 
-use super::document::{ARM_PHASE_ID, CLIMB_CAPTURE_MARGIN_M};
+use super::document::ARM_PHASE_ID;
 use super::{MissionAction, MissionEngine, MissionEvent, MissionOutput, MissionState};
 
+mod climb;
 mod directives;
-mod outputs;
+pub(super) mod outputs;
 mod overflight;
+mod speed;
 mod terminal;
 
 use outputs::{failed_output, terminal_output};
@@ -50,7 +51,7 @@ impl MissionEngine {
         if self.state() == MissionState::Enroute {
             plan_advanced = self.advance_active_plan(solution.as_ref(), &mut events);
         }
-        let observation = self.core_observation(solution.as_ref());
+        let observation = self.core_observation(solution.as_ref(), now);
         let Some(core_output) = self.tick_core(now, observation, &mut events) else {
             return failed_output(events);
         };
@@ -77,6 +78,16 @@ impl MissionEngine {
             }
             state = self.state();
         }
+        let withheld = if state == MissionState::AwaitSolution {
+            self.start_withheld_reason(solution.as_ref(), now)
+        } else {
+            None
+        };
+        self.announce_start(withheld, &mut events);
+        let action = match action {
+            Some(arm) => self.gate_arm(arm, now, &mut events),
+            None => self.release_held_arm(now, &mut events),
+        };
         let intent = self.intent_for_state(state, solution.as_ref(), now, &mut events);
         MissionOutput {
             intent,
@@ -92,7 +103,7 @@ impl MissionEngine {
         solution: Option<&NavigationSolution>,
         events: &mut Vec<MissionEvent>,
     ) -> Option<Option<MissionAction>> {
-        let observation = self.core_observation(solution);
+        let observation = self.core_observation(solution, now);
         let output = self.tick_core(now, observation, events)?;
         Some(self.apply_core_output(&output, events))
     }
@@ -153,10 +164,15 @@ impl MissionEngine {
         self.core_failed = true;
         self.active_action = None;
         self.outstanding_arm = None;
+        self.drop_held_arm();
         events.push(MissionEvent::MissionEngineRefused { detail });
     }
 
-    fn core_observation(&self, solution: Option<&NavigationSolution>) -> CoreObservation {
+    fn core_observation(
+        &self,
+        solution: Option<&NavigationSolution>,
+        now: MonotonicNanos,
+    ) -> CoreObservation {
         CoreObservation {
             navigation: NavigationObservation {
                 guidance_valid: Some(solution.is_some()),
@@ -164,7 +180,10 @@ impl MissionEngine {
                 waypoints_captured: u32::try_from(self.waypoints_captured()).ok(),
                 altitude_m: solution.map(|value| value.position.altitude_m),
             },
-            vehicle: VehicleObservation::default(),
+            vehicle: VehicleObservation {
+                lifecycle: self.vehicle_lifecycle(now),
+                ..VehicleObservation::default()
+            },
             signals: Vec::new(),
         }
     }
@@ -199,6 +218,7 @@ impl MissionEngine {
                 CoreEvent::Terminal { result } => {
                     self.active_action = None;
                     self.outstanding_arm = None;
+                    self.drop_held_arm();
                     match result {
                         CoreTerminal::Complete { .. } => {
                             events.push(MissionEvent::MissionComplete);
@@ -221,10 +241,17 @@ impl MissionEngine {
         now: MonotonicNanos,
         events: &mut Vec<MissionEvent>,
     ) -> Option<ControlIntent> {
+        if self.steers_by_heading() {
+            return self.heading_intent_for_state(state, solution, now, events);
+        }
+        if matches!(state, MissionState::Climb | MissionState::Enroute) && solution.is_none() {
+            return self.hold_position(now, events);
+        }
         match state {
             MissionState::Climb => self.climb_intent(solution),
             MissionState::Enroute => self.follow_plan_intent(solution, now, events),
             MissionState::Complete => self.end_of_plan_intent(solution, now, events),
+            MissionState::Arming if self.arm_request_sent() => self.arming_intent(solution),
             MissionState::AwaitSolution
             | MissionState::Arming
             | MissionState::Held
@@ -244,40 +271,7 @@ impl MissionEngine {
         }
     }
 
-    fn climb_intent(&self, solution: Option<&NavigationSolution>) -> Option<ControlIntent> {
-        let solution = solution?;
-        let Some(CoreFlightAction::Climb { target_altitude_m }) = self.active_action.as_ref()
-        else {
-            return None;
-        };
-        if solution.position.altitude_m >= *target_altitude_m - CLIMB_CAPTURE_MARGIN_M {
-            return None;
-        }
-        let up_mps = clamp_symmetric(
-            self.config.climb_rate_mps,
-            self.config.limits.max_vertical_mps,
-        );
-        Some(ControlIntent::Velocity(VelocityIntent {
-            frame: ReferenceFrame::BodyFrd,
-            vx: 0.0,
-            vy: 0.0,
-            vz: -up_mps as f32,
-            yaw_rate: 0.0,
-        }))
-    }
-
-    fn climb_is_captured(&self, solution: Option<&NavigationSolution>) -> bool {
-        let Some(solution) = solution else {
-            return false;
-        };
-        let Some(CoreFlightAction::Climb { target_altitude_m }) = self.active_action.as_ref()
-        else {
-            return false;
-        };
-        solution.position.altitude_m >= *target_altitude_m - CLIMB_CAPTURE_MARGIN_M
-    }
-
-    fn follow_plan_intent(
+    pub(super) fn follow_plan_intent(
         &mut self,
         solution: Option<&NavigationSolution>,
         now: MonotonicNanos,
@@ -326,9 +320,16 @@ impl MissionEngine {
             self.plan_complete = self.route.arrive(&solution.position);
             return;
         }
+        if let Some((to_index, cross_track_m)) = self.route.pass_start(&solution.position) {
+            events.push(MissionEvent::LegAdvanced {
+                to_index,
+                reason: SequenceReason::Passed { cross_track_m },
+            });
+            return;
+        }
         match self
             .route
-            .advance(&solution.position, self.commanded_groundspeed_mps())
+            .advance(&solution.position, self.route_groundspeed_mps(solution))
         {
             SequenceEvent::LegAdvanced {
                 to_index, reason, ..
@@ -381,6 +382,10 @@ impl MissionEngine {
             &self.guidance,
         );
         match guided {
+            Ok(command) if self.steers_by_heading() => {
+                self.last_refusal = None;
+                self.steer(solution, &command.setpoint, to.position.altitude_m, now)
+            }
             Ok(command) => self.guided_intent(command.setpoint),
             Err(refusal) => {
                 self.counters.guidance_refused = self.counters.guidance_refused.wrapping_add(1);
@@ -407,18 +412,17 @@ impl MissionEngine {
             self.counters.missing_yaw = self.counters.missing_yaw.wrapping_add(1);
             return None;
         };
-        project_guidance_setpoint(
+        let intent = project_guidance_setpoint(
             &setpoint,
             yaw,
             &self.config.limits,
             self.config.yaw_gain_per_s,
-        )
-    }
-
-    fn commanded_groundspeed_mps(&self) -> f64 {
-        self.config
-            .cruise_mps
-            .min(self.config.limits.max_horizontal_mps)
+        )?;
+        Some(if self.config.can_stop() {
+            intent
+        } else {
+            speed::at_most_cruise(intent, self.commanded_cruise_mps())
+        })
     }
 
     #[allow(dead_code)]

@@ -16,7 +16,7 @@ use super::pose::truth_pose;
 use super::{SIM_CAMERA_CLIENT, spawn};
 use crate::runtime::connection::{DatagramClass, ToConnection};
 use crate::runtime::engine_actor::ToEngine;
-use crate::runtime::wire_codec::encode_telemetry_datagram;
+use pilotage_host_core::wire_codec::encode_telemetry_datagram;
 
 const N51: (f64, f64, f64) = (40.577_186, -74.738_192, 176.3);
 /// A failed delivery fails the test at this deadline instead of hanging it.

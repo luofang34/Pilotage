@@ -179,6 +179,8 @@ fn decode_heartbeat(payload: &[u8]) -> FcMessage {
         armed: payload.get(6).is_some_and(|b| b & 0x80 != 0),
         custom_mode: u32_at(payload, 0),
         autopilot: payload.get(5).copied().unwrap_or(0),
+        mav_type: payload.get(4).copied().unwrap_or(0),
+        system_status: payload.get(7).copied().unwrap_or(0),
     }
 }
 
@@ -242,6 +244,7 @@ pub(super) fn decode_known(msg_id: u32, payload: &[u8]) -> Option<FcMessage> {
         }),
         HIL_STATE_QUATERNION_ID => Some(decode_sim_truth(payload)),
         GNSS_RAW_ID => decode_gnss_fix(payload),
+        super::GPS_GLOBAL_ORIGIN_ID => Some(super::global_origin::decode(payload)),
         LOCAL_POSITION_NED_ID => Some(FcMessage::LocalPositionNed {
             time_boot_ms: u32_at(payload, 0),
             pos_ned_m: [f32_at(payload, 4), f32_at(payload, 8), f32_at(payload, 12)],

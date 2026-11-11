@@ -118,19 +118,23 @@ fn planar_projection(
     }
 }
 
-/// The estimate as one telemetry sample: the avionics group with its
+/// The estimate at `now` as one telemetry sample: the avionics group with its
 /// authorization, and the planar pose when the pair supports one. Empty
 /// when neither group is fresh.
-pub fn estimate_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -> TelemetryBatch {
+pub fn estimate_batch(
+    vehicle: VehicleId,
+    state: &Arc<Mutex<LinkState>>,
+    now: web_time::Instant,
+) -> TelemetryBatch {
     let Ok(latest) = state.lock() else {
         return TelemetryBatch::default();
     };
     let kinematics = latest
         .kinematics
-        .filter(|kin| kin.received_at.elapsed() <= WITHHOLD_AFTER);
+        .filter(|kin| now.saturating_duration_since(kin.received_at) <= WITHHOLD_AFTER);
     let attitude = latest
         .attitude
-        .filter(|att| att.received_at.elapsed() <= WITHHOLD_AFTER);
+        .filter(|att| now.saturating_duration_since(att.received_at) <= WITHHOLD_AFTER);
     if attitude.is_none() && kinematics.is_none() {
         return TelemetryBatch::default();
     }
@@ -152,7 +156,7 @@ pub fn estimate_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -> Tele
         // independently of the local frame beside it.
         geodetic: latest
             .gnss_fix
-            .filter(|fix| fix.received_at.elapsed() <= WITHHOLD_AFTER)
+            .filter(|fix| now.saturating_duration_since(fix.received_at) <= WITHHOLD_AFTER)
             .as_ref()
             .and_then(|fix| estimate_geodetic_fix(fix, &latest)),
         attitude: attitude.map(|att| AvionicsAttitudeSample::Canonical {
@@ -208,19 +212,19 @@ pub struct OperationalPose {
     pub vel_ned_mps: Option<[f32; 3]>,
 }
 
-/// The current operational pose, or `None` unless a fresh, coherent,
+/// The current operational pose at `now`, or `None` unless a fresh, coherent,
 /// authorized, finite attitude and position pair of the current epoch exists.
 /// The quaternion must have unit norm within a tolerance of 0.1.
 #[must_use]
-pub fn operational_pose(latest: &LinkState) -> Option<OperationalPose> {
+pub fn operational_pose(latest: &LinkState, now: web_time::Instant) -> Option<OperationalPose> {
     let status_stamp = latest.estimator_status_stamp()?;
     let attitude = latest
         .attitude
-        .filter(|update| update.received_at.elapsed() <= WITHHOLD_AFTER)
+        .filter(|update| now.saturating_duration_since(update.received_at) <= WITHHOLD_AFTER)
         .filter(|update| update.stamp.role == SourceRole::OperationalEstimate)?;
     let kinematics = latest
         .kinematics
-        .filter(|update| update.received_at.elapsed() <= WITHHOLD_AFTER)
+        .filter(|update| now.saturating_duration_since(update.received_at) <= WITHHOLD_AFTER)
         .filter(|update| update.stamp.role == SourceRole::OperationalEstimate)?;
     let current_epoch = latest.source_epoch;
     if status_stamp.source_epoch != current_epoch

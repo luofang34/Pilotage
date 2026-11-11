@@ -12,6 +12,8 @@
 //! by its unit tests. Each runs after the pairs.
 
 mod aviate_control_feel;
+mod embedded_clock;
+mod geodetic_datum;
 mod pipefail_pipelines;
 mod production_lints;
 mod terrain_base_layer;
@@ -73,6 +75,44 @@ fn run_rust_guards(repo_root: &Path, failed: &mut Vec<String>) {
     run_terrain_base_layer(repo_root, failed);
     run_vehicle_writes(repo_root, failed);
     run_wasm_portable(repo_root, failed);
+    run_embedded_clock(repo_root, failed);
+    run_geodetic_datum(repo_root, failed);
+}
+
+fn run_geodetic_datum(repo_root: &Path, failed: &mut Vec<String>) {
+    let name = geodetic_datum::NAME;
+    match geodetic_datum::check(repo_root) {
+        Ok(refusals) if refusals.is_empty() => print_line(&format!("guard {name}: ok")),
+        Ok(refusals) => {
+            for refusal in &refusals {
+                print_line(refusal);
+            }
+            print_line(&format!("guard {name}: FAILED at the check"));
+            failed.push(name.to_owned());
+        }
+        Err(error) => {
+            print_line(&format!("guard {name}: FAILED: {error}"));
+            failed.push(name.to_owned());
+        }
+    }
+}
+
+fn run_embedded_clock(repo_root: &Path, failed: &mut Vec<String>) {
+    let name = embedded_clock::NAME;
+    match embedded_clock::check(repo_root) {
+        Ok(refusals) if refusals.is_empty() => print_line(&format!("guard {name}: ok")),
+        Ok(refusals) => {
+            for refusal in &refusals {
+                print_line(refusal);
+            }
+            print_line(&format!("guard {name}: FAILED at the check"));
+            failed.push(name.to_owned());
+        }
+        Err(error) => {
+            print_line(&format!("guard {name}: FAILED: {error}"));
+            failed.push(name.to_owned());
+        }
+    }
 }
 
 fn run_wasm_portable(repo_root: &Path, failed: &mut Vec<String>) {

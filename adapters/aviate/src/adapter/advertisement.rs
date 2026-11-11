@@ -43,8 +43,16 @@ impl AviateAdapter {
             // telemetry-only as required by ADR-0018.
             vehicles: vec![VehicleDescriptor {
                 id: self.vehicle,
-                class: pilotage_protocol::VehicleClass::Multicopter,
-                display_name: "Aviate multicopter".to_owned(),
+                class: if self.fixed_wing_envelope().is_some() {
+                    pilotage_protocol::VehicleClass::FixedWing
+                } else {
+                    pilotage_protocol::VehicleClass::Multicopter
+                },
+                display_name: if self.fixed_wing_envelope().is_some() {
+                    "Aviate fixed wing".to_owned()
+                } else {
+                    "Aviate multicopter".to_owned()
+                },
                 scopes: {
                     #[cfg_attr(not(feature = "sim"), allow(unused_mut))]
                     let mut scopes = if self.uplink.is_some() {
@@ -52,12 +60,17 @@ impl AviateAdapter {
                             .uplink
                             .as_ref()
                             .map(crate::uplink::FlightUplink::envelope);
-                        let mut flight = envelope.map_or_else(Vec::new, |value| {
-                            vec![
+                        let mut flight = match (self.fixed_wing_envelope(), envelope) {
+                            // A fixed wing has no stick law and no direct
+                            // attitude scope: its flight controller flies
+                            // the course, height, and airspeed itself.
+                            (Some(fixed_wing), _) => vec![fixed_wing_scope_descriptor(&fixed_wing)],
+                            (None, Some(value)) => vec![
                                 flight_scope_descriptor(value),
                                 direct_scope_descriptor(value),
-                            ]
-                        });
+                            ],
+                            (None, None) => vec![],
+                        };
                         // STRUCTURALLY simulation-only (SIM-01): the lifecycle
                         // scope exists only under the Simulation profile — a
                         // physical/RF vehicle neither advertises nor accepts
@@ -180,6 +193,43 @@ fn direct_scope_descriptor(envelope: pilotage_control_feel::DemandEnvelope) -> S
             max_angular: envelope.direct_tilt_rad,
             max_yaw_rate: envelope.yaw_rate_rps,
         }],
+        actions: flight_actions(),
+        legacy: None,
+    }
+}
+
+/// The flight scope of a fixed wing: a velocity read as a course, an
+/// airspeed, and a climb rate, and a heading with an altitude. The bounds
+/// are the envelope's: the airspeed range's top, the larger of the climb
+/// and sink rates (the adapter bounds each direction), and the turn rate
+/// at the route bank and the lowest airspeed.
+fn fixed_wing_scope_descriptor(
+    envelope: &pilotage_control_feel::FixedWingEnvelope,
+) -> ScopeDescriptor {
+    let max_airspeed = envelope.max_airspeed_mps as f32;
+    ScopeDescriptor {
+        payload: None,
+        authority_group: Some(FLIGHT_SCOPE.to_owned()),
+        scope: ScopeId::new(FLIGHT_SCOPE),
+        axes: vec![],
+        intents: vec![
+            IntentCapability {
+                family: IntentFamily::Velocity,
+                frames: vec![ReferenceFrame::BodyFrd],
+                max_linear: max_airspeed,
+                max_vertical: envelope.max_climb_mps.max(envelope.max_sink_mps) as f32,
+                max_angular: envelope.max_turn_rate_rps() as f32,
+                max_yaw_rate: 0.0,
+            },
+            IntentCapability {
+                family: IntentFamily::HeadingAltitude,
+                frames: vec![],
+                max_linear: max_airspeed,
+                max_vertical: 0.0,
+                max_angular: 0.0,
+                max_yaw_rate: 0.0,
+            },
+        ],
         actions: flight_actions(),
         legacy: None,
     }

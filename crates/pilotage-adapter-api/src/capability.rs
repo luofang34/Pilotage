@@ -68,7 +68,8 @@ pub struct IntentCapability {
     /// frame-implicit families: body rate and gimbal rate).
     pub frames: Vec<ReferenceFrame>,
     /// Bound on the horizontal linear term (m/s for velocity, m for
-    /// position hold). Zero means no bound advertised.
+    /// position hold, m/s of airspeed for heading and altitude). Zero
+    /// means no bound advertised.
     pub max_linear: f32,
     /// Bound on the vertical linear term when the vehicle's vertical
     /// envelope is tighter; zero falls back to `max_linear`.

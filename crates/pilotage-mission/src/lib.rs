@@ -13,6 +13,7 @@
 
 pub mod change;
 pub mod config;
+pub mod declared_start;
 pub mod engine;
 pub mod error;
 pub mod fixture;
@@ -32,9 +33,14 @@ pub use body_frame::{
     project_guidance_setpoint, project_ned_velocity, project_thrust_vector_ned,
 };
 pub use config::{MissionConfig, MissionLimits, OwnshipSource, TerminalOrbit};
+pub use declared_start::{
+    DeclaredHeading, DeclaredHeight, DeclaredPosition, DeclaredSpeed, DeclaredStart,
+    DeclaredStartError, SpeedReference,
+};
 pub use engine::{
-    MissionAction, MissionCounters, MissionEngine, MissionEvent, MissionOutput, MissionState,
-    NavGuidance, NavQuality,
+    LaunchDetection, MissionAction, MissionCounters, MissionEngine, MissionEvent, MissionOutput,
+    MissionState, NavGuidance, NavQuality, StartWithheldReason, VEHICLE_STATUS_MAX_AGE_NS,
+    VehicleStatus,
 };
 pub use error::MissionBuildError;
 pub use lane::{
@@ -50,5 +56,6 @@ pub use provenance::{MissionPlanRecord, SnapshotProvenance, decode_snapshot};
 pub use survey::{SurveyError, SurveyPlan, SurveyPlanRecord, SurveyRequest, plan_survey};
 pub use waypoints::{
     DEFAULT_ARRIVAL_RADIUS_M, DEFAULT_ORBIT_BANK_DEG, MIN_CAPTURE_RADIUS_M, PlannedWaypoint,
-    WaypointPlan, WaypointPlanRecord, WaypointTurn, capture_radius_for, turn_radius_for,
+    WaypointPlan, WaypointPlanRecord, WaypointTurn, capture_radius_for, true_airspeed_for,
+    turn_radius_for,
 };

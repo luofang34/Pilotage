@@ -1,46 +1,42 @@
-//! The single task owning [`SessionEngine`] and the embedded reference
-//! adapter (ADR-0002, ADR-0005): every connection task funnels decoded
-//! messages here instead of touching engine state directly, so the state
-//! machine is driven from exactly one place.
+//! The single task owning the engine (ADR-0002, ADR-0005): every
+//! connection task funnels decoded messages here instead of touching
+//! engine state directly, so the state machine is driven from exactly one
+//! place. The engine itself, with the session engine and the adapter, is
+//! the host core's ([`pilotage_host_core::engine_actor::EngineActor`]);
+//! this task gives it the time, delivers each client's queued messages to
+//! that client's connection task, and adds what only a process host has:
+//! the mission lane, the flight recorder, the simulator's truth lane and
+//! the latency log.
 
-use std::collections::BTreeMap;
 use std::time::Duration;
 
-use pilotage_adapter_api::{StepBudget, VehicleAdapter};
-use pilotage_protocol::{VehicleId, wire};
-use pilotage_session::{ClientKey, DomainEnvelope, SessionAction, SessionEngine, SessionOutcome};
-use pilotage_timing::{BoundedLatencyLog, MonoTimestamp, Stage, StageLatency};
+use pilotage_adapter_api::VehicleAdapter;
+#[cfg(feature = "sim")]
+use pilotage_host_core::engine_actor::TelemetryTap;
+use pilotage_host_core::engine_actor::{
+    EngineActor as CoreEngine, MessageClass, ToEngine as CoreCommand,
+};
+use pilotage_session::{ClientKey, SessionEngine};
+#[cfg(feature = "sim")]
+use pilotage_timing::MonoTimestamp;
+use pilotage_timing::{BoundedLatencyLog, Stage, StageLatency};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::time::Instant;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
-use crate::runtime::connection::{DatagramClass, ToConnection};
+use crate::runtime::connection::ToConnection;
 use crate::runtime::registry::ClientRegistry;
 
 mod command;
-mod outbound;
+mod drops;
+mod mission;
 #[cfg(feature = "sim")]
 mod recorder;
 #[cfg(feature = "sim")]
 mod sim_truth_lane;
-mod telemetry;
 pub use command::ToEngine;
-use outbound::{targets_reliable_stream, to_connection_message};
-
-#[cfg(test)]
-mod tests;
-
-mod action_dedup;
-mod apply;
-mod drops;
-mod link_loss;
-mod mission;
-mod rejection_dedup;
-use action_dedup::ActionDedup;
-use drops::{DropCounters, MessageClass};
-use pilotage_protocol::ScopedControlFrame;
-use rejection_dedup::RejectionDedup;
+use drops::DropCounters;
 
 /// Capacity of the [`EngineActor`]'s inbound command queue.
 ///
@@ -51,44 +47,25 @@ pub const ENGINE_QUEUE_CAPACITY: usize = 1024;
 
 /// How often the embedded adapter is stepped and telemetry broadcast
 /// (ADR-0005, ADR-0009's control/telemetry cadence).
-pub const TICK_INTERVAL: Duration = Duration::from_millis(10);
+pub const TICK_INTERVAL: Duration = pilotage_host_core::engine_actor::TICK_INTERVAL;
 
 /// Capacity of the per-stage latency ring buffer dumped at shutdown.
 const LATENCY_LOG_CAPACITY: usize = 4096;
 
-/// Owns the [`SessionEngine`], the embedded vehicle adapter, the client
-/// registry, and the per-stage latency log; runs until its command channel
-/// closes.
+/// Runs the host core's engine for the process host's connections.
 ///
-/// Generic over the [`VehicleAdapter`] so the same actor drives either the
-/// deterministic reference adapter or the real Gazebo adapter for control,
-/// telemetry, and stepping. Video frames are not part of this trait and are
-/// wired separately (the media task, ADR-0005/0008).
+/// Generic over the [`VehicleAdapter`] so the same actor drives every
+/// adapter the host supports. Video frames are not part of this trait and
+/// are wired separately (the media task, ADR-0005/0008).
 pub struct EngineActor<A: VehicleAdapter> {
-    engine: SessionEngine,
-    adapter: A,
+    core: CoreEngine<A>,
     clients: ClientRegistry,
     latency: BoundedLatencyLog<LATENCY_LOG_CAPACITY>,
     drops: DropCounters,
-    action_dedup: ActionDedup,
-    adapter_rejection_dedup: RejectionDedup,
-    /// Wrapping count of link-loss policy changes the adapter failed to
-    /// enact. A non-zero value is a fail-closed fault, not noise: authority
-    /// was already fenced, so an unenacted policy means the vehicle may
-    /// still be executing its last command with nobody in control.
-    link_loss_enact_failures: u64,
-    /// Latest navigation guidance per vehicle, published by the host's
-    /// navigation component (ADR-0031). A vehicle with no entry has no
-    /// guidance to show: its telemetry carries the field absent rather
-    /// than a centered or zeroed one.
-    nav_guidance: BTreeMap<VehicleId, wire::NavGuidanceState>,
     /// The mission lane that receives client intents (ADR-0052).
     mission_lane: Option<mpsc::Sender<crate::runtime::mission_lane::LaneInbound>>,
-    /// Turns a declared magnetic heading true with the shared model.
-    magnetic: telemetry::MagneticCorrection,
     /// The simulation flight recorder, when `PILOTAGE_RECORD_DIR` asks
-    /// for one. Simulation-only by construction (ADR-0040): a flight
-    /// build does not carry the module, not merely leave it idle.
+    /// for one. Simulation-only by construction (ADR-0040).
     #[cfg(feature = "sim")]
     recorder: Option<recorder::Recorder>,
     /// The simulator's own truth, when `PILOTAGE_SIM_TRUTH_ADDR` names
@@ -97,8 +74,6 @@ pub struct EngineActor<A: VehicleAdapter> {
     truth_lane: Option<sim_truth_lane::SimTruthLane>,
     /// The single monotonic origin shared with every connection task's
     /// client-message stamps (ADR-0009: one `host_time` reference domain).
-    /// Passed in rather than sampled here so tick-driven timestamps and
-    /// client-message timestamps are never comparing two different clocks.
     start: Instant,
 }
 
@@ -107,23 +82,16 @@ impl<A: VehicleAdapter> EngineActor<A> {
     /// client registry and latency log.
     ///
     /// `start` must be the same monotonic origin used to stamp incoming
-    /// client messages (ADR-0009): the actor derives every tick and
-    /// offer-expiry timestamp from it, and a second, independently-sampled
-    /// origin would skew those comparisons against client-message stamps.
+    /// client messages (ADR-0009). The magnetic field is evaluated at the
+    /// host's civil time when the actor starts.
     #[must_use]
     pub fn new(engine: SessionEngine, adapter: A, start: Instant) -> Self {
         Self {
-            engine,
-            adapter,
+            core: CoreEngine::new(engine, adapter, host_unix_seconds()),
             clients: ClientRegistry::new(),
             latency: BoundedLatencyLog::new(),
             drops: DropCounters::default(),
-            action_dedup: ActionDedup::default(),
-            adapter_rejection_dedup: RejectionDedup::default(),
-            link_loss_enact_failures: 0,
-            nav_guidance: BTreeMap::new(),
             mission_lane: None,
-            magnetic: telemetry::MagneticCorrection::at_host_time(),
             #[cfg(feature = "sim")]
             recorder: recorder::Recorder::from_env(),
             #[cfg(feature = "sim")]
@@ -154,28 +122,37 @@ impl<A: VehicleAdapter> EngineActor<A> {
     }
 
     fn handle_command(&mut self, command: ToEngine) {
+        self.core.set_now(self.start.elapsed());
         match command {
             ToEngine::ClientConnected { client, sender } => {
                 self.clients.insert(client, sender);
+                self.core
+                    .handle_command(CoreCommand::ClientConnected { client });
             }
             ToEngine::ClientMessage {
                 client,
                 message,
                 now,
             } => {
-                let current = MonoTimestamp::from_nanos(
-                    u64::try_from(self.start.elapsed().as_nanos()).unwrap_or(u64::MAX),
-                );
-                self.on_received_message(client, *message, now, current);
+                let is_disconnect =
+                    matches!(*message, pilotage_session::DomainEnvelope::Disconnect);
+                let validate_start = Instant::now();
+                self.core.handle_command(CoreCommand::ClientMessage {
+                    client,
+                    message,
+                    now,
+                });
+                self.record_stage(Stage::Validate, validate_start.elapsed());
+                self.deliver();
+                if is_disconnect {
+                    self.clients.remove(client);
+                }
+                return;
             }
-            ToEngine::NavGuidance { vehicle, state } => match state {
-                Some(state) => {
-                    self.nav_guidance.insert(vehicle, *state);
-                }
-                None => {
-                    self.nav_guidance.remove(&vehicle);
-                }
-            },
+            ToEngine::NavGuidance { vehicle, state } => {
+                self.core
+                    .handle_command(CoreCommand::NavGuidance { vehicle, state });
+            }
             ToEngine::MissionIntent { client, intent } => self.on_mission_intent(client, intent),
             ToEngine::Requester { client, requester } => self.on_requester(client, requester),
             ToEngine::MissionPublish { to, payload } => self.publish_mission(to, *payload),
@@ -187,182 +164,59 @@ impl<A: VehicleAdapter> EngineActor<A> {
                 reply.send(summary).ok();
             }
         }
-    }
-
-    fn on_received_message(
-        &mut self,
-        client: ClientKey,
-        message: DomainEnvelope,
-        received: MonoTimestamp,
-        current: MonoTimestamp,
-    ) {
-        let sampled = match &message {
-            DomainEnvelope::Frame(frame) => Some(frame.sampled_at),
-            DomainEnvelope::ActionCommand(command) if command.timing.is_some() => {
-                Some(command.sampled_at)
-            }
-            _ => None,
-        };
-        if let Some(sampled) = sampled {
-            self.engine.observe_receive_time(client, sampled, received);
-        }
-        self.on_client_message(client, message, current);
-    }
-
-    fn on_client_message(
-        &mut self,
-        client: ClientKey,
-        message: DomainEnvelope,
-        now: MonoTimestamp,
-    ) {
-        let validate_start = Instant::now();
-        let is_disconnect = matches!(message, DomainEnvelope::Disconnect);
-        let rejected_announcement = matches!(&message, DomainEnvelope::ProfileActivation(_));
-        let outcome = self.engine.handle_client_message(client, message, now);
-        self.record_stage(Stage::Validate, validate_start.elapsed());
-        // Evidence derives from the engine's EXPLICIT acceptance event
-        // (enacted below); an announcement whose outcome carries none was
-        // rejected — comparing engine state here could misreport a
-        // rejected duplicate or foreign-session announcement as accepted.
-        if rejected_announcement
-            && !outcome
-                .actions
-                .iter()
-                .any(|action| matches!(action, SessionAction::ActivationAccepted { .. }))
-        {
-            warn!(
-                client = client.as_u64(),
-                "control profile activation REJECTED (session or revision binding failed)"
-            );
-        }
-        if is_disconnect {
-            self.clients.remove(client);
-            self.action_dedup.forget(client);
-            self.adapter_rejection_dedup.forget(client);
-        }
-        self.enact(outcome);
+        self.deliver();
     }
 
     fn on_tick(&mut self) {
-        let now = MonoTimestamp::from_nanos(u64_nanos_since(self.start));
-        let outcome = self.engine.handle_tick(now);
-        self.enact(outcome);
-
+        self.core.set_now(self.start.elapsed());
         let apply_start = Instant::now();
-        let step_outcome = self.adapter.step(StepBudget { ticks: 1 });
+        #[cfg(feature = "sim")]
+        let mut tap = SimTap {
+            recorder: self.recorder.as_mut(),
+            truth: self
+                .truth_lane
+                .as_mut()
+                .and_then(sim_truth_lane::SimTruthLane::poll),
+        };
+        #[cfg(not(feature = "sim"))]
+        let mut tap = pilotage_host_core::engine_actor::NoTap;
+        self.core.tick_with(&mut tap);
         self.record_stage(Stage::Apply, apply_start.elapsed());
-        debug!(advanced = step_outcome.advanced, "adapter stepped");
-
-        for loss in self.adapter.take_control_authority_losses() {
-            let outcome = self.engine.handle_device_authority_loss(&loss, now);
-            self.enact(outcome);
-        }
-
-        self.broadcast_telemetry(now);
+        self.deliver();
     }
 
-    fn enact(&mut self, outcome: SessionOutcome) {
-        if outcome.dropped > 0 {
-            error!(
-                dropped = outcome.dropped,
-                "session engine dropped actions at the per-call cap"
-            );
-        }
-        for action in outcome.actions {
-            self.enact_one(action);
-        }
-    }
-
-    fn enact_one(&mut self, action: SessionAction) {
-        match action {
-            SessionAction::SendToClient { client, envelope } => {
-                // `Pong` is the ADR-0009 RTT probe reply and travels as a
-                // datagram alongside `Ping` (ADR-0005's channel mapping);
-                // `Authority` (were it ever unicast) belongs on the
-                // dedicated authority-events stream, never sharing the
-                // bootstrap stream's head-of-line with bulk/handshake
-                // traffic; every other unicast reply is session
-                // bootstrap/lease state and belongs on the bootstrap stream.
-                let message = to_connection_message(&envelope);
-                self.send_to(client, message, MessageClass::Unicast);
-            }
-            SessionAction::Broadcast { envelope } => {
-                let message = to_connection_message(&envelope);
-                self.broadcast(message, MessageClass::AuthorityBroadcast);
-            }
-            SessionAction::RejectFrame { client, rejection } => {
-                let bytes = crate::runtime::wire_codec::encode_frame_rejected_datagram(&rejection);
-                self.send_to(
-                    client,
-                    ToConnection::Datagram {
-                        class: DatagramClass::FrameRejected,
-                        bytes,
-                    },
-                    MessageClass::Unicast,
-                );
-            }
-            SessionAction::CloseClient { client, reason } => {
-                warn!(
-                    ?reason,
-                    client = client.as_u64(),
-                    "closing client connection"
-                );
-                self.send_to(client, ToConnection::Close, MessageClass::Unicast);
-                self.clients.remove(client);
-                self.action_dedup.forget(client);
-                self.adapter_rejection_dedup.forget(client);
-            }
-            SessionAction::ActivationAccepted { client, activation } => {
-                // The traceability record for control evidence (INPUT-01):
-                // emitted only on the engine's explicit acceptance.
-                info!(
-                    client = client.as_u64(),
-                    profile = %activation.profile_id,
-                    profile_revision = activation.profile_revision,
-                    activation_revision = activation.activation_revision,
-                    digest = %hex_digest(&activation.digest),
-                    device_profile = %activation.device_profile_id,
-                    device_profile_revision = activation.device_profile_revision,
-                    device_digest = %hex_digest(&activation.device_digest),
-                    "control profile activation accepted"
-                );
-            }
-            SessionAction::ApplyToAdapter { client, frame } => {
-                self.apply_to_adapter(client, frame);
-            }
-            SessionAction::InvalidatePendingCommands { vehicle, scope } => {
-                self.adapter.invalidate_pending_commands(vehicle, &scope);
-            }
-            action @ (SessionAction::EngageLinkLoss { .. }
-            | SessionAction::ClearLinkLoss { .. }) => {
-                self.enact_link_loss(action);
-            }
-        }
-    }
-
-    /// Hands `message` to `client`'s connection task without ever blocking
-    /// this actor's single task on that client's outbound queue (ADR-0009: a
-    /// stalled client must not wedge ticks, telemetry, or every other
-    /// client's control processing).
+    /// Hands every message the engine queued to its client's connection
+    /// task without ever blocking this actor's single task on that
+    /// client's outbound queue (ADR-0009: a stalled client must not wedge
+    /// ticks, telemetry, or every other client's control processing).
     ///
-    /// A full queue means the client is draining slower than it is being fed
-    /// and is a counted, non-fatal drop; only a closed channel — the
-    /// connection task has actually exited — evicts the client from the
-    /// registry.
-    fn send_to(&mut self, client: ClientKey, message: ToConnection, class: MessageClass) {
+    /// A full queue is a counted drop; a full reliable stream closes the
+    /// client instead, since a dropped ordered event breaks the stream's
+    /// ordering for every later event (ADR-0011). Only a closed channel —
+    /// the connection task has actually exited — evicts the client without
+    /// a close.
+    fn deliver(&mut self) {
+        for client in self.core.client_keys() {
+            for message in self.core.take_messages(client) {
+                if !self.send_to(client, message) {
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Sends one message to one client; false when the client is gone.
+    fn send_to(&mut self, client: ClientKey, message: ToConnection) -> bool {
         let Some(sender) = self.clients.sender(client) else {
-            return;
+            return false;
         };
         let reliable = targets_reliable_stream(&message);
+        let class = class_of(&message);
         match sender.try_send(message) {
-            Ok(()) => {}
+            Ok(()) => true,
             Err(TrySendError::Full(_)) => {
                 let total = self.drops.record(class);
                 if reliable {
-                    // Silently dropping an ordered reliable event breaks the
-                    // stream's ordering guarantee for every later event; a
-                    // client that cannot keep up with its own bootstrap/
-                    // authority stream is closed instead (ADR-0011).
                     error!(
                         client = client.as_u64(),
                         ?class,
@@ -370,97 +224,44 @@ impl<A: VehicleAdapter> EngineActor<A> {
                         "reliable-stream outbound queue full, closing connection"
                     );
                     self.close_full_client(client);
+                    false
                 } else {
-                    warn!(
+                    debug!(
                         client = client.as_u64(),
                         ?class,
                         total_dropped = total,
                         "client outbound queue full, dropping message"
                     );
+                    true
                 }
             }
             Err(TrySendError::Closed(_)) => {
-                self.clients.remove(client);
-                self.action_dedup.forget(client);
-                self.adapter_rejection_dedup.forget(client);
+                self.forget(client);
+                false
             }
         }
     }
 
     /// Closes a client whose outbound queue overflowed on a reliable-stream
-    /// message: sends a best-effort `Close` (which the writer honors before it
-    /// drains the backlog) and evicts the client so no further messages are
-    /// routed to it.
+    /// message: sends a best-effort `Close` (which the writer honors before
+    /// it drains the backlog) and evicts the client.
     fn close_full_client(&mut self, client: ClientKey) {
         if let Some(sender) = self.clients.sender(client) {
             sender.try_send(ToConnection::Close).ok();
         }
+        self.forget(client);
+    }
+
+    fn forget(&mut self, client: ClientKey) {
         self.clients.remove(client);
-        self.action_dedup.forget(client);
-        self.adapter_rejection_dedup.forget(client);
+        self.core.disconnect(client);
     }
 
-    fn broadcast_datagram(&mut self, bytes: Vec<u8>) {
-        self.broadcast(
-            ToConnection::Datagram {
-                class: DatagramClass::Telemetry,
-                bytes,
-            },
-            MessageClass::Telemetry,
-        );
-    }
-
-    /// Fans `message` out to every connected client without blocking the
-    /// actor task on any single client's queue (ADR-0009), evicting a client
-    /// only when its connection task has actually gone away — never merely
-    /// because it briefly could not keep up (ADR-0011: telemetry and
-    /// authority broadcasts have different reliability needs but neither
-    /// should disconnect a client over one busy tick).
+    /// Fans `message` out to every connected client, through the engine's
+    /// queues so it keeps its order behind the engine's own messages.
     fn broadcast(&mut self, message: ToConnection, class: MessageClass) {
-        let reliable = targets_reliable_stream(&message);
-        let mut closed = Vec::new();
-        let mut full = Vec::new();
-        for (client, sender) in self.clients.iter() {
-            match sender.try_send(message.clone()) {
-                Ok(()) => {}
-                Err(TrySendError::Full(_)) => full.push(client),
-                Err(TrySendError::Closed(_)) => closed.push(client),
-            }
-        }
-        if !full.is_empty() {
-            let total = (0..full.len())
-                .map(|_| self.drops.record(class))
-                .last()
-                .unwrap_or_default();
-            // A best-effort telemetry broadcast tolerates a full queue; a
-            // reliable authority broadcast does not — dropping it would break
-            // ordering for that client, so it is closed instead (ADR-0011).
-            if reliable {
-                error!(
-                    ?class,
-                    skipped_clients = full.len(),
-                    total_dropped = total,
-                    "reliable-stream broadcast queue full, closing affected connections"
-                );
-            } else {
-                debug!(
-                    ?class,
-                    skipped_clients = full.len(),
-                    total_dropped = total,
-                    "broadcast skipped clients with a full outbound queue"
-                );
-            }
-        }
-        if reliable {
-            for client in full {
-                self.close_full_client(client);
-            }
-        }
-        for client in closed {
-            self.clients.remove(client);
-            self.action_dedup.forget(client);
-            self.adapter_rejection_dedup.forget(client);
-        }
+        self.core.broadcast_message(message, class);
+        self.deliver();
     }
 
     fn record_stage(&mut self, stage: Stage, duration: Duration) {
@@ -487,13 +288,60 @@ impl<A: VehicleAdapter> EngineActor<A> {
     }
 }
 
-/// Nanoseconds elapsed since `start`, saturating rather than overflowing for
-/// an implausibly long-running process.
-fn u64_nanos_since(start: Instant) -> u64 {
-    u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX)
+/// Whether `message` is destined for one of the reliable ordered streams
+/// (bootstrap or authority-events, ADR-0005), where a dropped message would
+/// break the stream's ordering guarantee. Best-effort datagrams and the
+/// `Close` signal are not.
+fn targets_reliable_stream(message: &ToConnection) -> bool {
+    matches!(
+        message,
+        ToConnection::BootstrapMessage { .. } | ToConnection::AuthorityMessage(_)
+    )
 }
 
-/// Lowercase-hex rendering of a profile content digest for the evidence log.
-fn hex_digest(digest: &[u8; 32]) -> String {
-    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+/// The ADR-0011 class a message's drop counts against.
+fn class_of(message: &ToConnection) -> MessageClass {
+    match message {
+        ToConnection::Datagram {
+            class: pilotage_host_core::connection::DatagramClass::Telemetry,
+            ..
+        } => MessageClass::Telemetry,
+        ToConnection::AuthorityMessage(_) => MessageClass::AuthorityBroadcast,
+        _ => MessageClass::Unicast,
+    }
+}
+
+/// The host's civil time, Unix seconds: the date the magnetic field is
+/// evaluated at for the whole run.
+fn host_unix_seconds() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| {
+            i64::try_from(since.as_secs()).unwrap_or(i64::MAX)
+        })
+}
+
+/// The simulation build's telemetry tap: the simulator's truth fills a
+/// sample the adapter left without one, and the recorder keeps every
+/// corrected sample.
+#[cfg(feature = "sim")]
+struct SimTap<'a> {
+    recorder: Option<&'a mut recorder::Recorder>,
+    truth: Option<pilotage_adapter_api::SimTruthSample>,
+}
+
+#[cfg(feature = "sim")]
+impl TelemetryTap for SimTap<'_> {
+    fn fill(&mut self, sample: &mut pilotage_adapter_api::TelemetrySample) {
+        // The adapter's own truth takes precedence over the side lane.
+        if sample.sim_truth.is_none() {
+            sample.sim_truth = self.truth;
+        }
+    }
+
+    fn record(&mut self, sample: &pilotage_adapter_api::TelemetrySample, now: MonoTimestamp) {
+        if let Some(recorder) = self.recorder.as_mut() {
+            recorder.record(sample, now);
+        }
+    }
 }

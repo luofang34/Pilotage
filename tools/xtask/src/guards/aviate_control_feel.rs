@@ -111,6 +111,11 @@ pub(crate) const EXEMPTIONS: &[(&str, &str, &str)] = &[
     ("adapter.rs", "YAW_AXIS", "an axis id"),
     ("adapter.rs", "WITHHOLD_AFTER", "telemetry staleness"),
     (
+        "adapter/embedded.rs",
+        "AVIATE_GROUP_SKEW_MS",
+        "estimate group coherence on the embedded link",
+    ),
+    (
         "adapter/shm_sampling.rs",
         "REATTACH_INTERVAL",
         "shared-memory reattach",

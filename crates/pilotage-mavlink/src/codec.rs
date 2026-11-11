@@ -13,13 +13,20 @@ mod attitude_target;
 mod camera;
 mod flight_state;
 mod gimbal_manager;
+mod global_origin;
+mod heading_altitude;
 pub use camera::{
     CAMERA_INFORMATION_ID, CAMERA_SETTINGS_ID, CameraMessage, MAV_CMD_SET_CAMERA_ZOOM,
 };
-pub use flight_state::{EXTENDED_SYS_STATE_ID, GLOBAL_POSITION_INT_ID, LandedState};
+pub use flight_state::{EXTENDED_SYS_STATE_ID, GLOBAL_POSITION_INT_ID, LandedState, ready_to_arm};
 pub use gimbal_manager::{
     GIMBAL_MANAGER_INFORMATION_ID, GIMBAL_MANAGER_STATUS_ID, GimbalManagerInformation,
     GimbalManagerStatus,
+};
+pub use global_origin::GPS_GLOBAL_ORIGIN_ID;
+pub use heading_altitude::{
+    HEADING_ALTITUDE_TYPE_MASK, LocalDownError, MAV_CMD_DO_CHANGE_SPEED, encode_airspeed_command,
+    encode_heading_altitude_setpoint, local_down_m,
 };
 mod decoding;
 mod encoding;
@@ -125,6 +132,10 @@ pub enum FcMessage {
         custom_mode: u32,
         /// MAV_AUTOPILOT of the sender.
         autopilot: u8,
+        /// MAV_TYPE of the sender: the airframe it says it flies.
+        mav_type: u8,
+        /// MAV_STATE of the sender: booting, ready, armed, or failed.
+        system_status: u8,
     },
     /// ArduPilot's EKF health summary (ardupilotmega EKF_STATUS_REPORT).
     /// The message has no timestamp of its own.
@@ -139,6 +150,12 @@ pub enum FcMessage {
         severity: u8,
         /// The NUL-padded text, as the wire carries it.
         text: [u8; STATUS_TEXT_LEN],
+    },
+    /// The horizontal origin of the FC's local frame. It moves when the FC
+    /// rebases its local frame; the report's sea-level altitude is not read.
+    GlobalOrigin {
+        /// Latitude and longitude in degrees·1e7, as the wire carries them.
+        lat_lon: [i32; 2],
     },
     /// The attitude and collective thrust the FC commands now.
     AttitudeTarget {
@@ -301,6 +318,9 @@ pub struct ParseStats {
     /// Structurally valid frames carrying a message id this parser does
     /// not know (skipped whole).
     pub unknown_ids: u32,
+    /// The message id of the last frame counted in `unknown_ids`, so a
+    /// host can name what it skipped.
+    pub last_unknown_id: Option<u32>,
     /// Bytes discarded while hunting for a frame start.
     pub garbage_bytes: u32,
 }
@@ -351,6 +371,7 @@ fn crc_extra(msg_id: u32) -> Option<u8> {
         ATTITUDE_QUATERNION_ID => Some(246),
         LOCAL_POSITION_NED_ID => Some(185),
         GNSS_RAW_ID => Some(24),
+        GPS_GLOBAL_ORIGIN_ID => Some(39),
         SCALED_PRESSURE_ID => Some(115),
         HIL_STATE_QUATERNION_ID => Some(4),
         COMMAND_ACK_ID => Some(143),
@@ -463,6 +484,7 @@ pub fn parse_datagram(bytes: &[u8], out: &mut Vec<(FrameSource, FcMessage)>) -> 
             }
             None => {
                 stats.unknown_ids = stats.unknown_ids.wrapping_add(1);
+                stats.last_unknown_id = Some(msg_id);
             }
         }
         at = at.saturating_add(frame_len);

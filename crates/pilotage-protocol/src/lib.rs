@@ -40,9 +40,9 @@ pub use gimbal_reference::{GimbalAxisLocks, GimbalReference, GimbalYawFrame};
 pub use heading::{HeadingReference, MagneticVariationSource};
 pub use ids::{Generation, PrincipalId, ScopeId, SequenceNum, SessionId, VehicleId};
 pub use intent::{
-    ActionKind, AttitudeThrustIntent, BodyRateIntent, ControlAction, ControlIntent, FeelTarget,
-    GimbalRateIntent, IntentFamily, ModeTarget, PositionHoldIntent, ReferenceFrame, VelocityIntent,
-    actions_conflict,
+    ActionKind, AltitudeReference, AttitudeThrustIntent, BodyRateIntent, ControlAction,
+    ControlIntent, FeelTarget, GimbalRateIntent, HeadingAltitudeIntent, IntentFamily, ModeTarget,
+    PositionHoldIntent, ReferenceFrame, VelocityIntent, actions_conflict,
 };
 pub use join_token::{ADMISSION_REJECTED_CLOSE_CODE, JoinToken, JoinTokenError};
 pub use landed_state::LandedState;

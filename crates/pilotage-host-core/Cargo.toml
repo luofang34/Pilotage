@@ -1,0 +1,31 @@
+[package]
+name = "pilotage-host-core"
+description = "Pilotage's embeddable vehicle host: the mission principal, the session engine and the Aviate adapter on an injected clock, with the MAVLink bytes moved by the host"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+aerocontext-core = { workspace = true }
+navigate-contract = { workspace = true }
+pilotage-adapter-api = { workspace = true }
+pilotage-adapter-aviate = { workspace = true }
+pilotage-geo = { workspace = true }
+pilotage-mavlink = { workspace = true }
+pilotage-mission = { workspace = true }
+pilotage-protocol = { workspace = true }
+pilotage-session = { workspace = true }
+pilotage-timing = { workspace = true }
+pilotage-world = { workspace = true }
+prost = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+web-time = { workspace = true }
+
+[dev-dependencies]
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+pilotage-control-feel = { workspace = true }

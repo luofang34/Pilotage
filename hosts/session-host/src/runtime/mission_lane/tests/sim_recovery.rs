@@ -24,7 +24,6 @@ use super::super::journal::LaneJournal;
 use super::super::{LaneRuntimeConfig, LaneTask, PROGRESS_INTERVAL, unix_now_ms};
 use super::hand_back::{approval, fetched};
 use super::restart::send;
-use crate::runtime::automation::MissionPlan;
 use crate::runtime::engine_actor::{ENGINE_QUEUE_CAPACITY, EngineActor, ToEngine};
 use crate::runtime::operations::{self, OperationHost};
 use crate::runtime::{AutomationStatus, HOST_VEHICLE};
@@ -116,7 +115,7 @@ fn rig() -> Rig {
             name: "SIM-1".to_owned(),
             simulated: true,
             execution_strategy: "host-guided-velocity".to_owned(),
-            template: MissionPlan::lane_template(
+            template: crate::runtime::automation::plans::lane_template(
                 OwnshipSource::vehicle_estimate(),
                 ExecutionTarget::Simulator,
             ),

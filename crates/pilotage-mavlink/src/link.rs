@@ -19,7 +19,9 @@ mod flight_state;
 pub use flight_state::{LandedStateReport, RelativeAltitudeReport};
 mod fence;
 mod gimbal;
+mod global_origin;
 pub use gimbal::{GimbalManagerReport, GimbalReports};
+pub use global_origin::GlobalOriginUpdate;
 pub mod measurement;
 mod outbound;
 pub use fence::{
@@ -82,6 +84,8 @@ pub struct LinkState {
     pub sim_truth: Option<SimTruthUpdate>,
     /// The receiver's own fix, when the flight controller reports one.
     pub gnss_fix: Option<GnssFixUpdate>,
+    /// The horizontal origin of the FC's local frame, as it last reported.
+    pub global_origin: Option<GlobalOriginUpdate>,
     /// The flight controller's latest geomagnetic reference report.
     pub geomagnetic_reference: Option<GeomagneticReferenceUpdate>,
     /// When this link began: the clock a report is stamped against when

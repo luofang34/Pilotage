@@ -189,6 +189,7 @@ impl AviateAdapter {
             #[cfg(feature = "sim")]
             view_publish_failed: false,
             reset_latch: None,
+            fixed_wing: super::super::fixed_wing::FixedWingSettings::default(),
             #[cfg(test)]
             reset_spawns: 0,
             link_loss_policy: BTreeMap::new(),

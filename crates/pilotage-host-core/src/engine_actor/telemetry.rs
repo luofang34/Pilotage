@@ -1,0 +1,385 @@
+//! Lossless adapter-to-wire telemetry mapping.
+
+use pilotage_adapter_api::{
+    AvionicsSample, BatterySample, FcStateSample, GeodeticFixSample, GimbalAttitudeSample,
+    MagneticVariationSample, MagneticVariationSource, MeasurementClock, MeasurementStamp,
+    SimTruthSample, SourceIntegrity, SourceRole, TelemetrySample,
+};
+use pilotage_geo::SIMULATOR_GEOID_MODEL_ID;
+use pilotage_protocol::wire;
+use pilotage_timing::MonoTimestamp;
+use tracing::warn;
+
+const ESTIMATOR_VALID_FLAGS_MASK: u32 = 0x0f;
+const ESTIMATOR_QUALITY_UNUSABLE: u32 = 2;
+
+mod attitude;
+mod flight_procedure;
+mod magnetic;
+
+pub(super) use magnetic::MagneticCorrection;
+
+pub(super) fn sample_to_wire(
+    sample: TelemetrySample,
+    published_at: MonoTimestamp,
+) -> wire::TelemetrySample {
+    wire::TelemetrySample {
+        flight_procedure: sample
+            .flight_procedure
+            .map(|value| Box::new(flight_procedure::to_wire(value))),
+        payload: sample.payload.map(Box::new),
+        vehicle: Some(wire::VehicleId {
+            value: sample.vehicle.as_u64(),
+        }),
+        tick: Some(wire::SimTick {
+            value: sample.tick.as_u64(),
+        }),
+        observed_at: Some(wire::MonoTimestamp {
+            nanos: published_at.as_nanos(),
+        }),
+        pose: sample.pose.map(|pose| wire::Pose2d {
+            x_m: pose.x as f32,
+            y_m: pose.y as f32,
+            heading_rad: pose.heading as f32,
+        }),
+        velocity: sample.speed.map(|speed| wire::Velocity2d {
+            linear_x_mps: speed as f32,
+            linear_y_mps: 0.0,
+            angular_rad_s: 0.0,
+        }),
+        avionics: sample.avionics.map(avionics_to_wire),
+        sim_truth: sample
+            .sim_truth
+            .map(|truth| Box::new(sim_truth_to_wire(truth))),
+        fc_state: sample
+            .fc_state
+            .map(|state| Box::new(fc_state_to_wire(state))),
+        gimbal: sample.gimbal.map(|gimbal| Box::new(gimbal_to_wire(gimbal))),
+        battery: sample
+            .battery
+            .map(|battery| Box::new(battery_to_wire(battery))),
+        // Guidance does not come from the adapter; the engine actor
+        // attaches the navigation component's own state (ADR-0031).
+        nav_guidance: None,
+    }
+}
+
+fn gimbal_to_wire(sample: GimbalAttitudeSample) -> wire::GimbalAttitude {
+    wire::GimbalAttitude {
+        quat_w: sample.quat_wxyz[0],
+        quat_x: sample.quat_wxyz[1],
+        quat_y: sample.quat_wxyz[2],
+        quat_z: sample.quat_wxyz[3],
+        rate_x_rad_s: sample.rates_rps[0],
+        rate_y_rad_s: sample.rates_rps[1],
+        rate_z_rad_s: sample.rates_rps[2],
+        stamp: Some(measurement_stamp_to_wire(sample.stamp)),
+        failure_flags: sample.failure_flags,
+        yaw_frame: sample.reference.yaw_frame.to_wire() as i32,
+        roll_locked: sample.reference.locks.roll,
+        pitch_locked: sample.reference.locks.pitch,
+        yaw_locked: sample.reference.locks.yaw,
+        // The device's own mode bits stay unwritten: the typed reference
+        // is the only one a client reads.
+        ..wire::GimbalAttitude::default()
+    }
+}
+
+fn battery_to_wire(sample: BatterySample) -> wire::BatteryState {
+    wire::BatteryState {
+        stamp: Some(measurement_stamp_to_wire(sample.stamp)),
+        instance: sample.instance,
+        remaining_fraction: sample.remaining_fraction.unwrap_or(f32::NAN),
+        voltage_v: sample.voltage_v.unwrap_or(f32::NAN),
+        current_a: sample.current_a.unwrap_or(f32::NAN),
+        consumed_energy_j: sample.consumed_energy_j.unwrap_or(f32::NAN),
+        time_remaining_s: sample.time_remaining_s.unwrap_or(0),
+    }
+}
+
+fn measurement_stamp_to_wire(stamp: MeasurementStamp) -> wire::MeasurementStamp {
+    let clock = match stamp.clock {
+        MeasurementClock::VehicleBoot => wire::MeasurementClock::VehicleBoot,
+        MeasurementClock::Simulation => wire::MeasurementClock::Simulation,
+        MeasurementClock::HostMonotonic => wire::MeasurementClock::HostMonotonic,
+    };
+    let role = match stamp.role {
+        SourceRole::OperationalEstimate => wire::SourceRole::OperationalEstimate,
+        SourceRole::SimulationTruth => wire::SourceRole::SimulationTruth,
+        SourceRole::FcState => wire::SourceRole::FcState,
+        SourceRole::VideoCapture => wire::SourceRole::VideoCapture,
+        SourceRole::PayloadDevice => wire::SourceRole::PayloadDevice,
+    };
+    let integrity = match stamp.integrity {
+        SourceIntegrity::Authenticated => wire::SourceIntegrity::Authenticated,
+        SourceIntegrity::ChecksummedOnly => wire::SourceIntegrity::ChecksummedOnly,
+        SourceIntegrity::Unprotected => wire::SourceIntegrity::Unprotected,
+    };
+    wire::MeasurementStamp {
+        role: role as i32,
+        integrity: integrity as i32,
+        source_id: stamp.source_id,
+        source_epoch: stamp.source_epoch,
+        sequence: stamp.sequence,
+        acquired_at_ns: stamp.acquired_at_ns,
+        clock: clock as i32,
+        source_incarnation: stamp.source_incarnation.into_bytes().to_vec(),
+    }
+}
+
+// The deprecated wire lane `arm_state` is initialized (to 0, unknown) but
+// never populated: FC-owned arm state travels as TelemetrySample.fc_state.
+#[allow(deprecated)]
+fn avionics_to_wire(sample: AvionicsSample) -> wire::AvionicsState {
+    let kinematics = sample.kinematics;
+    let (valid_flags, quality) = if sample.estimator_status_stamp.is_some() {
+        (
+            sample.valid_flags & ESTIMATOR_VALID_FLAGS_MASK,
+            sample.quality.min(ESTIMATOR_QUALITY_UNUSABLE),
+        )
+    } else {
+        (0, ESTIMATOR_QUALITY_UNUSABLE)
+    };
+    // The estimate lane carries the estimator's OWN solution. A fix under
+    // any other role is in the wrong lane, and a simulator oracle's
+    // position read as the estimator's solution is exactly the
+    // substitution the roles exist to stop. The reader gates on this too;
+    // refusing here as well keeps a producer bug visible on the side that
+    // can name it.
+    let geodetic = sample
+        .geodetic
+        .filter(|fix| fix.stamp.role == SourceRole::OperationalEstimate)
+        .and_then(geodetic_to_wire);
+    let magnetic_variation = sample
+        .magnetic_variation
+        .and_then(magnetic_variation_to_wire);
+    let mut state = wire::AvionicsState {
+        rate_p_rad_s: f32::NAN,
+        rate_q_rad_s: f32::NAN,
+        rate_r_rad_s: f32::NAN,
+        pos_n_m: kinematics.map_or(0.0, |group| group.pos_ned_m[0]),
+        pos_e_m: kinematics.map_or(0.0, |group| group.pos_ned_m[1]),
+        pos_d_m: kinematics.map_or(0.0, |group| group.pos_ned_m[2]),
+        vel_n_mps: kinematics.map_or(0.0, |group| group.vel_ned_mps[0]),
+        vel_e_mps: kinematics.map_or(0.0, |group| group.vel_ned_mps[1]),
+        vel_d_mps: kinematics.map_or(0.0, |group| group.vel_ned_mps[2]),
+        valid_flags,
+        quality,
+        // FC-owned arm state travels as TelemetrySample.fc_state with its
+        // own provenance; this legacy lane stays at 0 (unknown) so an
+        // unstamped copy is never merged into the estimate.
+        arm_state: 0,
+        kinematics_stamp: kinematics.map(|group| measurement_stamp_to_wire(group.stamp)),
+        estimator_status_stamp: sample.estimator_status_stamp.map(measurement_stamp_to_wire),
+        baro_alt_m: sample.baro.map_or(0.0, |group| group.pressure_alt_m),
+        baro_stamp: sample
+            .baro
+            .map(|group| measurement_stamp_to_wire(group.stamp)),
+        // The contract runs once. The stamp travels only with a fix that
+        // survived it: a stamp beside no position would claim an
+        // observation the wire does not carry.
+        geodetic_stamp: geodetic
+            .as_ref()
+            .and(sample.geodetic.as_ref())
+            .map(|fix| measurement_stamp_to_wire(fix.stamp)),
+        geodetic,
+        // As with the fix: the stamp travels only with a value that
+        // survived the mapping.
+        magnetic_variation_stamp: magnetic_variation
+            .as_ref()
+            .and(sample.magnetic_variation.as_ref())
+            .map(|variation| measurement_stamp_to_wire(variation.stamp)),
+        magnetic_variation,
+        ..wire::AvionicsState::default()
+    };
+    attitude::apply(sample.attitude, &mut state);
+    state
+}
+
+/// Maps a stated variation onto the wire. A declination that is not a
+/// number is refused rather than sent: a reader would turn every heading
+/// by it. A vehicle that applies no variation states that with no value.
+fn magnetic_variation_to_wire(
+    variation: MagneticVariationSample,
+) -> Option<wire::MagneticVariation> {
+    let applies = variation.source != MagneticVariationSource::None;
+    if applies && !variation.declination_rad.is_finite() {
+        warn!(
+            source_id = variation.stamp.source_id,
+            source = ?variation.source,
+            "non-finite declination refused; no variation published",
+        );
+        return None;
+    }
+    Some(wire::MagneticVariation {
+        declination_rad: if applies {
+            variation.declination_rad
+        } else {
+            0.0
+        },
+        source: variation.source.to_wire() as i32,
+        model_id: variation.model_id.unwrap_or_default().to_owned(),
+        model_epoch: variation.model_epoch.unwrap_or(0.0),
+    })
+}
+
+/// Maps a fix onto the wire. There is deliberately no `map_or` fallback
+/// here: an absent fix leaves the whole message absent, because 0,0 is a
+/// real place and a receiver that read it would draw a plausible vehicle
+/// in the Gulf of Guinea.
+fn geodetic_to_wire(fix: GeodeticFixSample) -> Option<wire::GeodeticFix> {
+    // The typed value has public fields, so a producer can assemble one
+    // without the constructor that refuses a datum. Re-run the contract
+    // here: this is the last place before the wire, and a receiver cannot
+    // tell an assembled value from a constructed one.
+    // The value the constructor would have produced, not the one the
+    // producer assembled: the constructor wraps longitude, and a caller
+    // that re-checked and then published its own copy would put the
+    // unwrapped number on the wire for readers that disagree about it.
+    let position = match fix.position.normalized() {
+        Ok(position) => position,
+        Err(error) => {
+            warn!(
+                source_id = fix.stamp.source_id,
+                role = ?fix.stamp.role,
+                %error,
+                "geodetic fix refused by the contract; no position published",
+            );
+            return None;
+        }
+    };
+    // The simulator's declared separation names no geoid. A height that
+    // carries it under an operational role would read as a surveyed height
+    // measured from a model nothing can name.
+    let vertical = position.vertical;
+    if vertical.geoid == SIMULATOR_GEOID_MODEL_ID && fix.stamp.role != SourceRole::SimulationTruth {
+        warn!(
+            source_id = fix.stamp.source_id,
+            role = ?fix.stamp.role,
+            "simulator geoid under a non-truth role; no position published",
+        );
+        return None;
+    }
+    Some(wire::GeodeticFix {
+        latitude_deg: position.latitude_deg,
+        longitude_deg: position.longitude_deg,
+        horizontal_datum: u32::from(position.horizontal_datum.to_u8()),
+        realization: u32::from(position.realization.0),
+        height_m: vertical.height_m,
+        vertical_datum: u32::from(vertical.datum.to_u8()),
+        geoid_model: u32::from(vertical.geoid.0),
+        terrain_ref: vertical.terrain_ref.0,
+        baro_setting: vertical.baro_setting.0,
+        local_origin: vertical.origin.0,
+        horizontal_accuracy_mm: fix.quality.horizontal_mm,
+        vertical_accuracy_mm: fix.quality.vertical_mm,
+    })
+}
+
+fn sim_truth_to_wire(sample: SimTruthSample) -> wire::SimTruthState {
+    // The truth lane carries the oracle's own position. A fix under any
+    // other role is in the wrong lane, exactly as on the estimate side,
+    // and the reader gates on this too.
+    let geodetic = sample
+        .geodetic
+        .filter(|fix| fix.stamp.role == SourceRole::SimulationTruth)
+        .and_then(geodetic_to_wire);
+    wire::SimTruthState {
+        quat_w: sample.quat_wxyz[0],
+        quat_x: sample.quat_wxyz[1],
+        quat_y: sample.quat_wxyz[2],
+        quat_z: sample.quat_wxyz[3],
+        pos_n_m: sample.pos_ned_m[0],
+        pos_e_m: sample.pos_ned_m[1],
+        pos_d_m: sample.pos_ned_m[2],
+        vel_n_mps: sample.vel_ned_mps[0],
+        vel_e_mps: sample.vel_ned_mps[1],
+        vel_d_mps: sample.vel_ned_mps[2],
+        valid_flags: sample.valid_flags,
+        geodetic,
+        stamp: Some(measurement_stamp_to_wire(sample.stamp)),
+    }
+}
+
+fn fc_state_to_wire(sample: FcStateSample) -> wire::FcState {
+    wire::FcState {
+        arm_state: sample.arm_state,
+        landed_state: sample
+            .landed_state
+            .map(|landed| wire::LandedStateObservation {
+                state: landed.state.to_wire() as i32,
+                stamp: Some(measurement_stamp_to_wire(landed.stamp)),
+            }),
+        motor_state: sample.motor_state.map(|motor| wire::MotorStateObservation {
+            state: motor.state.to_wire() as i32,
+            stamp: Some(measurement_stamp_to_wire(motor.stamp)),
+        }),
+        landing_approach: sample.landing_approach.map(|approach| {
+            wire::LandingApproachObservation {
+                surface_distance_m: approach.surface_distance_m,
+                vertical_speed_down_mps: approach.vertical_speed_down_mps,
+                is_flying: approach.is_flying,
+                stamp: Some(measurement_stamp_to_wire(approach.stamp)),
+            }
+        }),
+        // 0 none observed, 1 arm, 2 disarm — the FC's verdict for the most
+        // recent commanded arm/disarm (enactment truth).
+        last_command_kind: sample
+            .last_command
+            .map_or(0, |ack| if ack.arm { 1 } else { 2 }),
+        last_command_outcome: sample
+            .last_command
+            .map_or(wire::CommandOutcome::Unspecified, |ack| {
+                ack.outcome.to_wire()
+            }) as i32,
+        stamp: sample.stamp.map(measurement_stamp_to_wire),
+        // The FC-specific result code stays unwritten: the typed outcome
+        // is the only answer a client reads.
+        ..wire::FcState::default()
+    }
+}
+
+impl<A: pilotage_adapter_api::VehicleAdapter> super::EngineActor<A> {
+    pub(super) fn broadcast_telemetry(
+        &mut self,
+        now: MonoTimestamp,
+        tap: &mut impl super::TelemetryTap,
+    ) {
+        let batch = self.adapter.sample_telemetry();
+        let capabilities = self.adapter.capabilities();
+        let references: Vec<_> = capabilities
+            .vehicles
+            .iter()
+            .map(|vehicle| (vehicle.id, vehicle.heading_reference))
+            .collect();
+        let refreshed = self.engine.refresh_capabilities(capabilities, now);
+        self.enact(refreshed);
+        for sample in batch.samples {
+            let mut sample = sample;
+            tap.fill(&mut sample);
+            let vehicle = sample.vehicle;
+            let reference = references
+                .iter()
+                .find(|(id, _)| *id == vehicle)
+                .and_then(|(_, reference)| *reference);
+            self.magnetic.apply(&mut sample, reference);
+            tap.record(&sample, now);
+            let mut wire_sample = sample_to_wire(sample, now);
+            // Guidance is a host-internal side input, not adapter output
+            // (ADR-0031): the assembly attaches the vehicle's latest
+            // state, re-publishing it unchanged until the navigation
+            // component supplies a new one.
+            wire_sample.nav_guidance = self
+                .nav_guidance
+                .get(&vehicle)
+                .map(|state| Box::new(state.clone()));
+            let bytes = crate::wire_codec::encode_telemetry_datagram(wire_sample);
+            self.broadcast_datagram(bytes);
+        }
+    }
+}
+
+#[cfg(test)]
+mod mission_estimate;
+#[cfg(test)]
+mod tests;

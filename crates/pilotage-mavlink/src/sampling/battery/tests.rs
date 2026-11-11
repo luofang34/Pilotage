@@ -31,6 +31,7 @@ fn a_report_becomes_an_si_sample_under_the_fc_state_role() {
         Some(report(Instant::now())),
         SourceIncarnation::new([7; 16]),
         started,
+        Instant::now(),
     )
     .expect("fresh report");
     assert_eq!(sample.remaining_fraction, Some(0.73));
@@ -72,7 +73,12 @@ fn a_stale_report_is_withheld() {
     let Some(old) = now.checked_sub(WITHHOLD_AFTER + Duration::from_millis(1)) else {
         return;
     };
-    let sample = battery_sample(Some(report(old)), SourceIncarnation::new([0; 16]), old);
+    let sample = battery_sample(
+        Some(report(old)),
+        SourceIncarnation::new([0; 16]),
+        old,
+        Instant::now(),
+    );
     assert!(
         sample.is_none(),
         "a battery value past its freshness is not shown"

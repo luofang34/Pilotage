@@ -18,8 +18,8 @@ use navigate_contract::{
 use navigate_geodesy::{BodyEllipsoid, LocalTangentPlane, NedOffset};
 use pilotage_mission::fixture::{self, GeoPointDegrees};
 use pilotage_mission::{
-    MissionConfig, MissionEngine, MissionOutput, MissionState, OwnshipSample, OwnshipSource,
-    TruthRole, decode_snapshot,
+    MissionConfig, MissionEngine, MissionEvent, MissionOutput, MissionState, OwnshipSample,
+    OwnshipSource, StartWithheldReason, TruthRole, decode_snapshot,
 };
 use pilotage_protocol::{ControlAction, ControlIntent, ReferenceFrame};
 
@@ -369,4 +369,94 @@ fn a_solution_without_an_attitude_gives_no_body_frame_command() {
     });
     assert!(out.intent.is_none());
     assert!(engine.counters().missing_yaw > 0);
+}
+
+#[test]
+fn a_start_without_a_solution_to_fly_says_why_once_for_each_reason() {
+    let mut engine = build_engine();
+    let vehicle = Vehicle::new();
+    let mut navigator = Navigator::new();
+    let mut now = MonotonicNanos::from_nanos(START_NANOS);
+    let mut withheld = Vec::new();
+    let mut step = |engine: &mut MissionEngine, solution: Option<&mut Navigator>| {
+        now = MonotonicNanos::from_nanos(now.as_nanos() + STEP_NANOS);
+        if let Some(navigator) = solution {
+            engine.on_onboard_solution(&navigator.solve(&vehicle, now, CLOCK), now);
+        }
+        engine.tick(now)
+    };
+    let mut record = |out: &MissionOutput| {
+        for event in &out.events {
+            if let MissionEvent::StartWithheld { reason } = event {
+                withheld.push(*reason);
+            }
+        }
+    };
+
+    for _ in 0..10 {
+        record(&step(&mut engine, None));
+    }
+    navigator.horizontal_1sigma_m = 80.0;
+    for sigma in [80.0, 95.0, 120.0] {
+        navigator.horizontal_1sigma_m = sigma;
+        record(&step(&mut engine, Some(&mut navigator)));
+    }
+    navigator.quality = SolutionQuality::Unusable;
+    record(&step(&mut engine, Some(&mut navigator)));
+    navigator.quality = SolutionQuality::Good;
+    navigator.horizontal_1sigma_m = 2.0;
+    let out = step(&mut engine, Some(&mut navigator));
+    record(&out);
+
+    assert_eq!(
+        withheld,
+        [
+            StartWithheldReason::NavigationNotStarted,
+            StartWithheldReason::NavigationTooUncertain {
+                horizontal_1sigma_m: 80.0,
+                limit_m: 50.0
+            },
+            StartWithheldReason::NavigationUnusable,
+        ],
+        "each reason once, in order; a changed uncertainty is not a new reason"
+    );
+    assert!(out.action.is_some(), "a fit solution starts the mission");
+}
+
+#[test]
+fn a_multicopter_without_a_solution_holds_position_only_on_a_valid_fc_position() {
+    for position_valid in [Some(true), Some(false), None] {
+        let mut engine = build_engine();
+        let mut vehicle = Vehicle::new();
+        let mut navigator = Navigator::new();
+        let (_, mut now) = fly_until(&mut engine, &mut vehicle, &mut navigator, enroute);
+        let mut holds = 0;
+        let mut intents = Vec::new();
+        for _ in 0..60 {
+            now = MonotonicNanos::from_nanos(now.as_nanos() + STEP_NANOS);
+            let mut status = pilotage_mission::VehicleStatus::ready(true, now);
+            status.position_valid = position_valid;
+            engine.on_vehicle_status(status);
+            let out = tick(&mut engine, &mut vehicle, now);
+            holds += out
+                .events
+                .iter()
+                .filter(|event| matches!(event, MissionEvent::NavigationHold { .. }))
+                .count();
+            intents.push(out.intent);
+        }
+        // The navigator stopped: past its one-second age limit nothing is
+        // fit to fly.
+        let late = &intents[30..];
+        if position_valid == Some(true) {
+            assert_eq!(holds, 1, "the hold is announced once");
+            assert!(late.iter().all(|intent| matches!(
+                intent,
+                Some(ControlIntent::Velocity(v)) if v.vx == 0.0 && v.vy == 0.0 && v.vz == 0.0
+            )));
+        } else {
+            assert_eq!(holds, 0, "{position_valid:?}");
+            assert!(late.iter().all(Option::is_none), "{position_valid:?}");
+        }
+    }
 }

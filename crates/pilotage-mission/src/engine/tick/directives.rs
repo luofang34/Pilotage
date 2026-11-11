@@ -47,9 +47,8 @@ impl MissionEngine {
                 let action_id = directive.context.action_id;
                 self.active_action = Some(directive.action.clone());
                 self.outstanding_arm = Some(action_id);
-                events.push(MissionEvent::ArmRequested {
-                    action_id: u64::from(action_id.get()),
-                });
+                // The request is announced when it goes out, which the
+                // vehicle's readiness can delay; see `gate_arm`.
                 Some(MissionAction {
                     action: ControlAction::Arm,
                     action_id: u64::from(action_id.get()),

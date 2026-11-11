@@ -11,35 +11,49 @@ use pilotage_timing::SimTick;
 
 #[cfg(feature = "sim")]
 use super::GIMBAL_SCOPE;
+use super::fixed_wing::{ControlMeasurement, fixed_wing_velocity};
 use super::sources::{ArmReport, fc_state_sample};
 use super::{
     AviateAdapter, DIRECT_SCOPE, FLIGHT_SCOPE, StepBudget, StepOutcome, control::rejected_control,
     control::sticks_from_velocity, mavlink_batch, process_flight_actions,
 };
 use crate::uplink::FlightUplink;
+use pilotage_control_feel::FixedWingEnvelope;
+use pilotage_flight_uplink::HeadingAltitudeDemand;
 
 fn send_motion_intent(
     uplink: &mut FlightUplink,
     frame: &ScopedControlFrame,
-    current_attitude: [f32; 3],
-    current_pos: [f32; 3],
-    current_vel: Option<[f32; 3]>,
+    measurement: &ControlMeasurement,
+    heading_altitude: Option<HeadingAltitudeDemand>,
+    fixed_wing: Option<FixedWingEnvelope>,
 ) -> Option<bool> {
     let envelope = uplink.envelope();
     match (frame.scope.as_str(), frame.intent) {
+        (FLIGHT_SCOPE, Some(ControlIntent::Velocity(velocity))) if fixed_wing.is_some() => {
+            let yaw = measurement.attitude_rad[2];
+            let (velocity_ned, constrained) = fixed_wing_velocity(&velocity, yaw, &fixed_wing?);
+            Some(!uplink.send_fixed_wing_velocity(velocity_ned, yaw) || constrained)
+        }
         (FLIGHT_SCOPE, Some(ControlIntent::Velocity(velocity))) => {
+            let pose = measurement.pose.as_ref()?;
             let (sticks, constrained) = sticks_from_velocity(&velocity, envelope);
             let uplink_constrained = uplink.send_stick_frame(
                 sticks[0],
                 sticks[1],
                 sticks[2],
                 sticks[3],
-                current_attitude[2],
-                current_pos,
-                current_vel,
+                pose.attitude_rad[2],
+                pose.pos_ned_m,
+                pose.velocity_ned_mps,
                 None,
             );
             Some(constrained || uplink_constrained)
+        }
+        (FLIGHT_SCOPE, Some(ControlIntent::HeadingAltitude(_))) => {
+            // A refused send is the flight controller not receiving the
+            // demand, which the operator sees as a constrained frame.
+            Some(!uplink.send_heading_altitude(heading_altitude?))
         }
         (DIRECT_SCOPE, Some(ControlIntent::AttitudeThrust(attitude))) => {
             let (roll, pitch, yaw) = pilotage_adapter_api::attitude_euler(&attitude);
@@ -48,7 +62,7 @@ fn send_motion_intent(
                 pitch,
                 yaw,
                 attitude.thrust,
-                current_attitude,
+                measurement.attitude_rad,
             );
             Some(
                 constrained
@@ -65,13 +79,14 @@ fn intent_belongs_to_scope(frame: &ScopedControlFrame) -> bool {
         (frame.scope.as_str(), frame.intent.as_ref()),
         (_, None)
             | (FLIGHT_SCOPE, Some(ControlIntent::Velocity(_)))
+            | (FLIGHT_SCOPE, Some(ControlIntent::HeadingAltitude(_)))
             | (DIRECT_SCOPE, Some(ControlIntent::AttitudeThrust(_)))
     )
 }
 
 impl AviateAdapter {
-    /// Enacts one flight-scope frame: the gate chain, then the velocity
-    /// or attitude demand the scope's family carries.
+    /// Enacts one flight-scope frame: the gate chain, then the demand the
+    /// scope's family carries.
     pub(super) fn apply_flight(
         &mut self,
         frame: &ScopedControlFrame,
@@ -86,17 +101,16 @@ impl AviateAdapter {
                 RejectReason::Other("intent family does not belong to this scope".to_owned()),
             );
         }
-        let Some(current) = self.current_pose() else {
+        let heading_altitude = match self.airframe_preconditions(frame) {
+            Ok(demand) => demand,
+            Err(reason) => return rejected_control(tick, reason),
+        };
+        let Some(current) = self.control_measurement(frame) else {
             return rejected_control(tick, RejectReason::MeasurementUnavailable);
         };
-        match self.activate_pending_control_feel(frame, current.attitude_rad[2]) {
-            Ok(true) => {
-                return ApplyOutcome {
-                    tick,
-                    disposition: Disposition::Accepted,
-                    action_results: Vec::new(),
-                };
-            }
+        let yaw = current.attitude_rad[2];
+        match self.activate_pending_control_feel(frame, yaw) {
+            Ok(true) => return ApplyOutcome::new(tick, Disposition::Accepted),
             Err(detail) => {
                 return rejected_control(tick, RejectReason::Other(detail.to_owned()));
             }
@@ -106,17 +120,13 @@ impl AviateAdapter {
         // changes the law the rest of this frame is shaped by.
         let feel_results = self.answer_feel_requests(&frame.actions, frame.generation);
 
+        let fixed_wing = self.fixed_wing_envelope();
         let Some(uplink) = self.uplink.as_mut() else {
             return rejected_control(tick, RejectReason::UnknownScope);
         };
 
-        let mut action_results = process_flight_actions(
-            &frame.actions,
-            |yaw| {
-                uplink.send_arm(yaw);
-            },
-            current.attitude_rad[2],
-        );
+        let mut action_results =
+            process_flight_actions(&frame.actions, |yaw| uplink.send_arm(yaw), yaw);
         // The free dispatch above rejects a feel request it cannot serve, so
         // the answered ones replace those rejections rather than joining them.
         action_results
@@ -129,13 +139,9 @@ impl AviateAdapter {
                 action_results,
             };
         }
-        let Some(constrained) = send_motion_intent(
-            uplink,
-            frame,
-            current.attitude_rad,
-            current.pos_ned_m,
-            current.velocity_ned_mps,
-        ) else {
+        let Some(constrained) =
+            send_motion_intent(uplink, frame, &current, heading_altitude, fixed_wing)
+        else {
             return rejected_control(
                 tick,
                 RejectReason::Other("intent family does not belong to this scope".to_owned()),
@@ -182,7 +188,7 @@ impl AviateAdapter {
         let fc_state = fc_state_sample(self.arm, arm_ack, self.arm_incarnation, self.started_at);
         let truth = self.take_truth_sample();
         let mut batch = match &self.estimate {
-            Some(source) => mavlink_batch(self.vehicle, &source.state),
+            Some(source) => mavlink_batch(self.vehicle, &source.state, self.clock.now()),
             None => TelemetryBatch::default(),
         };
         if let Some(sample) = batch.samples.first_mut() {

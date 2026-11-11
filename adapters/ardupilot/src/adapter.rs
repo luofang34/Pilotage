@@ -223,7 +223,7 @@ impl ArduPilotAdapter {
     }
 
     fn current_pose(&self) -> Option<OperationalPose> {
-        operational_pose(&*self.state.lock().ok()?)
+        operational_pose(&*self.state.lock().ok()?, web_time::Instant::now())
     }
 
     fn fc_armed(&self) -> bool {
@@ -375,8 +375,9 @@ impl VehicleAdapter for ArduPilotAdapter {
             self.state.lock().ok().and_then(|latest| latest.battery),
             self.incarnation,
             self.started_at,
+            web_time::Instant::now(),
         );
-        let mut batch = estimate_batch(self.vehicle, &self.state);
+        let mut batch = estimate_batch(self.vehicle, &self.state, web_time::Instant::now());
         self.attach_declination(&mut batch);
         if let Some(gimbal) = self.gimbal.as_mut() {
             gimbal.maintain();

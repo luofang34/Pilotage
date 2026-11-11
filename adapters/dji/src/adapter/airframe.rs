@@ -230,6 +230,7 @@ impl AirframeObservations {
             speed,
             fc_state: FcStateSample {
                 arm_state: 0,
+                ready_to_arm: None,
                 last_command: None,
                 landed_state: None,
                 landing_approach: report.approach.map(

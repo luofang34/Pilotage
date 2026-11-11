@@ -85,12 +85,15 @@ fn heartbeat_records_the_mode_and_autopilot() {
             armed: true,
             custom_mode: 4,
             autopilot: 3,
+            mav_type: 1,
+            system_status: 0,
         },
     );
 
     let latest = state.lock().expect("lock");
     assert_eq!(latest.fc_reports.custom_mode, Some(4));
     assert_eq!(latest.fc_reports.autopilot, Some(3));
+    assert_eq!(latest.fc_reports.mav_type, Some(1));
     assert_eq!(latest.heartbeat_armed, Some(true));
 }
 

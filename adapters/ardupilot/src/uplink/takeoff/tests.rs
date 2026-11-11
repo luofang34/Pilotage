@@ -34,6 +34,8 @@ fn observed(now: Instant) -> Arc<Mutex<LinkState>> {
                 armed: true,
                 custom_mode: 4,
                 autopilot: 3,
+                mav_type: 2,
+                system_status: 0,
             },
             FcMessage::AttitudeQuaternion {
                 time_boot_ms: 1000,
@@ -190,6 +192,8 @@ fn revocation_fences_queued_launch_and_only_fresh_disarm_recovers() {
             armed: false,
             custom_mode: 4,
             autopilot: 3,
+            mav_type: 2,
+            system_status: 0,
         }],
         now,
     );
@@ -205,6 +209,8 @@ fn revocation_fences_queued_launch_and_only_fresh_disarm_recovers() {
             armed: false,
             custom_mode: 4,
             autopilot: 3,
+            mav_type: 2,
+            system_status: 0,
         }],
         later,
     );
@@ -265,6 +271,8 @@ fn wrong_mode_or_disarm_precondition_cannot_queue_launch() {
                 armed,
                 custom_mode,
                 autopilot: 3,
+                mav_type: 2,
+                system_status: 0,
             }],
             now,
         );
@@ -293,6 +301,8 @@ fn mode_loss_ends_tracking_and_does_not_open_motion() {
             armed: true,
             custom_mode: 9,
             autopilot: 3,
+            mav_type: 2,
+            system_status: 0,
         }],
         now,
     );

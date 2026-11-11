@@ -1,0 +1,477 @@
+//! The mission principal's session flow: bootstrap-stream replies
+//! (welcome, lease, action results, rejections) and best-effort
+//! datagrams (telemetry, rejection notices), decoded with the same wire
+//! vocabulary remote clients read.
+
+use pilotage_mission::{MissionEngine, MissionLimits, MissionState};
+use pilotage_protocol::{
+    ControlAction, ControlActionResult, FrameRejected, LeaseRequest, LeaseResponse,
+    ProfileActivation, ScopeId, ServerWelcome, wire,
+};
+use pilotage_session::DomainEnvelope;
+use prost::Message;
+use tracing::{debug, error, info, warn};
+
+use crate::HOST_VEHICLE;
+
+use super::super::PlanSource;
+use super::nav_guidance::NavGuidancePublisher;
+use super::{
+    ACTIVATION_REVISION, MISSION_SCOPE, MissionTask, NO_DEVICE_DIGEST, PROFILE_DIGEST, PROFILE_ID,
+    PROFILE_REVISION, RunControl, ownship,
+};
+
+/// Speed below which a held vehicle counts as holding in place, metres per
+/// second.
+const HOLDING_SPEED_MPS: f64 = 0.3;
+
+/// Height above the launch point, metres, from which a real vehicle counts
+/// as launched. A DJI native takeoff hovers at about 1.2 m; below this the
+/// vehicle is on the ground and refuses velocity control.
+pub(super) const AIRBORNE_HEIGHT_M: f64 = 1.0;
+/// How long a held, airborne mission waits before it asks for the motion
+/// lease again.
+pub(super) const LEASE_RETRY_NS: u64 = 5_000_000_000;
+
+impl MissionTask {
+    /// One reliable bootstrap-stream reply, decoded with the same
+    /// envelope framing the remote clients read.
+    pub(super) fn on_bootstrap(&mut self, bytes: &[u8]) -> bool {
+        let envelope = match pilotage_protocol::decode_envelope_length_delimited(bytes) {
+            Ok((envelope, _rest)) => envelope,
+            Err(error) => {
+                warn!(%error, "undecodable bootstrap reply");
+                return true;
+            }
+        };
+        match envelope.payload {
+            Some(wire::envelope::Payload::ServerWelcome(welcome)) => {
+                match ServerWelcome::try_from(welcome) {
+                    Ok(welcome) => self.on_welcome(welcome),
+                    Err(error) => {
+                        error!(%error, "welcome failed to convert");
+                        false
+                    }
+                }
+            }
+            Some(wire::envelope::Payload::LeaseResponse(response)) => {
+                match LeaseResponse::try_from(response) {
+                    Ok(response) => self.on_lease_response(&response),
+                    Err(error) => warn!(%error, "lease response failed to convert"),
+                }
+                true
+            }
+            Some(wire::envelope::Payload::ControlActionResult(result)) => {
+                match ControlActionResult::try_from(result) {
+                    Ok(result) => self.on_action_result(&result),
+                    Err(error) => warn!(%error, "action result failed to convert"),
+                }
+                true
+            }
+            Some(wire::envelope::Payload::FrameRejected(rejection)) => {
+                match FrameRejected::try_from(rejection) {
+                    Ok(rejection) => self.on_frame_rejected(&rejection),
+                    Err(error) => warn!(%error, "frame rejection failed to convert"),
+                }
+                true
+            }
+            Some(wire::envelope::Payload::LeaseReleased(released)) => {
+                debug!(?released, "lease release acknowledged");
+                true
+            }
+            Some(wire::envelope::Payload::HostCapabilities(capabilities)) => {
+                self.on_capabilities(&capabilities)
+            }
+            _ => true,
+        }
+    }
+
+    /// The welcome closes the handshake: capture identities, then start
+    /// the mission against the advertised capabilities.
+    fn on_welcome(&mut self, welcome: ServerWelcome) -> bool {
+        // Fencing is permanent for this task: even a fresh welcome must
+        // not restart activation or re-lease the motion scope.
+        if self.fenced {
+            return false;
+        }
+        self.session = Some(welcome.session);
+        self.principal = Some(welcome.principal);
+        self.nav_guidance = Some(NavGuidancePublisher::for_session(welcome.session));
+        let ours = welcome.principal.as_u64();
+        let holder = welcome
+            .scope_holders
+            .iter()
+            .find(|h| h.vehicle == HOST_VEHICLE && h.scope.as_str() == MISSION_SCOPE)
+            .and_then(|h| h.holder)
+            .map(|h| h.as_u64())
+            .filter(|h| *h != ours);
+        self.update(|status| {
+            status.session = Some(welcome.session.as_u64());
+            status.lease_holder = holder;
+        });
+        self.try_start(&welcome.host_capabilities)
+    }
+
+    /// Capabilities the host announces after the welcome: a real vehicle
+    /// whose transport opened late advertises its velocity control only
+    /// now, and the mission that waited for it starts.
+    pub(super) fn on_capabilities(&mut self, capabilities: &wire::HostCapabilities) -> bool {
+        if self.fenced || self.plan.is_none() || self.session.is_none() {
+            return true;
+        }
+        self.try_start(capabilities)
+    }
+
+    /// Tightens the mission ceilings to the advertised envelope, builds the
+    /// flight engine, announces the profile, and asks for the motion lease
+    /// or waits for the launch. A real vehicle that advertises no velocity
+    /// control yet keeps its plan for a later capability announcement.
+    fn try_start(&mut self, capabilities: &wire::HostCapabilities) -> bool {
+        let Some(session) = self.session else {
+            return true;
+        };
+        let Some(plan) = self.plan.take() else {
+            return true;
+        };
+        let mut config = plan.config();
+        self.can_stop = config.can_stop();
+        if !tighten_limits(&mut config.limits, capabilities) {
+            if self.real_vehicle {
+                info!("the vehicle advertises no velocity control yet; the mission waits for it");
+                self.plan = Some(plan);
+                self.update(|status| status.awaiting_capabilities = true);
+                return true;
+            }
+            // Streaming velocity intents the host never advertised would
+            // fail open against the command gate; a mission with no
+            // authorized envelope does not fly.
+            self.fence("no vehicle.motion velocity capability advertised");
+            return false;
+        }
+        self.update(|status| status.awaiting_capabilities = false);
+        let limits = config.limits;
+        let built = build_mission(&plan.source, config);
+        match built {
+            Ok(engine) => {
+                info!(
+                    max_horizontal_mps = limits.max_horizontal_mps,
+                    max_vertical_mps = limits.max_vertical_mps,
+                    max_yaw_rate_rps = limits.max_yaw_rate_rps,
+                    "mission engine ready under advertised limits"
+                );
+                self.mission = Some(engine);
+            }
+            Err(error) => {
+                error!(%error, "mission engine failed to build");
+                return false;
+            }
+        }
+        let activation = DomainEnvelope::ProfileActivation(ProfileActivation {
+            session,
+            profile_id: PROFILE_ID.to_owned(),
+            profile_revision: PROFILE_REVISION,
+            activation_revision: ACTIVATION_REVISION,
+            digest: PROFILE_DIGEST,
+            device_profile_id: String::new(),
+            device_profile_revision: 0,
+            device_digest: NO_DEVICE_DIGEST,
+        });
+        if !self.send_message(activation) {
+            return false;
+        }
+        self.update(|status| status.activation_sent = true);
+        if self.real_vehicle {
+            self.wait_for_launch();
+            return true;
+        }
+        self.request_lease()
+    }
+
+    /// Asks for the motion lease.
+    pub(super) fn request_lease(&mut self) -> bool {
+        let lease = DomainEnvelope::Lease(LeaseRequest {
+            vehicle: HOST_VEHICLE,
+            scope: ScopeId::new(MISSION_SCOPE),
+        });
+        self.send_message(lease)
+    }
+
+    /// Holds a real vehicle's mission until its pilot has launched it: the
+    /// mission does not ask for the motion lease on the ground, where the
+    /// vehicle would refuse velocity control, and its phase clocks do not
+    /// run (ADR-0051).
+    pub(super) fn wait_for_launch(&mut self) {
+        self.awaiting_launch = true;
+        self.hold("waiting for the pilot to launch the aircraft");
+        self.update(|status| status.awaiting_launch = true);
+    }
+
+    /// Ends a run whose vehicle disarmed or landed during a flown phase: the
+    /// plan never lands, so the vehicle did it on its own, and the run
+    /// stops the way an abort does with the reason in its status. A
+    /// vehicle that lands after the plan completed, or before its launch,
+    /// ends nothing.
+    fn on_vehicle_left_flight(&mut self, reason: &'static str) {
+        let flown = matches!(
+            self.mission.as_ref().map(MissionEngine::state),
+            Some(MissionState::Climb | MissionState::Enroute | MissionState::Held)
+        );
+        if !flown || self.awaiting_launch || self.stopping.is_some() || self.fenced {
+            return;
+        }
+        warn!(
+            reason,
+            "the run ends: the vehicle left flight outside the plan"
+        );
+        self.update(|status| status.ended_by_vehicle = Some(reason));
+        self.on_control(RunControl::Abort);
+    }
+
+    /// Notes the vehicle airborne: the next tick asks for the lease, and
+    /// the mission keeps asking while another principal holds the scope.
+    pub(super) fn on_airborne(&mut self, height_m: f64) {
+        self.awaiting_launch = false;
+        self.lease_due = true;
+        self.lease_wanted = true;
+        info!(
+            height_m,
+            "the aircraft is airborne; the mission asks for the motion lease"
+        );
+        self.update(|status| status.awaiting_launch = false);
+    }
+
+    fn on_lease_response(&mut self, response: &LeaseResponse) {
+        if response.vehicle != HOST_VEHICLE || response.scope.as_str() != MISSION_SCOPE {
+            return;
+        }
+        if response.granted {
+            info!(
+                generation = response.generation.as_u64(),
+                "mission motion lease granted"
+            );
+            self.take_generation(response.generation);
+        } else if self.lease_wanted {
+            // A human holds the scope after the launch: the mission holds
+            // and asks again until the human releases or hands it over.
+            debug!(reason = ?response.reason, "mission motion lease denied; retrying");
+            self.hold("the motion lease is held by another principal");
+            self.schedule_lease_retry();
+        } else {
+            // A human already holds the scope: the mission waits for a
+            // handover instead of ending (ADR-0051).
+            error!(reason = ?response.reason, "mission motion lease denied");
+            self.hold("the motion lease was denied; waiting for a handover");
+        }
+    }
+
+    /// Arms the next lease request `LEASE_RETRY_NS` from now.
+    pub(super) fn schedule_lease_retry(&mut self) {
+        if self.lease_wanted && !self.fenced {
+            self.lease_retry_at =
+                Some(self.mission_now().as_nanos().saturating_add(LEASE_RETRY_NS));
+            self.update(|status| status.lease_retries = status.lease_retries.wrapping_add(1));
+        }
+    }
+
+    /// Whether a held mission's retry has come due at `now` on the mission clock.
+    pub(super) fn lease_retry_due(&self, now: u64) -> bool {
+        self.held
+            && !self.fenced
+            && !self.awaiting_launch
+            && self.lease_retry_at.is_some_and(|at| now >= at)
+    }
+
+    /// Routes a correlated action result back into the mission engine.
+    fn on_action_result(&mut self, result: &ControlActionResult) {
+        let Some(mission_id) = self.pending_actions.remove(&result.action_id) else {
+            debug!(action_id = result.action_id, "uncorrelated action result");
+            return;
+        };
+        info!(
+            action = ?result.action,
+            accepted = result.accepted,
+            detail = %result.detail,
+            "mission action result"
+        );
+        // An accepted arm is only a sent command: the receipt waits for
+        // the flight controller's answer (`arm_receipt`).
+        if result.accepted
+            && matches!(result.action, ControlAction::Arm)
+            && self.flight.reports_state()
+        {
+            if let Some(mission) = self.mission.as_ref() {
+                let timeout_ns = mission.arm_confirm_timeout().as_nanos();
+                let now = self.mission_now().as_nanos();
+                self.flight.arm.await_vehicle(mission_id, now, timeout_ns);
+            }
+            return;
+        }
+        if let Some(mission) = self.mission.as_mut() {
+            mission.on_action_result(mission_id, result.accepted);
+        }
+        if result.accepted && matches!(result.action, ControlAction::Arm) {
+            self.update(|status| status.arm_accepted = true);
+        }
+    }
+
+    /// One best-effort datagram: telemetry feeding the mission's ownship
+    /// path, or a frame-rejection notice.
+    pub(super) fn on_datagram(&mut self, bytes: &[u8]) {
+        let Ok(envelope) = wire::Envelope::decode(bytes) else {
+            debug!("undecodable datagram payload");
+            return;
+        };
+        match envelope.payload {
+            Some(wire::envelope::Payload::TelemetrySample(sample)) => self.on_telemetry(&sample),
+            Some(wire::envelope::Payload::FrameRejected(rejection)) => {
+                match FrameRejected::try_from(rejection) {
+                    Ok(rejection) => self.on_frame_rejected(&rejection),
+                    Err(error) => warn!(%error, "frame rejection failed to convert"),
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn on_telemetry(&mut self, sample: &wire::TelemetrySample) {
+        let now = self.mission_now();
+        let ours = sample
+            .vehicle
+            .as_ref()
+            .is_some_and(|vehicle| vehicle.value == HOST_VEHICLE.as_u64());
+        if !ours {
+            return;
+        }
+        if let Some(reason) = sample
+            .fc_state
+            .as_ref()
+            .and_then(|fc| self.flight.observe(fc))
+        {
+            self.on_vehicle_left_flight(reason);
+        }
+        if let Some((mission_id, verdict)) = sample
+            .fc_state
+            .as_ref()
+            .and_then(|fc| self.flight.arm.observe(fc))
+        {
+            self.settle_arm(mission_id, verdict);
+        }
+        let Some(mission) = self.mission.as_mut() else {
+            return;
+        };
+        let ownship = ownship::from_wire(
+            self.ownship_source,
+            sample,
+            now,
+            self.planar_pose_is_truth,
+            |latitude_rad, longitude_rad, altitude| {
+                mission.ned_of(latitude_rad, longitude_rad, altitude)
+            },
+        );
+        let Some(ownship) = ownship else {
+            return;
+        };
+        mission.on_ownship(&ownship, now);
+        let speed = ownship
+            .ned_velocity
+            .iter()
+            .map(|v| v * v)
+            .sum::<f64>()
+            .sqrt();
+        let holding = (self.operator_hold || self.stopping.is_some()) && speed < HOLDING_SPEED_MPS;
+        if holding != self.status.holding {
+            self.update(|status| status.holding = holding);
+        }
+        self.check_launch(Some(-ownship.ned[2]));
+    }
+}
+
+/// Tightens the mission ceilings to the advertised `vehicle.motion`
+/// velocity envelope: a nonzero advertised bound lowers the configured
+/// ceiling; a zero advertisement means "no bound" on the wire and leaves
+/// the configured ceiling in force. Vertical mirrors the command gate's
+/// effective bound (`max_vertical`, falling back to `max_linear`).
+/// Returns false when no velocity capability is advertised at all — the
+/// mission has no authorized envelope and must not fly.
+fn tighten_limits(limits: &mut MissionLimits, capabilities: &wire::HostCapabilities) -> bool {
+    let Some(intent) = velocity_capability(capabilities) else {
+        error!("no vehicle.motion velocity capability advertised; the mission cannot fly");
+        return false;
+    };
+    tighten(&mut limits.max_horizontal_mps, intent.max_linear);
+    let vertical = if intent.max_vertical > 0.0 {
+        intent.max_vertical
+    } else {
+        intent.max_linear
+    };
+    tighten(&mut limits.max_vertical_mps, vertical);
+    tighten(&mut limits.max_yaw_rate_rps, intent.max_angular);
+    true
+}
+
+fn tighten(limit: &mut f64, advertised: f32) {
+    if advertised > 0.0 {
+        *limit = limit.min(f64::from(advertised));
+    }
+}
+
+/// The advertised velocity capability for this principal's (vehicle,
+/// scope), if the welcome carried one.
+fn velocity_capability(capabilities: &wire::HostCapabilities) -> Option<&wire::IntentCapability> {
+    capabilities
+        .vehicles
+        .iter()
+        .find(|vehicle| {
+            vehicle
+                .vehicle
+                .as_ref()
+                .is_some_and(|id| id.value == HOST_VEHICLE.as_u64())
+        })?
+        .scopes
+        .iter()
+        .find(|scope| {
+            scope
+                .scope
+                .as_ref()
+                .is_some_and(|id| id.value == MISSION_SCOPE)
+        })?
+        .intents
+        .iter()
+        .find(|intent| intent.family == wire::IntentFamily::Velocity as i32)
+}
+
+/// Builds the flight engine over the plan's source.
+fn build_mission(
+    source: &PlanSource,
+    config: pilotage_mission::MissionConfig,
+) -> Result<MissionEngine, pilotage_mission::MissionBuildError> {
+    match source {
+        PlanSource::Route {
+            snapshot,
+            provenance,
+        } => MissionEngine::new(snapshot, provenance.clone(), config).map(|(engine, record)| {
+            info!(route = %record.route_input, "mission plan is a route");
+            engine
+        }),
+        PlanSource::Survey(request) => {
+            MissionEngine::from_survey(request, config).map(|(engine, record)| {
+                info!(
+                    lines = record.line_count,
+                    waypoints = record.waypoint_count,
+                    "mission plan is an area survey"
+                );
+                engine
+            })
+        }
+        PlanSource::Home => MissionEngine::home(config),
+        PlanSource::Waypoints(waypoints) => {
+            MissionEngine::from_waypoints(waypoints, config).map(|(engine, record)| {
+                info!(waypoints = ?record.idents, "mission plan is a waypoint list");
+                engine
+            })
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;

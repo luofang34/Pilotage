@@ -32,6 +32,7 @@ impl LinkState {
             baro: None,
             sim_truth: None,
             gnss_fix: None,
+            global_origin: None,
             geomagnetic_reference: None,
             started_at,
             truth_origin: None,

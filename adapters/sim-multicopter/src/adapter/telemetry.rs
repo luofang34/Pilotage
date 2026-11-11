@@ -201,6 +201,7 @@ impl SimMulticopterAdapter {
         };
         FcStateSample {
             arm_state: if self.phase.armed() { 2 } else { 1 },
+            ready_to_arm: None,
             last_command: None,
             landed_state: Some(LandedStateSample {
                 state: self.phase.landed_state(),

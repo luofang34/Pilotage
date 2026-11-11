@@ -72,9 +72,9 @@ impl OwnshipSource {
 /// default.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct TerminalOrbit {
-    /// The orbit radius, metres. Default: the turn radius at the cruise
-    /// speed and [`crate::DEFAULT_ORBIT_BANK_DEG`], and at least the
-    /// capture radius.
+    /// The orbit radius, metres. Default: the turn radius at the true
+    /// airspeed of the cruise speed at the orbit altitude and
+    /// [`MissionConfig::route_bank_deg`], and at least the capture radius.
     pub radius_m: Option<f64>,
     /// The orbit altitude on the WGS84 ellipsoid, metres. Default: the
     /// altitude of the last waypoint.
@@ -173,6 +173,34 @@ pub struct MissionConfig {
     pub capture_time_s: f64,
     /// The orbit after a waypoint plan for a vehicle that cannot stop.
     pub terminal_orbit: TerminalOrbit,
+    /// The bank angle the mission plans its turns at, degrees. With the
+    /// speed over the ground it sizes the turn ahead of a fly-by waypoint,
+    /// and with the true airspeed the orbit after the plan.
+    ///
+    /// The host sets it below the bank the flight controller turns at on a
+    /// route. A turn planned at the airframe's bank limit leaves the
+    /// aircraft no bank to spare: the time it takes to roll in, and every
+    /// gust or shift of wind in the turn, then carry it outside the planned
+    /// path, and it has no authority left to come back. The margin below
+    /// the limit is that authority. Default
+    /// [`crate::DEFAULT_ORBIT_BANK_DEG`].
+    pub route_bank_deg: f64,
+    /// Whether the arm request waits for a vehicle status that says the
+    /// vehicle is ready to arm; see [`crate::VehicleStatus`]. A host that
+    /// feeds vehicle status sets it, so no arm goes to a flight controller
+    /// still starting up. Default false: a host that feeds no status gets
+    /// the arm request at once.
+    pub arm_when_vehicle_ready: bool,
+    /// When the vehicle counts as launched by its flight controller's own
+    /// height or airspeed, with no position: a fixed wing launched with no
+    /// solution fit to fly then climbs on its heading instead of waiting
+    /// without a command. Default none.
+    pub launch_detection: Option<crate::LaunchDetection>,
+    /// The operator's statement of the start, for a navigator with no
+    /// satellite fix to start from. The engine does not fly it or read it:
+    /// [`crate::MissionEngine::declared_start`] hands it on to the
+    /// navigator as stated. Default none.
+    pub declared_start: Option<crate::DeclaredStart>,
 }
 
 impl MissionConfig {
@@ -191,6 +219,18 @@ impl MissionConfig {
     /// [`ExecutionTarget::RealVehicle`]: a real vehicle has no truth
     /// oracle, so the mission would wait in flight for a solution that
     /// never comes.
+    /// Refuses a declared start no navigator can take.
+    ///
+    /// # Errors
+    ///
+    /// [`MissionBuildError::DeclaredStart`] naming the refused part.
+    pub(crate) fn check_declared_start(&self) -> Result<(), MissionBuildError> {
+        self.declared_start
+            .as_ref()
+            .map_or(Ok(()), crate::DeclaredStart::validate)
+            .map_err(|source| MissionBuildError::DeclaredStart { source })
+    }
+
     pub(crate) fn check_ownship_source(&self) -> Result<(), MissionBuildError> {
         match (self.ownship_source, self.execution_target) {
             (OwnshipSource::SimulationTruth, ExecutionTarget::RealVehicle) => {
@@ -223,6 +263,10 @@ impl MissionConfig {
             vehicle_class: VehicleClass::Multicopter,
             capture_time_s: 2.0,
             terminal_orbit: TerminalOrbit::default(),
+            route_bank_deg: crate::DEFAULT_ORBIT_BANK_DEG,
+            arm_when_vehicle_ready: false,
+            launch_detection: None,
+            declared_start: None,
         }
     }
 }

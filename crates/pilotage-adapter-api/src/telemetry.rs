@@ -252,6 +252,9 @@ pub struct FcStateSample {
     pub motor_state: Option<MotorStateSample>,
     /// Downward ranging and descent feedback, or `None` when unavailable.
     pub landing_approach: Option<LandingApproachSample>,
+    /// Whether the FC reports it would accept an arm now (its pre-arm
+    /// checks passed), or `None` when it states no readiness.
+    pub ready_to_arm: Option<bool>,
     /// Identity and acquisition time of the arm report, or `None` when absent.
     ///
     /// Independent motor or landed reports do not supply an arm stamp.

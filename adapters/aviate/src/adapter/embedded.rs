@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use pilotage_adapter_api::SourceIncarnation;
 use pilotage_control_feel::ValidatedFlightFeelProfile;
-use pilotage_mavlink::codec::parse_datagram;
+use pilotage_mavlink::codec::{ParseStats, parse_datagram};
 use pilotage_mavlink::link::{LinkConfig, LinkState, apply_messages_at};
 use pilotage_protocol::VehicleId;
 use web_time::Instant;
@@ -23,6 +23,13 @@ use crate::uplink::FlightUplink;
 
 #[cfg(test)]
 mod tests;
+
+/// The inter-group skew budget of an embedded adapter whose link
+/// configuration leaves it at 0, milliseconds: one period of the slower of
+/// Aviate's attitude (about 20 Hz) and local-position (10 Hz) groups. At
+/// 0, every other attitude and position pair would be refused as
+/// reordered. A non-zero budget in the configuration is kept.
+pub const AVIATE_GROUP_SKEW_MS: u32 = 100;
 
 /// The identities an embedded adapter stamps its sources with: one for
 /// the estimate link and one for the FC state reports on the uplink.
@@ -59,6 +66,10 @@ impl AviateAdapter {
         let mut uplink = FlightUplink::in_memory(control_feel, now)
             .map_err(|source| AviateAdapterError::EmbeddedUplink { source })?;
         uplink.set_expected_source(config.system_id, config.component_id);
+        let mut config = config;
+        if config.maximum_inter_group_skew_ms == 0 {
+            config.maximum_inter_group_skew_ms = AVIATE_GROUP_SKEW_MS;
+        }
         let state = Arc::new(Mutex::new(LinkState::for_source(
             config,
             incarnations.estimate,
@@ -91,6 +102,7 @@ impl AviateAdapter {
             #[cfg(feature = "sim")]
             view_publish_failed: false,
             reset_latch: None,
+            fixed_wing: super::fixed_wing::FixedWingSettings::default(),
             #[cfg(test)]
             reset_spawns: 0,
             link_loss_policy: BTreeMap::new(),
@@ -107,20 +119,20 @@ impl AviateAdapter {
     }
 
     /// Folds one datagram from the FC's telemetry link into the estimate
-    /// cache at the adapter's current time.
-    pub fn on_downlink(&mut self, datagram: &[u8]) {
-        let Some(source) = self.estimate.as_ref() else {
-            return;
-        };
+    /// cache at the adapter's current time, and returns how it parsed.
+    pub fn on_downlink(&mut self, datagram: &[u8]) -> ParseStats {
         let mut messages = Vec::new();
         let stats = parse_datagram(datagram, &mut messages);
-        apply_messages_at(
-            &source.state,
-            &messages,
-            stats.crc_failures,
-            stats.unknown_ids,
-            self.clock.now(),
-        );
+        if let Some(source) = self.estimate.as_ref() {
+            apply_messages_at(
+                &source.state,
+                &messages,
+                stats.crc_failures,
+                stats.unknown_ids,
+                self.clock.now(),
+            );
+        }
+        stats
     }
 
     /// Queues one datagram the FC sent on the command link (heartbeats

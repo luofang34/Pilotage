@@ -343,11 +343,15 @@ fn apply_message(latest: &mut LinkState, message: FcMessage, now: Instant) {
             armed,
             custom_mode,
             autopilot,
+            mav_type,
+            system_status,
         } => {
             latest.last_heartbeat = Some(now);
             latest.heartbeat_armed = Some(armed);
             latest.fc_reports.custom_mode = Some(custom_mode);
             latest.fc_reports.autopilot = Some(autopilot);
+            latest.fc_reports.mav_type = Some(mav_type);
+            latest.fc_reports.system_status = Some(system_status);
         }
         FcMessage::EkfStatusReport { flags } => apply_ekf_status(latest, flags, now),
         FcMessage::StatusText { severity, text } => {
@@ -373,6 +377,7 @@ fn apply_message(latest: &mut LinkState, message: FcMessage, now: Instant) {
             vel_ned_mps,
         } => apply_kinematics(latest, time_boot_ms, pos_ned_m, vel_ned_mps, now),
         FcMessage::GnssFix { .. } => apply_gnss_fix(latest, message, now),
+        FcMessage::GlobalOrigin { lat_lon } => super::global_origin::apply(latest, lat_lon, now),
         FcMessage::AviateGeomagneticReference {
             declination_rad,
             source,

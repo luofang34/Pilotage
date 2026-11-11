@@ -2,6 +2,8 @@
 
 use std::sync::{Arc, Mutex};
 
+use web_time::Instant;
+
 use pilotage_adapter_api::{
     AvionicsAttitudeSample, AvionicsKinematicsSample, AvionicsSample, GeodeticFixSample, Pose2d,
     SourceRole, TelemetryBatch, TelemetrySample,
@@ -79,10 +81,15 @@ pub(super) fn measurement_pair_supports_pose(
     attitude: AttitudeUpdate,
     kinematics: KinematicsUpdate,
 ) -> bool {
-    attitude.quality <= QUALITY_DEGRADED
+    attitude_is_usable(attitude)
         && kinematics.quality <= QUALITY_DEGRADED
-        && attitude.valid_flags & 0b0001 != 0
         && kinematics.valid_flags & 0b0100 != 0
+}
+
+/// Whether the estimator declared this attitude valid at a quality that
+/// control may use.
+fn attitude_is_usable(attitude: AttitudeUpdate) -> bool {
+    attitude.quality <= QUALITY_DEGRADED && attitude.valid_flags & 0b0001 != 0
 }
 
 fn planar_projection(
@@ -210,10 +217,13 @@ fn truth_geodetic_fix(
 
 /// The fresh simulation-truth sample, stamped with its own source role so
 /// a consumer can never mistake it for the FC's operational estimate.
-fn sim_truth_sample(latest: &LinkState) -> Option<pilotage_adapter_api::SimTruthSample> {
+fn sim_truth_sample(
+    latest: &LinkState,
+    now: Instant,
+) -> Option<pilotage_adapter_api::SimTruthSample> {
     latest
         .sim_truth
-        .filter(|truth| truth.received_at.elapsed() <= WITHHOLD_AFTER)
+        .filter(|truth| now.saturating_duration_since(truth.received_at) <= WITHHOLD_AFTER)
         .map(|truth| {
             let stamp = pilotage_adapter_api::MeasurementStamp {
                 role: pilotage_adapter_api::SourceRole::SimulationTruth,
@@ -252,16 +262,20 @@ fn avionics_attitude(attitude: AttitudeUpdate) -> AvionicsAttitudeSample {
     }
 }
 
-pub(crate) fn mavlink_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -> TelemetryBatch {
+pub(crate) fn mavlink_batch(
+    vehicle: VehicleId,
+    state: &Arc<Mutex<LinkState>>,
+    now: Instant,
+) -> TelemetryBatch {
     let Ok(latest) = state.lock() else {
         return TelemetryBatch::default();
     };
     let kinematics = latest
         .kinematics
-        .filter(|kin| kin.received_at.elapsed() <= WITHHOLD_AFTER);
+        .filter(|kin| now.saturating_duration_since(kin.received_at) <= WITHHOLD_AFTER);
     let attitude = latest
         .attitude
-        .filter(|att| att.received_at.elapsed() <= WITHHOLD_AFTER);
+        .filter(|att| now.saturating_duration_since(att.received_at) <= WITHHOLD_AFTER);
     if attitude.is_none() && kinematics.is_none() {
         return TelemetryBatch::default();
     }
@@ -280,7 +294,7 @@ pub(crate) fn mavlink_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -
         // independently of the local frame beside it.
         geodetic: latest
             .gnss_fix
-            .filter(|fix| fix.received_at.elapsed() <= WITHHOLD_AFTER)
+            .filter(|fix| now.saturating_duration_since(fix.received_at) <= WITHHOLD_AFTER)
             .as_ref()
             .and_then(|fix| estimate_geodetic_fix(fix, &latest)),
         attitude: attitude.map(avionics_attitude),
@@ -291,7 +305,7 @@ pub(crate) fn mavlink_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -
         }),
         baro: latest
             .baro
-            .filter(|update| update.received_at.elapsed() <= WITHHOLD_AFTER)
+            .filter(|update| now.saturating_duration_since(update.received_at) <= WITHHOLD_AFTER)
             .map(|update| pilotage_adapter_api::AvionicsBaroSample {
                 pressure_alt_m: update.pressure_alt_m,
                 stamp: update.stamp,
@@ -301,7 +315,7 @@ pub(crate) fn mavlink_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -
         quality,
         magnetic_variation: latest
             .geomagnetic_reference
-            .filter(|update| update.received_at.elapsed() <= WITHHOLD_AFTER)
+            .filter(|update| now.saturating_duration_since(update.received_at) <= WITHHOLD_AFTER)
             .as_ref()
             .and_then(|update| fc_magnetic_variation(update, &latest)),
     });
@@ -318,7 +332,7 @@ pub(crate) fn mavlink_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -
             pose: planar_pose,
             speed: planar_speed,
             avionics,
-            sim_truth: sim_truth_sample(&latest),
+            sim_truth: sim_truth_sample(&latest, now),
             fc_state: None,
             gimbal: None,
             battery: None,
@@ -339,15 +353,19 @@ impl super::AviateAdapter {
     /// A pose can be usable while velocity is not; a caller must never
     /// infer "stopped" from a missing velocity.
     pub(super) fn current_pose(&mut self) -> Option<CurrentPose> {
+        // The adapter's clock, so an embedding host's time decides what is
+        // fresh, as it decided when each update arrived.
+        let now = self.clock.now();
+        let fresh = |received_at| now.saturating_duration_since(received_at) <= WITHHOLD_AFTER;
         let latest = self.estimate.as_ref()?.state.lock().ok()?;
         let status_stamp = latest.estimator_status_stamp()?;
         let attitude = latest
             .attitude
-            .filter(|update| update.received_at.elapsed() <= WITHHOLD_AFTER)
+            .filter(|update| fresh(update.received_at))
             .filter(|update| update.stamp.role == SourceRole::OperationalEstimate)?;
         let kinematics = latest
             .kinematics
-            .filter(|update| update.received_at.elapsed() <= WITHHOLD_AFTER)
+            .filter(|update| fresh(update.received_at))
             .filter(|update| update.stamp.role == SourceRole::OperationalEstimate)?;
         let current_epoch = latest.source_epoch;
         if status_stamp.source_epoch != current_epoch
@@ -367,6 +385,30 @@ impl super::AviateAdapter {
             pos_ned_m: kinematics.pos_ned_m,
             velocity_ned_mps: validated_velocity(kinematics),
         })
+    }
+
+    /// The vehicle's current measured roll, pitch, and yaw, radians, under
+    /// the same estimate discipline as [`Self::current_pose`] with no
+    /// position or velocity. An arm and a heading with an altitude need no
+    /// more: the flight controller holds the heading, altitude, and
+    /// airspeed with its own sensors, so a vehicle without a position
+    /// estimate can still fly them.
+    pub(super) fn current_attitude(&mut self) -> Option<[f32; 3]> {
+        let now = self.clock.now();
+        let latest = self.estimate.as_ref()?.state.lock().ok()?;
+        let status_stamp = latest.estimator_status_stamp()?;
+        let attitude = latest
+            .attitude
+            .filter(|update| now.saturating_duration_since(update.received_at) <= WITHHOLD_AFTER)
+            .filter(|update| update.stamp.role == SourceRole::OperationalEstimate)?;
+        let current_epoch = latest.source_epoch;
+        if status_stamp.source_epoch != current_epoch
+            || attitude.stamp.source_epoch != current_epoch
+            || !attitude_is_usable(attitude)
+        {
+            return None;
+        }
+        attitude_euler_of(attitude.quat_wxyz)
     }
 }
 
