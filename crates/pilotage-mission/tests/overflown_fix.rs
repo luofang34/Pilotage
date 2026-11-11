@@ -1,12 +1,14 @@
 #![cfg(test)]
 
-//! A line end the vehicle passes too far to the side to sequence it:
-//! guidance turns back to it instead of following the leg's course away
-//! from the area.
+//! A line end the vehicle passes too far to the side to capture it: the
+//! sequencer ends the leg where the vehicle crosses the perpendicular
+//! through the fix (Navigate NAV-TT-006), reports the miss with its
+//! cross-track distance, and the survey goes on to the next line.
 
 use navigate_contract::{ClockDomainId, GeodeticPosition, MonotonicNanos};
 use navigate_geodesy::NedOffset;
 use navigate_geodesy::wgs84::tangent_plane;
+use navigate_route::SequenceReason;
 use pilotage_mission::{
     ExecutionTarget, MissionConfig, MissionEngine, MissionEvent, MissionState, OwnshipSample,
     OwnshipSource, SurveyRequest, TruthRole, plan_survey,
@@ -58,7 +60,7 @@ fn first_line_end() -> [f64; 2] {
 }
 
 #[test]
-fn a_line_end_passed_outside_the_capture_radius_is_flown_back_to() {
+fn a_line_end_passed_outside_the_capture_radius_sequences_as_passed() {
     let (mut engine, record) = MissionEngine::from_survey(&request(), config()).expect("builds");
     let end = first_line_end();
     let (mut ned, mut velocity, mut yaw) = ([0.0_f64; 3], [0.0_f64; 3], 0.0_f64);
@@ -99,7 +101,10 @@ fn a_line_end_passed_outside_the_capture_radius_is_flown_back_to() {
         }
         farthest = farthest.max(ned[0] - end[0]);
         reports.extend(output.events.iter().filter_map(|event| match event {
-            MissionEvent::FixOverflown { to_index } => Some(*to_index),
+            MissionEvent::LegAdvanced {
+                to_index,
+                reason: SequenceReason::Passed { cross_track_m },
+            } => Some((*to_index, *cross_track_m)),
             _ => None,
         }));
         if output.state == MissionState::Complete {
@@ -110,17 +115,14 @@ fn a_line_end_passed_outside_the_capture_radius_is_flown_back_to() {
     assert!(gusted, "the gust fired before the line end");
     assert!(completed, "the survey completes after the missed line end");
     assert!(
-        engine.counters().fix_overflown > 0,
-        "guidance flew back to the missed line end"
-    );
-    assert!(
         farthest < 2.0 * GUST_M,
         "the vehicle went {farthest} m past the line end"
     );
-    assert!(!reports.is_empty(), "the miss is reported");
+    assert_eq!(reports.len(), 1, "the one missed line end: {reports:?}");
+    let (_, cross_track_m) = reports[0];
     assert!(
-        reports.windows(2).all(|pair| pair[0] < pair[1]),
-        "each missed fix reports once, in fly order: {reports:?}"
+        cross_track_m.abs() > record.capture_radius_m && cross_track_m.abs() < 2.0 * GUST_M,
+        "the miss reports how far the vehicle passed the fix: {cross_track_m} m"
     );
     assert!(record.capture_radius_m < GUST_M);
 }

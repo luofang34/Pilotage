@@ -62,14 +62,16 @@ pub enum MissionEvent {
     ClimbStarted,
     /// Enroute guidance began.
     EnrouteStarted,
-    /// A waypoint captured and the next leg is active.
+    /// A waypoint sequenced and the next leg is active.
     LegAdvanced {
         /// Index of the newly active `to` waypoint in fly order.
         to_index: usize,
         /// Which sequencing rule authorized the advance: turn
-        /// anticipation ahead of a fly-by fix, or the capture radius.
-        /// Telemetry carries it so an early transition is attributable
-        /// to the rule rather than read as a skipped waypoint.
+        /// anticipation ahead of a fly-by fix, the capture radius, or a
+        /// fix passed outside the capture radius (with the distance by
+        /// which it was missed). Telemetry carries it so a transition is
+        /// attributable to the rule rather than read as a skipped
+        /// waypoint.
         reason: SequenceReason,
     },
     /// The mission core entered the phase of a task.
