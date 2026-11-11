@@ -408,3 +408,49 @@ fn an_attitude_within_the_tilt_bound_passes_and_beyond_it_is_rejected() {
         Err(FrameRejectionReason::LimitExceeded)
     );
 }
+
+/// A motion scope that also takes a heading with an altitude, with an
+/// airspeed bound of 70 m/s.
+fn heading_altitude_scope() -> ScopeDescriptor {
+    let mut scope = motion_scope();
+    scope.intents.push(IntentCapability {
+        family: IntentFamily::HeadingAltitude,
+        frames: vec![],
+        max_linear: 70.0,
+        max_vertical: 0.0,
+        max_angular: 0.0,
+        max_yaw_rate: 0.0,
+    });
+    scope
+}
+
+fn heading_altitude(airspeed_mps: Option<f32>) -> ControlIntent {
+    ControlIntent::HeadingAltitude(pilotage_protocol::HeadingAltitudeIntent {
+        heading_rad: 2.5,
+        altitude_m: 900.0,
+        reference: pilotage_protocol::AltitudeReference::Ellipsoid,
+        airspeed_mps,
+    })
+}
+
+#[test]
+fn a_heading_and_altitude_is_gated_by_the_advertisement_and_its_airspeed_bound() {
+    let frame = |intent| ScopedControlFrame {
+        intent: Some(intent),
+        ..base_frame()
+    };
+    let scope = heading_altitude_scope();
+    for airspeed in [None, Some(52.0), Some(70.0)] {
+        let typed = gate_frame(&frame(heading_altitude(airspeed)), &scope).expect("admitted");
+        assert_eq!(typed.intent, Some(heading_altitude(airspeed)));
+    }
+    assert_eq!(
+        gate_frame(&frame(heading_altitude(Some(70.5))), &scope),
+        Err(FrameRejectionReason::LimitExceeded)
+    );
+    assert_eq!(
+        gate_frame(&frame(heading_altitude(None)), &motion_scope()),
+        Err(FrameRejectionReason::UnsupportedIntent),
+        "a scope that does not advertise the family refuses it"
+    );
+}

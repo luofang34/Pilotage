@@ -6,6 +6,10 @@
 //! velocity-to-attitude transition is a distinct intent (and, per CTRL-01, a
 //! distinct scope) rather than a reinterpretation of the same axis numbers.
 
+mod heading_altitude;
+
+pub use heading_altitude::{AltitudeReference, HeadingAltitudeIntent};
+
 /// The reference frame a typed control intent is expressed in. Frames are
 /// negotiated per intent family (a vehicle advertises the ones it accepts), so
 /// a client never sends a frame the vehicle cannot interpret.
@@ -277,6 +281,8 @@ pub enum ControlIntent {
     BodyRate(BodyRateIntent),
     /// Gimbal pitch/yaw rate.
     GimbalRate(GimbalRateIntent),
+    /// True heading + altitude, and optionally airspeed.
+    HeadingAltitude(HeadingAltitudeIntent),
 }
 
 /// The intent families a vehicle can advertise (the capability-side view of
@@ -293,6 +299,8 @@ pub enum IntentFamily {
     BodyRate,
     /// Gimbal pitch/yaw rate.
     GimbalRate,
+    /// True heading + altitude, and optionally airspeed.
+    HeadingAltitude,
 }
 
 impl ControlIntent {
@@ -305,18 +313,20 @@ impl ControlIntent {
             Self::AttitudeThrust(_) => IntentFamily::AttitudeThrust,
             Self::BodyRate(_) => IntentFamily::BodyRate,
             Self::GimbalRate(_) => IntentFamily::GimbalRate,
+            Self::HeadingAltitude(_) => IntentFamily::HeadingAltitude,
         }
     }
 
     /// The reference frame this intent is expressed in, when its family
-    /// carries one (body-rate and gimbal-rate are frame-implicit).
+    /// carries one (body-rate and gimbal-rate are frame-implicit, and a
+    /// heading with an altitude names its own references).
     #[must_use]
     pub const fn reference_frame(&self) -> Option<ReferenceFrame> {
         match self {
             Self::Velocity(v) => Some(v.frame),
             Self::PositionHold(p) => Some(p.frame),
             Self::AttitudeThrust(a) => Some(a.frame),
-            Self::BodyRate(_) | Self::GimbalRate(_) => None,
+            Self::BodyRate(_) | Self::GimbalRate(_) | Self::HeadingAltitude(_) => None,
         }
     }
 }

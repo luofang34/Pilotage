@@ -1,6 +1,7 @@
 use super::{
-    ControlAction, ControlIntent, ConvertError, GimbalRateIntent, ReferenceFrame, VelocityIntent,
-    action_from_wire, action_to_wire, intent_from_wire, intent_to_wire, wire,
+    AltitudeReference, ControlAction, ControlIntent, ConvertError, GimbalRateIntent,
+    HeadingAltitudeIntent, ReferenceFrame, VelocityIntent, action_from_wire, action_to_wire,
+    intent_from_wire, intent_to_wire, wire,
 };
 
 #[test]
@@ -189,4 +190,111 @@ fn a_thrust_outside_unit_range_is_rejected() {
             ..
         })
     ));
+}
+
+fn heading_altitude() -> HeadingAltitudeIntent {
+    HeadingAltitudeIntent {
+        heading_rad: -1.25,
+        altitude_m: 812.5,
+        reference: AltitudeReference::Ellipsoid,
+        airspeed_mps: Some(52.0),
+    }
+}
+
+fn heading_altitude_wire(
+    change: impl FnOnce(&mut wire::HeadingAltitudeIntent),
+) -> wire::ControlIntent {
+    let mut wire = intent_to_wire(&ControlIntent::HeadingAltitude(heading_altitude()));
+    let Some(wire::control_intent::Family::HeadingAltitude(intent)) = wire.family.as_mut() else {
+        panic!("the heading and altitude family encodes as itself");
+    };
+    change(intent);
+    wire
+}
+
+#[test]
+fn a_heading_altitude_intent_round_trips_with_each_reference_and_airspeed_state() {
+    for reference in [AltitudeReference::Ellipsoid, AltitudeReference::LocalOrigin] {
+        for airspeed_mps in [Some(52.0), None] {
+            let intent = ControlIntent::HeadingAltitude(HeadingAltitudeIntent {
+                reference,
+                airspeed_mps,
+                ..heading_altitude()
+            });
+            assert_eq!(
+                intent_from_wire(intent_to_wire(&intent)).expect("round-trips"),
+                intent
+            );
+        }
+    }
+}
+
+#[test]
+fn the_altitude_reference_codes_are_the_vertical_datum_codes_of_a_fix() {
+    // pilotage_geo::VerticalDatum: 1 is the ellipsoid, 6 is local-relative.
+    assert_eq!(AltitudeReference::Ellipsoid.code(), 1);
+    assert_eq!(AltitudeReference::LocalOrigin.code(), 6);
+    for code in [0, 2, 3, 4, 5, 7, u32::MAX] {
+        assert_eq!(AltitudeReference::from_code(code), None);
+        assert!(matches!(
+            intent_from_wire(heading_altitude_wire(|intent| intent.vertical_datum = code)),
+            Err(ConvertError::UnknownEnum {
+                enum_name: "pilotage.v1.HeadingAltitudeIntent.vertical_datum",
+                ..
+            })
+        ));
+    }
+}
+
+#[test]
+fn a_heading_outside_one_turn_and_a_non_finite_value_are_refused() {
+    assert!(matches!(
+        intent_from_wire(heading_altitude_wire(|intent| intent.heading_rad = 3.2)),
+        Err(ConvertError::IntentOutOfRange {
+            field: "heading_altitude.heading_rad",
+            ..
+        })
+    ));
+    assert!(matches!(
+        intent_from_wire(heading_altitude_wire(|intent| intent.heading_rad = f32::NAN)),
+        Err(ConvertError::NonFiniteIntentValue {
+            field: "heading_altitude.heading_rad"
+        })
+    ));
+    assert!(matches!(
+        intent_from_wire(heading_altitude_wire(
+            |intent| intent.altitude_m = f32::INFINITY
+        )),
+        Err(ConvertError::NonFiniteIntentValue {
+            field: "heading_altitude.altitude_m"
+        })
+    ));
+}
+
+#[test]
+fn an_airspeed_that_is_not_greater_than_zero_is_refused_and_absence_is_not_zero() {
+    for airspeed in [0.0, -3.0] {
+        assert!(matches!(
+            intent_from_wire(heading_altitude_wire(|intent| {
+                intent.airspeed_mps = Some(airspeed);
+            })),
+            Err(ConvertError::IntentOutOfRange {
+                field: "heading_altitude.airspeed_mps",
+                ..
+            })
+        ));
+    }
+    assert!(matches!(
+        intent_from_wire(heading_altitude_wire(|intent| {
+            intent.airspeed_mps = Some(f32::NAN);
+        })),
+        Err(ConvertError::NonFiniteIntentValue {
+            field: "heading_altitude.airspeed_mps"
+        })
+    ));
+    let absent = heading_altitude_wire(|intent| intent.airspeed_mps = None);
+    let ControlIntent::HeadingAltitude(intent) = intent_from_wire(absent).expect("decodes") else {
+        panic!("the family decodes as itself");
+    };
+    assert_eq!(intent.airspeed_mps, None);
 }

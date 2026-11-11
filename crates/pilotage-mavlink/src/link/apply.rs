@@ -373,6 +373,7 @@ fn apply_message(latest: &mut LinkState, message: FcMessage, now: Instant) {
             vel_ned_mps,
         } => apply_kinematics(latest, time_boot_ms, pos_ned_m, vel_ned_mps, now),
         FcMessage::GnssFix { .. } => apply_gnss_fix(latest, message, now),
+        FcMessage::GlobalOrigin { lat_lon } => super::global_origin::apply(latest, lat_lon, now),
         FcMessage::AviateGeomagneticReference {
             declination_rad,
             source,

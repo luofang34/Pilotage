@@ -208,6 +208,7 @@ fn adapter_rejection_reason(reason: &RejectReason) -> FrameRejectionReason {
         | RejectReason::MeasurementUnavailable
         | RejectReason::LinkLossEngaged
         | RejectReason::ResetInProgress
+        | RejectReason::LocalOriginHeightUnknown
         | RejectReason::Other(_) => FrameRejectionReason::AdapterRejected,
     }
 }

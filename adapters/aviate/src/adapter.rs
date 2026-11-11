@@ -36,6 +36,7 @@ mod control;
 mod control_feel;
 mod embedded;
 mod flight;
+mod heading_altitude;
 #[cfg(feature = "sim")]
 mod pointing;
 mod sampling;
@@ -153,6 +154,8 @@ pub struct AviateAdapter {
     // neutral input (control::ResetLatch). While engaged, everything
     // except disarm is rejected.
     reset_latch: Option<control::ResetLatch>,
+    // What the host has said about flying a heading with an altitude.
+    heading_altitude: heading_altitude::HeadingAltitudeSettings,
     // Reset script spawns recorded instead of executed, so tests can
     // press the reset button without running the real script (which
     // kills any live SITL FC on the machine).
@@ -320,6 +323,7 @@ impl AviateAdapter {
             #[cfg(feature = "sim")]
             view_publish_failed: false,
             reset_latch: None,
+            heading_altitude: heading_altitude::HeadingAltitudeSettings::default(),
             reset_spawns: 0,
             link_loss_policy: BTreeMap::new(),
         }

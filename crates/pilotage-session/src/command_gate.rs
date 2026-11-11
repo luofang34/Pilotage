@@ -115,6 +115,11 @@ fn check_limits(
             within(g.pitch_rate, capability.max_angular)
                 && within(g.yaw_rate, capability.max_angular)
         }
+        // The heading range, the altitude reference, and a positive
+        // airspeed are decode guarantees; `max_linear` bounds the airspeed.
+        ControlIntent::HeadingAltitude(h) => h
+            .airspeed_mps
+            .is_none_or(|airspeed| within(airspeed, capability.max_linear)),
         // Thrust bounds and quaternion unity are decode guarantees;
         // `max_angular` bounds the commanded TILT angle (yaw is a heading
         // setpoint, not a rate, and carries no advertised bound).

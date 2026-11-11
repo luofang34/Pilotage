@@ -12,6 +12,6 @@
 mod policy;
 
 pub use policy::{
-    ActivationStep, AttitudeOutcome, DirectFrame, DirectRefusal, HeadingState, MAX_DT_S,
-    StickFrame, StickOutcome, UplinkPolicy,
+    AIRSPEED_REPEAT, ActivationStep, AttitudeOutcome, DirectFrame, DirectRefusal,
+    HeadingAltitudeDemand, HeadingState, MAX_DT_S, StickFrame, StickOutcome, UplinkPolicy,
 };
