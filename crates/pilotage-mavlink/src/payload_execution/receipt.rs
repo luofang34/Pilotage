@@ -18,6 +18,7 @@ impl WriteReceipt {
         self.0.lock().ok().and_then(|value| *value)
     }
 
+    #[cfg(feature = "net")]
     pub(crate) fn record_sent(&self, at: Instant) {
         if let Ok(mut value) = self.0.lock() {
             *value = Some(at);

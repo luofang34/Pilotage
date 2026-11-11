@@ -1,6 +1,7 @@
 use super::*;
 use crate::{ManagerWriteRequirement, ResetPolicy, SendFence};
 
+#[cfg(feature = "net")]
 mod transport;
 
 const KEY: (u8, u8) = (191, 154);

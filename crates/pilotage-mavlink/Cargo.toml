@@ -8,6 +8,12 @@ publish = false
 [lints]
 workspace = true
 
+[features]
+default = ["net"]
+# The tokio side: the UDP link task, the camera endpoints and the
+# gimbal-manager control. Without it the crate builds for wasm32.
+net = ["dep:tokio"]
+
 [dependencies]
 pilotage-mavlink-framing = { workspace = true }
 pilotage-adapter-api = { workspace = true }
@@ -15,7 +21,7 @@ pilotage-geo = { workspace = true }
 pilotage-protocol = { workspace = true }
 pilotage-timing = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["net", "rt", "sync", "time", "macros"] }
+tokio = { workspace = true, optional = true, features = ["net", "rt", "sync", "time", "macros"] }
 tracing = { workspace = true }
 turret-core = { workspace = true }
 turret-mavlink = { workspace = true }

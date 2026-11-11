@@ -213,8 +213,16 @@ impl SendFence {
         self.valid.lock().is_ok_and(|valid| *valid)
     }
 
-    /// Serialize a nonblocking write with revocation; never await inside the operation.
-    pub(crate) fn with_valid_write(
+    /// Runs one nonblocking write of a fenced frame under the fence: the
+    /// write does not run once the fence or its guard is invalid, and a
+    /// revocation waits for a write in progress. Every writer of a fenced
+    /// frame, the UDP link or a host that moves the bytes itself, goes
+    /// through it. Never await inside `operation`.
+    ///
+    /// # Errors
+    ///
+    /// The error of `operation`, or an error for a poisoned fence lock.
+    pub fn with_valid_write(
         &self,
         operation: impl FnOnce() -> std::io::Result<bool>,
     ) -> std::io::Result<bool> {
