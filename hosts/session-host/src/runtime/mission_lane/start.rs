@@ -60,7 +60,8 @@ impl LaneTask {
                 },
             ),
             plan => {
-                let Some(plan) = MissionPlan::of_lane(plan, order.config) else {
+                let Some(plan) = crate::runtime::automation::plans::of_lane(plan, order.config)
+                else {
                     return;
                 };
                 automation::spawn_mission_run(

@@ -27,7 +27,7 @@ use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tracing::{error, info, warn};
 
-use super::automation::{self, AutomationStatus, MissionPlan, RunControl};
+use super::automation::{self, AutomationStatus, RunControl};
 use super::engine_actor::ToEngine;
 use super::operations::{self, OperationHost, RunInputs};
 use crate::error::HostError;

@@ -10,7 +10,6 @@
 //! so host shutdown proceeds exactly as without a mission and the task
 //! drains out behind the actor.
 
-pub(crate) mod ownship;
 mod rig;
 #[cfg(feature = "sim")]
 mod sim_multicopter_rig;
@@ -19,10 +18,9 @@ mod task;
 pub use rig::{MissionRig, Participant, TelemetryObserver};
 #[cfg(feature = "sim")]
 pub use rig::{spawn_reference_mission_rig, spawn_reference_survey_rig};
-pub(crate) use task::RunControl;
 
-use navigate_contract::{ClockDomainId, GeodeticPosition};
-use pilotage_mission::{MissionConfig, MissionEngine, MissionState, SurveyRequest};
+use navigate_contract::GeodeticPosition;
+use pilotage_mission::{MissionConfig, MissionEngine, SurveyRequest};
 use pilotage_session::ClientKey;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
@@ -30,18 +28,17 @@ use tokio::time::Instant;
 use tracing::info;
 
 use crate::error::HostError;
-use crate::mission_navdata::{self, LoadedNavdata};
+use crate::mission_navdata;
 use crate::runtime::engine_actor::ToEngine;
 use crate::runtime::registry::OUTBOUND_QUEUE_CAPACITY;
 use crate::runtime::{MissionOptions, MissionPlanRequest};
 #[cfg(feature = "sim")]
 pub use sim_multicopter_rig::{SurveyRuns, spawn_sim_multicopter_rig, spawn_sim_multicopter_runs};
 
-/// The mission principal's driver-assigned client key. The accept loop
-/// allocates keys from zero with a `fetch_add`, so `u64::MAX` can only
-/// collide after 2^64 - 1 accepted connections — beyond any process
-/// lifetime — making it collision-free for the local principal.
-const MISSION_CLIENT: ClientKey = ClientKey::new(u64::MAX);
+// The mission principal's client key, `u64::MAX`: the accept loop
+// allocates keys from zero with a `fetch_add`, so it can only collide
+// after 2^64 - 1 accepted connections.
+use pilotage_host_core::automation::MISSION_CLIENT;
 
 /// The observing client's key, allocated from the same collision-free end
 /// of the space as [`MISSION_CLIENT`].
@@ -52,128 +49,28 @@ const OBSERVER_CLIENT: ClientKey = ClientKey::new(u64::MAX - 1);
 /// The climb rate a lane's plans ask for, metres per second.
 const LANE_CLIMB_RATE_MPS: f64 = 3.0;
 
-const MISSION_CLOCK: ClockDomainId = ClockDomainId::new(1);
+use pilotage_host_core::automation::MISSION_CLOCK;
 
-/// Observable progress of the in-process mission principal, published on
-/// a watch channel for logs and the integration test.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct AutomationStatus {
-    /// Session id assigned by the welcome, once the handshake completed.
-    pub session: Option<u64>,
-    /// The control-profile activation announcement has been sent.
-    pub activation_sent: bool,
-    /// Fencing generation of the held motion lease.
-    pub lease_generation: Option<u64>,
-    /// The engine closed this principal's connection, or the mission is
-    /// otherwise ended for this task; nothing resumes it.
-    pub fenced: bool,
-    /// A human holds the motion scope: the mission stopped framing and
-    /// waits for a transfer back (ADR-0051).
-    pub held: bool,
-    /// The mission lost a lease it held. Only a transfer offered to this
-    /// principal, the hand-back, returns control; no other run of the lane
-    /// may take the lease meanwhile (ADR-0051).
-    pub awaiting_hand_back: bool,
-    /// The principal that took the lease from a run that waits for a
-    /// hand-back released it, or its connection closed, without a hand-back:
-    /// no one holds the lease, and the approval's recovery may apply.
-    pub control_freed: bool,
-    /// A real vehicle's mission is waiting for its pilot to launch it.
-    pub awaiting_launch: bool,
-    /// A real vehicle's mission is waiting for the vehicle to advertise
-    /// velocity control.
-    pub awaiting_capabilities: bool,
-    /// Lease requests scheduled while another principal held the scope.
-    pub lease_retries: u32,
-    /// Transfers back that resumed the mission.
-    pub resumes: u32,
-    /// Offers this principal made to humans who requested the scope.
-    pub offers: u32,
-    /// The vehicle accepted the arm action.
-    pub arm_accepted: bool,
-    /// Current mission phase, once the engine is built.
-    pub mission_state: Option<MissionState>,
-    /// Typed intent frames submitted to the session engine.
-    pub frames_sent: u64,
-    /// The running digest of the wire bytes of every intent frame sent,
-    /// in order: two runs that send the same frames end with the same
-    /// digest.
-    pub frame_digest: [u8; 32],
-    /// `FrameRejected` notices received back for submitted frames.
-    pub frames_rejected: u64,
-    /// The engine closed this principal's connection.
-    pub closed: bool,
-    /// Index of the waypoint the plan flies toward, once the engine is
-    /// built.
-    pub target_waypoint: Option<usize>,
-    /// The plan's last waypoint is captured.
-    pub plan_complete: bool,
-    /// An operator's hold keeps the vehicle stopped in place.
-    pub operator_held: bool,
-    /// An abort stopped the vehicle, released the lease and ended the run.
-    pub stopped: bool,
-    /// The vehicle disarmed or landed on its own during a flown phase, and
-    /// the run ended for that reason.
-    pub ended_by_vehicle: Option<&'static str>,
-    /// An operator's hold or an abort holds the vehicle, and the vehicle
-    /// reports that it is still.
-    pub holding: bool,
-    /// The principal that holds the motion lease when another one does, as
-    /// the welcome or an authority event named it.
-    pub lease_holder: Option<u64>,
-    /// The task the run flies now, as the mission core names its phase.
-    pub active_task: Option<String>,
-    /// The tasks the run finished, in order.
-    pub finished_tasks: Vec<String>,
-    /// What the operations of the finished tasks returned, by task.
-    pub results: Vec<(String, Vec<pilotage_protocol::wire::MissionValue>)>,
-    /// The tasks whose operation a cancel stopped before its end.
-    pub cancelled_tasks: Vec<String>,
-    /// The tasks whose operation failed.
-    pub failed_tasks: Vec<String>,
-    /// The questions the run's operations ask a person now, by task.
-    pub questions: Vec<(String, pilotage_protocol::wire::MissionQuestion)>,
-    /// The run of a plan of operations ended before its end, for this
-    /// reason.
-    pub ended_because: Option<&'static str>,
-}
+pub use pilotage_host_core::automation::AutomationStatus;
+pub(crate) use pilotage_host_core::automation::{MissionPlan, PlanSource, RunControl};
 
-/// Where the plan comes from: a navdata snapshot the route expands
-/// against, or an area survey request.
-pub(crate) enum PlanSource {
-    /// The decoded snapshot and its provenance.
-    Navdata(LoadedNavdata),
-    /// The survey request the plan is derived from.
-    Survey(SurveyRequest),
-    /// Home from wherever the vehicle is, at the cruise height.
-    Home,
-    /// A waypoint list.
-    Waypoints(pilotage_mission::WaypointPlan),
-}
-
-/// A validated mission: the plan source and the config the flight engine
-/// is built from once capabilities are known.
-pub(crate) struct MissionPlan {
-    source: PlanSource,
-    config: MissionConfig,
-}
-
-impl MissionPlan {
-    /// The mission config over this plan's route and anchor; limits are
-    /// tightened by the caller from the advertised capabilities.
-    fn config(&self) -> MissionConfig {
-        self.config.clone()
-    }
+/// The configs and plans the host builds from its options and its
+/// mission lane.
+pub(crate) mod plans {
+    use super::*;
 
     /// The flight of a run a mission lane admitted, over its config; none
     /// for a plan of operations, which the host's executors carry out.
-    pub(crate) fn of_lane(plan: pilotage_mission::RunPlan, config: MissionConfig) -> Option<Self> {
+    pub(crate) fn of_lane(
+        plan: pilotage_mission::RunPlan,
+        config: MissionConfig,
+    ) -> Option<MissionPlan> {
         let source = match plan {
             pilotage_mission::RunPlan::Survey(request) => PlanSource::Survey(request),
             pilotage_mission::RunPlan::Home => PlanSource::Home,
             pilotage_mission::RunPlan::Operations(_) => return None,
         };
-        Some(Self { source, config })
+        Some(MissionPlan::new(source, config))
     }
 
     /// The config every lane proposal starts from; compilation sets the
@@ -197,7 +94,7 @@ impl MissionPlan {
     }
 
     /// The mission config the options describe. A survey carries no route.
-    fn config_for(options: &MissionOptions) -> MissionConfig {
+    pub(super) fn config_for(options: &MissionOptions) -> MissionConfig {
         let route = match &options.plan {
             MissionPlanRequest::Route(route) => route.clone(),
             MissionPlanRequest::Survey(_) | MissionPlanRequest::Waypoints(_) => String::new(),
@@ -245,10 +142,10 @@ fn prepare_waypoints(
     options: &MissionOptions,
     waypoints: &pilotage_mission::WaypointPlan,
 ) -> Result<MissionPlan, HostError> {
-    let plan = MissionPlan {
-        source: PlanSource::Waypoints(waypoints.clone()),
-        config: MissionPlan::config_for(options),
-    };
+    let plan = MissionPlan::new(
+        PlanSource::Waypoints(waypoints.clone()),
+        plans::config_for(options),
+    );
     let (_, record) = MissionEngine::from_waypoints(waypoints, plan.config())
         .map_err(|source| HostError::MissionBuild(Box::new(source)))?;
     info!(
@@ -267,10 +164,10 @@ fn prepare_survey(
     options: &MissionOptions,
     request: &SurveyRequest,
 ) -> Result<MissionPlan, HostError> {
-    let plan = MissionPlan {
-        source: PlanSource::Survey(request.clone()),
-        config: MissionPlan::config_for(options),
-    };
+    let plan = MissionPlan::new(
+        PlanSource::Survey(request.clone()),
+        plans::config_for(options),
+    );
     let (_, record) = MissionEngine::from_survey(request, plan.config())
         .map_err(|source| HostError::MissionBuild(Box::new(source)))?;
     info!(
@@ -293,13 +190,16 @@ fn prepare_route(options: &MissionOptions) -> Result<MissionPlan, HostError> {
     let (_, record) = MissionEngine::new(
         &navdata.snapshot,
         navdata.provenance.clone(),
-        MissionPlan::config_for(options),
+        plans::config_for(options),
     )
     .map_err(|source| HostError::MissionBuild(Box::new(source)))?;
-    let plan = MissionPlan {
-        source: PlanSource::Navdata(navdata),
-        config: MissionPlan::config_for(options),
-    };
+    let plan = MissionPlan::new(
+        PlanSource::Route {
+            snapshot: navdata.snapshot,
+            provenance: navdata.provenance,
+        },
+        plans::config_for(options),
+    );
     info!(
         route = %record.route_input,
         waypoints = record.waypoint_count,

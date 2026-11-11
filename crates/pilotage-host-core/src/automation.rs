@@ -9,7 +9,7 @@
 pub mod ownship;
 mod task;
 
-pub use task::{MissionTask, RunControl, TICK_INTERVAL as MISSION_TICK};
+pub use task::{MissionTask, RunControl, TICK_INTERVAL};
 
 use aerocontext_core::NavDataSnapshot;
 use navigate_contract::ClockDomainId;

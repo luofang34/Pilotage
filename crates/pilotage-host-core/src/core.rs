@@ -10,7 +10,7 @@ use pilotage_timing::StalenessPolicy;
 use web_time::Instant;
 
 use crate::HOST_VEHICLE;
-use crate::automation::{MISSION_TICK, MissionPlan, MissionTask, RunControl};
+use crate::automation::{MissionPlan, MissionTask, RunControl, TICK_INTERVAL as MISSION_TICK};
 use crate::config::HostCoreConfig;
 use crate::engine_actor::{EngineActor, TICK_INTERVAL};
 use crate::error::HostCoreError;

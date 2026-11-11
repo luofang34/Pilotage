@@ -31,7 +31,6 @@ use pilotage_decision::Provider;
 use pilotage_mission::{ExecutionTarget, LaneConfig, OwnshipSource, SurveyDefaults};
 
 use crate::error::HostError;
-use crate::runtime::automation::MissionPlan;
 use crate::runtime::operations::{self, OperationHost};
 use crate::runtime::options::{env_var, parse_execution_target, parse_ownship_source};
 
@@ -119,7 +118,7 @@ impl LaneRuntimeConfig {
                 name: env_var("PILOTAGE_LANE_NAME")?.unwrap_or_else(|| adapter.to_owned()),
                 simulated,
                 execution_strategy: "host-guided-velocity".to_owned(),
-                template: MissionPlan::lane_template(ownship, target),
+                template: crate::runtime::automation::plans::lane_template(ownship, target),
                 defaults,
                 usable_energy_wh: positive("PILOTAGE_LANE_ENERGY_WH")?,
                 cruise_power_w: positive("PILOTAGE_LANE_CRUISE_POWER_W")?,

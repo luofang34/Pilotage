@@ -16,7 +16,6 @@ use wire::MissionLaneState as State;
 use wire::mission_intent::Action;
 
 use super::super::{LaneRuntimeConfig, LaneTask};
-use crate::runtime::automation::MissionPlan;
 use crate::runtime::engine_actor::ToEngine;
 use crate::runtime::operations::{self, OperationHost};
 
@@ -47,7 +46,7 @@ pub(super) fn host() -> Host {
             name: "SIM-1".to_owned(),
             simulated: true,
             execution_strategy: "host-guided-velocity".to_owned(),
-            template: MissionPlan::lane_template(
+            template: crate::runtime::automation::plans::lane_template(
                 OwnshipSource::vehicle_estimate(),
                 ExecutionTarget::Simulator,
             ),
