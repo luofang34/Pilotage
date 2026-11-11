@@ -105,5 +105,8 @@ fn a_fixed_wing_core_builds_with_its_envelope_and_origin() {
     let mut core = HostCore::new(config, Instant::now()).unwrap();
     core.load_mission(plan()).unwrap();
     core.tick(MonotonicNanos::from_nanos(0)).unwrap();
-    assert!(core.status().mission_state.is_some(), "the C172 mission builds");
+    assert!(
+        core.status().mission_state.is_some(),
+        "the C172 mission builds"
+    );
 }
