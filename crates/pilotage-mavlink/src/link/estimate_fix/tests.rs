@@ -2,7 +2,7 @@
 
 #![allow(clippy::expect_used, clippy::panic)]
 
-use std::time::Instant;
+use web_time::Instant;
 
 use pilotage_adapter_api::{MeasurementClock, SourceRole};
 

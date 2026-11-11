@@ -63,6 +63,7 @@ impl MavlinkLink {
         let state = Arc::new(Mutex::new(LinkState::for_source(
             config,
             source_incarnation,
+            web_time::Instant::now(),
         )));
         let (commands, command_rx) = tokio::sync::mpsc::channel(16);
         let (rate_tx, rate_rx) = tokio::sync::watch::channel(None);

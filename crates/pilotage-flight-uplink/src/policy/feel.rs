@@ -126,7 +126,6 @@ impl UplinkFeel {
         self.profile.profile().envelope
     }
 
-    #[cfg(test)]
     pub(super) fn validated_profile(&self) -> &ValidatedFlightFeelProfile {
         &self.profile
     }

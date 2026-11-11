@@ -11,19 +11,22 @@ workspace = true
 [dependencies]
 aviate-xil-contract = { workspace = true, optional = true }
 aviate-xil-shm = { workspace = true, optional = true }
-getrandom = { version = "0.3.4", features = ["std"] }
+getrandom = { version = "0.3.4", features = ["std"], optional = true }
 pilotage-adapter-api = { workspace = true }
 pilotage-control-feel = { workspace = true }
+pilotage-flight-uplink = { workspace = true }
 pilotage-geo = { workspace = true }
 pilotage-mavlink = { workspace = true }
 pilotage-sim-video = { workspace = true, optional = true }
 pilotage-protocol = { workspace = true }
 pilotage-timing = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["net", "rt", "sync", "time", "macros"] }
+tokio = { workspace = true, optional = true, features = ["net", "rt", "sync", "time", "macros"] }
 tracing = { workspace = true }
+web-time = { workspace = true }
 
 [dev-dependencies]
+pilotage-flight-uplink = { workspace = true, features = ["test-support"] }
 pilotage-control-web = { path = "../../clients/web-control" }
 pilotage-input = { workspace = true }
 serde = { workspace = true }
@@ -31,8 +34,13 @@ serde_json = { workspace = true }
 tokio = { workspace = true, features = ["net", "rt", "sync", "time", "macros", "rt-multi-thread"] }
 
 [features]
-default = ["sim"]
+default = ["net", "sim"]
+# The process side: the tokio MAVLink receive link, the OS entropy
+# identity provider and the async start. Without it the adapter is the
+# embedded one (`AviateAdapter::embedded`), whose bytes a host moves,
+# and it builds for wasm32.
+net = ["dep:tokio", "dep:getrandom", "pilotage-mavlink/net"]
 # Simulation-only code: the camera sidecar client and the XIL
 # truth-oracle attachment. A flight build turns this off; the adapter
 # then has no video producer and no simulation profile at all.
-sim = ["dep:pilotage-sim-video", "dep:aviate-xil-contract", "dep:aviate-xil-shm"]
+sim = ["net", "dep:pilotage-sim-video", "dep:aviate-xil-contract", "dep:aviate-xil-shm"]

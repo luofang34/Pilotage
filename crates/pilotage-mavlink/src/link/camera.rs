@@ -1,7 +1,7 @@
 //! Camera reports cannot authorize vehicle estimates.
 use super::LinkState;
 use crate::codec::CameraMessage;
-use std::time::Instant;
+use web_time::Instant;
 
 /// Independently discovered camera and its latest lens setting.
 #[derive(Debug, Clone, Copy)]

@@ -1,6 +1,7 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use aviate_xil_contract::AttachError;
 use aviate_xil_shm::{AttachFailure, ModelStateSnapshot, SimWriterSession};

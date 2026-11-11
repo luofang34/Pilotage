@@ -1,6 +1,6 @@
 //! Atomic control-feel profile selection.
 
-use std::time::Instant;
+use web_time::Instant;
 
 use pilotage_control_feel::{
     AxisResponse, FeelDigest, FeelMode, NeutralBand, NeutralLatch, ValidatedFlightFeelProfile,
@@ -282,7 +282,7 @@ impl NeutralObservation {
             self.last_sample_at
                 .and_then(|last| observed_at.checked_duration_since(last))
                 .map_or(0.0, |elapsed| elapsed.as_secs_f32())
-                .clamp(0.0, crate::uplink::MAX_DT_S)
+                .clamp(0.0, pilotage_flight_uplink::MAX_DT_S)
         } else {
             0.0
         };

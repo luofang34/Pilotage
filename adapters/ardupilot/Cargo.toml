@@ -10,7 +10,7 @@ workspace = true
 
 [dependencies]
 pilotage-adapter-api = { workspace = true }
-pilotage-mavlink = { workspace = true }
+pilotage-mavlink = { workspace = true, features = ["net"] }
 pilotage-protocol = { workspace = true }
 pilotage-timing = { workspace = true }
 thiserror = { workspace = true }

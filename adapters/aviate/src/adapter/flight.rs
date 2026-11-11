@@ -175,7 +175,7 @@ impl AviateAdapter {
                 system_id,
                 component_id,
                 sequence,
-                acquired_at: std::time::Instant::now(),
+                acquired_at: self.clock.now(),
             });
         }
         let arm_ack = self.uplink.as_ref().and_then(FlightUplink::arm_ack);

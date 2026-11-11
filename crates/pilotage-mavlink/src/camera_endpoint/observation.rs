@@ -1,6 +1,6 @@
 use crate::CameraReport;
 use pilotage_protocol::wire;
-use std::time::Instant;
+use web_time::Instant;
 
 pub(super) fn camera_observation(
     key: (u8, u8),

@@ -30,11 +30,19 @@ pub enum AviateAdapterError {
         source: pilotage_control_feel::FeelDigestError,
     },
     /// The attachment identity provider could not obtain a new incarnation.
+    #[cfg(feature = "net")]
     #[error("creating an Aviate source incarnation failed: {source}")]
     IncarnationUnavailable {
         /// The operating-system entropy failure.
         #[source]
         source: getrandom::Error,
+    },
+    /// The in-memory uplink of an embedded adapter could not be built.
+    #[error("building the embedded Aviate uplink failed: {source}")]
+    EmbeddedUplink {
+        /// The uplink construction failure.
+        #[source]
+        source: std::io::Error,
     },
     /// The MAVLink receive link could not start.
     #[error(transparent)]

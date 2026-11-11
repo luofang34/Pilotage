@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use super::*;
 use crate::codec::{GCS_COMPONENT_ID, GCS_SYSTEM_ID, encode_frame_v2_from};

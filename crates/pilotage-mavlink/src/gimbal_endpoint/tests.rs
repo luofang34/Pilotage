@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use pilotage_adapter_api::{Disposition, SourceIncarnation};
 use pilotage_protocol::{

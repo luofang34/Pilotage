@@ -14,6 +14,7 @@
 //! byte functions so it is unit-testable byte-for-byte.
 
 mod adapter;
+mod clock;
 mod error;
 mod incarnation;
 #[cfg(feature = "sim")]
@@ -23,11 +24,14 @@ mod uplink;
 pub use pilotage_mavlink::codec as mavlink;
 
 pub use adapter::{
-    ARM_BUTTON, AviateAdapter, AviateProfile, AviateTruth, DISARM_BUTTON, FLIGHT_SCOPE, PITCH_AXIS,
-    ROLL_AXIS, THROTTLE_AXIS, YAW_AXIS,
+    ARM_BUTTON, AviateAdapter, AviateProfile, AviateTruth, DISARM_BUTTON, EmbeddedIncarnations,
+    FLIGHT_SCOPE, PITCH_AXIS, ROLL_AXIS, THROTTLE_AXIS, YAW_AXIS,
 };
+pub use clock::AdapterClock;
 pub use error::AviateAdapterError;
-pub use incarnation::{IncarnationProvider, OsIncarnationProvider};
+pub use incarnation::IncarnationProvider;
+#[cfg(feature = "net")]
+pub use incarnation::OsIncarnationProvider;
 pub use pilotage_mavlink::link::{LinkConfig, ResetPolicy};
 pub use uplink::{
     ATTITUDE_SETPOINT_FRAME_BYTES, ExactDirectError, ExactDirectSetpoint, FlightUplink,

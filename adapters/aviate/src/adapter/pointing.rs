@@ -16,7 +16,8 @@
 //! is; it does not slew it to level) and refuses to report success it
 //! did not achieve.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use pilotage_sim_video::wire::BridgeCameraCommand;
 

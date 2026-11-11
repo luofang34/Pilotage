@@ -1,7 +1,7 @@
 //! Camera capability, command, and observation paths shared by MAVLink adapters.
 
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use web_time::Instant;
 
 use pilotage_adapter_api::{
     ActionResult, ApplyOutcome, Disposition, RejectReason, ScopeDescriptor, TelemetryBatch,

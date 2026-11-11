@@ -1,10 +1,10 @@
 //! Turret lifecycle shared by an adapter and its final MAVLink writer.
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 use turret_core::{
     Command, CommandIdentity, CommandProgress, Effect, Executor, PayloadCapabilities,
     PayloadCommand, Tick,
 };
+use web_time::Instant;
 
 mod receipt;
 mod write;

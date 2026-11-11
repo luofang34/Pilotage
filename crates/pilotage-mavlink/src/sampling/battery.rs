@@ -22,7 +22,7 @@ pub const BATTERY_SOURCE_ID: u64 = 3;
 pub fn battery_sample(
     report: Option<BatteryReport>,
     incarnation: SourceIncarnation,
-    started_at: std::time::Instant,
+    started_at: web_time::Instant,
 ) -> Option<BatterySample> {
     let report = report.filter(|r| r.received_at.elapsed() <= WITHHOLD_AFTER)?;
     let acquired = report

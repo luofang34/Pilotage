@@ -2,7 +2,7 @@
 //! latest-state cache, and carries this GCS's commands and setpoints
 //! from the same socket.
 
-use std::time::Instant;
+use web_time::Instant;
 
 use pilotage_adapter_api::{MeasurementStamp, SourceIncarnation};
 
@@ -142,10 +142,15 @@ mod magnetic_variation;
 
 impl LinkState {
     /// An empty cache for the FC that `config` names, under
-    /// `source_incarnation`. A host that feeds the cache itself, without
-    /// [`MavlinkLink`]'s socket, starts here and folds each datagram in
-    /// with [`apply_messages_at`].
-    pub fn for_source(config: LinkConfig, source_incarnation: SourceIncarnation) -> Self {
+    /// `source_incarnation`, whose acquisition clock starts at
+    /// `started_at`. A host that feeds the cache itself, without a UDP
+    /// link's socket, starts here and folds each datagram in with
+    /// [`apply_messages_at`].
+    pub fn for_source(
+        config: LinkConfig,
+        source_incarnation: SourceIncarnation,
+        started_at: Instant,
+    ) -> Self {
         Self {
             system_id: config.system_id,
             component_id: config.component_id,
@@ -157,7 +162,7 @@ impl LinkState {
             reset_candidate_max_ms: config.reset_candidate_max_ms,
             maximum_inter_group_skew_ms: config.maximum_inter_group_skew_ms,
             source_epoch: 1,
-            ..Self::default()
+            ..Self::empty(started_at)
         }
     }
 

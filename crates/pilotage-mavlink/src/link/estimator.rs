@@ -2,7 +2,7 @@
 //! private status, the standard ESTIMATOR_STATUS, and ArduPilot's EKF
 //! status report.
 
-use std::time::Instant;
+use web_time::Instant;
 
 use pilotage_adapter_api::MeasurementStamp;
 

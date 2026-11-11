@@ -3,7 +3,7 @@
 //! (ADR-0018: loss of data marks groups stale rather than freezing
 //! them).
 
-use std::time::Instant;
+use web_time::Instant;
 
 use pilotage_adapter_api::MeasurementStamp;
 

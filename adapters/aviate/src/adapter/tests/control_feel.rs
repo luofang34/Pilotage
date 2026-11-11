@@ -424,6 +424,7 @@ fn activation_waits_for_the_complete_arm_quiet_window() {
     assert_no_frame(&fc);
 }
 
+#[cfg(feature = "net")]
 #[tokio::test]
 async fn a_physical_start_refuses_an_unqualified_control_feel_artifact() {
     let result = AviateAdapter::start_with_control_feel(
