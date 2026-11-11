@@ -11,14 +11,22 @@ use super::{
 };
 use crate::truth::Truth;
 
+mod contact;
 mod samples;
+
+use contact::Bounds;
 
 /// The widest the two tracks may part at any step of a flight.
 const POSITION_M: f64 = 1e-3;
 const VELOCITY_M_S: f64 = 1e-3;
 const ATTITUDE_RAD: f64 = 1e-4;
-// Contact forces differ more than the integrated state. Bound the
-// accelerometer difference by one default noise standard deviation.
+const RATE_RAD_S: f64 = 1e-4;
+/// The widest the contact allowance may make the body-rate bound. A bound
+/// past it no longer constrains the rates, so the comparison fails.
+const RATE_CAP_RAD_S: f64 = 10.0 * RATE_RAD_S;
+// Bound the accelerometer difference in the air by one default noise
+// standard deviation. On the gear, `contact::Bounds` adds what the
+// admitted height and attitude differences can cause.
 const FORCE_M_S2: f64 = 0.02;
 /// Metres per degree of latitude, near enough to bound a difference.
 const M_PER_DEG: f64 = 111_000.0;
@@ -61,70 +69,81 @@ fn largest(differences: impl Iterator<Item = f64>) -> f64 {
 fn assert_same_flight(rust: &[Truth], cpp: &[Truth]) {
     assert_eq!(rust.len(), cpp.len());
     for (step, (r, c)) in rust.iter().zip(cpp).enumerate() {
-        let position = largest(
-            [
-                r.altitude_m - c.altitude_m,
-                (r.latitude_deg - c.latitude_deg) * M_PER_DEG,
-                (r.longitude_deg - c.longitude_deg) * M_PER_DEG,
-            ]
-            .into_iter(),
-        );
-        let velocity = largest((0..3).map(|i| r.velocity_ned[i] - c.velocity_ned[i]));
-        let attitude = largest(
-            [
-                angle(r.attitude.roll - c.attitude.roll),
-                angle(r.attitude.pitch - c.attitude.pitch),
-                angle(r.attitude.yaw - c.attitude.yaw),
-            ]
-            .into_iter(),
-        );
+        assert_same_state(&format!("step {step}"), r, c, Bounds::AIRBORNE);
+    }
+}
+
+/// The two engines' states agree at one point of a flight; `at` names
+/// that point in a failure, and `bounds` widens the specific force and
+/// the body rates on the gear.
+fn assert_same_state(at: &str, r: &Truth, c: &Truth, bounds: Bounds) {
+    let position = largest(
+        [
+            r.altitude_m - c.altitude_m,
+            (r.latitude_deg - c.latitude_deg) * M_PER_DEG,
+            (r.longitude_deg - c.longitude_deg) * M_PER_DEG,
+        ]
+        .into_iter(),
+    );
+    let velocity = largest((0..3).map(|i| r.velocity_ned[i] - c.velocity_ned[i]));
+    let attitude = largest(
+        [
+            angle(r.attitude.roll - c.attitude.roll),
+            angle(r.attitude.pitch - c.attitude.pitch),
+            angle(r.attitude.yaw - c.attitude.yaw),
+        ]
+        .into_iter(),
+    );
+    assert!(
+        position < POSITION_M && velocity < VELOCITY_M_S && attitude < ATTITUDE_RAD,
+        "{at}: {position} m, {velocity} m/s, {attitude} rad apart"
+    );
+    close(at, "time", r.time_s, c.time_s, 1e-9);
+    for i in 0..3 {
+        let (rr, cr) = (r.rates_frd[i], c.rates_frd[i]);
         assert!(
-            position < POSITION_M && velocity < VELOCITY_M_S && attitude < ATTITUDE_RAD,
-            "step {step}: {position} m, {velocity} m/s, {attitude} rad apart"
+            rr.is_finite() && cr.is_finite() && (rr - cr).abs() < bounds.rate_limit(),
+            "{at}: rate: Rust {rr}, C++ {cr}, {}",
+            bounds.describe_rate()
         );
-        close(step, "time", r.time_s, c.time_s, 1e-9);
-        for i in 0..3 {
-            close(step, "rate", r.rates_frd[i], c.rates_frd[i], 1e-4);
-            close(
-                step,
-                "specific force",
-                r.specific_force_frd[i],
-                c.specific_force_frd[i],
-                FORCE_M_S2,
-            );
-        }
-        close(
-            step,
-            "dynamic pressure",
-            r.dynamic_pressure_pa,
-            c.dynamic_pressure_pa,
-            1e-2,
-        );
-        close(
-            step,
-            "true airspeed",
-            r.true_airspeed_mps,
-            c.true_airspeed_mps,
-            VELOCITY_M_S,
-        );
-        close(
-            step,
-            "calibrated airspeed",
-            r.calibrated_airspeed_mps,
-            c.calibrated_airspeed_mps,
-            VELOCITY_M_S,
+        let (rf, cf) = (r.specific_force_frd[i], c.specific_force_frd[i]);
+        assert!(
+            rf.is_finite() && cf.is_finite() && (rf - cf).abs() < bounds.force.limit(),
+            "{at}: specific force: Rust {rf}, C++ {cf}, {}",
+            bounds.force.describe()
         );
     }
+    close(
+        at,
+        "dynamic pressure",
+        r.dynamic_pressure_pa,
+        c.dynamic_pressure_pa,
+        1e-2,
+    );
+    close(
+        at,
+        "true airspeed",
+        r.true_airspeed_mps,
+        c.true_airspeed_mps,
+        VELOCITY_M_S,
+    );
+    close(
+        at,
+        "calibrated airspeed",
+        r.calibrated_airspeed_mps,
+        c.calibrated_airspeed_mps,
+        VELOCITY_M_S,
+    );
 }
 
 fn angle(d: f64) -> f64 {
     d.sin().atan2(d.cos())
 }
 
-fn close(step: usize, field: &str, r: f64, c: f64, limit: f64) {
+fn close(at: &str, field: &str, r: f64, c: f64, limit: f64) {
     assert!(
         r.is_finite() && c.is_finite() && (r - c).abs() < limit,
-        "step {step}: {field}: Rust {r}, C++ {c}, limit {limit}"
+        "{at}: {field}: Rust {r}, C++ {c}, limit {limit}"
     );
 }
 

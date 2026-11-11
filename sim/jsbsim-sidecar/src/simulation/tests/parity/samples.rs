@@ -3,9 +3,10 @@
 use pilotage_world::{MagneticEpoch, UniformTerrain, World};
 
 use super::super::{message_id, vehicle};
+use super::contact::{Bounds, Contact, struts};
 use super::{
-    Aircraft, Encoder, EngineKind, GROUND_M, ModelPaths, N51, Simulation, Start,
-    assert_same_flight, close, controls,
+    Aircraft, Encoder, EngineKind, GROUND_M, ModelPaths, N51, RATE_CAP_RAD_S, Simulation, Start,
+    assert_same_state, close, controls,
 };
 use crate::hil::{HIL_GPS, HIL_SENSOR};
 
@@ -21,122 +22,295 @@ fn i32_at(frame: &[u8], at: usize) -> i64 {
     ))
 }
 
-fn assert_frames(step: usize, rust: &[Vec<u8>], cpp: &[Vec<u8>]) {
-    assert_eq!(rust.len(), cpp.len(), "step {step}: frame count");
+/// The horizontal speed of an `HIL_GPS` frame from its north and east
+/// velocities, before the encoder rounds the speed to whole cm/s.
+fn speed_of(frame: &[u8]) -> f64 {
+    let cm_s = |at: usize| {
+        f64::from(i16::from_le_bytes(
+            frame[10 + at..12 + at].try_into().unwrap(),
+        ))
+    };
+    cm_s(26).hypot(cm_s(28)) / 100.0
+}
+
+/// Two `HIL_GPS` frames carry the same fix, within the bounds.
+fn assert_gps(at: &str, r: &[u8], c: &[u8], bounds: Bounds) {
+    for offset in [8, 12, 16] {
+        assert!(
+            (i32_at(r, offset) - i32_at(c, offset)).abs() <= 1,
+            "{at}: HIL_GPS at {offset}"
+        );
+    }
+    assert_eq!(&r[30..34], &c[30..34], "{at}: GNSS accuracy");
+    for offset in [26, 28, 30] {
+        let value =
+            |frame: &[u8]| i16::from_le_bytes(frame[10 + offset..12 + offset].try_into().unwrap());
+        assert!(
+            (i32::from(value(r)) - i32::from(value(c))).abs() <= 1,
+            "{at}: HIL_GPS velocity at {offset}"
+        );
+    }
+    let u16_at = |frame: &[u8], at: usize| {
+        i32::from(u16::from_le_bytes(
+            frame[10 + at..12 + at].try_into().unwrap(),
+        ))
+    };
+    assert!(
+        (u16_at(r, 24) - u16_at(c, 24)).abs() <= 1,
+        "{at}: GNSS speed"
+    );
+    let course = (u16_at(r, 32) - u16_at(c, 32) + 18_000).rem_euclid(36_000) - 18_000;
+    let speed_m_s = speed_of(r);
+    let limit = bounds.course_limit_cdeg(speed_m_s);
+    assert!(
+        f64::from(course.abs()) <= limit,
+        "{at}: GNSS course: Rust {} cdeg, C++ {} cdeg, bound {limit} cdeg at {speed_m_s} m/s, |Δv| {} m/s",
+        u16_at(r, 32),
+        u16_at(c, 32),
+        bounds.horizontal_velocity_m_s
+    );
+    assert_eq!(
+        &r[44..r.len() - 2],
+        &c[44..c.len() - 2],
+        "{at}: GNSS fix fields"
+    );
+}
+
+fn assert_frames(at: &str, rust: &[Vec<u8>], cpp: &[Vec<u8>], bounds: Bounds) {
+    assert_eq!(rust.len(), cpp.len(), "{at}: frame count");
     for (r, c) in rust.iter().zip(cpp) {
         assert_eq!(message_id(r), message_id(c));
         if message_id(r) != 0 {
-            assert_eq!(&r[10..18], &c[10..18], "step {step}: time");
+            assert_eq!(&r[10..18], &c[10..18], "{at}: time");
         }
         if message_id(r) == HIL_SENSOR.0 {
             // Acceleration, rate, field, pressure, pitot, altitude, temperature.
+            let acceleration = bounds.force.limit();
+            let rate = bounds.rate_limit();
             let limits = [
-                0.02, 0.02, 0.02, 1e-4, 1e-4, 1e-4, 1e-4, 1e-4, 1e-4, 0.01, 0.001, 0.002, 1e-4,
+                acceleration,
+                acceleration,
+                acceleration,
+                rate,
+                rate,
+                rate,
+                1e-4,
+                1e-4,
+                1e-4,
+                0.01,
+                0.001,
+                0.002,
+                1e-4,
             ];
             for (i, limit) in limits.into_iter().enumerate() {
                 close(
-                    step,
+                    at,
                     "HIL_SENSOR",
                     f32_at(r, 8 + 4 * i),
                     f32_at(c, 8 + 4 * i),
                     limit,
                 );
             }
-            assert_eq!(&r[70..74], &c[70..74], "step {step}: sensor flags");
+            assert_eq!(&r[70..74], &c[70..74], "{at}: sensor flags");
         }
         if message_id(r) == HIL_GPS.0 {
-            for at in [8, 12, 16] {
-                assert!(
-                    (i32_at(r, at) - i32_at(c, at)).abs() <= 1,
-                    "step {step}: HIL_GPS at {at}"
-                );
-            }
-            assert_eq!(&r[30..34], &c[30..34], "GNSS accuracy");
-            for at in [26, 28, 30] {
-                let value =
-                    |frame: &[u8]| i16::from_le_bytes(frame[10 + at..12 + at].try_into().unwrap());
-                assert!(
-                    (i32::from(value(r)) - i32::from(value(c))).abs() <= 1,
-                    "step {step}: HIL_GPS velocity at {at}"
-                );
-            }
-            let u16_at = |frame: &[u8], at: usize| {
-                i32::from(u16::from_le_bytes(
-                    frame[10 + at..12 + at].try_into().unwrap(),
-                ))
-            };
-            assert!((u16_at(r, 24) - u16_at(c, 24)).abs() <= 1, "GNSS speed");
-            let course = (u16_at(r, 32) - u16_at(c, 32) + 18_000).rem_euclid(36_000) - 18_000;
-            assert!(course.abs() <= 5, "step {step}: GNSS course");
-            assert_eq!(&r[44..r.len() - 2], &c[44..c.len() - 2], "GNSS fix fields");
+            assert_gps(at, r, c, bounds);
         }
     }
+}
+
+/// One landing site: where the vehicle starts and the ground height.
+#[derive(Debug, Clone, Copy)]
+struct Site {
+    latitude_deg: f64,
+    longitude_deg: f64,
+    heading_deg: f64,
+    ground_m: f64,
+}
+
+const N51_SITE: Site = Site {
+    latitude_deg: N51.latitude_deg,
+    longitude_deg: N51.longitude_deg,
+    heading_deg: N51.heading_deg,
+    ground_m: GROUND_M,
+};
+
+fn x500_paths(aircraft_dir: std::path::PathBuf) -> ModelPaths {
+    ModelPaths {
+        root: option_env!("PILOTAGE_JSBSIM_ROOT").map(std::path::PathBuf::from),
+        aircraft_dir,
+        model: "x500".to_owned(),
+    }
+}
+
+/// The widest bounds of one landing.
+#[derive(Debug, Clone, Copy, Default)]
+struct Widest {
+    force_m_s2: f64,
+    rate_rad_s: f64,
+}
+
+/// Climbs, cuts the motors, falls onto the gear, and settles, with the
+/// Rust engine on `rust_dir` and the C++ engine on the bundled model,
+/// comparing truth and frames at every step. Returns the two engines
+/// at rest and the widest bounds the comparison used.
+fn land(site: Site, step_ms: u32, rust_dir: std::path::PathBuf) -> ([Simulation; 2], Widest) {
+    let mut world = World::new(
+        N51,
+        UniformTerrain {
+            elevation_m: site.ground_m,
+        },
+        MagneticEpoch::from_decimal_year(2026.8),
+    );
+    let start = Start {
+        latitude_deg: site.latitude_deg,
+        longitude_deg: site.longitude_deg,
+        heading_deg: site.heading_deg,
+    };
+    let rust_struts = struts(&rust_dir, "x500");
+    let mut config = vehicle(Aircraft::X500, x500_paths(rust_dir), start, None, step_ms);
+    let mut rust = Simulation::new(&config, &mut world).unwrap();
+    config.engine = EngineKind::Cpp;
+    config.paths = x500_paths(Aircraft::X500.bundled_dir());
+    let mut cpp = Simulation::new(&config, &mut world).unwrap();
+    let cpp_struts = struts(&Aircraft::X500.bundled_dir(), "x500");
+    let mut contact = Contact::new(&mut rust, rust_struts, &mut cpp, cpp_struts);
+    let (mut r_encoder, mut c_encoder) = (Encoder::default(), Encoder::default());
+    let mut peak = 0.0f64;
+    let mut widest = Widest::default();
+    for step in 0..8_000 / step_ms {
+        let command = match step * step_ms {
+            0..250 => controls(1.0, true),
+            250..1_250 => controls(0.82, true),
+            1_250..3_000 => controls(0.64, true),
+            3_000..4_000 => controls(0.0, true),
+            _ => controls(1.0, false),
+        };
+        let r = rust
+            .step(Some(&command), &mut world, &mut r_encoder)
+            .unwrap();
+        let c = cpp
+            .step(Some(&command), &mut world, &mut c_encoder)
+            .unwrap();
+        let (r_truth, c_truth) = (rust.truth(), cpp.truth());
+        let step_s = f64::from(step_ms) / 1_000.0;
+        let bounds = contact.bounds(&mut rust, &mut cpp, &r_truth, &c_truth, step_s);
+        let at = format!(
+            "{}°, {}°, {} m, {step_ms} ms, step {step}",
+            site.latitude_deg, site.longitude_deg, site.ground_m
+        );
+        assert_same_state(&at, &r_truth, &c_truth, bounds);
+        assert_frames(&at, &r, &c, bounds);
+        assert!(
+            bounds.rate_limit() <= RATE_CAP_RAD_S,
+            "{at}: the comparison no longer constrains the body rates: {}, cap {RATE_CAP_RAD_S}",
+            bounds.describe_rate()
+        );
+        widest.force_m_s2 = widest.force_m_s2.max(bounds.force.limit());
+        widest.rate_rad_s = widest.rate_rad_s.max(bounds.rate_limit());
+        peak = peak.max(r_truth.altitude_m - site.ground_m);
+    }
+    assert!(peak > 0.5, "the vehicle must leave the ground: {peak}");
+    ([rust, cpp], widest)
 }
 
 #[test]
 fn landing_truth_and_sensor_frames_agree_at_all_step_rates_and_sites() {
     // Include the southern hemisphere, high latitude, the date line,
     // negative terrain height, high terrain, and a heading near zero.
-    for (latitude_deg, longitude_deg, heading_deg, ground) in [
-        (
-            N51.latitude_deg,
-            N51.longitude_deg,
-            N51.heading_deg,
-            GROUND_M,
-        ),
-        (-33.9, 179.9999, 359.99, -200.0),
-        (78.0, -179.9999, 0.0, 3_000.0),
+    for site in [
+        N51_SITE,
+        Site {
+            latitude_deg: -33.9,
+            longitude_deg: 179.9999,
+            heading_deg: 359.99,
+            ground_m: -200.0,
+        },
+        Site {
+            latitude_deg: 78.0,
+            longitude_deg: -179.9999,
+            heading_deg: 0.0,
+            ground_m: 3_000.0,
+        },
     ] {
         for step_ms in [1, 2, 4] {
-            let mut world = World::new(
-                N51,
-                UniformTerrain {
-                    elevation_m: ground,
-                },
-                MagneticEpoch::from_decimal_year(2026.8),
+            let (mut simulations, widest) = land(site, step_ms, Aircraft::X500.bundled_dir());
+            assert!(
+                widest.rate_rad_s <= RATE_CAP_RAD_S && widest.force_m_s2.is_finite(),
+                "{site:?}, {step_ms} ms: widest bounds {widest:?}"
             );
-            let paths = ModelPaths {
-                root: option_env!("PILOTAGE_JSBSIM_ROOT").map(std::path::PathBuf::from),
-                aircraft_dir: Aircraft::X500.bundled_dir(),
-                model: "x500".to_owned(),
-            };
-            let start = Start {
-                latitude_deg,
-                longitude_deg,
-                heading_deg,
-            };
-            let mut config = vehicle(Aircraft::X500, paths, start, None, step_ms);
-            let mut rust = Simulation::new(&config, &mut world).unwrap();
-            config.engine = EngineKind::Cpp;
-            let mut cpp = Simulation::new(&config, &mut world).unwrap();
-            let mut r_encoder = Encoder::default();
-            let mut c_encoder = Encoder::default();
-            let mut peak = 0.0f64;
-            for step in 0..8_000 / step_ms {
-                let elapsed_ms = step * step_ms;
-                let command = match elapsed_ms {
-                    0..250 => controls(1.0, true),
-                    250..1_250 => controls(0.82, true),
-                    1_250..3_000 => controls(0.64, true),
-                    3_000..4_000 => controls(0.0, true),
-                    _ => controls(1.0, false),
-                };
-                let r = rust
-                    .step(Some(&command), &mut world, &mut r_encoder)
-                    .unwrap();
-                let c = cpp
-                    .step(Some(&command), &mut world, &mut c_encoder)
-                    .unwrap();
-                assert_same_flight(&[rust.truth()], &[cpp.truth()]);
-                assert_frames(step as usize, &r, &c);
-                peak = peak.max(rust.truth().altitude_m - ground);
-            }
-            assert!(peak > 0.5, "the vehicle must leave the ground: {peak}");
-            for simulation in [&mut rust, &mut cpp] {
+            for simulation in &mut simulations {
                 let truth = simulation.truth();
-                assert!((truth.altitude_m - ground - 0.12).abs() < 0.02);
+                assert!((truth.altitude_m - site.ground_m - 0.12).abs() < 0.02);
                 assert!(truth.velocity_ned.iter().all(|v| v.abs() < 0.01));
             }
         }
     }
+}
+
+/// A copy of the bundled X500 with the `tag` value of the first `count`
+/// contacts scaled by `scale`, in a directory of its own.
+fn scaled_x500(tag: &str, scale: f64, count: usize) -> std::path::PathBuf {
+    let source = std::fs::read_to_string(Aircraft::X500.bundled_dir().join("x500.xml")).unwrap();
+    let mut scaled = String::new();
+    let mut rest = source.as_str();
+    for _ in 0..count {
+        let Some(at) = rest.find(&format!("<{tag} ")) else {
+            break;
+        };
+        let open_end = rest[at..].find('>').unwrap() + at + 1;
+        let close = rest[open_end..].find('<').unwrap() + open_end;
+        let value: f64 = rest[open_end..close].trim().parse().unwrap();
+        scaled.push_str(&rest[..open_end]);
+        scaled.push_str(&format!("{}", value * scale));
+        rest = &rest[close..];
+    }
+    scaled.push_str(rest);
+    assert_ne!(scaled, source, "the model has no {tag}");
+    let dir = std::env::temp_dir().join(format!(
+        "pilotage-x500-{tag}-{scale}-{count}-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("x500.xml"), scaled).unwrap();
+    dir
+}
+
+/// The failure message of a landing over a Rust-side model in `dir`.
+fn landing_failure(dir: std::path::PathBuf) -> String {
+    let run = std::panic::catch_unwind(|| {
+        land(N51_SITE, 1, dir.clone());
+    });
+    std::fs::remove_dir_all(&dir).unwrap();
+    let message = run.expect_err("the landing comparison must fail");
+    message
+        .downcast_ref::<String>()
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// The contact bound must not admit a gear that is not the C++ engine's
+/// gear: every strut 5 % stiffer or 5 % more damped on the Rust side
+/// fails the landing comparison.
+#[test]
+fn a_five_percent_strut_change_fails_the_landing_comparison() {
+    for tag in ["spring_coeff", "damping_coeff"] {
+        let text = landing_failure(scaled_x500(tag, 1.05, 4));
+        assert!(
+            text.contains("specific force")
+                || text.contains("HIL_SENSOR")
+                || text.contains("apart"),
+            "{tag}: {text}"
+        );
+    }
+}
+
+/// The rate allowance must not admit an asymmetric gear: one strut 5 %
+/// more damped on the Rust side tilts the touchdown torque, and the
+/// body-rate comparison fails. Damping leaves the attitude at rest the
+/// same, so the comparison reaches the touchdown.
+#[test]
+fn a_five_percent_change_of_one_strut_fails_the_rate_comparison() {
+    let text = landing_failure(scaled_x500("damping_coeff", 1.05, 1));
+    assert!(text.contains(": rate: "), "{text}");
 }
