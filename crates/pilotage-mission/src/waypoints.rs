@@ -15,8 +15,10 @@ pub const MIN_CAPTURE_RADIUS_M: f64 = 2.0;
 /// completes a waypoint list, unless the plan sets another, metres.
 pub const DEFAULT_ARRIVAL_RADIUS_M: f64 = 1.0;
 
-/// The bank angle that sizes the default orbit after a plan for a
-/// vehicle that cannot stop, degrees: a moderate coordinated turn.
+/// The bank angle a vehicle turns at on a route unless its configuration
+/// names another, degrees: a moderate coordinated turn. It sizes the turn
+/// ahead of a fly-by waypoint and the orbit after a plan for a vehicle
+/// that cannot stop.
 pub const DEFAULT_ORBIT_BANK_DEG: f64 = 25.0;
 
 /// The capture radius for a vehicle at `speed_mps`: the distance it
@@ -40,6 +42,36 @@ pub fn turn_radius_for(speed_mps: f64, bank_deg: f64, floor_m: f64) -> f64 {
     }
     let lateral_mps2 = crate::body::SURFACE_GRAVITY_MPS2 * bank_deg.to_radians().tan();
     at_least(speed_mps * speed_mps / lateral_mps2, floor_m)
+}
+
+/// The true airspeed of an indicated airspeed `indicated_mps` at
+/// `altitude_m`, in the ISA standard atmosphere with no wind: the speed
+/// over the ground a fixed wing flies when its flight controller holds
+/// that indicated airspeed. Thinner air needs more true speed for the same
+/// dynamic pressure, `TAS = IAS / √σ`; the difference between indicated and
+/// equivalent airspeed is below a percent at a light aircraft's speeds.
+/// Above the 11 km tropopause the density falls exponentially. A
+/// non-finite input gives the indicated airspeed.
+#[must_use]
+pub fn true_airspeed_for(indicated_mps: f64, altitude_m: f64) -> f64 {
+    /// Temperature lapse over the sea-level temperature, 1/m.
+    const LAPSE_PER_M: f64 = 0.0065 / 288.15;
+    /// `g / (L·R) − 1` for dry air: the density exponent of the ISA
+    /// troposphere.
+    const DENSITY_EXPONENT: f64 = 4.255_876;
+    const TROPOPAUSE_M: f64 = 11_000.0;
+    /// Density scale height of the isothermal layer above it, metres.
+    const STRATOSPHERE_SCALE_M: f64 = 6_341.62;
+    if !(indicated_mps.is_finite() && altitude_m.is_finite()) {
+        return indicated_mps;
+    }
+    let troposphere = |height_m: f64| (1.0 - LAPSE_PER_M * height_m).powf(DENSITY_EXPONENT);
+    let density_ratio = if altitude_m <= TROPOPAUSE_M {
+        troposphere(altitude_m)
+    } else {
+        troposphere(TROPOPAUSE_M) * (-(altitude_m - TROPOPAUSE_M) / STRATOSPHERE_SCALE_M).exp()
+    };
+    indicated_mps / density_ratio.sqrt()
 }
 
 fn at_least(value: f64, floor: f64) -> f64 {

@@ -50,5 +50,6 @@ pub use provenance::{MissionPlanRecord, SnapshotProvenance, decode_snapshot};
 pub use survey::{SurveyError, SurveyPlan, SurveyPlanRecord, SurveyRequest, plan_survey};
 pub use waypoints::{
     DEFAULT_ARRIVAL_RADIUS_M, DEFAULT_ORBIT_BANK_DEG, MIN_CAPTURE_RADIUS_M, PlannedWaypoint,
-    WaypointPlan, WaypointPlanRecord, WaypointTurn, capture_radius_for, turn_radius_for,
+    WaypointPlan, WaypointPlanRecord, WaypointTurn, capture_radius_for, true_airspeed_for,
+    turn_radius_for,
 };

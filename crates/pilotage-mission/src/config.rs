@@ -72,9 +72,9 @@ impl OwnshipSource {
 /// default.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct TerminalOrbit {
-    /// The orbit radius, metres. Default: the turn radius at the cruise
-    /// speed and [`crate::DEFAULT_ORBIT_BANK_DEG`], and at least the
-    /// capture radius.
+    /// The orbit radius, metres. Default: the turn radius at the true
+    /// airspeed of the cruise speed at the orbit altitude and
+    /// [`MissionConfig::route_bank_deg`], and at least the capture radius.
     pub radius_m: Option<f64>,
     /// The orbit altitude on the WGS84 ellipsoid, metres. Default: the
     /// altitude of the last waypoint.
@@ -173,6 +173,11 @@ pub struct MissionConfig {
     pub capture_time_s: f64,
     /// The orbit after a waypoint plan for a vehicle that cannot stop.
     pub terminal_orbit: TerminalOrbit,
+    /// The bank angle the vehicle turns at on a route, degrees: the
+    /// airframe's route bank limit. With the speed over the ground it sizes
+    /// the turn ahead of a fly-by waypoint, and with the true airspeed the
+    /// orbit after the plan. Default [`crate::DEFAULT_ORBIT_BANK_DEG`].
+    pub route_bank_deg: f64,
 }
 
 impl MissionConfig {
@@ -223,6 +228,7 @@ impl MissionConfig {
             vehicle_class: VehicleClass::Multicopter,
             capture_time_s: 2.0,
             terminal_orbit: TerminalOrbit::default(),
+            route_bank_deg: crate::DEFAULT_ORBIT_BANK_DEG,
         }
     }
 }

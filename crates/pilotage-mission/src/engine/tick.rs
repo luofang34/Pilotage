@@ -25,6 +25,7 @@ use super::{MissionAction, MissionEngine, MissionEvent, MissionOutput, MissionSt
 mod directives;
 mod outputs;
 mod overflight;
+mod speed;
 mod terminal;
 
 use outputs::{failed_output, terminal_output};
@@ -328,7 +329,7 @@ impl MissionEngine {
         }
         match self
             .route
-            .advance(&solution.position, self.commanded_groundspeed_mps())
+            .advance(&solution.position, self.route_groundspeed_mps(solution))
         {
             SequenceEvent::LegAdvanced {
                 to_index, reason, ..
@@ -407,18 +408,17 @@ impl MissionEngine {
             self.counters.missing_yaw = self.counters.missing_yaw.wrapping_add(1);
             return None;
         };
-        project_guidance_setpoint(
+        let intent = project_guidance_setpoint(
             &setpoint,
             yaw,
             &self.config.limits,
             self.config.yaw_gain_per_s,
-        )
-    }
-
-    fn commanded_groundspeed_mps(&self) -> f64 {
-        self.config
-            .cruise_mps
-            .min(self.config.limits.max_horizontal_mps)
+        )?;
+        Some(if self.config.can_stop() {
+            intent
+        } else {
+            speed::at_most_cruise(intent, self.commanded_cruise_mps())
+        })
     }
 
     #[allow(dead_code)]
