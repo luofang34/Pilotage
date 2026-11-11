@@ -4,7 +4,8 @@ use navigate_contract::{AltitudeConstraint, FlightPlan, PlanRole, TurnType, Wayp
 use pilotage_mission_core::{
     Comparison, Digest, ExecutionPolicy, ExecutionTarget, FlightAction, FlightPlanReference,
     MissionAction, MissionCapability, MissionCondition, MissionDocument, MissionPhase,
-    NavigationCondition, NavigationDataIdentity, PhaseClock, PhaseDeadline,
+    NavigationCondition, NavigationDataIdentity, PhaseClock, PhaseDeadline, VehicleCondition,
+    VehicleLifecycleState,
 };
 use sha2::{Digest as _, Sha256};
 
@@ -125,7 +126,7 @@ fn phases(
 ) -> Vec<MissionPhase> {
     let mut phases = Vec::with_capacity(segments.len().max(1).saturating_add(2));
     if config.execution_target == ExecutionTarget::Simulator {
-        phases.push(arm_phase());
+        phases.push(arm_phase(config));
     }
     // The first phase waits for a valid solution; later phases follow on.
     let first = phases.is_empty();
@@ -167,16 +168,28 @@ fn segment_phase(plan: &FlightPlanReference, segment: &Segment) -> MissionPhase 
     }
 }
 
-fn arm_phase() -> MissionPhase {
+/// The arm phase. It starts once guidance has a valid solution and, when
+/// the configuration waits for the vehicle, once the vehicle reports itself
+/// ready: the arm directive starts the receipt timer, so it must not be
+/// issued to a flight controller that cannot answer it yet.
+fn arm_phase(config: &MissionConfig) -> MissionPhase {
+    let mut required_capabilities = vec![
+        MissionCapability::ArmDisarm,
+        MissionCapability::NavigationState,
+    ];
+    let mut entry_conditions = vec![MissionCondition::Navigation(
+        NavigationCondition::GuidanceValid { expected: true },
+    )];
+    if config.arm_when_vehicle_ready {
+        required_capabilities.push(MissionCapability::LifecycleState);
+        entry_conditions.push(MissionCondition::Vehicle(VehicleCondition::Lifecycle {
+            state: VehicleLifecycleState::Ready,
+        }));
+    }
     MissionPhase {
         id: ARM_PHASE_ID.to_owned(),
-        required_capabilities: vec![
-            MissionCapability::ArmDisarm,
-            MissionCapability::NavigationState,
-        ],
-        entry_conditions: vec![MissionCondition::Navigation(
-            NavigationCondition::GuidanceValid { expected: true },
-        )],
+        required_capabilities,
+        entry_conditions,
         action: MissionAction::Flight(FlightAction::Arm {}),
         cleanup_actions: Vec::new(),
         completion_conditions: vec![MissionCondition::Always {}],

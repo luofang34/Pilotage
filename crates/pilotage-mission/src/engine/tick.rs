@@ -51,7 +51,7 @@ impl MissionEngine {
         if self.state() == MissionState::Enroute {
             plan_advanced = self.advance_active_plan(solution.as_ref(), &mut events);
         }
-        let observation = self.core_observation(solution.as_ref());
+        let observation = self.core_observation(solution.as_ref(), now);
         let Some(core_output) = self.tick_core(now, observation, &mut events) else {
             return failed_output(events);
         };
@@ -78,6 +78,12 @@ impl MissionEngine {
             }
             state = self.state();
         }
+        let withheld = if state == MissionState::AwaitSolution {
+            self.start_withheld_reason(solution.as_ref(), now)
+        } else {
+            None
+        };
+        self.announce_start(withheld, &mut events);
         let action = match action {
             Some(arm) => self.gate_arm(arm, now, &mut events),
             None => self.release_held_arm(now, &mut events),
@@ -97,7 +103,7 @@ impl MissionEngine {
         solution: Option<&NavigationSolution>,
         events: &mut Vec<MissionEvent>,
     ) -> Option<Option<MissionAction>> {
-        let observation = self.core_observation(solution);
+        let observation = self.core_observation(solution, now);
         let output = self.tick_core(now, observation, events)?;
         Some(self.apply_core_output(&output, events))
     }
@@ -162,7 +168,11 @@ impl MissionEngine {
         events.push(MissionEvent::MissionEngineRefused { detail });
     }
 
-    fn core_observation(&self, solution: Option<&NavigationSolution>) -> CoreObservation {
+    fn core_observation(
+        &self,
+        solution: Option<&NavigationSolution>,
+        now: MonotonicNanos,
+    ) -> CoreObservation {
         CoreObservation {
             navigation: NavigationObservation {
                 guidance_valid: Some(solution.is_some()),
@@ -170,7 +180,10 @@ impl MissionEngine {
                 waypoints_captured: u32::try_from(self.waypoints_captured()).ok(),
                 altitude_m: solution.map(|value| value.position.altitude_m),
             },
-            vehicle: VehicleObservation::default(),
+            vehicle: VehicleObservation {
+                lifecycle: self.vehicle_lifecycle(now),
+                ..VehicleObservation::default()
+            },
             signals: Vec::new(),
         }
     }
