@@ -11,6 +11,7 @@
 mod archive;
 mod files;
 mod json;
+mod order;
 mod plans;
 mod sources;
 mod style;
@@ -89,6 +90,8 @@ const REQUIRED: [&str; 15] = [
 pub(super) struct Inputs {
     pub(super) paths: Paths,
     pub(super) style: Value,
+    /// The style's source names in file order.
+    pub(super) source_order: Vec<String>,
     pub(super) plan: Value,
     pub(super) manifest: Value,
     pub(super) coastline_plan: Value,
@@ -100,6 +103,7 @@ impl Inputs {
         let parse = |relative: &str| json_file(&paths.at(relative));
         Self {
             style: parse(STYLE),
+            source_order: order::source_order(&std::fs::read(paths.at(STYLE)).unwrap_or_default()),
             plan: parse(PLAN),
             manifest: parse(MANIFEST),
             coastline_plan: parse(COASTLINE_PLAN),

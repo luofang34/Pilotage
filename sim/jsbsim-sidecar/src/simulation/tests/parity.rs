@@ -28,6 +28,9 @@ const RATE_CAP_RAD_S: f64 = 10.0 * RATE_RAD_S;
 // standard deviation. On the gear, `contact::Bounds` adds what the
 // admitted height and attitude differences can cause.
 const FORCE_M_S2: f64 = 0.02;
+/// The widest the contact terms may make the specific-force bound. A
+/// bound past it no longer constrains the accelerometer.
+const FORCE_CAP_M_S2: f64 = 0.1;
 /// Metres per degree of latitude, near enough to bound a difference.
 const M_PER_DEG: f64 = 111_000.0;
 
