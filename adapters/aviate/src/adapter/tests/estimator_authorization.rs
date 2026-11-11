@@ -3,7 +3,7 @@
 //! The link-layer half of this contract lives with `pilotage_mavlink`.
 
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use web_time::Instant;
 
 use pilotage_adapter_api::VehicleAdapter;
 use pilotage_mavlink::LinkState;

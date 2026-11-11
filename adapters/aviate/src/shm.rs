@@ -24,7 +24,7 @@
 //! consumers needing body rates must derive them from successive
 //! attitudes and label them as derived.
 
-use std::time::Instant;
+use web_time::Instant;
 
 use aviate_xil_contract::{ShmName, WriterState, shm_name};
 use aviate_xil_shm::{AttachFailure, ConsumerSession, ModelStateSnapshot};

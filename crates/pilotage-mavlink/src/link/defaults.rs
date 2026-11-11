@@ -1,6 +1,6 @@
 //! The state a link starts in, before any frame has been read.
 
-use std::time::Instant;
+use web_time::Instant;
 
 use pilotage_adapter_api::SourceIncarnation;
 
@@ -9,6 +9,13 @@ use super::{AuthorizationSource, LinkState, ResetPolicy, measurement};
 
 impl Default for LinkState {
     fn default() -> Self {
+        Self::empty(Instant::now())
+    }
+}
+
+impl LinkState {
+    /// The empty cache whose acquisition clock starts at `started_at`.
+    pub(super) fn empty(started_at: Instant) -> Self {
         Self {
             system_id: 1,
             component_id: 1,
@@ -26,7 +33,7 @@ impl Default for LinkState {
             sim_truth: None,
             gnss_fix: None,
             geomagnetic_reference: None,
-            started_at: Instant::now(),
+            started_at,
             truth_origin: None,
             gimbals: Default::default(),
             battery: None,

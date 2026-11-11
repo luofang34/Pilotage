@@ -1,0 +1,18 @@
+[package]
+name = "pilotage-flight-uplink"
+description = "The sans-IO flight uplink policy: stick shaping, hold, arm quiet, keep-alive, and the MAVLink frames they make"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+# Inspection and seeding hooks for the tests of crates that wrap the policy.
+test-support = []
+
+[dependencies]
+pilotage-control-feel = { workspace = true }
+pilotage-mavlink = { workspace = true }
+tracing = { workspace = true }

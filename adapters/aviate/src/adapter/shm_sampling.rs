@@ -20,7 +20,8 @@
 //! `AvionicsSample`: simulator truth does not impersonate an FC
 //! estimator and is not eligible for operational control.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use aviate_xil_contract::WriterState;
 use pilotage_adapter_api::{

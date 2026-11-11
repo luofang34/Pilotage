@@ -244,7 +244,7 @@ fn the_x_plane_lane_publishes_the_position_the_flight_controller_forwarded() {
             lat_lon_alt: REPORTED,
             time_usec: 1_000,
             sequence: 3,
-            received_at: std::time::Instant::now(),
+            received_at: web_time::Instant::now(),
         });
     }
     let mut adapter = AviateAdapter::from_state(VehicleId::new(1), state);
@@ -278,7 +278,7 @@ fn an_oracle_with_no_paired_sensor_states_no_position() {
             lat_lon_alt: [473_977_419, 85_455_938, 488_227],
             time_usec: 1_000,
             sequence: 3,
-            received_at: std::time::Instant::now(),
+            received_at: web_time::Instant::now(),
         });
     }
     let mut adapter = AviateAdapter::from_state(VehicleId::new(1), state);
@@ -309,7 +309,7 @@ fn the_estimate_lane_publishes_the_position_the_receiver_solved() {
             accuracy_mm: [1_250, 2_100],
             sequence: 4,
             received_since_start_ns: 9_000_000,
-            received_at: std::time::Instant::now(),
+            received_at: web_time::Instant::now(),
         });
     }
     let mut adapter = AviateAdapter::from_state(VehicleId::new(1), state);

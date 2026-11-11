@@ -1,6 +1,7 @@
 //! Selected flight-controller reports for observed flight procedures.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use pilotage_adapter_api::{MeasurementClock, MeasurementStamp, SourceIntegrity, SourceRole};
 

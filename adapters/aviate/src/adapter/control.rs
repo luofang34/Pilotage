@@ -1,7 +1,7 @@
 //! Flight-control gating (typed commands), reset handling, and the
 //! velocity-envelope stick conversion.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use pilotage_adapter_api::{ApplyOutcome, Disposition, RejectReason};
 use pilotage_control_feel::DemandEnvelope;
@@ -150,7 +150,7 @@ impl AviateAdapter {
     /// the FC this adapter was talking to is about to die, so every
     /// cached measurement loses its authority to validate control.
     pub(super) fn spawn_reset(&mut self) {
-        let now = Instant::now();
+        let now = self.clock.now();
         if self
             .last_reset
             .is_some_and(|last_reset| now.duration_since(last_reset) < Duration::from_secs(5))

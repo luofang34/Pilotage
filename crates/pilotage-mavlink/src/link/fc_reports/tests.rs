@@ -1,7 +1,7 @@
 #![allow(clippy::expect_used)]
 
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use web_time::Instant;
 
 use crate::codec::{
     FcMessage, FrameSource, MAV_CMD_COMPONENT_ARM_DISARM, MAV_CMD_SET_MESSAGE_INTERVAL,

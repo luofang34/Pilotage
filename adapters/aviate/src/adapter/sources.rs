@@ -2,7 +2,7 @@
 //! binds, and the provenance stamping for FC-owned state reports.
 
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use web_time::Instant;
 
 use pilotage_adapter_api::{
     FcStateSample, MeasurementClock, MeasurementStamp, SourceIncarnation, SourceIntegrity,
@@ -11,18 +11,25 @@ use pilotage_adapter_api::{
 
 #[cfg(feature = "sim")]
 use super::shm_sampling::ShmSource;
+#[cfg(feature = "net")]
 use super::{AviateProfile, AviateTruth};
+#[cfg(feature = "net")]
 use crate::error::AviateAdapterError;
+#[cfg(feature = "net")]
 use crate::incarnation::IncarnationProvider;
-use pilotage_mavlink::link::{LinkConfig, LinkState, MavlinkLink};
+use pilotage_mavlink::link::LinkState;
+#[cfg(feature = "net")]
+use pilotage_mavlink::link::{LinkConfig, MavlinkLink};
 
-/// The MAVLink estimate link: the latest-value cache plus the receive
-/// task that feeds it. This link only ever produces the FC operational
+/// The MAVLink estimate link: the latest-value cache plus, in a process
+/// host, the receive task that feeds it; an embedding host feeds the
+/// cache itself. This link only ever produces the FC operational
 /// estimate role.
 #[derive(Debug)]
 pub(super) struct EstimateSource {
     pub(super) state: Arc<Mutex<LinkState>>,
     // Kept alive for its receive task; dropped with the adapter.
+    #[cfg(feature = "net")]
     pub(super) _link: Option<MavlinkLink>,
 }
 
@@ -44,6 +51,7 @@ pub(super) struct ArmReport {
 /// Binds the links a profile's roles require. Every role gets its own
 /// attachment identity: truth, estimate, and FC state reports are
 /// independent sources, not one link.
+#[cfg(feature = "net")]
 pub(super) async fn bind_sources<P: IncarnationProvider>(
     profile: AviateProfile,
     // A flight build binds no truth at all.
@@ -98,6 +106,7 @@ pub(super) async fn bind_sources<P: IncarnationProvider>(
     }
 }
 
+#[cfg(feature = "net")]
 async fn estimate_source(
     config: LinkConfig,
     incarnation: SourceIncarnation,

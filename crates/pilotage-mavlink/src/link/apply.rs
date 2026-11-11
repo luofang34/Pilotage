@@ -3,7 +3,7 @@
 //! measurement-group acquisition discipline.
 
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use web_time::Instant;
 
 use super::estimator::{accept_status, authorization_at, invalidate_cached_authorization};
 use super::measurement::{next_attitude_stamp, next_baro_stamp, next_kinematics_stamp};
@@ -15,6 +15,7 @@ use crate::codec::{FcMessage, FrameSource};
 
 /// Folds decoded messages into the shared cache. Kept synchronous and
 /// lock-scoped: the lock is never held across an await.
+#[cfg(feature = "net")]
 pub(super) fn apply_messages(
     state: &Arc<Mutex<LinkState>>,
     messages: &[(FrameSource, FcMessage)],

@@ -116,7 +116,7 @@ fn set_still_at(
     let kin = latest.kinematics.as_mut().expect("kinematics fixture");
     kin.pos_ned_m = pos;
     kin.vel_ned_mps = [0.1, 0.0, 0.0];
-    kin.received_at = std::time::Instant::now();
+    kin.received_at = web_time::Instant::now();
 }
 
 /// Sends one centered frame, expects a position-hold setpoint back, and
@@ -176,7 +176,7 @@ fn a_hold_captured_before_link_loss_never_commands_recovery_to_it() {
         let mut latest = state.lock().expect("state lock");
         let kin = latest.kinematics.as_mut().expect("kinematics fixture");
         kin.vel_ned_mps = [0.1, 0.0, 0.0];
-        kin.received_at = std::time::Instant::now();
+        kin.received_at = web_time::Instant::now();
     }
     adapter.apply_control(&flight_frame(
         vec![(LogicalAxisId::new(super::super::PITCH_AXIS), 0.0)],

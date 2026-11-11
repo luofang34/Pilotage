@@ -1,7 +1,8 @@
 //! The FC's geomagnetic reference: the stamped variation on the estimate
 //! lane and the heading reference the capability advertises from it.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use pilotage_adapter_api::{MagneticVariationSource, VehicleAdapter};
 use pilotage_mavlink::link::GeomagneticReferenceUpdate;

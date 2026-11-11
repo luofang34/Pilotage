@@ -83,7 +83,7 @@ pub(super) fn check(inputs: &Inputs, refusals: &mut Vec<String>) {
         ),
         refusals,
     );
-    let detail = detail_source(style, bands, global_zoom);
+    let detail = detail_source(style, &inputs.source_order, bands, global_zoom);
     check_detail(inputs, detail.as_deref(), global_zoom, bands, refusals);
     check_terrain_layers(inputs, refusals);
     require(
@@ -95,16 +95,22 @@ pub(super) fn check(inputs: &Inputs, refusals: &mut Vec<String>) {
     );
 }
 
-/// The first terrain source that starts the zoom after the global band
-/// stops and reaches the deepest band.
-fn detail_source(style: &Value, bands: &[Value], global_zoom: Option<f64>) -> Option<String> {
+/// The first terrain source, in file order, that starts the zoom after
+/// the global band stops and reaches the deepest band.
+fn detail_source(
+    style: &Value,
+    order: &[String],
+    bands: &[Value],
+    global_zoom: Option<f64>,
+) -> Option<String> {
     let deepest = max_number(bands.iter().map(|band| field(band, "max_zoom")));
     // jq adds 1 to a missing ceiling as to 0.
     let start = global_zoom.unwrap_or(0.0) + 1.0;
     let zero = Value::from(0);
     let sources = field(style, "sources").as_object()?;
-    sources
+    order
         .iter()
+        .filter_map(|name| sources.get(name).map(|source| (name, source)))
         .find(|(_, source)| {
             is_text(field(source, "url"), TERRAIN_URL)
                 && is_number(or_else(field(source, "minzoom"), &zero), start)

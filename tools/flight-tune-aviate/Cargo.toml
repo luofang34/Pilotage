@@ -32,7 +32,7 @@ sysctl = "=0.7.1"
 
 [dev-dependencies]
 flight-tune = { path = "../flight-tune", features = ["test-support"] }
-pilotage-adapter-aviate = { workspace = true }
+pilotage-adapter-aviate = { workspace = true, features = ["net"] }
 pilotage-durable-storage = { workspace = true, features = ["fault-injection"] }
 rustix = { workspace = true, features = ["event", "fs", "process"] }
 tempfile = "3.23.0"

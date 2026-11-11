@@ -6,9 +6,10 @@ use crate::{
 use pilotage_protocol::{ScopedControlFrame, ZoomCommand, ZoomUnit, wire};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tracing::warn;
 use turret_core::{CommandIdentity, PayloadCapabilities, PayloadCommand};
+use web_time::Instant;
 
 #[derive(Debug, thiserror::Error)]
 pub(super) enum CameraCommandError {

@@ -1,5 +1,5 @@
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use web_time::Instant;
 
 /// A complete transport-write fact, independent of device acknowledgement.
 #[derive(Debug, Default, Clone)]
@@ -18,6 +18,7 @@ impl WriteReceipt {
         self.0.lock().ok().and_then(|value| *value)
     }
 
+    #[cfg(feature = "net")]
     pub(crate) fn record_sent(&self, at: Instant) {
         if let Ok(mut value) = self.0.lock() {
             *value = Some(at);

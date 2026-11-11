@@ -195,7 +195,7 @@ fn the_view_returns_forward_after_aiming_stops() {
     state.aim();
     state.note_published();
     // Age the aim past the hold without sleeping.
-    state.aimed_at = Some(std::time::Instant::now() - super::PAYLOAD_VIEW_HOLD);
+    state.aimed_at = Some(web_time::Instant::now() - super::PAYLOAD_VIEW_HOLD);
     assert_eq!(
         state.command().mode,
         1,
@@ -265,7 +265,7 @@ fn an_expired_view_is_not_resurrected_by_neutral_frames() {
     pointing.aim();
     // Simulate the stream stopping past the hold window by aging the
     // stamp directly: sustain must NOT re-arm an expired view.
-    pointing.aimed_at = Some(std::time::Instant::now() - PAYLOAD_VIEW_HOLD * 2);
+    pointing.aimed_at = Some(web_time::Instant::now() - PAYLOAD_VIEW_HOLD * 2);
     assert_eq!(pointing.mode(), MODE_FPV);
     pointing.sustain_aim();
     assert_eq!(pointing.mode(), MODE_FPV);

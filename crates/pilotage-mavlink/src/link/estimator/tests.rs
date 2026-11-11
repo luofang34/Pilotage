@@ -1,7 +1,8 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use crate::codec::{FcMessage, FrameSource};
 use crate::link::{LinkState, ResetPolicy, apply_messages_at};

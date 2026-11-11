@@ -2,11 +2,12 @@
 use crate::{
     GimbalRateDemand, OutboundCommand, PayloadChannel, PayloadTiming, SendFence, WriteReceipt,
 };
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::{mpsc::Sender, watch};
 use tracing::warn;
 use turret_core::{AngularRate, PayloadCommand, Tick};
 use turret_mavlink::ManagerPolicy;
+use web_time::Instant;
 
 mod discovery;
 mod release;

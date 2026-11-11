@@ -22,9 +22,11 @@ pub trait IncarnationProvider {
 }
 
 /// Operating-system CSPRNG identity provider for simulator attachments.
+#[cfg(feature = "net")]
 #[derive(Debug, Default)]
 pub struct OsIncarnationProvider;
 
+#[cfg(feature = "net")]
 impl IncarnationProvider for OsIncarnationProvider {
     fn next_incarnation_blocking(&mut self) -> Result<SourceIncarnation, AviateAdapterError> {
         let mut bytes = [0_u8; 16];

@@ -29,12 +29,13 @@ mod camera;
 mod profile;
 mod sim_attachments;
 pub use profile::{AviateProfile, AviateTruth};
-#[cfg(not(feature = "sim"))]
+#[cfg(all(feature = "net", not(feature = "sim")))]
 use sim_attachments::no_camera;
 use sim_attachments::{CameraBridge, Pointing, TruthOracle};
 
 mod control;
 mod control_feel;
+mod embedded;
 mod flight;
 #[cfg(feature = "sim")]
 mod pointing;
@@ -44,6 +45,7 @@ mod shm_sampling;
 mod sources;
 mod startup;
 use control::rejected_control;
+pub use embedded::EmbeddedIncarnations;
 use sampling::mavlink_batch;
 use sources::{ArmReport, EstimateSource};
 pub(crate) use startup::validate_aviate_profile_bindings;
@@ -108,6 +110,7 @@ pub struct AviateAdapter {
     control_feel_changed: bool,
     // Pilotage's Gazebo sidecar bridges the flight world's camera topics;
     // the adapter remains usable without video when the sidecar cannot spawn.
+    #[cfg(feature = "net")]
     frames: Option<tokio::sync::mpsc::Receiver<pilotage_adapter_api::RawVideoFrame>>,
     // The producer link. Held (not underscore-parked) because the gimbal
     // scope enacts through it: pointing and zoom are commands to the
@@ -125,15 +128,19 @@ pub struct AviateAdapter {
     // and structurally uninhabited in a flight build.
     #[cfg_attr(not(feature = "sim"), allow(dead_code))]
     pointing: Option<Pointing>,
+    #[cfg(feature = "net")]
     _frame_forwarder: Option<tokio::task::JoinHandle<()>>,
     // Latest FC arm report from uplink heartbeats, with its receive
     // metadata; `None` until the FC has reported at least once.
     arm: Option<ArmReport>,
     // Identity under which arm reports are stamped.
     arm_incarnation: SourceIncarnation,
+    // The adapter's time source: the process clock, or the time an
+    // embedding host steps on.
+    clock: crate::clock::AdapterClock,
     // Zero point of the host-monotonic acquisition clock.
-    started_at: std::time::Instant,
-    last_reset: Option<std::time::Instant>,
+    started_at: web_time::Instant,
+    last_reset: Option<web_time::Instant>,
     /// Whether the last payload-view publish failed, so a dead
     /// producer link logs one transition line instead of storming the
     /// telemetry tick.
@@ -277,6 +284,7 @@ impl AviateAdapter {
 
     /// Takes the raw-frame receiver for the host media task, if cameras
     /// are up and it has not been taken.
+    #[cfg(feature = "net")]
     pub fn subscribe_frames(
         &mut self,
     ) -> Option<tokio::sync::mpsc::Receiver<pilotage_adapter_api::RawVideoFrame>> {
@@ -289,19 +297,26 @@ impl AviateAdapter {
         Self {
             vehicle,
             profile: AviateProfile::Simulation,
-            estimate: Some(EstimateSource { state, _link: None }),
+            estimate: Some(EstimateSource {
+                state,
+                #[cfg(feature = "net")]
+                _link: None,
+            }),
             truth: None,
             uplink: None,
             control_feel_profiles: None,
             control_feel_changed: false,
+            #[cfg(feature = "net")]
             frames: None,
             camera_bridge: None,
             navsat_join_failures: 0,
             pointing: None,
+            #[cfg(feature = "net")]
             _frame_forwarder: None,
             arm: None,
             arm_incarnation: SourceIncarnation::new([0; 16]),
-            started_at: std::time::Instant::now(),
+            clock: crate::clock::AdapterClock::System,
+            started_at: web_time::Instant::now(),
             last_reset: None,
             #[cfg(feature = "sim")]
             view_publish_failed: false,

@@ -1,5 +1,5 @@
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use web_time::Instant;
 
 use crate::codec::{
     ATTITUDE_QUATERNION_ID, AVIATE_ESTIMATOR_STATUS_ID, LOCAL_POSITION_NED_ID, encode_frame_v2_from,
