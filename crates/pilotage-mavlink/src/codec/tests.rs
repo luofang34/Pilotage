@@ -349,6 +349,7 @@ fn gcs_heartbeat_parses_back_as_heartbeat() {
                 armed: false,
                 custom_mode: 0,
                 autopilot: 8, // MAV_AUTOPILOT_INVALID: a GCS has no autopilot.
+                mav_type: 6,  // MAV_TYPE_GCS
             }
         )]
     );

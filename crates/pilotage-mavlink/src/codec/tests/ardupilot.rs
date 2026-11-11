@@ -81,6 +81,7 @@ fn heartbeat_carries_the_ardupilot_mode() {
         armed,
         custom_mode,
         autopilot,
+        ..
     } = decode_one(&GUIDED_HEARTBEAT)
     else {
         panic!("a heartbeat");

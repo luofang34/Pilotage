@@ -76,6 +76,13 @@ pub enum RejectReason {
     /// not been given the ellipsoidal height of the flight controller's
     /// local origin, so it cannot place that altitude in the local frame.
     LocalOriginHeightUnknown,
+    /// The flight controller reports an airframe (its MAVLink `MAV_TYPE`)
+    /// that is not the one the adapter flies: a fixed-wing demand would
+    /// reach a rotorcraft law, or the reverse.
+    AirframeMismatch {
+        /// The `MAV_TYPE` the flight controller reported.
+        reported_mav_type: u8,
+    },
     /// The adapter rejected the frame for a reason not covered above.
     Other(String),
 }

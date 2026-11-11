@@ -211,6 +211,7 @@ fn adapter_rejection_reason(reason: &RejectReason) -> FrameRejectionReason {
         | RejectReason::LinkLossEngaged
         | RejectReason::ResetInProgress
         | RejectReason::LocalOriginHeightUnknown
+        | RejectReason::AirframeMismatch { .. }
         | RejectReason::Other(_) => FrameRejectionReason::AdapterRejected,
     }
 }

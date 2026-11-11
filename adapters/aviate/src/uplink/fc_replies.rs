@@ -26,8 +26,11 @@ impl FlightUplink {
                     continue;
                 }
                 match *message {
-                    pilotage_mavlink::codec::FcMessage::Heartbeat { armed: a, .. } => {
-                        armed = Some(a)
+                    pilotage_mavlink::codec::FcMessage::Heartbeat {
+                        armed: a, mav_type, ..
+                    } => {
+                        armed = Some(a);
+                        self.fc_mav_type = Some(mav_type);
                     }
                     pilotage_mavlink::codec::FcMessage::CommandAck {
                         command,
@@ -55,6 +58,14 @@ impl FlightUplink {
             }
         }
         armed
+    }
+}
+
+impl FlightUplink {
+    /// The MAV_TYPE the FC's last heartbeat on this link reported: the
+    /// airframe it says it flies.
+    pub fn fc_mav_type(&self) -> Option<u8> {
+        self.fc_mav_type
     }
 }
 

@@ -179,6 +179,7 @@ fn decode_heartbeat(payload: &[u8]) -> FcMessage {
         armed: payload.get(6).is_some_and(|b| b & 0x80 != 0),
         custom_mode: u32_at(payload, 0),
         autopilot: payload.get(5).copied().unwrap_or(0),
+        mav_type: payload.get(4).copied().unwrap_or(0),
     }
 }
 
