@@ -289,6 +289,16 @@ impl MissionEngine {
         if self.plan_complete {
             return Some(zero_velocity_intent());
         }
+        if self.route.approaching() {
+            let last = *self.route.last_waypoint()?;
+            return self.guide_to(
+                solution,
+                LateralReference::PresentPosition,
+                &last,
+                now,
+                events,
+            );
+        }
         self.guide_active_leg(solution, now, events)
     }
 
@@ -311,6 +321,10 @@ impl MissionEngine {
         if self.plan_complete {
             return;
         }
+        if self.route.approaching() {
+            self.plan_complete = self.route.arrive(&solution.position);
+            return;
+        }
         match self
             .route
             .advance(&solution.position, self.commanded_groundspeed_mps())
@@ -318,7 +332,7 @@ impl MissionEngine {
             SequenceEvent::LegAdvanced {
                 to_index, reason, ..
             } => events.push(MissionEvent::LegAdvanced { to_index, reason }),
-            SequenceEvent::PlanComplete { .. } => self.plan_complete = true,
+            SequenceEvent::PlanComplete { .. } => self.plan_complete = !self.route.approaching(),
             _ => {}
         }
     }
@@ -354,10 +368,22 @@ impl MissionEngine {
         };
         let leg_from = self.track_start(&solution.position, leg_from, &leg_to, events);
         let reference = leg_from.map_or(LateralReference::PresentPosition, LateralReference::track);
+        self.guide_to(solution, reference, &leg_to, now, events)
+    }
+
+    /// Guides along `reference` to `to`.
+    fn guide_to(
+        &mut self,
+        solution: &NavigationSolution,
+        reference: LateralReference,
+        to: &Waypoint,
+        now: MonotonicNanos,
+        events: &mut Vec<MissionEvent>,
+    ) -> Option<ControlIntent> {
         let guided = guide_velocity(
             solution,
             reference,
-            &leg_to,
+            to,
             now,
             self.config.clock,
             &self.guidance,

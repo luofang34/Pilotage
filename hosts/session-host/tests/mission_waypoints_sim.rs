@@ -41,7 +41,7 @@ fn waypoints() -> WaypointPlan {
             LAUNCH.alt_m + 22.0,
         ),
     ]);
-    plan.capture_radius_m = 3.0;
+    plan.capture_radius_m = Some(3.0);
     plan
 }
 
@@ -118,8 +118,8 @@ async fn a_waypoint_list_flies_to_each_waypoint_and_completes() {
         * 6_371_000.0
         * last.latitude_deg.to_radians().cos();
     assert!(
-        north_m.hypot(east_m) < 10.0,
-        "the vehicle ends near the last waypoint: {north_m} m north, {east_m} m east"
+        north_m.hypot(east_m) < 3.0,
+        "the vehicle ends at the last waypoint: {north_m} m north, {east_m} m east"
     );
     // The simulated vehicle reports its height on the ellipsoid or above
     // its launch point; the waypoint altitude is on the ellipsoid.

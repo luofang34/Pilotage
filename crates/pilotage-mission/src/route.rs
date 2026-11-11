@@ -27,6 +27,10 @@ pub(crate) struct MissionRoute {
     config: ExecutionConfig,
     active_index: usize,
     complete: bool,
+    /// The distance to the last waypoint at which the plan completes,
+    /// when the plan flies on to it after its capture.
+    arrival_radius_m: Option<f64>,
+    arrived: bool,
 }
 
 impl MissionRoute {
@@ -57,9 +61,46 @@ impl MissionRoute {
             config: config.with_surface_gravity_mps2(body::SURFACE_GRAVITY_MPS2),
             active_index: 0,
             complete: false,
+            arrival_radius_m: None,
+            arrived: false,
         };
         PlanExecution::new(route.plan(), route.config)?;
         Ok(route)
+    }
+
+    /// The route flies on to its last waypoint after the sequencer
+    /// captures it, until the vehicle is within `radius_m` of it
+    /// horizontally and vertically. A capture radius sized for turns
+    /// would otherwise end the plan that far short of its last waypoint.
+    pub(crate) fn with_arrival_radius(mut self, radius_m: f64) -> Self {
+        self.arrival_radius_m = Some(radius_m);
+        self
+    }
+
+    /// Whether the sequencer completed the plan and the vehicle still
+    /// flies on to the last waypoint.
+    pub(crate) fn approaching(&self) -> bool {
+        self.complete && self.arrival_radius_m.is_some() && !self.arrived
+    }
+
+    /// The last waypoint, which an approaching route flies to.
+    pub(crate) fn last_waypoint(&self) -> Option<&Waypoint> {
+        self.waypoints.last()
+    }
+
+    /// Records the arrival at the last waypoint when `position` is within
+    /// the arrival radius of it; true at the arrival.
+    pub(crate) fn arrive(&mut self, position: &GeodeticPosition) -> bool {
+        let (Some(radius_m), Some(last)) = (self.arrival_radius_m, self.waypoints.last()) else {
+            return false;
+        };
+        if !self.approaching() {
+            return false;
+        }
+        let horizontal_m = navigate_geodesy::distance_m(position, &last.position, body::GEODESY);
+        let vertical_m = (position.altitude_m - last.position.altitude_m).abs();
+        self.arrived = horizontal_m <= radius_m && vertical_m <= radius_m;
+        self.arrived
     }
 
     /// The plan as a Navigate view over the owned waypoints.

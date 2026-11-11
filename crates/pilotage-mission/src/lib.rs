@@ -48,4 +48,6 @@ pub use pilotage_mission_core::ExecutionTarget;
 pub use pilotage_mission_core::executor;
 pub use provenance::{MissionPlanRecord, SnapshotProvenance, decode_snapshot};
 pub use survey::{SurveyError, SurveyPlan, SurveyPlanRecord, SurveyRequest, plan_survey};
-pub use waypoints::{PlannedWaypoint, WaypointPlan, WaypointPlanRecord, WaypointTurn};
+pub use waypoints::{
+    PlannedWaypoint, WaypointPlan, WaypointPlanRecord, WaypointTurn, capture_radius_for,
+};

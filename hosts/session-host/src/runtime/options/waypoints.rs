@@ -11,7 +11,10 @@
 //! ```
 //!
 //! `alt_m` is the height above the WGS84 ellipsoid. `turn` is `fly-by`
-//! (the default) or `fly-over`. `capture_radius_m` is optional.
+//! (the default) or `fly-over`. `capture_radius_m` is optional: without
+//! it the radius follows the mission's cruise speed. `arrival_radius_m`
+//! is optional: the distance to the last waypoint at which the plan
+//! completes, 1 m without it.
 
 use std::path::{Path, PathBuf};
 
@@ -25,6 +28,8 @@ use crate::error::HostError;
 struct File {
     #[serde(default)]
     capture_radius_m: Option<f64>,
+    #[serde(default)]
+    arrival_radius_m: Option<f64>,
     waypoints: Vec<Point>,
 }
 
@@ -82,15 +87,22 @@ pub(super) fn parse(text: &str) -> Result<WaypointPlan, String> {
         })
         .collect();
     let mut plan = WaypointPlan::new(waypoints);
-    if let Some(radius) = file.capture_radius_m {
-        if !(radius.is_finite() && radius > 0.0) {
-            return Err(format!(
-                "capture_radius_m must be a positive distance, got {radius}"
-            ));
-        }
-        plan.capture_radius_m = radius;
+    plan.capture_radius_m = file
+        .capture_radius_m
+        .map(|radius| positive("capture_radius_m", radius))
+        .transpose()?;
+    if let Some(radius) = file.arrival_radius_m {
+        plan.arrival_radius_m = positive("arrival_radius_m", radius)?;
     }
     Ok(plan)
+}
+
+fn positive(name: &str, radius: f64) -> Result<f64, String> {
+    if radius.is_finite() && radius > 0.0 {
+        Ok(radius)
+    } else {
+        Err(format!("{name} must be a positive distance, got {radius}"))
+    }
 }
 
 /// The path that `PILOTAGE_MISSION_WAYPOINTS` names.

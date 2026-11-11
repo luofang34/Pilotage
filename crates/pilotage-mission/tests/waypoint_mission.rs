@@ -43,7 +43,7 @@ fn plan() -> WaypointPlan {
         corner,
         PlannedWaypoint::new(47.0, 8.0008, ANCHOR_ALT_M + 8.0),
     ]);
-    plan.capture_radius_m = 4.0;
+    plan.capture_radius_m = Some(4.0);
     plan
 }
 
@@ -104,9 +104,19 @@ fn a_waypoint_list_flies_each_waypoint_at_its_own_altitude() {
             "{altitude_m} m at a waypoint planned at {expected_m} m above the anchor"
         );
     }
+    // The plan completes at the last waypoint itself, within the arrival
+    // radius, not a capture radius short of it.
     let last = plane.from_ned(&navigate_geodesy::NedOffset::new(ned[0], ned[1], ned[2]));
-    assert!((last.latitude_rad.to_degrees() - 47.0).abs() < 1e-4);
-    assert!((last.longitude_rad.to_degrees() - 8.0008).abs() < 1e-4);
+    let target = plan.waypoints.last().expect("a last waypoint");
+    let north_m = (last.latitude_rad.to_degrees() - target.latitude_deg).to_radians() * 6_371_000.0;
+    let east_m = (last.longitude_rad.to_degrees() - target.longitude_deg).to_radians()
+        * 6_371_000.0
+        * target.latitude_deg.to_radians().cos();
+    assert!(
+        north_m.hypot(east_m) <= plan.arrival_radius_m + 0.1,
+        "{north_m} m north, {east_m} m east of the last waypoint"
+    );
+    assert!((last.altitude_m - target.altitude_m).abs() <= plan.arrival_radius_m + 0.1);
 }
 
 #[test]
@@ -147,4 +157,23 @@ fn a_changed_waypoint_changes_the_plan_identity() {
         first.mission_identity.content_digest,
         second.mission_identity.content_digest
     );
+}
+
+#[test]
+fn the_capture_radius_follows_the_vehicle_unless_the_plan_sets_one() {
+    // 6 m/s at 2.5 m/s² turns on a 14.4 m radius.
+    let mut derived = plan();
+    derived.capture_radius_m = None;
+    let (_, record) = MissionEngine::from_waypoints(&derived, config()).expect("builds");
+    assert!(
+        (record.capture_radius_m - 14.4).abs() < 1e-9,
+        "{}",
+        record.capture_radius_m
+    );
+    let (_, record) = MissionEngine::from_waypoints(&plan(), config()).expect("builds");
+    assert_eq!(record.capture_radius_m, 4.0);
+    // A slow vehicle keeps the minimum radius.
+    assert_eq!(pilotage_mission::capture_radius_for(1.0, 2.5), 2.0);
+    let vehicle = WaypointPlan::for_vehicle(plan().waypoints, 10.0, 5.0);
+    assert_eq!(vehicle.capture_radius_m, Some(20.0));
 }

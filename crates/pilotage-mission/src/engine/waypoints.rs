@@ -10,7 +10,10 @@ use super::{MissionEngine, document};
 use crate::config::MissionConfig;
 use crate::error::MissionBuildError;
 use crate::route::MissionRoute;
-use crate::waypoints::{PlannedWaypoint, WaypointPlan, WaypointPlanRecord, WaypointTurn};
+use crate::waypoints::{
+    DEFAULT_TURN_ACCEL_MPS2, PlannedWaypoint, WaypointPlan, WaypointPlanRecord, WaypointTurn,
+    capture_radius_for,
+};
 
 impl MissionEngine {
     /// Builds an engine that flies `plan`: each waypoint at its own
@@ -51,12 +54,19 @@ impl MissionEngine {
         let plan_id = format!("waypoints:{digest}");
         let name =
             document::navigate_plan_name("waypoints", &plan_id, PlanRole::Mission, &waypoints)?;
+        let capture_radius_m = plan.capture_radius_m.unwrap_or_else(|| {
+            capture_radius_for(
+                config.cruise_mps.min(config.limits.max_horizontal_mps),
+                DEFAULT_TURN_ACCEL_MPS2,
+            )
+        });
         let route = MissionRoute::activate(
             &name,
             PlanRole::Mission,
             waypoints,
-            ExecutionConfig::new(plan.capture_radius_m),
-        )?;
+            ExecutionConfig::new(capture_radius_m),
+        )?
+        .with_arrival_radius(plan.arrival_radius_m);
         let engine = Self::from_route(
             route,
             &plan_id,
@@ -68,6 +78,7 @@ impl MissionEngine {
         let record = WaypointPlanRecord {
             digest,
             idents,
+            capture_radius_m,
             mission_identity: engine.document.identity.clone(),
         };
         Ok((engine, record))

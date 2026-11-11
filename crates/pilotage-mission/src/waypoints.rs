@@ -7,9 +7,32 @@ use sha2::{Digest as _, Sha256};
 
 const WAYPOINT_LIST_DIGEST_DOMAIN: &[u8] = b"pilotage.waypoint-list.v1\0";
 
-/// The capture radius of a waypoint list unless the plan sets one,
-/// metres: the default of Navigate's `ExecutionConfig`.
-pub const DEFAULT_CAPTURE_RADIUS_M: f64 = 100.0;
+/// The lateral acceleration that sizes a capture radius from a cruise
+/// speed when the plan sets none, m/s²: a bank of about 14°, a gentle
+/// turn for a multicopter or a light aircraft.
+pub const DEFAULT_TURN_ACCEL_MPS2: f64 = 2.5;
+
+/// The smallest capture radius derived from a speed, metres: below it a
+/// position estimate of ordinary quality can circle a fix.
+pub const MIN_CAPTURE_RADIUS_M: f64 = 2.0;
+
+/// The distance to the last waypoint at which a waypoint list completes
+/// unless the plan sets another, metres.
+pub const DEFAULT_ARRIVAL_RADIUS_M: f64 = 1.0;
+
+/// The capture radius for a vehicle that turns at `turn_accel_mps2` at
+/// `speed_mps`: its turn radius `v² / a`, and at least
+/// [`MIN_CAPTURE_RADIUS_M`]. A non-finite or non-positive input gives
+/// the minimum.
+#[must_use]
+pub fn capture_radius_for(speed_mps: f64, turn_accel_mps2: f64) -> f64 {
+    let radius = speed_mps * speed_mps / turn_accel_mps2;
+    if radius.is_finite() && radius > MIN_CAPTURE_RADIUS_M {
+        radius
+    } else {
+        MIN_CAPTURE_RADIUS_M
+    }
+}
 
 /// How the vehicle passes a waypoint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -51,23 +74,45 @@ impl PlannedWaypoint {
     }
 }
 
-/// A list of waypoints in fly order and the distance at which each one
-/// captures.
+/// A list of waypoints in fly order, the distance at which each one
+/// captures, and the distance at which the last one completes the plan.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WaypointPlan {
     /// The waypoints in fly order.
     pub waypoints: Vec<PlannedWaypoint>,
-    /// The distance to a waypoint at which it captures, metres.
-    pub capture_radius_m: f64,
+    /// The distance to a waypoint at which it captures, metres. `None`
+    /// derives it from the mission's cruise speed with
+    /// [`capture_radius_for`] and [`DEFAULT_TURN_ACCEL_MPS2`].
+    pub capture_radius_m: Option<f64>,
+    /// The distance to the last waypoint, horizontally and vertically,
+    /// at which the plan completes, metres. The vehicle flies on to the
+    /// last waypoint after it captures until it is this close.
+    pub arrival_radius_m: f64,
 }
 
 impl WaypointPlan {
-    /// A plan with the default capture radius.
+    /// A plan whose capture radius follows the mission's cruise speed,
+    /// with the default arrival radius.
     #[must_use]
     pub const fn new(waypoints: Vec<PlannedWaypoint>) -> Self {
         Self {
             waypoints,
-            capture_radius_m: DEFAULT_CAPTURE_RADIUS_M,
+            capture_radius_m: None,
+            arrival_radius_m: DEFAULT_ARRIVAL_RADIUS_M,
+        }
+    }
+
+    /// A plan for a vehicle that cruises at `cruise_mps` and turns at
+    /// `turn_accel_mps2`: the capture radius is [`capture_radius_for`].
+    #[must_use]
+    pub fn for_vehicle(
+        waypoints: Vec<PlannedWaypoint>,
+        cruise_mps: f64,
+        turn_accel_mps2: f64,
+    ) -> Self {
+        Self {
+            capture_radius_m: Some(capture_radius_for(cruise_mps, turn_accel_mps2)),
+            ..Self::new(waypoints)
         }
     }
 
@@ -94,7 +139,14 @@ impl WaypointPlan {
             hasher.update((name.len() as u64).to_le_bytes());
             hasher.update(name.as_bytes());
         }
-        hasher.update(self.capture_radius_m.to_le_bytes());
+        match self.capture_radius_m {
+            Some(radius) => {
+                hasher.update([1]);
+                hasher.update(radius.to_le_bytes());
+            }
+            None => hasher.update([0]),
+        }
+        hasher.update(self.arrival_radius_m.to_le_bytes());
         Digest::from_bytes(hasher.finalize().into())
     }
 }
@@ -106,6 +158,8 @@ pub struct WaypointPlanRecord {
     pub digest: Digest,
     /// The waypoint names in fly order.
     pub idents: Vec<String>,
+    /// The capture radius the plan flies with, metres.
+    pub capture_radius_m: f64,
     /// Identity of the mission document that owns the plan.
     pub mission_identity: MissionIdentity,
 }

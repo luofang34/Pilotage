@@ -7,6 +7,7 @@ fn a_waypoint_file_becomes_a_waypoint_plan() {
     let plan = parse(
         r#"{
             "capture_radius_m": 5.0,
+            "arrival_radius_m": 0.5,
             "waypoints": [
                 { "lat_deg": 47.0006, "lon_deg": 8.0, "alt_m": 512.0 },
                 { "lat_deg": 47.0006, "lon_deg": 8.0008, "alt_m": 518.0,
@@ -15,7 +16,13 @@ fn a_waypoint_file_becomes_a_waypoint_plan() {
         }"#,
     )
     .expect("parses");
-    assert_eq!(plan.capture_radius_m, 5.0);
+    assert_eq!(plan.capture_radius_m, Some(5.0));
+    assert_eq!(plan.arrival_radius_m, 0.5);
+    let derived = parse(r#"{ "waypoints": [] }"#).expect("parses");
+    assert_eq!(
+        derived.capture_radius_m, None,
+        "the radius follows the cruise speed"
+    );
     assert_eq!(plan.waypoints.len(), 2);
     assert_eq!(plan.waypoints[0].turn, WaypointTurn::FlyBy);
     assert_eq!(plan.waypoints[0].name, None);
@@ -32,6 +39,7 @@ fn a_file_that_is_not_a_waypoint_list_is_refused() {
         r#"{ "waypoints": [], "extra": 1 }"#,
         r#"{ "waypoints": [ { "lat_deg": 47.0, "lon_deg": 8.0, "alt_m": 1.0, "turn": "loop" } ] }"#,
         r#"{ "capture_radius_m": 0.0, "waypoints": [] }"#,
+        r#"{ "arrival_radius_m": -1.0, "waypoints": [] }"#,
     ] {
         assert!(parse(text).is_err(), "{text}");
     }
