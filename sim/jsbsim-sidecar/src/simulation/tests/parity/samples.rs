@@ -5,8 +5,8 @@ use pilotage_world::{MagneticEpoch, UniformTerrain, World};
 use super::super::{message_id, vehicle};
 use super::contact::{Bounds, Contact, struts};
 use super::{
-    Aircraft, Encoder, EngineKind, GROUND_M, ModelPaths, N51, Simulation, Start, assert_same_state,
-    close, controls,
+    Aircraft, Encoder, EngineKind, GROUND_M, ModelPaths, N51, RATE_CAP_RAD_S, Simulation, Start,
+    assert_same_state, close, controls,
 };
 use crate::hil::{HIL_GPS, HIL_SENSOR};
 
@@ -143,11 +143,18 @@ fn x500_paths(aircraft_dir: std::path::PathBuf) -> ModelPaths {
     }
 }
 
+/// The widest bounds of one landing.
+#[derive(Debug, Clone, Copy, Default)]
+struct Widest {
+    force_m_s2: f64,
+    rate_rad_s: f64,
+}
+
 /// Climbs, cuts the motors, falls onto the gear, and settles, with the
 /// Rust engine on `rust_dir` and the C++ engine on the bundled model,
 /// comparing truth and frames at every step. Returns the two engines
-/// at rest.
-fn land(site: Site, step_ms: u32, rust_dir: std::path::PathBuf) -> [Simulation; 2] {
+/// at rest and the widest bounds the comparison used.
+fn land(site: Site, step_ms: u32, rust_dir: std::path::PathBuf) -> ([Simulation; 2], Widest) {
     let mut world = World::new(
         N51,
         UniformTerrain {
@@ -170,6 +177,7 @@ fn land(site: Site, step_ms: u32, rust_dir: std::path::PathBuf) -> [Simulation; 
     let mut contact = Contact::new(&mut rust, rust_struts, &mut cpp, cpp_struts);
     let (mut r_encoder, mut c_encoder) = (Encoder::default(), Encoder::default());
     let mut peak = 0.0f64;
+    let mut widest = Widest::default();
     for step in 0..8_000 / step_ms {
         let command = match step * step_ms {
             0..250 => controls(1.0, true),
@@ -193,10 +201,17 @@ fn land(site: Site, step_ms: u32, rust_dir: std::path::PathBuf) -> [Simulation; 
         );
         assert_same_state(&at, &r_truth, &c_truth, bounds);
         assert_frames(&at, &r, &c, bounds);
+        assert!(
+            bounds.rate_limit() <= RATE_CAP_RAD_S,
+            "{at}: the comparison no longer constrains the body rates: {}, cap {RATE_CAP_RAD_S}",
+            bounds.describe_rate()
+        );
+        widest.force_m_s2 = widest.force_m_s2.max(bounds.force.limit());
+        widest.rate_rad_s = widest.rate_rad_s.max(bounds.rate_limit());
         peak = peak.max(r_truth.altitude_m - site.ground_m);
     }
     assert!(peak > 0.5, "the vehicle must leave the ground: {peak}");
-    [rust, cpp]
+    ([rust, cpp], widest)
 }
 
 #[test]
@@ -219,7 +234,12 @@ fn landing_truth_and_sensor_frames_agree_at_all_step_rates_and_sites() {
         },
     ] {
         for step_ms in [1, 2, 4] {
-            for simulation in &mut land(site, step_ms, Aircraft::X500.bundled_dir()) {
+            let (mut simulations, widest) = land(site, step_ms, Aircraft::X500.bundled_dir());
+            assert!(
+                widest.rate_rad_s <= RATE_CAP_RAD_S && widest.force_m_s2.is_finite(),
+                "{site:?}, {step_ms} ms: widest bounds {widest:?}"
+            );
+            for simulation in &mut simulations {
                 let truth = simulation.truth();
                 assert!((truth.altitude_m - site.ground_m - 0.12).abs() < 0.02);
                 assert!(truth.velocity_ned.iter().all(|v| v.abs() < 0.01));
@@ -228,13 +248,16 @@ fn landing_truth_and_sensor_frames_agree_at_all_step_rates_and_sites() {
     }
 }
 
-/// A copy of the bundled X500 with every `tag` coefficient scaled by
-/// `scale`, in a directory of its own.
-fn scaled_x500(tag: &str, scale: f64) -> std::path::PathBuf {
+/// A copy of the bundled X500 with the `tag` value of the first `count`
+/// contacts scaled by `scale`, in a directory of its own.
+fn scaled_x500(tag: &str, scale: f64, count: usize) -> std::path::PathBuf {
     let source = std::fs::read_to_string(Aircraft::X500.bundled_dir().join("x500.xml")).unwrap();
     let mut scaled = String::new();
     let mut rest = source.as_str();
-    while let Some(at) = rest.find(&format!("<{tag} ")) {
+    for _ in 0..count {
+        let Some(at) = rest.find(&format!("<{tag} ")) else {
+            break;
+        };
         let open_end = rest[at..].find('>').unwrap() + at + 1;
         let close = rest[open_end..].find('<').unwrap() + open_end;
         let value: f64 = rest[open_end..close].trim().parse().unwrap();
@@ -245,7 +268,7 @@ fn scaled_x500(tag: &str, scale: f64) -> std::path::PathBuf {
     scaled.push_str(rest);
     assert_ne!(scaled, source, "the model has no {tag}");
     let dir = std::env::temp_dir().join(format!(
-        "pilotage-x500-{tag}-{scale}-{}",
+        "pilotage-x500-{tag}-{scale}-{count}-{}",
         std::process::id()
     ));
     std::fs::create_dir_all(&dir).unwrap();
@@ -253,22 +276,26 @@ fn scaled_x500(tag: &str, scale: f64) -> std::path::PathBuf {
     dir
 }
 
+/// The failure message of a landing over a Rust-side model in `dir`.
+fn landing_failure(dir: std::path::PathBuf) -> String {
+    let run = std::panic::catch_unwind(|| {
+        land(N51_SITE, 1, dir.clone());
+    });
+    std::fs::remove_dir_all(&dir).unwrap();
+    let message = run.expect_err("the landing comparison must fail");
+    message
+        .downcast_ref::<String>()
+        .cloned()
+        .unwrap_or_default()
+}
+
 /// The contact bound must not admit a gear that is not the C++ engine's
-/// gear: a strut 5 % stiffer or 5 % more damped on the Rust side fails
-/// the landing comparison.
+/// gear: every strut 5 % stiffer or 5 % more damped on the Rust side
+/// fails the landing comparison.
 #[test]
 fn a_five_percent_strut_change_fails_the_landing_comparison() {
     for tag in ["spring_coeff", "damping_coeff"] {
-        let dir = scaled_x500(tag, 1.05);
-        let run = std::panic::catch_unwind(|| {
-            land(N51_SITE, 1, dir.clone());
-        });
-        std::fs::remove_dir_all(&dir).unwrap();
-        let message = run.expect_err(tag);
-        let text = message
-            .downcast_ref::<String>()
-            .map(String::as_str)
-            .unwrap_or_default();
+        let text = landing_failure(scaled_x500(tag, 1.05, 4));
         assert!(
             text.contains("specific force")
                 || text.contains("HIL_SENSOR")
@@ -276,4 +303,14 @@ fn a_five_percent_strut_change_fails_the_landing_comparison() {
             "{tag}: {text}"
         );
     }
+}
+
+/// The rate allowance must not admit an asymmetric gear: one strut 5 %
+/// more damped on the Rust side tilts the touchdown torque, and the
+/// body-rate comparison fails. Damping leaves the attitude at rest the
+/// same, so the comparison reaches the touchdown.
+#[test]
+fn a_five_percent_change_of_one_strut_fails_the_rate_comparison() {
+    let text = landing_failure(scaled_x500("damping_coeff", 1.05, 1));
+    assert!(text.contains(": rate: "), "{text}");
 }

@@ -1,32 +1,49 @@
 //! How far the readings of a vehicle on its gear may part between the
 //! two engines.
 //!
-//! The comparison admits a height difference of up to `POSITION_M` and an
-//! attitude difference of up to `ATTITUDE_RAD`. On the gear the contact
-//! forces change with the height of each contact, so a reading may part
-//! by what those admitted differences cause. In the air nothing is added
-//! to `FORCE_M_S2` and `RATE_RAD_S`.
+//! The comparison admits small differences in height, tilt, vertical
+//! speed and body rate between the two engines. On the gear the contact
+//! forces change with those differences, so a reading may part by what
+//! they cause. In the air nothing is added to `FORCE_M_S2` and
+//! `RATE_RAD_S`. Each term below has one source:
 //!
-//! The sensitivity comes from the model. JSBSim's strut force
-//! (`FGLGear::ComputeVerticalStrutForce`) is `k·x + c·ẋ` for a compression
-//! `x`. A contact that enters the ground during a step has its compression
-//! speed limited to `x/dt` (`FGLGear::GetForces`), so its force is
-//! `(k + c/dt)·x`: its sensitivity is `k + c/dt` to height and zero to
-//! speed. A contact that stays on the ground has the sensitivity `k` to
-//! height and `c` to speed.
+//! - Strut force `k·x + c·ẋ` for a compression `x`, with `k` and `c` from
+//!   the model file: `FGLGear::ComputeVerticalStrutForce`.
+//! - A contact that enters the ground during a physics step has its
+//!   compression speed limited to `x/dt`: `FGLGear::GetBodyForces`
+//!   (`maxCompressSpeed`). Its force is `(k + c/dt)·x` for that step, so
+//!   its sensitivity is `k + c/dt` to height and zero to speed. A contact
+//!   that stays on the ground has the sensitivity `k` to height and `c`
+//!   to speed.
+//! - A contact at body position `r` changes height by `r·Δθ` for a tilt
+//!   difference `Δθ` and speed by `r·Δω` for a rate difference `Δω`
+//!   (rigid-body kinematics of the contact point in `FGLGear::GetBodyForces`).
+//! - The friction of a contact is at most its friction coefficient
+//!   (`static_friction`, `dynamic_friction`, both below 1 in the test
+//!   models) times its normal force: `FGLGear::ComputeJacobian` and
+//!   `FGLGear::UpdateForces`. So the per-contact normal-force change, summed
+//!   without sign, bounds the change on every axis.
+//! - Mass and principal inertias come from the engine (`inertia/mass-slugs`,
+//!   `inertia/ixx-slugs_ft2` and so on): `FGMassBalance`.
+//! - The contact moments add to the body moment (`FGGroundReactions`
+//!   sums `GetMoments` of each contact), and the body rates integrate the
+//!   moment divided by the inertia: `FGAccelerations::CalculatePQRdot`.
 //!
-//! A contact's height difference between the engines is at most the
-//! vehicle's height difference plus the contact's arm times the tilt
-//! difference. Its speed difference is at most the vehicle's vertical
-//! speed difference plus its arm times the body-rate difference.
+//! The bounds:
 //!
-//! - Specific force: the sum over the contacts on the ground of each
-//!   sensitivity times its difference, divided by the mass. The bound
-//!   applies to each axis.
-//! - Body rate: a rate is integrated, so a difference that one contact
-//!   step causes stays. Each step on the ground adds the step time times
-//!   the torque that the contact differences can cause, divided by the
-//!   smallest principal moment of inertia.
+//! - Specific force, each axis: `Σ_contacts (k_h·(|Δh| + |r|·|Δθ|) +
+//!   k_v·(|Δvd| + |r|·|Δω|)) / m`, with `k_h` and `k_v` the height and
+//!   speed sensitivities above.
+//! - Body rate: a rate is integrated, so a difference that a contact
+//!   step causes stays. Each step adds the angular impulse that the
+//!   height, tilt and speed differences can cause, divided by the smallest
+//!   principal inertia. The torque of a common height or speed difference
+//!   is `|Σk·r|` times it, and the torque of a tilt difference is at most
+//!   the largest eigenvalue of `Σk·r·rᵀ` times it. The entry sensitivity
+//!   holds for one physics step. A rate difference meets the damping
+//!   torque `-Σc·r·rᵀ·Δω` that opposes it, so the allowance decays by
+//!   `exp(-dt·λ_min(Σc·r·rᵀ)/I)` on each step, the slowest decay that the
+//!   damping gives.
 
 use std::path::Path;
 
@@ -43,8 +60,9 @@ const KG_M2_PER_SLUG_FT2: f64 = 1.355_817_948_331_400_4;
 pub(super) struct Strut {
     spring_n_per_m: f64,
     damping_n_s_per_m: f64,
-    /// Horizontal distance from the reference point, metres.
-    arm_m: f64,
+    /// Body x and y of the contact from the reference point, metres.
+    x_m: f64,
+    y_m: f64,
 }
 
 /// Reads every contact of `model.xml`, in file order, which is JSBSim's
@@ -61,7 +79,8 @@ pub(super) fn struts(aircraft_dir: &Path, model: &str) -> Vec<Strut> {
             Strut {
                 spring_n_per_m: value(body, "<spring_coeff unit=\"N/M\">"),
                 damping_n_s_per_m: value(body, "<damping_coeff unit=\"N/M/SEC\">"),
-                arm_m: x.hypot(y),
+                x_m: x,
+                y_m: y,
             }
         })
         .collect()
@@ -89,19 +108,42 @@ struct Probe {
 }
 
 /// The sums over one engine's contacts on the ground of one strut
-/// sensitivity `s`: `Σs`, `Σs·arm`, and `Σs·arm²`.
+/// sensitivity `s` at the contact position `r = (x, y)`: `Σs`, `Σs·|r|`,
+/// `Σs·r`, and `Σs·r·rᵀ`.
 #[derive(Debug, Clone, Copy, Default)]
 struct Moments {
     sum: f64,
     arm: f64,
-    arm2: f64,
+    x: f64,
+    y: f64,
+    xx: f64,
+    yy: f64,
+    xy: f64,
 }
 
 impl Moments {
-    fn add(&mut self, sensitivity: f64, arm_m: f64) {
+    fn add(&mut self, sensitivity: f64, strut: &Strut) {
+        let (x, y) = (strut.x_m, strut.y_m);
         self.sum += sensitivity;
-        self.arm += sensitivity * arm_m;
-        self.arm2 += sensitivity * arm_m * arm_m;
+        self.arm += sensitivity * x.hypot(y);
+        self.x += sensitivity * x;
+        self.y += sensitivity * y;
+        self.xx += sensitivity * x * x;
+        self.yy += sensitivity * y * y;
+        self.xy += sensitivity * x * y;
+    }
+
+    /// `|Σs·r|`: the torque of one common height or speed difference.
+    fn first(&self) -> f64 {
+        self.x.hypot(self.y)
+    }
+
+    /// The largest and the smallest eigenvalue of `Σs·r·rᵀ`: the torque
+    /// of one tilt or rate difference, at most and at least.
+    fn second(&self) -> (f64, f64) {
+        let mean = 0.5 * (self.xx + self.yy);
+        let spread = (0.5 * (self.xx - self.yy)).hypot(self.xy);
+        (mean + spread, mean - spread)
     }
 }
 
@@ -112,6 +154,10 @@ struct Sensitivity {
     height: Moments,
     /// Contact force per metre per second of compression speed, N·s/m.
     speed: Moments,
+    /// The strut spring of every contact on the ground, N/m.
+    spring: Moments,
+    /// The strut damping of every contact on the ground, N·s/m.
+    damping: Moments,
     mass_kg: f64,
     smallest_inertia_kg_m2: f64,
 }
@@ -173,12 +219,14 @@ impl Probe {
             if !on_ground {
                 continue;
             }
+            sensitivity.spring.add(strut.spring_n_per_m, strut);
+            sensitivity.damping.add(strut.damping_n_s_per_m, strut);
             if entered {
                 let stiffness = strut.spring_n_per_m + strut.damping_n_s_per_m / PHYSICS_DT_S;
-                sensitivity.height.add(stiffness, strut.arm_m);
+                sensitivity.height.add(stiffness, strut);
             } else {
-                sensitivity.height.add(strut.spring_n_per_m, strut.arm_m);
-                sensitivity.speed.add(strut.damping_n_s_per_m, strut.arm_m);
+                sensitivity.height.add(strut.spring_n_per_m, strut);
+                sensitivity.speed.add(strut.damping_n_s_per_m, strut);
             }
         }
         sensitivity
@@ -224,9 +272,8 @@ impl Contact {
     ) -> Bounds {
         let height_m = (r.altitude_m - c.altitude_m).abs();
         let speed_m_s = (r.velocity_ned[2] - c.velocity_ned[2]).abs();
-        let tilt_rad = (r.attitude.roll - c.attitude.roll)
-            .abs()
-            .max((r.attitude.pitch - c.attitude.pitch).abs());
+        let tilt_rad =
+            (r.attitude.roll - c.attitude.roll).hypot(r.attitude.pitch - c.attitude.pitch);
         let rate_rad_s = (0..3)
             .map(|i| (r.rates_frd[i] - c.rates_frd[i]).abs())
             .fold(0.0, f64::max);
@@ -239,6 +286,7 @@ impl Contact {
             rate_rad_s,
         };
         let mut rate_step = 0.0f64;
+        let mut retained = 0.0f64;
         for s in [self.rust.sense(rust), self.cpp.sense(cpp)] {
             force.k_per_s2 = force.k_per_s2.max(s.height.sum / s.mass_kg);
             force.contact_n = force.contact_n.max(
@@ -248,13 +296,20 @@ impl Contact {
                     + s.speed.arm * rate_rad_s)
                     / s.mass_kg,
             );
-            let torque_n_m = s.height.arm * height_m
-                + s.height.arm2 * tilt_rad
-                + s.speed.arm * speed_m_s
-                + s.speed.arm2 * rate_rad_s;
-            rate_step = rate_step.max(step_s * torque_n_m / s.smallest_inertia_kg_m2);
+            // The entry sensitivity holds for the one physics step in
+            // which a contact enters; the rest of the step sees the strut.
+            // A rate difference meets the damping torque that opposes it;
+            // `retained` below is that decay, so it adds nothing here.
+            let torque = |height: &Moments, speed: &Moments| {
+                height.first() * height_m + height.second().0 * tilt_rad + speed.first() * speed_m_s
+            };
+            let impulse_n_m_s = PHYSICS_DT_S * torque(&s.height, &s.speed)
+                + (step_s - PHYSICS_DT_S).max(0.0) * torque(&s.spring, &s.damping);
+            rate_step = rate_step.max(impulse_n_m_s / s.smallest_inertia_kg_m2);
+            let slowest = s.damping.second().1 / s.smallest_inertia_kg_m2;
+            retained = retained.max((-step_s * slowest).exp());
         }
-        self.rate_allowance_rad_s += rate_step;
+        self.rate_allowance_rad_s = self.rate_allowance_rad_s * retained + rate_step;
         Bounds {
             force,
             rate_allowance_rad_s: self.rate_allowance_rad_s,

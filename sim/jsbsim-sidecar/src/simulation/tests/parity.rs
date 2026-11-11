@@ -21,6 +21,9 @@ const POSITION_M: f64 = 1e-3;
 const VELOCITY_M_S: f64 = 1e-3;
 const ATTITUDE_RAD: f64 = 1e-4;
 const RATE_RAD_S: f64 = 1e-4;
+/// The widest the contact allowance may make the body-rate bound. A bound
+/// past it no longer constrains the rates, so the comparison fails.
+const RATE_CAP_RAD_S: f64 = 10.0 * RATE_RAD_S;
 // Bound the accelerometer difference in the air by one default noise
 // standard deviation. On the gear, `contact::Bounds` adds what the
 // admitted height and attitude differences can cause.
