@@ -27,6 +27,15 @@ pub enum HostEvent {
     ArmRefused,
     /// The session engine refused an intent frame of the mission.
     FrameRejected,
+    /// A plan loaded while another one flew took over the motion scope;
+    /// the core flies it from now on.
+    NewPlanFlying,
+    /// A plan loaded while another one flew did not take over the motion
+    /// scope, for this reason; the flown plan goes on.
+    NewPlanRefused {
+        /// Why the new plan did not take over.
+        reason: &'static str,
+    },
 }
 
 /// Where the core stands after its last call.

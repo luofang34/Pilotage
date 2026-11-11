@@ -63,6 +63,14 @@ impl MissionTask {
         core::mem::take(&mut self.events)
     }
 
+    /// Makes the principal take the motion scope over from the principal
+    /// that holds it: it asks its holder for a transfer instead of asking
+    /// for a lease, so the holder keeps commanding the vehicle until the
+    /// transfer commits.
+    pub fn take_over(&mut self) {
+        self.takes_over = true;
+    }
+
     /// Registers the principal under `client` instead of
     /// [`super::MISSION_CLIENT`], as a mission lane's run is.
     pub fn bind_client(&mut self, client: ClientKey) {
