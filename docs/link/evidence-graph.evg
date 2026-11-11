@@ -149,7 +149,7 @@ attr test mislabeled_estimate_roles_cannot_seed_a_control_setpoint
 
 node CASE-LINK-WIRE verification-case
 title truth and FC state survive the wire under their own identities
-locator hosts/session-host/src/runtime/engine_actor/telemetry/tests.rs
+locator crates/pilotage-host-core/src/engine_actor/telemetry/tests.rs
 attr test truth_and_fc_state_survive_the_wire_under_their_own_identities
 
 node CASE-LINK-CAPTURE verification-case

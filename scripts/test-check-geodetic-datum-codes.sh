@@ -14,14 +14,14 @@ mkdir -p \
     "$fixture/clients/web-instruments/src/decode_envelope" \
     "$fixture/adapters/aviate/src/adapter" \
     "$fixture/tools/xtask/src/backend" \
-    "$fixture/hosts/session-host/src/runtime/engine_actor" \
+    "$fixture/crates/pilotage-host-core/src/engine_actor" \
     "$fixture/scripts" \
     "$fixture/.github/workflows"
 
 datum="$fixture/crates/pilotage-geo/src/datum.rs"
 proto="$fixture/schemas/pilotage/v1/telemetry.proto"
 decoder="$fixture/clients/web/wire.js"
-mapper="$fixture/hosts/session-host/src/runtime/engine_actor/telemetry.rs"
+mapper="$fixture/crates/pilotage-host-core/src/engine_actor/telemetry.rs"
 wasm_decoder="$fixture/clients/web-instruments/src/decode_envelope/groups.rs"
 attachments="$fixture/adapters/aviate/src/adapter/sim_attachments.rs"
 camera="$fixture/adapters/aviate/src/adapter/camera.rs"
@@ -31,7 +31,7 @@ ci="$fixture/.github/workflows/ci.yml"
 cp "$root/crates/pilotage-geo/src/datum.rs" "$datum"
 cp "$root/schemas/pilotage/v1/telemetry.proto" "$proto"
 cp "$root/clients/web/wire.js" "$decoder"
-cp "$root/hosts/session-host/src/runtime/engine_actor/telemetry.rs" "$mapper"
+cp "$root/crates/pilotage-host-core/src/engine_actor/telemetry.rs" "$mapper"
 cp "$root/clients/web-instruments/src/decode_envelope/groups.rs" "$wasm_decoder"
 cp "$root/adapters/aviate/src/adapter/sim_attachments.rs" "$attachments"
 cp "$root/adapters/aviate/src/adapter/camera.rs" "$camera"
@@ -54,7 +54,7 @@ restore() {
         datum) cp "$root/crates/pilotage-geo/src/datum.rs" "$datum" ;;
         proto) cp "$root/schemas/pilotage/v1/telemetry.proto" "$proto" ;;
         decoder) cp "$root/clients/web/wire.js" "$decoder" ;;
-        mapper) cp "$root/hosts/session-host/src/runtime/engine_actor/telemetry.rs" "$mapper" ;;
+        mapper) cp "$root/crates/pilotage-host-core/src/engine_actor/telemetry.rs" "$mapper" ;;
         ci) cp "$root/.github/workflows/ci.yml" "$ci" ;;
         wasm) cp "$root/clients/web-instruments/src/decode_envelope/groups.rs" "$wasm_decoder" ;;
         attachments) cp "$root/adapters/aviate/src/adapter/sim_attachments.rs" "$attachments" ;;

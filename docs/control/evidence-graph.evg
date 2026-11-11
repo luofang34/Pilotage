@@ -106,7 +106,7 @@ attr symbol on_action_command
 
 node IMPL-ACTION-DEDUP implementation
 title ActionDedup::strip_answered — id + fingerprint dedup, replay re-answer, reuse refusal
-locator hosts/session-host/src/runtime/engine_actor/action_dedup.rs
+locator crates/pilotage-host-core/src/engine_actor/action_dedup.rs
 attr symbol strip_answered
 
 node IMPL-AUTHORITY-PAIR implementation

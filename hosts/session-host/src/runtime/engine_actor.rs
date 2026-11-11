@@ -17,7 +17,9 @@ use pilotage_host_core::engine_actor::{
     EngineActor as CoreEngine, MessageClass, ToEngine as CoreCommand,
 };
 use pilotage_session::{ClientKey, SessionEngine};
-use pilotage_timing::{BoundedLatencyLog, MonoTimestamp, Stage, StageLatency};
+#[cfg(feature = "sim")]
+use pilotage_timing::MonoTimestamp;
+use pilotage_timing::{BoundedLatencyLog, Stage, StageLatency};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::time::Instant;

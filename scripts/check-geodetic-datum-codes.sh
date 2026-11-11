@@ -16,7 +16,7 @@ decoder="$root/clients/web/wire.js"
 # wire.js. A field only the JavaScript decoder knows is a field the
 # client never sees, and no decode error says so.
 wasm_decoder="$root/clients/web-instruments/src/decode_envelope/groups.rs"
-mapper="$root/hosts/session-host/src/runtime/engine_actor/telemetry.rs"
+mapper="$root/crates/pilotage-host-core/src/engine_actor/telemetry.rs"
 status=0
 
 for path in "$datum" "$proto" "$decoder" "$mapper"; do
