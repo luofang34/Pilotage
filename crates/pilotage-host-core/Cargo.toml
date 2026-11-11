@@ -27,4 +27,5 @@ tracing = { workspace = true }
 web-time = { workspace = true }
 
 [dev-dependencies]
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
 pilotage-control-feel = { workspace = true }

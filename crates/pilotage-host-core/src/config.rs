@@ -7,7 +7,11 @@ use pilotage_mission::MissionConfig;
 /// The configuration of one [`crate::HostCore`], by value.
 #[derive(Debug, Clone)]
 pub struct HostCoreConfig {
-    /// The flight controller's MAVLink identity and link policy.
+    /// The flight controller's MAVLink identity and link policy. Its
+    /// `maximum_inter_group_skew_ms` must cover one period of the slower of
+    /// the attitude and local-position groups (100 ms for Aviate's 20 Hz
+    /// and 10 Hz streams): at 0, every other pair is refused as reordered
+    /// and every other frame meets no measurement.
     pub link: LinkConfig,
     /// The airframe the flight controller flies: a multirotor with the
     /// control-feel law its commands are shaped by, or a fixed wing with

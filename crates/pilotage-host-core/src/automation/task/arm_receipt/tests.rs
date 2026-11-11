@@ -1,6 +1,9 @@
 use pilotage_protocol::{CommandOutcome, wire};
 
-use super::{ArmReceipt, ArmVerdict};
+use pilotage_mission::MissionAction;
+use pilotage_protocol::ControlAction;
+
+use super::{ARM_READY_TIMEOUT_NS, ARM_RESEND_NS, ArmReceipt, ArmVerdict};
 
 const TIMEOUT_NS: u64 = 3_000_000_000;
 
@@ -27,15 +30,11 @@ fn a_refused_first_arm_and_an_accepted_second_arm_give_their_own_receipts() {
         Some((7, ArmVerdict::Refused(CommandOutcome::Denied)))
     );
     // The engine retries. The adapter clears the old acknowledgement
-    // when it sends the new arm; the acknowledgement accepts, and the
-    // receipt waits for the heartbeat to report armed.
+    // when it sends the new arm; the acknowledgement that accepts is the
+    // answer, before the next heartbeat reports armed.
     receipt.await_vehicle(8, 1_000_000_000, TIMEOUT_NS);
     assert_eq!(
         receipt.observe(&report(false, Some(CommandOutcome::Accepted))),
-        None
-    );
-    assert_eq!(
-        receipt.observe(&report(true, Some(CommandOutcome::Accepted))),
         Some((8, ArmVerdict::Armed))
     );
     assert_eq!(
@@ -82,4 +81,30 @@ fn an_unstamped_arm_state_and_a_disarm_acknowledgement_answer_nothing() {
         ..report(false, None)
     };
     assert_eq!(receipt.observe(&disarm_refused), None);
+}
+
+#[test]
+fn a_controller_that_is_not_ready_gets_the_arm_again_until_its_window_closes() {
+    let arm = MissionAction {
+        action: ControlAction::Arm,
+        action_id: 9,
+    };
+    let mut receipt = ArmReceipt {
+        action: Some(arm),
+        ..ArmReceipt::default()
+    };
+    receipt.await_vehicle(9, 0, TIMEOUT_NS);
+    assert_eq!(
+        receipt.observe(&report(false, Some(CommandOutcome::TemporarilyRejected))),
+        Some((9, ArmVerdict::Refused(CommandOutcome::TemporarilyRejected)))
+    );
+    // Not a spent retry: the arm is due again after the resend interval.
+    assert!(receipt.wait_for_readiness(100));
+    assert_eq!(receipt.resend_due(100 + ARM_RESEND_NS - 1), None);
+    assert_eq!(receipt.resend_due(100 + ARM_RESEND_NS), Some(arm));
+    assert_eq!(receipt.resend_due(u64::MAX), None, "one send per refusal");
+    // Still not ready later: the window counts from the first refusal.
+    assert!(receipt.wait_for_readiness(100 + ARM_READY_TIMEOUT_NS - 1));
+    assert!(!receipt.wait_for_readiness(100 + ARM_READY_TIMEOUT_NS));
+    assert_eq!(receipt.resend_due(u64::MAX), None, "nothing more to send");
 }

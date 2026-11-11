@@ -7,6 +7,7 @@ mod arm_receipt;
 mod fencing;
 mod flight_watch;
 mod frames;
+mod holder;
 mod nav_guidance;
 mod run_control;
 mod session_flow;
@@ -305,12 +306,7 @@ impl MissionTask {
         {
             return false;
         }
-        if let Some(intent) = output.intent
-            && !self.send_intent(intent, MonoTimestamp::from_nanos(nanos))
-        {
-            return false;
-        }
-        true
+        self.frame_intent(output.intent, output.state, nanos)
     }
 
     /// Hands this tick's guidance to the telemetry assembly, or clears
@@ -394,6 +390,9 @@ impl MissionTask {
         }
         let wire_id = self.next_action_id;
         self.pending_actions.insert(wire_id, action.action_id);
+        if action.action == pilotage_protocol::ControlAction::Arm {
+            self.flight.arm.action = Some(action);
+        }
         info!(action = ?action.action, action_id = wire_id, "mission action command");
         let command = ControlActionCommand {
             sampled_at: pilotage_timing::MonoTimestamp::from_nanos(0),
