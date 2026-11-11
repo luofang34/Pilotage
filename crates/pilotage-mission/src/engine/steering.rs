@@ -19,6 +19,8 @@ use pilotage_protocol::{AltitudeReference, ControlIntent, HeadingAltitudeIntent}
 
 use crate::config::OwnshipSource;
 
+mod heading_bias;
+
 use super::{MissionEngine, MissionEvent, MissionState, StartWithheldReason};
 use pilotage_mission_core::FlightAction as CoreFlightAction;
 
@@ -39,6 +41,8 @@ pub(super) struct Steering {
     /// The indicated airspeed last commanded on the velocity path, m/s,
     /// which the wind estimate takes as the air speed it is flown at.
     indicated_mps: Option<f64>,
+    /// The flight controller's heading bias.
+    heading_bias: heading_bias::HeadingBias,
 }
 
 impl MissionEngine {
@@ -62,9 +66,12 @@ impl MissionEngine {
         setpoint: &GuidanceSetpoint,
         altitude_m: f64,
         now: MonotonicNanos,
+        events: &mut Vec<MissionEvent>,
     ) -> Option<ControlIntent> {
         self.end_hold();
         self.update_wind(solution, now);
+        self.update_heading_bias(now);
+        self.report_heading_bias(events);
         let course = match setpoint {
             GuidanceSetpoint::Velocity { velocity }
                 if velocity.north_mps.hypot(velocity.east_mps) > 0.0 =>
@@ -79,9 +86,12 @@ impl MissionEngine {
             _ => None,
         };
         let heading = match course {
-            Some(course) => self.wind_corrected_heading(course, solution.position.altitude_m),
+            Some(course) => self.unbiased_heading(
+                self.wind_corrected_heading(course, solution.position.altitude_m),
+            ),
             None => self.current_heading()?,
         };
+        self.record_heading_command(heading, now);
         Some(self.heading_altitude(heading, altitude_m))
     }
 
