@@ -53,19 +53,31 @@ fn a_trimmed_origin_frame_decodes_its_latitude_and_longitude_and_no_altitude() {
 fn the_origin_is_cached_and_a_moved_origin_counts_a_rebase() {
     let state = state();
     let start = Instant::now();
-    received(&state, &origin_frame([395_000_000, -755_000_000], 12_000), start);
+    received(
+        &state,
+        &origin_frame([395_000_000, -755_000_000], 12_000),
+        start,
+    );
     let first = state.lock().expect("lock").global_origin.expect("cached");
     assert_eq!(first.lat_lon, [395_000_000, -755_000_000]);
     assert_eq!(first.rebases, 0);
 
     let later = start + Duration::from_secs(1);
-    received(&state, &origin_frame([395_000_000, -755_000_000], 12_000), later);
+    received(
+        &state,
+        &origin_frame([395_000_000, -755_000_000], 12_000),
+        later,
+    );
     let repeated = state.lock().expect("lock").global_origin.expect("cached");
     assert_eq!(repeated.rebases, 0, "the same origin again is no rebase");
     assert_eq!(repeated.received_at, later);
 
     let moved = start + Duration::from_secs(2);
-    received(&state, &origin_frame([395_100_000, -755_000_000], 12_000), moved);
+    received(
+        &state,
+        &origin_frame([395_100_000, -755_000_000], 12_000),
+        moved,
+    );
     let rebased = state.lock().expect("lock").global_origin.expect("cached");
     assert_eq!(rebased.lat_lon, [395_100_000, -755_000_000]);
     assert_eq!(rebased.rebases, 1);

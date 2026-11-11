@@ -32,6 +32,7 @@ use pilotage_flight_uplink::{ActivationStep, StickFrame, UplinkPolicy};
 
 mod direct;
 mod fc_replies;
+mod heading_altitude;
 mod transport;
 use transport::UplinkTransport;
 #[cfg(test)]

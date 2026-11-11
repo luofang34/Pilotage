@@ -20,8 +20,8 @@ pub use flight_state::{LandedStateReport, RelativeAltitudeReport};
 mod fence;
 mod gimbal;
 mod global_origin;
-pub use global_origin::GlobalOriginUpdate;
 pub use gimbal::{GimbalManagerReport, GimbalReports};
+pub use global_origin::GlobalOriginUpdate;
 pub mod measurement;
 mod outbound;
 pub use fence::{
