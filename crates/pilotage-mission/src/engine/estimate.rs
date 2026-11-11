@@ -90,6 +90,7 @@ impl VehicleEstimate {
             SymmetricCov3::from_diagonal(velocity_variance, velocity_variance, velocity_variance),
             integrity,
             composition,
+            crate::body::ELLIPSOID,
         ))
     }
 }

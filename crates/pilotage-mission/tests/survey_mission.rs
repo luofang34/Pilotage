@@ -4,8 +4,9 @@
 //! request arms, climbs, flies every line end in order, and completes.
 
 use navigate_contract::{ClockDomainId, GeodeticPosition, MonotonicNanos};
-use navigate_fpl::SequenceReason;
+use navigate_geodesy::wgs84::tangent_plane;
 use navigate_geodesy::{LocalTangentPlane, NedOffset};
+use navigate_route::SequenceReason;
 use pilotage_mission::{
     ExecutionTarget, MissionBuildError, MissionConfig, MissionEngine, MissionEvent, MissionState,
     OwnshipSample, OwnshipSource, SurveyError, SurveyPlanRecord, SurveyRequest, TruthRole,
@@ -24,7 +25,7 @@ fn anchor() -> GeodeticPosition {
 }
 
 fn plane() -> LocalTangentPlane {
-    LocalTangentPlane::new(anchor()).expect("anchor is plausible")
+    tangent_plane(anchor()).expect("anchor is plausible")
 }
 
 /// A 120 m by 60 m rectangle east and north of the anchor, in degrees.
@@ -138,7 +139,6 @@ fn line_ends() -> Vec<[f64; 2]> {
     let plane = plane();
     plan_survey(&request(), &anchor(), HEIGHT_M)
         .expect("plans")
-        .plan
         .waypoints
         .iter()
         .map(|waypoint| {

@@ -16,10 +16,10 @@ mod tests;
 use core::f64::consts::PI;
 
 use navigate_contract::{
-    AltitudeConstraint, FlightPlan, GeodeticPosition, PlanRole, TurnType, Waypoint,
+    AltitudeConstraint, GeodeticPosition, Ident, IdentError, TurnType, Waypoint,
 };
-use navigate_fpl::{ExecutionConfig, turn_radius_m};
 use navigate_geodesy::{GeodesyError, LocalTangentPlane, NedOffset};
+use navigate_route::{ExecutionConfig, turn_radius_m};
 use pilotage_mission_core::{Digest, MissionIdentity};
 use sha2::{Digest as _, Sha256};
 
@@ -98,8 +98,12 @@ impl SurveyRequest {
             return;
         }
         self.capture_radius_m = self.capture_radius_m.max(CAPTURE_SECONDS * cruise_mps);
-        let bank = ExecutionConfig::default().bank_limit_rad;
-        self.overshoot_m = self.overshoot_m.max(turn_radius_m(cruise_mps, bank));
+        let execution = ExecutionConfig::default();
+        self.overshoot_m = self.overshoot_m.max(turn_radius_m(
+            cruise_mps,
+            execution.bank_limit_rad,
+            crate::body::SURFACE_GRAVITY_MPS2,
+        ));
     }
 
     /// The content digest of the request: what the plan was derived from.
@@ -129,8 +133,8 @@ impl SurveyRequest {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SurveyPlan {
     /// The waypoints in fly order, two fly-by turns per line, then home
-    /// as a fly-over.
-    pub plan: FlightPlan,
+    /// as a fly-over, on WGS84.
+    pub waypoints: Vec<Waypoint>,
     /// The content digest of the request the plan came from.
     pub digest: Digest,
     /// Number of survey lines.
@@ -216,6 +220,15 @@ pub enum SurveyError {
     /// The anchor is not a plausible tangent-plane origin.
     #[error("survey anchor rejected by geodesy")]
     Geodesy(#[from] GeodesyError),
+    /// A survey waypoint name is not a Navigate identifier.
+    #[error("survey waypoint name {ident:?} is not a navigation identifier: {source}")]
+    WaypointIdent {
+        /// The waypoint name.
+        ident: String,
+        /// Why the name is refused.
+        #[source]
+        source: IdentError,
+    },
 }
 
 /// Plans the survey of `request` at `height_above_anchor_m` above the
@@ -231,7 +244,7 @@ pub fn plan_survey(
     height_above_anchor_m: f64,
 ) -> Result<SurveyPlan, SurveyError> {
     validate_parameters(request, height_above_anchor_m)?;
-    let plane = LocalTangentPlane::new(*anchor)?;
+    let plane = crate::body::tangent_plane(*anchor)?;
     let vertices = project(request, anchor, &plane)?;
     let area_m2 = geometry::area_m2(&vertices);
     if area_m2 < MIN_AREA_M2 {
@@ -275,13 +288,9 @@ pub fn plan_survey(
     let altitude_m = anchor.altitude_m + height_above_anchor_m;
     // The plane's origin is the anchor: the launch point.
     let home = request.return_to_launch.then_some([0.0, 0.0]);
-    let plan = FlightPlan::new(
-        format!("survey:{digest}"),
-        PlanRole::Mission,
-        waypoints(&lines, home, &plane, height_above_anchor_m, altitude_m),
-    );
+    let waypoints = waypoints(&lines, home, &plane, height_above_anchor_m, altitude_m)?;
     Ok(SurveyPlan {
-        plan,
+        waypoints,
         digest,
         line_count: lines.len(),
         line_spacing_m,
@@ -407,7 +416,7 @@ fn waypoints(
     plane: &LocalTangentPlane,
     height_above_anchor_m: f64,
     altitude_m: f64,
-) -> Vec<Waypoint> {
+) -> Result<Vec<Waypoint>, SurveyError> {
     // The plane's down axis leaves the ellipsoid normal away from the
     // anchor by millimetres; the waypoint states the survey altitude.
     let place = |point: Planar| {
@@ -423,17 +432,27 @@ fn waypoints(
             [("A", line.start), ("B", line.end)]
                 .into_iter()
                 .map(move |(end, point)| {
-                    Waypoint::new(format!("L{:02}{end}", index + 1), place(point))
-                        .with_altitude(AltitudeConstraint::At(altitude_m))
-                        .with_turn(TurnType::FlyBy)
+                    Ok(Waypoint::new(
+                        survey_ident(&format!("L{:02}{end}", index + 1))?,
+                        place(point),
+                    )
+                    .with_altitude(AltitudeConstraint::At(altitude_m))
+                    .with_turn(TurnType::FlyBy))
                 })
         })
         .chain(home.map(|point| {
-            Waypoint::new("HOME".to_owned(), place(point))
+            Ok(Waypoint::new(survey_ident("HOME")?, place(point))
                 .with_altitude(AltitudeConstraint::At(altitude_m))
-                .with_turn(TurnType::FlyOver)
+                .with_turn(TurnType::FlyOver))
         }))
         .collect()
+}
+
+fn survey_ident(text: &str) -> Result<Ident, SurveyError> {
+    Ident::try_new(text).map_err(|source| SurveyError::WaypointIdent {
+        ident: text.to_owned(),
+        source,
+    })
 }
 
 fn path_length_m(lines: &[Line], home: Option<Planar>) -> f64 {

@@ -4,8 +4,9 @@ use aerocontext_core::NavDataError;
 use aerocontext_navdata::blob::BlobError;
 use aerocontext_planning::route::RouteError;
 use chrono::NaiveDate;
-use navigate_fpl::PlanActivationError;
+use navigate_contract::IdentError;
 use navigate_geodesy::GeodesyError;
+use navigate_route::PlanActivationError;
 use pilotage_mission_core::CodecError;
 
 use crate::survey::SurveyError;
@@ -67,6 +68,17 @@ pub enum MissionBuildError {
     /// The survey request did not become a plan.
     #[error("survey request rejected: {0}")]
     Survey(#[from] SurveyError),
+    /// A waypoint or plan name is not a Navigate identifier: it is
+    /// empty or longer than 32 bytes. The mission is refused; a name is
+    /// never shortened.
+    #[error("name {ident:?} is not a navigation identifier: {source}")]
+    NavigationIdent {
+        /// The name as the route, the survey, or the engine gave it.
+        ident: String,
+        /// Why the name is refused.
+        #[source]
+        source: IdentError,
+    },
     /// A Navigate plan value has no canonical identity encoding.
     #[error("flight-plan identity cannot encode {field} value {value}")]
     PlanIdentity {

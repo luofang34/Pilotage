@@ -22,7 +22,9 @@ pub mod policy;
 pub mod provenance;
 pub mod survey;
 
+mod body;
 mod body_frame;
+mod route;
 
 pub use body_frame::{
     project_cartesian_velocity_body, project_cartesian_velocity_ned, project_entry_bank_ned,

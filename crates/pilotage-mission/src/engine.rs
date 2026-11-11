@@ -13,14 +13,14 @@ use core::mem::Discriminant;
 use aerocontext_core::NavDataSnapshot;
 use aerocontext_planning::route::{RouteToken, expand_str};
 use navigate_contract::{
-    AltitudeConstraint, FlightPlan, GeodeticPosition, MonotonicNanos, NavigationSolution,
+    AltitudeConstraint, GeodeticPosition, Ident, MonotonicNanos, NavigationSolution,
     ObservationStamp, PlanRole, SensorClass, SourceComposition, SourceEpoch, SourceId,
     SymmetricCov3, Waypoint, WrappingSequence,
 };
-use navigate_fpl::{ExecutionConfig, PlanExecution};
 use navigate_fusion::{FusionConfig, NavigationFilter, Observation, ObservationValue};
 use navigate_geodesy::{LocalTangentPlane, NedOffset};
 use navigate_guidance::{GuidanceRefusal, VelocityGuidanceConfig};
+use navigate_route::ExecutionConfig;
 use pilotage_mission_core::{
     ActionId, DirectiveReceipt, EngineState as CoreEngineState, FlightAction as CoreFlightAction,
     FlightPlanReference, MissionDocument, MissionEngine as CoreMissionEngine,
@@ -33,6 +33,7 @@ pub use output::{MissionAction, MissionCounters, MissionEvent, MissionOutput, Mi
 use crate::config::{MissionConfig, OwnshipSource};
 use crate::error::MissionBuildError;
 use crate::ownship::{OwnshipAltitude, OwnshipSample, TruthRole};
+use crate::route::MissionRoute;
 
 mod estimate;
 mod hold;
@@ -57,7 +58,7 @@ pub struct MissionEngine {
     config: MissionConfig,
     plane: LocalTangentPlane,
     filter: NavigationFilter,
-    execution: PlanExecution,
+    route: MissionRoute,
     guidance: VelocityGuidanceConfig,
     document: MissionDocument,
     plan_reference: FlightPlanReference,
@@ -131,17 +132,24 @@ impl MissionEngine {
                 route: config.route.clone(),
             });
         }
-        let waypoints = build_waypoints(&expanded.points, &config);
-        let expanded_idents: Vec<String> = waypoints.iter().map(|wp| wp.ident.clone()).collect();
-        let plan = FlightPlan::new(
-            format!("mission:{}", config.route),
+        let waypoints = build_waypoints(&expanded.points, &config)?;
+        let expanded_idents: Vec<String> = waypoints
+            .iter()
+            .map(|wp| wp.ident.as_str().to_owned())
+            .collect();
+        let plan_id = format!("mission:{}", config.route);
+        let name =
+            document::navigate_plan_name("mission", &plan_id, PlanRole::Mission, &waypoints)?;
+        let route = MissionRoute::activate(
+            &name,
             PlanRole::Mission,
             waypoints,
-        );
-        let execution = PlanExecution::new(plan, ExecutionConfig::default())?;
+            ExecutionConfig::default(),
+        )?;
         let route_input = config.route.clone();
-        let engine = Self::from_execution(
-            execution,
+        let engine = Self::from_route(
+            route,
+            &plan_id,
             config,
             provenance.navigation_data_identity.clone(),
             document::ROUTE_REVISION_PREFIX,
@@ -177,16 +185,23 @@ impl MissionEngine {
             snapshot_digest: survey.digest,
         };
         let idents: Vec<String> = survey
-            .plan
             .waypoints
             .iter()
-            .map(|waypoint| waypoint.ident.clone())
+            .map(|waypoint| waypoint.ident.as_str().to_owned())
             .collect();
-        let execution =
-            PlanExecution::new(survey.plan, ExecutionConfig::new(survey.capture_radius_m))?;
+        let plan_id = format!("survey:{}", survey.digest);
+        let name =
+            document::navigate_plan_name("survey", &plan_id, PlanRole::Mission, &survey.waypoints)?;
+        let route = MissionRoute::activate(
+            &name,
+            PlanRole::Mission,
+            survey.waypoints,
+            ExecutionConfig::new(survey.capture_radius_m),
+        )?;
         let segments = document::survey_segments(survey.line_count, idents.len(), &config.task_ids);
-        let mut engine = Self::from_execution(
-            execution,
+        let mut engine = Self::from_route(
+            route,
+            &plan_id,
             config,
             identity,
             document::SURVEY_REVISION_PREFIX,
@@ -211,28 +226,30 @@ impl MissionEngine {
 
     /// The engine over an activated plan: the document, the anchor plane,
     /// the fusion filter, and the guidance shaped by the config.
-    fn from_execution(
-        execution: PlanExecution,
+    fn from_route(
+        route: MissionRoute,
+        plan_id: &str,
         config: MissionConfig,
         identity: NavigationDataIdentity,
         revision_prefix: &str,
         segments: &[document::Segment],
     ) -> Result<Self, MissionBuildError> {
         let (document, plan_reference) = document::build_document(
-            execution.plan(),
+            plan_id,
+            &route.plan(),
             &config,
             identity,
             revision_prefix,
             segments,
         )?;
-        let plane = LocalTangentPlane::new(config.anchor)?;
+        let plane = crate::body::tangent_plane(config.anchor)?;
         let filter = NavigationFilter::new(FusionConfig::default(), config.clock);
         let guidance = guidance_config(&config);
         Ok(Self {
             config,
             plane,
             filter,
-            execution,
+            route,
             guidance,
             document,
             plan_reference,
@@ -439,19 +456,24 @@ fn procedure_token_name(token: &RouteToken) -> String {
 fn build_waypoints(
     points: &[aerocontext_planning::route::RoutePoint],
     config: &MissionConfig,
-) -> Vec<Waypoint> {
+) -> Result<Vec<Waypoint>, MissionBuildError> {
     let cruise_alt_m = config.anchor.altitude_m + config.cruise_height_m;
     points
         .iter()
         .enumerate()
         .map(|(index, point)| {
-            let ident = point.ident.clone().unwrap_or_else(|| format!("RP{index}"));
+            let name = point.ident.clone().unwrap_or_else(|| format!("RP{index}"));
+            let ident =
+                Ident::try_new(&name).map_err(|source| MissionBuildError::NavigationIdent {
+                    ident: name,
+                    source,
+                })?;
             let position = GeodeticPosition::new(
                 point.position.lat.to_radians(),
                 point.position.lon.to_radians(),
                 cruise_alt_m,
             );
-            Waypoint::new(ident, position).with_altitude(AltitudeConstraint::At(cruise_alt_m))
+            Ok(Waypoint::new(ident, position).with_altitude(AltitudeConstraint::At(cruise_alt_m)))
         })
         .collect()
 }

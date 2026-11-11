@@ -145,13 +145,10 @@ fn survey_request(
 /// One task per survey line, then the way home.
 fn tasks_of(plan: &SurveyPlan, return_home: bool, proposal_id: &str) -> Vec<wire::MissionTaskPlan> {
     let point = |index: usize| {
-        plan.plan
-            .waypoints
-            .get(index)
-            .map(|waypoint| wire::GeoPoint {
-                latitude_deg: waypoint.position.latitude_rad.to_degrees(),
-                longitude_deg: waypoint.position.longitude_rad.to_degrees(),
-            })
+        plan.waypoints.get(index).map(|waypoint| wire::GeoPoint {
+            latitude_deg: waypoint.position.latitude_rad.to_degrees(),
+            longitude_deg: waypoint.position.longitude_rad.to_degrees(),
+        })
     };
     let mut tasks: Vec<wire::MissionTaskPlan> = (0..plan.line_count)
         .filter_map(|line| {

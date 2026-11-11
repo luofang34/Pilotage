@@ -5,7 +5,8 @@
 //! the active leg to completion.
 
 use navigate_contract::{ClockDomainId, GeodeticPosition, MonotonicNanos};
-use navigate_geodesy::{LocalTangentPlane, NedOffset};
+use navigate_geodesy::NedOffset;
+use navigate_geodesy::wgs84::tangent_plane;
 use pilotage_mission::{
     ExecutionTarget, MissionConfig, MissionEngine, MissionEvent, MissionState, OwnshipSample,
     SurveyRequest, TruthRole,
@@ -25,7 +26,7 @@ fn anchor() -> GeodeticPosition {
 }
 
 fn request() -> SurveyRequest {
-    let plane = LocalTangentPlane::new(anchor()).expect("anchor is plausible");
+    let plane = tangent_plane(anchor()).expect("anchor is plausible");
     let polygon = [[0.0, 0.0], [120.0, 0.0], [120.0, 60.0], [0.0, 60.0]]
         .iter()
         .map(|[north, east]| {

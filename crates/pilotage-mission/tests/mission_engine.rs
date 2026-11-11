@@ -5,8 +5,8 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use navigate_contract::{ClockDomainId, GeodeticPosition, MonotonicNanos};
-use navigate_fpl::SequenceReason;
 use navigate_guidance::GuidanceRefusal;
+use navigate_route::SequenceReason;
 use pilotage_mission::fixture::{self, GeoPointDegrees};
 use pilotage_mission::{
     MissionConfig, MissionEngine, MissionEvent, MissionState, NavGuidance, NavQuality,

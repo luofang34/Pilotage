@@ -39,8 +39,8 @@ impl MissionEngine {
     /// toward, and whether its last waypoint is captured.
     #[must_use]
     pub fn plan_progress(&self) -> (usize, bool) {
-        let total = self.execution.plan().waypoints.len();
-        let remaining = self.execution.remaining_waypoints().len();
+        let total = self.route.waypoints().len();
+        let remaining = self.route.remaining_waypoints().len();
         (total.saturating_sub(remaining), self.plan_complete)
     }
 

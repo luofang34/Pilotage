@@ -3,10 +3,11 @@
 use core::mem::discriminant;
 
 use navigate_contract::{
-    GeodeticPosition, GuidanceSetpoint, MonotonicNanos, NavigationSolution, NedVelocity, Waypoint,
+    GeodeticPosition, GuidanceSetpoint, LateralReference, MonotonicNanos, NavigationSolution,
+    NedVelocity, Waypoint,
 };
-use navigate_fpl::SequenceEvent;
 use navigate_guidance::guide_velocity;
+use navigate_route::SequenceEvent;
 use pilotage_mission_core::{
     EngineEvent as CoreEvent, EngineStart, FlightAction as CoreFlightAction,
     MissionEngine as CoreMissionEngine, MissionObservation as CoreObservation,
@@ -311,7 +312,7 @@ impl MissionEngine {
             return;
         }
         match self
-            .execution
+            .route
             .advance(&solution.position, self.commanded_groundspeed_mps())
         {
             SequenceEvent::LegAdvanced {
@@ -348,13 +349,14 @@ impl MissionEngine {
         events: &mut Vec<MissionEvent>,
     ) -> Option<ControlIntent> {
         let (leg_from, leg_to): (Option<GeodeticPosition>, Waypoint) = {
-            let leg = self.execution.active_leg()?;
-            (leg.from.map(|waypoint| waypoint.position), leg.to.clone())
+            let leg = self.route.active_leg()?;
+            (leg.from.map(|waypoint| waypoint.position), *leg.to)
         };
         let leg_from = self.track_start(&solution.position, leg_from, &leg_to, events);
+        let reference = leg_from.map_or(LateralReference::PresentPosition, LateralReference::track);
         let guided = guide_velocity(
             solution,
-            leg_from.as_ref(),
+            reference,
             &leg_to,
             now,
             self.config.clock,

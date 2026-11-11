@@ -9,8 +9,11 @@
 //! past this boundary (ADR-0017).
 
 use navigate_contract::{AltitudeConstraint, GeodeticPosition, SolutionQuality};
-use navigate_fpl::Leg;
-use navigate_geodesy::{cross_track_m, distance_m, initial_bearing_rad};
+use navigate_geodesy::initial_bearing_rad;
+use navigate_geodesy::{cross_track_m, distance_m};
+
+use crate::body::GEODESY;
+use navigate_route::Leg;
 
 use super::{MissionEngine, MissionState};
 
@@ -94,11 +97,11 @@ impl MissionEngine {
             | MissionState::Complete
             | MissionState::Failed => None,
             MissionState::Climb | MissionState::Enroute => {
-                let leg = self.execution.active_leg()?;
+                let leg = self.route.active_leg()?;
                 Some(leg_guidance(
                     &solution.position,
                     &leg,
-                    self.execution.plan().waypoints.len(),
+                    self.route.waypoints().len(),
                     solution.integrity.quality.into(),
                 ))
             }
@@ -123,14 +126,14 @@ fn leg_guidance(
         |from| initial_bearing_rad(&from.position, &to.position),
     );
     NavGuidance {
-        to_ident: to.ident.clone(),
-        from_ident: leg.from.map(|from| from.ident.clone()),
+        to_ident: to.ident.as_str().to_owned(),
+        from_ident: leg.from.map(|from| from.ident.as_str().to_owned()),
         course_rad,
         lateral_deviation_m: leg
             .from
-            .and_then(|from| cross_track_m(position, &from.position, &to.position).ok()),
+            .and_then(|from| cross_track_m(position, &from.position, &to.position, GEODESY).ok()),
         vertical_deviation_m: profile_deviation_m(position.altitude_m, to.altitude.as_ref()),
-        distance_to_waypoint_m: distance_m(position, &to.position),
+        distance_to_waypoint_m: distance_m(position, &to.position, GEODESY),
         leg_index: u32::try_from(leg.index).unwrap_or(u32::MAX),
         waypoint_count: u32::try_from(waypoint_count).unwrap_or(u32::MAX),
         quality,

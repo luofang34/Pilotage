@@ -7,6 +7,8 @@
 use navigate_contract::{GeodeticPosition, Waypoint};
 use navigate_geodesy::{along_track_m, distance_m};
 
+use crate::body::GEODESY;
+
 use super::super::{MissionEngine, MissionEvent};
 
 impl MissionEngine {
@@ -25,7 +27,7 @@ impl MissionEngine {
             return Some(from);
         }
         self.counters.fix_overflown = self.counters.fix_overflown.wrapping_add(1);
-        let to_index = self.execution.active_index();
+        let to_index = self.route.active_index();
         if self.overflown_fix != Some(to_index) {
             self.overflown_fix = Some(to_index);
             events.push(MissionEvent::FixOverflown { to_index });
@@ -41,5 +43,6 @@ pub(super) fn overflown(
     from: &GeodeticPosition,
     to: &GeodeticPosition,
 ) -> bool {
-    along_track_m(position, from, to).is_ok_and(|along| along > distance_m(from, to))
+    along_track_m(position, from, to, GEODESY)
+        .is_ok_and(|along| along > distance_m(from, to, GEODESY))
 }

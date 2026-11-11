@@ -90,11 +90,11 @@ aviate-xil-shm = { git = "https://github.com/luofang34/Aviate.git", rev = "816b1
 # all five crates must always pin the identical rev so the contract
 # vocabulary, fusion, plan sequencing, guidance, and geodesy cannot
 # drift apart (the same discipline as the aviate-xil pins above).
-navigate-contract = { git = "https://github.com/luofang34/Navigate.git", rev = "ace50f68b3ffae6237bbb53f6af687c335518272" }
-navigate-geodesy = { git = "https://github.com/luofang34/Navigate.git", rev = "ace50f68b3ffae6237bbb53f6af687c335518272" }
-navigate-fusion = { git = "https://github.com/luofang34/Navigate.git", rev = "ace50f68b3ffae6237bbb53f6af687c335518272" }
-navigate-fpl = { git = "https://github.com/luofang34/Navigate.git", rev = "ace50f68b3ffae6237bbb53f6af687c335518272" }
-navigate-guidance = { git = "https://github.com/luofang34/Navigate.git", rev = "ace50f68b3ffae6237bbb53f6af687c335518272" }
+navigate-contract = { git = "https://github.com/luofang34/Navigate.git", rev = "9cf9d2ceadeb5bd6e6dbcbada19acdeb75d82b6c" }
+navigate-geodesy = { git = "https://github.com/luofang34/Navigate.git", rev = "9cf9d2ceadeb5bd6e6dbcbada19acdeb75d82b6c" }
+navigate-fusion = { git = "https://github.com/luofang34/Navigate.git", rev = "9cf9d2ceadeb5bd6e6dbcbada19acdeb75d82b6c" }
+navigate-route = { git = "https://github.com/luofang34/Navigate.git", rev = "9cf9d2ceadeb5bd6e6dbcbada19acdeb75d82b6c" }
+navigate-guidance = { git = "https://github.com/luofang34/Navigate.git", rev = "9cf9d2ceadeb5bd6e6dbcbada19acdeb75d82b6c" }
 # The instrument family is consumed only at one exact upstream revision:
 # every Indicate crate must always pin the identical rev so the state ABI,
 # the scene vocabulary, the panels, and the registry digest cannot drift
