@@ -13,6 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 pilotage-session = { workspace = true }
+pilotage-host-core = { workspace = true }
 pilotage-geo = { workspace = true }
 pilotage-protocol = { workspace = true }
 pilotage-authority = { workspace = true }

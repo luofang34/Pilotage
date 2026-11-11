@@ -10,10 +10,10 @@ use tokio::sync::mpsc::error::TrySendError;
 use tracing::warn;
 
 use super::EngineActor;
-use super::drops::MessageClass;
 use crate::runtime::connection::ToConnection;
 use crate::runtime::mission_lane::LaneInbound;
 use crate::runtime::wire_codec::encode_mission_payload;
+use pilotage_host_core::engine_actor::MessageClass;
 
 impl<A: VehicleAdapter> EngineActor<A> {
     pub(super) fn on_requester(

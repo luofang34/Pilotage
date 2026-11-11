@@ -133,7 +133,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
     /// Forgets a client whose connection is gone: its queue and its
     /// deduplication records.
     pub fn disconnect(&mut self, client: ClientKey) {
-        self.clients.remove(client);
+        self.clients.forget(client);
         self.action_dedup.forget(client);
         self.adapter_rejection_dedup.forget(client);
     }

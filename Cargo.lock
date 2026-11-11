@@ -2571,6 +2571,7 @@ dependencies = [
  "pilotage-decision",
  "pilotage-dji-usb",
  "pilotage-geo",
+ "pilotage-host-core",
  "pilotage-mavlink",
  "pilotage-mission",
  "pilotage-protocol",

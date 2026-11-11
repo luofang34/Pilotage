@@ -16,7 +16,7 @@ pub mod engine_actor;
 mod error;
 mod output;
 mod registry;
-mod wire_codec;
+pub mod wire_codec;
 
 pub use config::HostCoreConfig;
 pub use core::HostCore;

@@ -68,10 +68,4 @@ impl ClientRegistry {
     pub fn sender(&self, client: ClientKey) -> Option<&mpsc::Sender<ToConnection>> {
         self.clients.get(&client)
     }
-
-    /// Iterates every currently connected client's key and sender, for
-    /// broadcast fan-out.
-    pub fn iter(&self) -> impl Iterator<Item = (ClientKey, &mpsc::Sender<ToConnection>)> {
-        self.clients.iter().map(|(key, sender)| (*key, sender))
-    }
 }

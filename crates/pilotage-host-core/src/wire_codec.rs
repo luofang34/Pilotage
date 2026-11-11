@@ -12,7 +12,7 @@ use prost::Message;
 /// session-events stream (`Authority`) — the framing is identical, only
 /// the destination stream differs (ADR-0005).
 #[must_use]
-pub(crate) fn encode_envelope_message(message: &OutboundMessage) -> Vec<u8> {
+pub fn encode_envelope_message(message: &OutboundMessage) -> Vec<u8> {
     let payload = match message {
         OutboundMessage::Capabilities(capabilities) => {
             wire::envelope::Payload::HostCapabilities(capabilities.clone())
@@ -47,7 +47,7 @@ pub(crate) fn encode_envelope_message(message: &OutboundMessage) -> Vec<u8> {
 
 /// Encodes a `Pong` as a standalone envelope for a control-fast datagram.
 #[must_use]
-pub(crate) fn encode_pong_datagram(pong: &pilotage_protocol::Pong) -> Vec<u8> {
+pub fn encode_pong_datagram(pong: &pilotage_protocol::Pong) -> Vec<u8> {
     let envelope = wire::Envelope {
         schema_version: SCHEMA_VERSION,
         payload: Some(wire::envelope::Payload::Pong(pong.into())),
@@ -58,7 +58,7 @@ pub(crate) fn encode_pong_datagram(pong: &pilotage_protocol::Pong) -> Vec<u8> {
 /// Encodes a telemetry sample as a standalone envelope for a telemetry-fast
 /// datagram.
 #[must_use]
-pub(crate) fn encode_telemetry_datagram(sample: wire::TelemetrySample) -> Vec<u8> {
+pub fn encode_telemetry_datagram(sample: wire::TelemetrySample) -> Vec<u8> {
     let envelope = wire::Envelope {
         schema_version: SCHEMA_VERSION,
         payload: Some(wire::envelope::Payload::TelemetrySample(sample)),
@@ -69,9 +69,7 @@ pub(crate) fn encode_telemetry_datagram(sample: wire::TelemetrySample) -> Vec<u8
 /// Encodes a `FrameRejected` notice as a datagram envelope (sent back to the
 /// frame's sender only, ADR-0009).
 #[must_use]
-pub(crate) fn encode_frame_rejected_datagram(
-    rejection: &pilotage_protocol::FrameRejected,
-) -> Vec<u8> {
+pub fn encode_frame_rejected_datagram(rejection: &pilotage_protocol::FrameRejected) -> Vec<u8> {
     let envelope = wire::Envelope {
         schema_version: SCHEMA_VERSION,
         payload: Some(wire::envelope::Payload::FrameRejected(rejection.into())),
