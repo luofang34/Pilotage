@@ -464,3 +464,34 @@ fn current_epoch_progress_cancels_an_unconfirmed_reset() {
 }
 
 mod truth_origin;
+
+#[test]
+fn an_airspeed_report_is_cached_and_its_absence_replaces_it() {
+    let state = state(ResetPolicy::Conservative);
+    let start = Instant::now();
+    let hud = |airspeed| {
+        (
+            SELECTED,
+            FcMessage::VfrHud(crate::codec::VfrHud {
+                indicated_airspeed_mps: airspeed,
+            }),
+        )
+    };
+    apply_messages_at(&state, &[hud(Some(52.5))], 0, 0, start);
+    let first = state.lock().expect("lock").air_data.expect("cached");
+    assert_eq!(first.indicated_airspeed_mps, Some(52.5));
+    apply_messages_at(
+        &state,
+        &[hud(None)],
+        0,
+        0,
+        start + Duration::from_millis(250),
+    );
+    let second = state.lock().expect("lock").air_data.expect("cached");
+    assert_eq!(
+        second.indicated_airspeed_mps, None,
+        "a lost probe leaves no value"
+    );
+    assert_eq!(second.sequence, first.sequence.wrapping_add(1));
+    assert!(second.received_since_start_ns > first.received_since_start_ns);
+}

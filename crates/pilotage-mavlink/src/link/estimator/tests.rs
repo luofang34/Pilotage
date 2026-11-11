@@ -69,7 +69,8 @@ fn maps_fc_quality_and_masks_unknown_validity_bits() {
     assert_eq!(
         EstimatorAuthorization::from_fc(0xff, 2),
         EstimatorAuthorization {
-            valid_flags: 0x0f,
+            // Height and airspeed are known bits; 0x40 and 0x80 are not.
+            valid_flags: 0x3f,
             quality: QUALITY_GOOD,
         }
     );

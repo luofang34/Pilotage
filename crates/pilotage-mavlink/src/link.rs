@@ -42,8 +42,9 @@ pub use outbound::{
     OutboundParam, ParamRequest,
 };
 pub use updates::{
-    AttitudeUpdate, BaroUpdate, BatteryReport, CommandAckReport, GeomagneticReferenceUpdate,
-    GimbalDeviceAttitude, GnssFixUpdate, KinematicsUpdate, SimTruthUpdate, TruthOrigin,
+    AirDataUpdate, AttitudeUpdate, BaroUpdate, BatteryReport, CommandAckReport,
+    GeomagneticReferenceUpdate, GimbalDeviceAttitude, GnssFixUpdate, KinematicsUpdate,
+    SimTruthUpdate, TruthOrigin,
 };
 
 /// Latest state received from the FC, with receive stamps so staleness
@@ -79,6 +80,8 @@ pub struct LinkState {
     pub estimator_status: Option<EstimatorStatusUpdate>,
     /// Latest accepted static-pressure acquisition.
     pub baro: Option<BaroUpdate>,
+    /// Latest airspeed report.
+    pub air_data: Option<AirDataUpdate>,
     /// Latest simulator ground-truth report (SITL only). Cached outside
     /// the estimate measurement discipline like the gimbal report.
     pub sim_truth: Option<SimTruthUpdate>,

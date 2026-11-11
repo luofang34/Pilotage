@@ -30,6 +30,7 @@ impl LinkState {
             kinematics: None,
             estimator_status: None,
             baro: None,
+            air_data: None,
             sim_truth: None,
             gnss_fix: None,
             global_origin: None,

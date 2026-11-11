@@ -152,6 +152,7 @@ pub fn estimate_batch(
     };
     let avionics = Some(AvionicsSample {
         baro: None,
+        airspeed: None,
         // The estimator's own fix, under its own stamp: it advances
         // independently of the local frame beside it.
         geodetic: latest

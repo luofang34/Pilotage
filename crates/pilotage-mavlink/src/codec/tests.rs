@@ -46,6 +46,7 @@ pub(crate) fn encode_frame(msg_id: u32, payload: &[u8], truncate: bool) -> Vec<u
         20_000 => 171,
         22 => 220,
         83 => 22,
+        74 => 20,
         // The table is kept apart from the decoder's on purpose, so the
         // two are independent statements of the same wire fact. An id the
         // decoder knows and this table does not would make a frame the
@@ -462,3 +463,6 @@ mod stick_and_parameter;
 
 /// Uplink setpoint layouts and the attitude-target report.
 mod setpoints;
+
+/// VFR_HUD's airspeed against an independent encoder.
+mod air_data;

@@ -9,12 +9,14 @@
 //! `aviate-link` implementation, the peer this parser must interoperate
 //! with byte-for-byte).
 
+mod air_data;
 mod attitude_target;
 mod camera;
 mod flight_state;
 mod gimbal_manager;
 mod global_origin;
 mod heading_altitude;
+pub use air_data::{VFR_HUD_ID, VfrHud};
 pub use camera::{
     CAMERA_INFORMATION_ID, CAMERA_SETTINGS_ID, CameraMessage, MAV_CMD_SET_CAMERA_ZOOM,
 };
@@ -33,7 +35,7 @@ mod encoding;
 mod param_encoding;
 mod parameters;
 pub use attitude_target::{AttitudeTargetKind, SET_ATTITUDE_TARGET_ID, encode_attitude_target};
-use decoding::decode_known;
+use decoding::{decode_known, record_invalid_private_status};
 pub use encoding::{
     GCS_COMPONENT_ID, GCS_SYSTEM_ID, GIMBAL_FLAGS_HORIZON_YAW_FOLLOW, MAV_FRAME_BODY_OFFSET_NED,
     ManualControlSticks, encode_arm_command, encode_autopilot_heartbeat,
@@ -112,6 +114,8 @@ pub enum FcMessage {
     },
     /// Flight controller's landed detector state, with no source timestamp.
     LandedState(LandedState),
+    /// The airspeed a flight controller measures, with no source timestamp.
+    VfrHud(VfrHud),
     /// Manager-declared operations and physical limits.
     GimbalManagerInformation(GimbalManagerInformation),
     /// Actual gimbal-manager primary and secondary control ownership.
@@ -368,6 +372,7 @@ fn crc_extra(msg_id: u32) -> Option<u8> {
         HEARTBEAT_ID => Some(50),
         GLOBAL_POSITION_INT_ID => Some(104),
         EXTENDED_SYS_STATE_ID => Some(130),
+        VFR_HUD_ID => Some(20),
         ATTITUDE_QUATERNION_ID => Some(246),
         LOCAL_POSITION_NED_ID => Some(185),
         GNSS_RAW_ID => Some(24),
@@ -388,34 +393,6 @@ fn crc_extra(msg_id: u32) -> Option<u8> {
         EKF_STATUS_REPORT_ID => Some(71),
         STATUSTEXT_ID => Some(83),
         _ => None,
-    }
-}
-
-fn frame_header(bytes: &[u8], at: usize) -> Option<(FrameSource, u32)> {
-    let header = bytes.get(at..at + 10)?;
-    let source = FrameSource {
-        frame_sequence: header[4],
-        system_id: header[5],
-        component_id: header[6],
-    };
-    let message_id =
-        u32::from(header[7]) | (u32::from(header[8]) << 8) | (u32::from(header[9]) << 16);
-    Some((source, message_id))
-}
-
-fn record_invalid_private_status(
-    bytes: &[u8],
-    at: usize,
-    stats: &mut ParseStats,
-    out: &mut Vec<(FrameSource, FcMessage)>,
-) {
-    let Some((source, message_id)) = frame_header(bytes, at) else {
-        return;
-    };
-    if message_id == AVIATE_ESTIMATOR_STATUS_ID {
-        stats.invalid_estimator_status_frames =
-            stats.invalid_estimator_status_frames.wrapping_add(1);
-        out.push((source, FcMessage::InvalidAviateEstimatorStatus));
     }
 }
 
