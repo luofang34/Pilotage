@@ -18,8 +18,8 @@ pub(super) use targets::{
 
 use super::ConvertError;
 use crate::intent::{
-    AttitudeThrustIntent, BodyRateIntent, ControlAction, ControlIntent, GimbalRateIntent,
-    PositionHoldIntent, ReferenceFrame, VelocityIntent,
+    AltitudeReference, AttitudeThrustIntent, BodyRateIntent, ControlAction, ControlIntent,
+    GimbalRateIntent, HeadingAltitudeIntent, PositionHoldIntent, ReferenceFrame, VelocityIntent,
 };
 use crate::wire;
 
@@ -264,6 +264,12 @@ pub(super) fn intent_to_wire(intent: &ControlIntent) -> wire::ControlIntent {
             pitch_rate: g.pitch_rate,
             yaw_rate: g.yaw_rate,
         }),
+        ControlIntent::HeadingAltitude(h) => Family::HeadingAltitude(wire::HeadingAltitudeIntent {
+            heading_rad: h.heading_rad,
+            altitude_m: h.altitude_m,
+            vertical_datum: h.reference.code(),
+            airspeed_mps: h.airspeed_mps,
+        }),
     };
     wire::ControlIntent {
         family: Some(family),
@@ -317,6 +323,47 @@ pub(super) fn intent_from_wire(intent: wire::ControlIntent) -> Result<ControlInt
             pitch_rate: finite(g.pitch_rate, "gimbal_rate.pitch_rate")?,
             yaw_rate: finite(g.yaw_rate, "gimbal_rate.yaw_rate")?,
         }),
+        Family::HeadingAltitude(h) => ControlIntent::HeadingAltitude(heading_altitude(&h)?),
+    })
+}
+
+/// A heading and altitude intent off the wire. A heading outside one
+/// wrapped turn, an altitude reference the intent cannot have, and an
+/// airspeed that is not greater than zero are refused: none of them is a
+/// command a vehicle can hold.
+fn heading_altitude(
+    intent: &wire::HeadingAltitudeIntent,
+) -> Result<HeadingAltitudeIntent, ConvertError> {
+    let heading_rad = finite(intent.heading_rad, "heading_altitude.heading_rad")?;
+    if heading_rad.abs() > core::f32::consts::PI {
+        return Err(ConvertError::IntentOutOfRange {
+            field: "heading_altitude.heading_rad",
+            value: heading_rad,
+        });
+    }
+    let reference =
+        AltitudeReference::from_code(intent.vertical_datum).ok_or(ConvertError::UnknownEnum {
+            enum_name: "pilotage.v1.HeadingAltitudeIntent.vertical_datum",
+            value: i32::try_from(intent.vertical_datum).unwrap_or(i32::MAX),
+        })?;
+    let airspeed_mps = match intent.airspeed_mps {
+        None => None,
+        Some(value) => {
+            let value = finite(value, "heading_altitude.airspeed_mps")?;
+            if value <= 0.0 {
+                return Err(ConvertError::IntentOutOfRange {
+                    field: "heading_altitude.airspeed_mps",
+                    value,
+                });
+            }
+            Some(value)
+        }
+    };
+    Ok(HeadingAltitudeIntent {
+        heading_rad,
+        altitude_m: finite(intent.altitude_m, "heading_altitude.altitude_m")?,
+        reference,
+        airspeed_mps,
     })
 }
 

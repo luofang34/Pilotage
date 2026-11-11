@@ -109,3 +109,26 @@ fn the_motion_latch_suppresses_the_direct_scope_but_not_the_gimbal() {
         &ScopeId::new(DIRECT_SCOPE)
     ));
 }
+
+#[test]
+fn a_heading_and_altitude_never_proves_neutral_input() {
+    let capability = crate::IntentCapability {
+        family: pilotage_protocol::IntentFamily::HeadingAltitude,
+        frames: vec![],
+        max_linear: 70.0,
+        max_vertical: 0.0,
+        max_angular: 0.0,
+        max_yaw_rate: 0.0,
+    };
+    let intent = ControlIntent::HeadingAltitude(pilotage_protocol::HeadingAltitudeIntent {
+        heading_rad: 0.0,
+        altitude_m: 0.0,
+        reference: pilotage_protocol::AltitudeReference::LocalOrigin,
+        airspeed_mps: None,
+    });
+    assert!(!intent_satisfies_neutral_activation(
+        &intent,
+        &capability,
+        1000
+    ));
+}

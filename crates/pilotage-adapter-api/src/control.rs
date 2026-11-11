@@ -158,6 +158,8 @@ impl ApplyOutcome {
 /// capability: every velocity or rate component must sit inside the
 /// limit-scaled deadband. Position hold has no meaningful neutral posture
 /// and never satisfies it — recovery activation stays fail-closed for it.
+/// A heading with an altitude is the same: every value of it commands the
+/// vehicle to somewhere.
 #[must_use]
 pub fn intent_satisfies_neutral_activation(
     intent: &ControlIntent,
@@ -202,7 +204,7 @@ pub fn intent_satisfies_neutral_activation(
                 && b.yaw_rate.abs() <= angular
                 && (b.thrust - 0.5).abs() <= 0.5 * fraction
         }
-        ControlIntent::PositionHold(_) => false,
+        ControlIntent::PositionHold(_) | ControlIntent::HeadingAltitude(_) => false,
     }
 }
 

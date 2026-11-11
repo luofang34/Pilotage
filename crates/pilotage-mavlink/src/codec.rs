@@ -13,6 +13,7 @@ mod attitude_target;
 mod camera;
 mod flight_state;
 mod gimbal_manager;
+mod heading_altitude;
 pub use camera::{
     CAMERA_INFORMATION_ID, CAMERA_SETTINGS_ID, CameraMessage, MAV_CMD_SET_CAMERA_ZOOM,
 };
@@ -20,6 +21,10 @@ pub use flight_state::{EXTENDED_SYS_STATE_ID, GLOBAL_POSITION_INT_ID, LandedStat
 pub use gimbal_manager::{
     GIMBAL_MANAGER_INFORMATION_ID, GIMBAL_MANAGER_STATUS_ID, GimbalManagerInformation,
     GimbalManagerStatus,
+};
+pub use heading_altitude::{
+    HEADING_ALTITUDE_TYPE_MASK, LocalDownError, MAV_CMD_DO_CHANGE_SPEED, encode_airspeed_command,
+    encode_heading_altitude_setpoint, local_down_m,
 };
 mod decoding;
 mod encoding;

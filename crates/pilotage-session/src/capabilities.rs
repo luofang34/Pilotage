@@ -162,6 +162,7 @@ fn intent_family(family: pilotage_protocol::IntentFamily) -> wire::IntentFamily 
         Domain::AttitudeThrust => wire::IntentFamily::AttitudeThrust,
         Domain::BodyRate => wire::IntentFamily::BodyRate,
         Domain::GimbalRate => wire::IntentFamily::GimbalRate,
+        Domain::HeadingAltitude => wire::IntentFamily::HeadingAltitude,
     }
 }
 

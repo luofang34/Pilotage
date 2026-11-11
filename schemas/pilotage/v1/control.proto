@@ -191,6 +191,24 @@ message GimbalRateIntent {
   float yaw_rate = 2;
 }
 
+// A true heading and an altitude, and optionally an airspeed. For an
+// airframe whose flight controller holds heading, altitude, and airspeed
+// with its own sensors. The vehicle needs no position estimate to fly it.
+message HeadingAltitudeIntent {
+  // True heading, radians in [-pi, pi]: zero north, positive toward east.
+  float heading_rad = 1;
+  // Altitude in metres, positive up, against `vertical_datum`.
+  float altitude_m = 2;
+  // The reference of `altitude_m`, as a pilotage_geo::VerticalDatum code:
+  // 1 is the height above the WGS-84 ellipsoid, 6 is the height above the
+  // local origin of the flight controller, the origin its local position
+  // refers to. Every other code is refused, never guessed.
+  uint32 vertical_datum = 3;
+  // Indicated airspeed in metres per second, greater than zero. When it is
+  // absent, the vehicle holds its own cruise airspeed.
+  optional float airspeed_mps = 4;
+}
+
 // Exactly one typed control-intent family. The `oneof` makes the families
 // mutually exclusive on the wire: a frame commands velocity OR attitude OR body
 // rate, never an ambiguous mix, so a velocity-to-attitude transition is a
@@ -203,6 +221,7 @@ message ControlIntent {
     AttitudeThrustIntent attitude_thrust = 3;
     BodyRateIntent body_rate = 4;
     GimbalRateIntent gimbal_rate = 5;
+    HeadingAltitudeIntent heading_altitude = 6;
   }
 }
 
