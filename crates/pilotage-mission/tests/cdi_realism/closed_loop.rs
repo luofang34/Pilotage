@@ -11,7 +11,8 @@ use aerocontext_core::{GeoPoint, NavDataCycle, NavDataSnapshot, NavPoint, NavPoi
 use aerocontext_navdata::blob;
 use chrono::NaiveDate;
 use navigate_contract::{ClockDomainId, GeodeticPosition, MonotonicNanos};
-use navigate_geodesy::{LocalTangentPlane, NedOffset};
+use navigate_geodesy::NedOffset;
+use navigate_geodesy::wgs84::tangent_plane;
 use pilotage_mission::fixture::{self, GeoPointDegrees};
 use pilotage_mission::{
     MissionBuildError, MissionConfig, MissionEngine, MissionOutput, MissionPlanRecord,
@@ -237,7 +238,7 @@ pub fn try_engine_over_offsets(
     offsets: &[(f64, f64)],
     route: &str,
 ) -> Result<(MissionEngine, MissionPlanRecord), MissionBuildError> {
-    let plane = LocalTangentPlane::new(anchor_position()).expect("the anchor is plausible");
+    let plane = tangent_plane(anchor_position()).expect("the anchor is plausible");
     let points = idents
         .iter()
         .zip(offsets.iter().copied())

@@ -13,7 +13,7 @@ use aerocontext_core::{
 use aerocontext_navdata::blob;
 use chrono::NaiveDate;
 use navigate_contract::GeodeticPosition;
-use navigate_geodesy::{LocalTangentPlane, NedOffset};
+use navigate_geodesy::NedOffset;
 
 use crate::error::MissionBuildError;
 
@@ -70,7 +70,7 @@ pub fn demo_snapshot(anchor_deg: GeoPointDegrees) -> Result<NavDataSnapshot, Mis
         anchor_deg.lon_deg.to_radians(),
         anchor_deg.alt_m,
     );
-    let plane = LocalTangentPlane::new(origin)?;
+    let plane = navigate_geodesy::wgs84::tangent_plane(origin)?;
     let points = DEMO_OFFSETS
         .iter()
         .map(|&(ident, north_m, east_m)| {

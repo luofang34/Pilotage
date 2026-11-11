@@ -8,7 +8,7 @@
 //! than degraded: one estimator, no redundancy, no fault detection.
 
 use navigate_contract::{
-    ClockDomainId, DurationNanos, FaultDetection, IntegrityAssessment, MonotonicNanos,
+    ClockDomainId, DurationNanos, Ellipsoid, FaultDetection, IntegrityAssessment, MonotonicNanos,
     NavigationSolution, NedVelocity, Redundancy, SensorClass, SolutionQuality, SolutionStamp,
     SourceComposition, SourceEpoch, SymmetricCov3, WrappingSequence,
 };
@@ -90,6 +90,7 @@ impl VehicleEstimate {
             SymmetricCov3::from_diagonal(velocity_variance, velocity_variance, velocity_variance),
             integrity,
             composition,
+            Ellipsoid::WGS84,
         ))
     }
 }

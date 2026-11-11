@@ -29,7 +29,7 @@ mod closed_loop;
 use closed_loop::{
     CORNER_IDENTS, Rig, corner_engine, fixture_engine, right_of_course_ned, try_engine_over_offsets,
 };
-use navigate_fpl::{PlanActivationError, SequenceReason};
+use navigate_route::{PlanActivationError, SequenceReason};
 use pilotage_mission::{MissionBuildError, MissionEvent, NavQuality};
 
 /// Lateral disturbance a displacement scenario applies, m/s. Above the

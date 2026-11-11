@@ -5,7 +5,8 @@
 //! from the area.
 
 use navigate_contract::{ClockDomainId, GeodeticPosition, MonotonicNanos};
-use navigate_geodesy::{LocalTangentPlane, NedOffset};
+use navigate_geodesy::NedOffset;
+use navigate_geodesy::wgs84::tangent_plane;
 use pilotage_mission::{
     ExecutionTarget, MissionConfig, MissionEngine, MissionEvent, MissionState, OwnshipSample,
     OwnshipSource, SurveyRequest, TruthRole, plan_survey,
@@ -25,7 +26,7 @@ fn anchor() -> GeodeticPosition {
 }
 
 fn request() -> SurveyRequest {
-    let plane = LocalTangentPlane::new(anchor()).expect("anchor is plausible");
+    let plane = tangent_plane(anchor()).expect("anchor is plausible");
     let polygon = [[0.0, 0.0], [300.0, 0.0], [300.0, 120.0], [0.0, 120.0]]
         .iter()
         .map(|[north, east]| {
@@ -50,9 +51,9 @@ fn config() -> MissionConfig {
 
 /// The first line's far end in the truth frame: north, east.
 fn first_line_end() -> [f64; 2] {
-    let plane = LocalTangentPlane::new(anchor()).expect("anchor is plausible");
+    let plane = tangent_plane(anchor()).expect("anchor is plausible");
     let plan = plan_survey(&request(), &anchor(), HEIGHT_M).expect("plans");
-    let end = plane.to_ned(&plan.plan.waypoints[1].position);
+    let end = plane.to_ned(&plan.waypoints[1].position);
     [end.north_m, end.east_m]
 }
 

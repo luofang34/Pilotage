@@ -1,12 +1,18 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use navigate_contract::{AltitudeConstraint, GeodeticPosition, SolutionQuality, Waypoint};
-use navigate_fpl::Leg;
+use navigate_contract::{
+    AltitudeConstraint, GeodeticPosition, Ident, LegPath, SolutionQuality, Waypoint,
+};
+use navigate_route::Leg;
 
 use super::{NavQuality, leg_guidance, profile_deviation_m};
 
 /// One degree of arc on the mean-radius sphere, meters: the scale every
 /// hand-computed expectation below is derived from.
+fn ident(name: &str) -> Ident {
+    Ident::try_new(name).expect("a short name")
+}
+
 const METERS_PER_DEGREE: f64 = 111_195.0;
 
 fn position(lat_deg: f64, lon_deg: f64, altitude_m: f64) -> GeodeticPosition {
@@ -17,8 +23,8 @@ fn position(lat_deg: f64, lon_deg: f64, altitude_m: f64) -> GeodeticPosition {
 /// against: `EASTA` at 0°E, `EASTB` at 1°E, both crossing at 1000 m.
 fn eastbound_leg() -> (Waypoint, Waypoint) {
     (
-        Waypoint::new("EASTA".to_owned(), position(0.0, 0.0, 1000.0)),
-        Waypoint::new("EASTB".to_owned(), position(0.0, 1.0, 1000.0))
+        Waypoint::new(ident("EASTA"), position(0.0, 0.0, 1000.0)),
+        Waypoint::new(ident("EASTB"), position(0.0, 1.0, 1000.0))
             .with_altitude(AltitudeConstraint::At(1000.0)),
     )
 }
@@ -30,6 +36,7 @@ fn eastbound_leg_pins_course_deviations_and_distance() {
         from: Some(&from),
         to: &to,
         index: 1,
+        path: LegPath::TrackToFix,
     };
     // 0.01° south of the track at its midpoint, 50 m above the profile.
     let ownship = position(-0.01, 0.5, 1050.0);
@@ -75,6 +82,7 @@ fn left_of_track_is_negative() {
         from: Some(&from),
         to: &to,
         index: 1,
+        path: LegPath::TrackToFix,
     };
     let guidance = leg_guidance(&position(0.01, 0.5, 1000.0), &leg, 3, NavQuality::Degraded);
 
@@ -96,6 +104,7 @@ fn direct_to_courses_at_the_waypoint_and_reports_no_cross_track() {
         from: None,
         to: &to,
         index: 0,
+        path: LegPath::DirectToFix,
     };
     // Due south-west of the waypoint: the live bearing to it is the
     // course, and no track exists to deviate from.
@@ -114,11 +123,12 @@ fn direct_to_courses_at_the_waypoint_and_reports_no_cross_track() {
 #[test]
 fn an_unconstrained_waypoint_reports_no_vertical_deviation() {
     let (from, _) = eastbound_leg();
-    let unconstrained = Waypoint::new("FREEE".to_owned(), position(0.0, 1.0, 1000.0));
+    let unconstrained = Waypoint::new(ident("FREEE"), position(0.0, 1.0, 1000.0));
     let leg = Leg {
         from: Some(&from),
         to: &unconstrained,
         index: 1,
+        path: LegPath::TrackToFix,
     };
     let guidance = leg_guidance(&position(0.0, 0.5, 2000.0), &leg, 2, NavQuality::Good);
     assert_eq!(guidance.vertical_deviation_m, None);

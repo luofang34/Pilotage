@@ -1,8 +1,8 @@
 //! Typed outputs of one engine tick: intent, action, state, events,
 //! and the refusal counters.
 
-use navigate_fpl::SequenceReason;
 use navigate_guidance::GuidanceRefusal;
+use navigate_route::SequenceReason;
 use pilotage_protocol::{ControlAction, ControlIntent};
 
 /// The mission phase the engine is in.

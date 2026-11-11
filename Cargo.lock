@@ -999,96 +999,6 @@ dependencies = [
 
 [[package]]
 name = "glam"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "333928d5eb103c5d4050533cec0384302db6be8ef7d3cebd30ec6a35350353da"
-
-[[package]]
-name = "glam"
-version = "0.15.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3abb554f8ee44336b72d522e0a7fe86a29e09f839a36022fa869a7dfe941a54b"
-
-[[package]]
-name = "glam"
-version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4126c0479ccf7e8664c36a2d719f5f2c140fbb4f9090008098d2c291fa5b3f16"
-
-[[package]]
-name = "glam"
-version = "0.17.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e01732b97afd8508eee3333a541b9f7610f454bb818669e66e90f5f57c93a776"
-
-[[package]]
-name = "glam"
-version = "0.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "525a3e490ba77b8e326fb67d4b44b4bd2f920f44d4cc73ccec50adc68e3bee34"
-
-[[package]]
-name = "glam"
-version = "0.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b8509e6791516e81c1a630d0bd7fbac36d2fa8712a9da8662e716b52d5051ca"
-
-[[package]]
-name = "glam"
-version = "0.20.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f43e957e744be03f5801a55472f593d43fabdebf25a4585db250f04d86b1675f"
-
-[[package]]
-name = "glam"
-version = "0.21.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "518faa5064866338b013ff9b2350dc318e14cc4fcd6cb8206d7e7c9886c98815"
-
-[[package]]
-name = "glam"
-version = "0.22.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12f597d56c1bd55a811a1be189459e8fad2bbc272616375602443bdfb37fa774"
-
-[[package]]
-name = "glam"
-version = "0.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e4afd9ad95555081e109fe1d21f2a30c691b5f0919c67dfa690a2e1eb6bd51c"
-
-[[package]]
-name = "glam"
-version = "0.24.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5418c17512bdf42730f9032c74e1ae39afc408745ebb2acf72fbc4691c17945"
-
-[[package]]
-name = "glam"
-version = "0.25.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "151665d9be52f9bb40fc7966565d39666f2d1e69233571b71b87791c7e0528b3"
-
-[[package]]
-name = "glam"
-version = "0.27.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e05e7e6723e3455f4818c7b26e855439f7546cf617ef669d1adedb8669e5cb9"
-
-[[package]]
-name = "glam"
-version = "0.28.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "779ae4bf7e8421cf91c0b3b64e7e8b40b862fba4d393f59150042de7c4965a94"
-
-[[package]]
-name = "glam"
-version = "0.29.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8babf46d4c1c9d92deac9f7be466f76dfc4482b6452fc5024b5e8daf6ffeb3ee"
-
-[[package]]
-name = "glam"
 version = "0.30.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19fc433e8437a212d1b6f1e68c7824af3aed907da60afa994e7f542d18d12aa9"
@@ -1104,6 +1014,12 @@ name = "glam"
 version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f70749695b063ecbf6b62949ccccde2e733ec3ecbbd71d467dca4e5c6c97cca0"
+
+[[package]]
+name = "glam"
+version = "0.33.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "37bfe73dc8ec21f54d181e5a60554327ec3f1c600c455a75ccbfc65d2106a6c4"
 
 [[package]]
 name = "glob"
@@ -1828,29 +1744,15 @@ checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
 
 [[package]]
 name = "nalgebra"
-version = "0.34.2"
+version = "0.35.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df76ea0ff5c7e6b88689085804d6132ded0ddb9de5ca5b8aeb9eeadc0508a70a"
+checksum = "adc43a60c217b0c6ff46e47f26911015ad8d2e5a8be1af668c67e370d99a4346"
 dependencies = [
  "approx",
- "glam 0.14.0",
- "glam 0.15.2",
- "glam 0.16.0",
- "glam 0.17.3",
- "glam 0.18.0",
- "glam 0.19.0",
- "glam 0.20.5",
- "glam 0.21.3",
- "glam 0.22.0",
- "glam 0.23.0",
- "glam 0.24.2",
- "glam 0.25.0",
- "glam 0.27.0",
- "glam 0.28.0",
- "glam 0.29.3",
  "glam 0.30.10",
  "glam 0.31.1",
  "glam 0.32.1",
+ "glam 0.33.12",
  "matrixmultiply",
  "num-complex",
  "num-rational",
@@ -1860,27 +1762,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "navigate-contract"
+name = "navigate-astrodynamics"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Navigate.git?rev=ace50f68b3ffae6237bbb53f6af687c335518272#ace50f68b3ffae6237bbb53f6af687c335518272"
-dependencies = [
- "thiserror",
-]
-
-[[package]]
-name = "navigate-fpl"
-version = "0.1.0"
-source = "git+https://github.com/luofang34/Navigate.git?rev=ace50f68b3ffae6237bbb53f6af687c335518272#ace50f68b3ffae6237bbb53f6af687c335518272"
-dependencies = [
- "navigate-contract",
- "navigate-geodesy",
- "thiserror",
-]
-
-[[package]]
-name = "navigate-fusion"
-version = "0.1.0"
-source = "git+https://github.com/luofang34/Navigate.git?rev=ace50f68b3ffae6237bbb53f6af687c335518272#ace50f68b3ffae6237bbb53f6af687c335518272"
+source = "git+https://github.com/luofang34/Navigate.git?rev=9cf9d2ceadeb5bd6e6dbcbada19acdeb75d82b6c#9cf9d2ceadeb5bd6e6dbcbada19acdeb75d82b6c"
 dependencies = [
  "nalgebra",
  "navigate-contract",
@@ -1889,9 +1773,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "navigate-contract"
+version = "0.1.0"
+source = "git+https://github.com/luofang34/Navigate.git?rev=9cf9d2ceadeb5bd6e6dbcbada19acdeb75d82b6c#9cf9d2ceadeb5bd6e6dbcbada19acdeb75d82b6c"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
+name = "navigate-fusion"
+version = "0.1.0"
+source = "git+https://github.com/luofang34/Navigate.git?rev=9cf9d2ceadeb5bd6e6dbcbada19acdeb75d82b6c#9cf9d2ceadeb5bd6e6dbcbada19acdeb75d82b6c"
+dependencies = [
+ "nalgebra",
+ "navigate-astrodynamics",
+ "navigate-contract",
+ "navigate-geodesy",
+ "thiserror",
+]
+
+[[package]]
 name = "navigate-geodesy"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Navigate.git?rev=ace50f68b3ffae6237bbb53f6af687c335518272#ace50f68b3ffae6237bbb53f6af687c335518272"
+source = "git+https://github.com/luofang34/Navigate.git?rev=9cf9d2ceadeb5bd6e6dbcbada19acdeb75d82b6c#9cf9d2ceadeb5bd6e6dbcbada19acdeb75d82b6c"
 dependencies = [
  "navigate-contract",
  "thiserror",
@@ -1900,8 +1804,34 @@ dependencies = [
 [[package]]
 name = "navigate-guidance"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Navigate.git?rev=ace50f68b3ffae6237bbb53f6af687c335518272#ace50f68b3ffae6237bbb53f6af687c335518272"
+source = "git+https://github.com/luofang34/Navigate.git?rev=9cf9d2ceadeb5bd6e6dbcbada19acdeb75d82b6c#9cf9d2ceadeb5bd6e6dbcbada19acdeb75d82b6c"
 dependencies = [
+ "nalgebra",
+ "navigate-astrodynamics",
+ "navigate-contract",
+ "navigate-geodesy",
+ "navigate-route",
+ "navigate-trajectory",
+ "thiserror",
+]
+
+[[package]]
+name = "navigate-route"
+version = "0.1.0"
+source = "git+https://github.com/luofang34/Navigate.git?rev=9cf9d2ceadeb5bd6e6dbcbada19acdeb75d82b6c#9cf9d2ceadeb5bd6e6dbcbada19acdeb75d82b6c"
+dependencies = [
+ "navigate-contract",
+ "navigate-geodesy",
+ "thiserror",
+]
+
+[[package]]
+name = "navigate-trajectory"
+version = "0.1.0"
+source = "git+https://github.com/luofang34/Navigate.git?rev=9cf9d2ceadeb5bd6e6dbcbada19acdeb75d82b6c#9cf9d2ceadeb5bd6e6dbcbada19acdeb75d82b6c"
+dependencies = [
+ "nalgebra",
+ "navigate-astrodynamics",
  "navigate-contract",
  "navigate-geodesy",
  "thiserror",
@@ -2006,12 +1936,6 @@ name = "openssl-probe"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
-
-[[package]]
-name = "paste"
-version = "1.0.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
 name = "pem"
@@ -2483,10 +2407,10 @@ dependencies = [
  "aerocontext-planning",
  "chrono",
  "navigate-contract",
- "navigate-fpl",
  "navigate-fusion",
  "navigate-geodesy",
  "navigate-guidance",
+ "navigate-route",
  "pilotage-mission-core",
  "pilotage-protocol",
  "prost",
@@ -3317,9 +3241,9 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "safe_arch"
-version = "0.7.4"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96b02de82ddbe1b636e6170c21be622223aea188ef2e139be0a5b219ec215323"
+checksum = "42c6efa15875e6ecb39ca61fb0b0c1a40b84fac5a5ffe71eef7d1000c8eb3f5f"
 dependencies = [
  "bytemuck",
 ]
@@ -3534,14 +3458,13 @@ dependencies = [
 
 [[package]]
 name = "simba"
-version = "0.9.1"
+version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c99284beb21666094ba2b75bbceda012e610f5479dfcc2d6e2426f53197ffd95"
+checksum = "f1a7200d82ff1c7b4235efd12f11e2537a402c91cf83a5cb97ce80eef787fde7"
 dependencies = [
  "approx",
  "num-complex",
  "num-traits",
- "paste",
  "wide",
 ]
 
@@ -3717,22 +3640,22 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "2.0.18"
+version = "2.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4288b5bcbc7920c07a1149a35cf9590a2aa808e0bc1eafaade0b80947865fbc4"
+checksum = "09e52cb86a36cede5cb101bf8908837b3e4c6e5e59fe7fd85c23fb56200d189e"
 dependencies = [
  "thiserror-impl",
 ]
 
 [[package]]
 name = "thiserror-impl"
-version = "2.0.18"
+version = "2.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ebc4ee7f67670e9b64d05fa4253e753e016c6c95ff35b89b7941d6b856dec1d5"
+checksum = "fe5197923287db20a58125f0bc85c062f7f2c892de97b18c356f9efb14b28524"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.118",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -4366,9 +4289,9 @@ dependencies = [
 
 [[package]]
 name = "wide"
-version = "0.7.33"
+version = "1.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ce5da8ecb62bcd8ec8b7ea19f69a51275e91299be594ea5cc6ef7819e16cd03"
+checksum = "d920ac99c3c8edce110cb8d07dbb324d6d026011dce85b1e9355b70f0adacc4f"
 dependencies = [
  "bytemuck",
  "safe_arch",

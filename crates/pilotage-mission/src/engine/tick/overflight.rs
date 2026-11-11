@@ -5,7 +5,7 @@
 //! fix instead: the vehicle turns back and captures it.
 
 use navigate_contract::{GeodeticPosition, Waypoint};
-use navigate_geodesy::{along_track_m, distance_m};
+use navigate_geodesy::wgs84::{along_track_m, distance_m};
 
 use super::super::{MissionEngine, MissionEvent};
 
@@ -25,7 +25,7 @@ impl MissionEngine {
             return Some(from);
         }
         self.counters.fix_overflown = self.counters.fix_overflown.wrapping_add(1);
-        let to_index = self.execution.active_index();
+        let to_index = self.route.active_index();
         if self.overflown_fix != Some(to_index) {
             self.overflown_fix = Some(to_index);
             events.push(MissionEvent::FixOverflown { to_index });

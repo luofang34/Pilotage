@@ -107,8 +107,8 @@ impl MissionEngine {
 
     /// How many of the plan's waypoints are captured, from its first.
     pub(super) fn waypoints_captured(&self) -> usize {
-        let total = self.execution.plan().waypoints.len();
-        total.saturating_sub(self.execution.remaining_waypoints().len())
+        let total = self.route.waypoints().len();
+        total.saturating_sub(self.route.remaining_waypoints().len())
     }
 
     pub(super) fn queue_receipt(

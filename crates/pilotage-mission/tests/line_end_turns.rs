@@ -5,7 +5,8 @@
 //! fix, and the turns stay outside the survey area.
 
 use navigate_contract::{ClockDomainId, GeodeticPosition, MonotonicNanos};
-use navigate_geodesy::{LocalTangentPlane, NedOffset};
+use navigate_geodesy::NedOffset;
+use navigate_geodesy::wgs84::tangent_plane;
 use pilotage_mission::{
     ExecutionTarget, MissionConfig, MissionEngine, MissionState, OwnshipSample, OwnshipSource,
     SurveyRequest, TruthRole,
@@ -31,7 +32,7 @@ fn anchor() -> GeodeticPosition {
 }
 
 fn request() -> SurveyRequest {
-    let plane = LocalTangentPlane::new(anchor()).expect("anchor is plausible");
+    let plane = tangent_plane(anchor()).expect("anchor is plausible");
     let polygon = [
         [0.0, 0.0],
         [AREA_NORTH_M, 0.0],

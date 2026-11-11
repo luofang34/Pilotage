@@ -1,6 +1,7 @@
 use core::f64::consts::{FRAC_PI_2, PI};
 
 use navigate_contract::{AltitudeConstraint, GeodeticPosition, TurnType};
+use navigate_geodesy::wgs84::tangent_plane;
 use navigate_geodesy::{LocalTangentPlane, NedOffset};
 
 use super::{MAX_SURVEY_WAYPOINTS, SurveyError, SurveyRequest, plan_survey};
@@ -12,7 +13,7 @@ fn anchor() -> GeodeticPosition {
 }
 
 fn plane() -> LocalTangentPlane {
-    LocalTangentPlane::new(anchor()).expect("anchor is plausible")
+    tangent_plane(anchor()).expect("anchor is plausible")
 }
 
 /// A polygon from planar corners, in degrees.
@@ -37,8 +38,7 @@ fn rectangle(north_m: f64, east_m: f64) -> Vec<[f64; 2]> {
 /// Waypoint positions back in the plane: north, east.
 fn planar_waypoints(plan: &super::SurveyPlan) -> Vec<[f64; 2]> {
     let plane = plane();
-    plan.plan
-        .waypoints
+    plan.waypoints
         .iter()
         .filter(|waypoint| waypoint.ident != "HOME")
         .map(|waypoint| {
@@ -50,9 +50,8 @@ fn planar_waypoints(plan: &super::SurveyPlan) -> Vec<[f64; 2]> {
 
 /// The home waypoint, north then east metres from the anchor.
 fn planar_home(plan: &super::SurveyPlan) -> Option<[f64; 2]> {
-    let plane = LocalTangentPlane::new(anchor()).expect("anchor is plausible");
-    plan.plan
-        .waypoints
+    let plane = tangent_plane(anchor()).expect("anchor is plausible");
+    plan.waypoints
         .iter()
         .find(|waypoint| waypoint.ident == "HOME")
         .map(|waypoint| {
@@ -153,9 +152,8 @@ fn rectangle_lines_follow_the_long_edge_and_cover_the_width() {
     assert!(survey.line_spacing_m <= footprint * 0.4 + 1e-9);
     assert!(survey.line_spacing_m > footprint * 0.3);
     assert_eq!(survey.line_count, 4);
-    assert_eq!(survey.plan.waypoints.len(), 9, "eight line ends and home");
+    assert_eq!(survey.waypoints.len(), 9, "eight line ends and home");
     let idents: Vec<&str> = survey
-        .plan
         .waypoints
         .iter()
         .map(|waypoint| waypoint.ident.as_str())
@@ -166,7 +164,7 @@ fn rectangle_lines_follow_the_long_edge_and_cover_the_width() {
             "L01A", "L01B", "L02A", "L02B", "L03A", "L03B", "L04A", "L04B", "HOME"
         ]
     );
-    for waypoint in &survey.plan.waypoints {
+    for waypoint in &survey.waypoints {
         let turn = if waypoint.ident == "HOME" {
             TurnType::FlyOver
         } else {
@@ -341,7 +339,6 @@ fn requests_outside_their_ranges_are_refused() {
     assert!(
         plan_survey(&largest, &anchor(), HEIGHT_M)
             .expect("plans")
-            .plan
             .waypoints
             .len()
             <= MAX_SURVEY_WAYPOINTS
@@ -356,7 +353,7 @@ fn a_measured_footprint_replaces_the_derived_one_and_allows_a_planar_height() {
     assert!((survey.footprint_width_m - 12.0).abs() < 1e-9);
     assert!((survey.line_spacing_m - 4.5).abs() < 1e-9);
     assert_eq!(survey.line_count, 5);
-    for waypoint in &survey.plan.waypoints {
+    for waypoint in &survey.waypoints {
         assert_eq!(waypoint.altitude, Some(AltitudeConstraint::At(500.0)));
     }
     let planar = [[0.0, 0.0], [40.0, 0.0], [40.0, 30.0], [0.0, 30.0]];
@@ -398,7 +395,6 @@ fn the_digest_binds_every_parameter() {
     assert_ne!(measured.digest(), request.digest());
     let survey = plan_survey(&request, &anchor(), HEIGHT_M).expect("plans");
     assert_eq!(survey.digest, request.digest());
-    assert_eq!(survey.plan.id, format!("survey:{}", request.digest()));
 }
 
 #[test]
@@ -407,10 +403,7 @@ fn the_plan_comes_home_unless_asked_not_to() {
     let with_home = plan_survey(&request, &anchor(), HEIGHT_M).expect("plans");
     request.return_to_launch = false;
     let without = plan_survey(&request, &anchor(), HEIGHT_M).expect("plans");
-    assert_eq!(
-        with_home.plan.waypoints.len(),
-        without.plan.waypoints.len() + 1
-    );
+    assert_eq!(with_home.waypoints.len(), without.waypoints.len() + 1);
     assert_ne!(
         with_home.digest, without.digest,
         "the choice is in the digest"
@@ -421,7 +414,6 @@ fn the_plan_comes_home_unless_asked_not_to() {
     );
     assert!(
         without
-            .plan
             .waypoints
             .iter()
             .all(|waypoint| waypoint.ident != "HOME")

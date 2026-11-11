@@ -83,15 +83,16 @@ pub(super) fn home_segments(waypoints: usize, task_ids: &[String]) -> Vec<Segmen
 }
 
 pub(super) fn build_document(
-    plan: &FlightPlan,
+    plan_id: &str,
+    plan: &FlightPlan<'_>,
     config: &MissionConfig,
     navigation_data_identity: NavigationDataIdentity,
     revision_prefix: &str,
     segments: &[Segment],
 ) -> Result<(MissionDocument, FlightPlanReference), MissionBuildError> {
-    let plan_content_digest = plan_digest(plan)?;
+    let plan_content_digest = plan_digest(plan_id, plan)?;
     let plan_reference = FlightPlanReference {
-        plan_id: plan.id.clone(),
+        plan_id: plan_id.to_owned(),
         plan_content_digest,
         navigation_data_identity: navigation_data_identity.clone(),
     };
@@ -236,10 +237,12 @@ fn follow_plan_phase(plan: FlightPlanReference) -> MissionPhase {
     }
 }
 
-fn plan_digest(plan: &FlightPlan) -> Result<Digest, MissionBuildError> {
+/// The content digest of a plan. It hashes the Pilotage plan identifier
+/// that the mission document carries, not the Navigate plan identifier.
+fn plan_digest(plan_id: &str, plan: &FlightPlan<'_>) -> Result<Digest, MissionBuildError> {
     let mut hasher = Sha256::new();
     hasher.update(PLAN_DIGEST_DOMAIN);
-    hash_string(&mut hasher, &plan.id);
+    hash_string(&mut hasher, plan_id);
     let role = match plan.role {
         PlanRole::Mission => 1,
         PlanRole::LossOfComm => 2,
@@ -248,14 +251,14 @@ fn plan_digest(plan: &FlightPlan) -> Result<Digest, MissionBuildError> {
     };
     hasher.update([role]);
     hash_len(&mut hasher, plan.waypoints.len());
-    for waypoint in &plan.waypoints {
+    for waypoint in plan.waypoints {
         hash_waypoint(&mut hasher, waypoint)?;
     }
     Ok(Digest::from_bytes(hasher.finalize().into()))
 }
 
 fn hash_waypoint(hasher: &mut Sha256, waypoint: &Waypoint) -> Result<(), MissionBuildError> {
-    hash_string(hasher, &waypoint.ident);
+    hash_string(hasher, waypoint.ident.as_str());
     hash_f64(hasher, waypoint.position.latitude_rad);
     hash_f64(hasher, waypoint.position.longitude_rad);
     hash_f64(hasher, waypoint.position.altitude_m);
