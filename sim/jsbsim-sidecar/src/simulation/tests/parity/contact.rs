@@ -45,11 +45,18 @@
 //!   holds for one physics step of a sample. The allowance decays by
 //!   `exp(-dt·λ_min(Σc·r·rᵀ)/I)` on each step, the slowest decay that the
 //!   damping torque gives.
-//! - Contact compression: the compressions of the two engines may part by
-//!   at most `(FORCE_CAP_M_S2 - FORCE_M_S2)·m / Σk`, the difference at
-//!   which the spring force alone takes the specific-force bound to its
-//!   cap. A larger difference makes the force comparison meaningless, so
-//!   it fails as a compression difference.
+//! - Contact compression: a contact on the ground in both engines may
+//!   part in compression by at most `(FORCE_CAP_M_S2 - FORCE_M_S2)·m / Σk`,
+//!   the difference at which the spring force alone takes the
+//!   specific-force bound to its cap. A contact on the ground in one
+//!   engine only fails on its own.
+//!
+//! The landing test compares the state, then the readings, then the
+//! contact states, and checks the caps last. A model difference fails
+//! one of these comparisons whatever their order; the order decides only
+//! which one a failure names. A cap failure means that the admitted
+//! differences no longer let the comparison see anything, so no model
+//! difference is expected to fail there.
 
 use std::path::Path;
 
@@ -164,7 +171,9 @@ struct Sensitivity {
     spring: Moments,
     /// The strut damping of every contact on the ground, N·s/m.
     damping: Moments,
-    /// The compression of each contact, zero in the air, metres.
+    /// Whether each contact is on the ground.
+    on_ground: Vec<bool>,
+    /// The compression of each contact, metres.
     compression_m: Vec<f64>,
     mass_kg: f64,
     smallest_inertia_kg_m2: f64,
@@ -226,11 +235,8 @@ impl Probe {
                 && (!self.was_on_ground[i]
                     || speed_limited(compression_ft, engine.get(self.compression_speed_fps[i])));
             self.was_on_ground[i] = on_ground;
-            sensitivity.compression_m.push(if on_ground {
-                compression_ft * M_PER_FT
-            } else {
-                0.0
-            });
+            sensitivity.on_ground.push(on_ground);
+            sensitivity.compression_m.push(compression_ft * M_PER_FT);
             if !on_ground {
                 continue;
             }
@@ -297,10 +303,7 @@ impl Contact {
             height_m,
             tilt_rad,
         };
-        let mut compression = CompressionBound {
-            difference_m: largest_difference(&senses[0].compression_m, &senses[1].compression_m),
-            limit_m: f64::INFINITY,
-        };
+        let mut compression = compare_contacts(&senses[0], &senses[1]);
         let mut rate_step = 0.0f64;
         let mut retained = 0.0f64;
         for s in &senses {
@@ -333,12 +336,24 @@ impl Contact {
     }
 }
 
-/// The largest difference between two lists of contact compressions.
-fn largest_difference(a: &[f64], b: &[f64]) -> f64 {
-    a.iter()
-        .zip(b)
-        .map(|(a, b)| (a - b).abs())
-        .fold(0.0, f64::max)
+/// The contact states of the two engines: the first contact that is on
+/// the ground in one engine only, and the largest compression difference
+/// of the contacts on the ground in both. The caller sets the limit.
+fn compare_contacts(a: &Sensitivity, b: &Sensitivity) -> CompressionBound {
+    let mut bound = CompressionBound {
+        difference_m: 0.0,
+        limit_m: f64::INFINITY,
+        one_sided: None,
+    };
+    for (i, (on_a, on_b)) in a.on_ground.iter().zip(&b.on_ground).enumerate() {
+        if on_a != on_b {
+            bound.one_sided = bound.one_sided.or(Some(i));
+        } else if *on_a {
+            let difference = (a.compression_m[i] - b.compression_m[i]).abs();
+            bound.difference_m = bound.difference_m.max(difference);
+        }
+    }
+    bound
 }
 
 /// The bounds of one sample.
@@ -366,6 +381,7 @@ impl Bounds {
         compression: CompressionBound {
             difference_m: 0.0,
             limit_m: f64::INFINITY,
+            one_sided: None,
         },
         rate_allowance_rad_s: 0.0,
         horizontal_velocity_m_s: 0.0,
@@ -436,12 +452,15 @@ impl ForceBound {
 /// How far the compression of one contact may part between the engines.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct CompressionBound {
-    /// The largest difference over the contacts, metres.
+    /// The largest difference over the contacts on the ground in both
+    /// engines, metres.
     pub(super) difference_m: f64,
     /// `(FORCE_CAP_M_S2 - FORCE_M_S2)·m / Σk`: the compression difference
     /// at which the spring force alone takes the specific-force bound to
     /// its cap. Infinite with no contact on the ground.
     pub(super) limit_m: f64,
+    /// The first contact that is on the ground in one engine only.
+    pub(super) one_sided: Option<usize>,
 }
 
 impl CompressionBound {

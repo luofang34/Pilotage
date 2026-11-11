@@ -202,6 +202,11 @@ fn land(site: Site, step_ms: u32, rust_dir: std::path::PathBuf) -> ([Simulation;
         assert_same_state(&at, &r_truth, &c_truth, bounds);
         assert_frames(&at, &r, &c, bounds);
         assert!(
+            bounds.compression.one_sided.is_none(),
+            "{at}: contact {:?} is on the ground in one engine only",
+            bounds.compression.one_sided
+        );
+        assert!(
             bounds.compression.holds(),
             "{at}: contact compression: |Δx| {} m, limit {} m",
             bounds.compression.difference_m,
@@ -295,17 +300,22 @@ fn scaled_x500(open: &str, scale: f64, count: usize) -> std::path::PathBuf {
     dir
 }
 
-/// The failure message of a landing over a Rust-side model in `dir`.
+/// The failure message of a landing over a Rust-side model in `dir`,
+/// which must be a comparison failure and not a cap failure.
 fn landing_failure(dir: std::path::PathBuf) -> String {
     let run = std::panic::catch_unwind(|| {
         land(N51_SITE, 1, dir.clone());
     });
     std::fs::remove_dir_all(&dir).unwrap();
     let message = run.expect_err("the landing comparison must fail");
-    message
+    let text = message
         .downcast_ref::<String>()
         .cloned()
-        .unwrap_or_default()
+        .unwrap_or_default();
+    // A model difference must fail a comparison, never a cap: a cap
+    // failure would mean that the comparison saw nothing.
+    assert!(!text.contains("no longer constrains"), "{text}");
+    text
 }
 
 /// A gear that is not the C++ engine's gear fails the landing comparison
@@ -353,4 +363,12 @@ fn the_course_bound_is_open_at_rest_and_tight_in_motion() {
     assert!(bounds.course_limit_cdeg(0.0).is_infinite());
     let moving = bounds.course_limit_cdeg(5.0);
     assert!((5.0..5.01).contains(&moving), "{moving}");
+    // At 10 m/s, a velocity difference at its limit turns the course by
+    // asin(1e-3 / 10) = 0.573 centidegrees.
+    let at_limit = Bounds {
+        horizontal_velocity_m_s: 1e-3,
+        ..Bounds::AIRBORNE
+    };
+    let limit = at_limit.course_limit_cdeg(10.0);
+    assert!((limit - 5.573).abs() < 1e-3, "{limit}");
 }
