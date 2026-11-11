@@ -8,6 +8,7 @@ mod nav_guidance;
 mod onboard;
 mod output;
 mod ownship;
+mod steering;
 mod tick;
 mod vehicle_status;
 mod waypoints;
@@ -32,7 +33,9 @@ use pilotage_mission_core::{
 
 pub use nav_guidance::{NavGuidance, NavQuality};
 pub use output::{MissionAction, MissionCounters, MissionEvent, MissionOutput, MissionState};
-pub use vehicle_status::{StartWithheldReason, VEHICLE_STATUS_MAX_AGE_NS, VehicleStatus};
+pub use vehicle_status::{
+    LaunchDetection, StartWithheldReason, VEHICLE_STATUS_MAX_AGE_NS, VehicleStatus,
+};
 
 use crate::config::MissionConfig;
 use crate::error::MissionBuildError;
@@ -95,6 +98,9 @@ pub struct MissionEngine {
     vehicle: vehicle_status::VehicleReadiness,
     /// Whether a simulation-truth sample was ever fused.
     truth_sampled: bool,
+    /// The heading and altitude steering of a fixed wing on the onboard
+    /// navigator.
+    steering: steering::Steering,
 }
 
 impl MissionEngine {
@@ -244,6 +250,7 @@ impl MissionEngine {
         segments: &[document::Segment],
     ) -> Result<Self, MissionBuildError> {
         config.check_ownship_source()?;
+        config.check_declared_start()?;
         let (document, plan_reference) = document::build_document(
             plan_id,
             &route.plan(),
@@ -281,6 +288,7 @@ impl MissionEngine {
             hold_events: Vec::new(),
             vehicle: vehicle_status::VehicleReadiness::default(),
             truth_sampled: false,
+            steering: steering::Steering::default(),
         })
     }
 
@@ -308,6 +316,14 @@ impl MissionEngine {
             action_id: outstanding,
             result,
         });
+    }
+
+    /// The operator's declared start, as stated in the configuration, for
+    /// the host to hand to the onboard navigator. The engine takes nothing
+    /// from it: the navigator's solution is the only ownship it flies.
+    #[must_use]
+    pub const fn declared_start(&self) -> Option<&crate::DeclaredStart> {
+        self.config.declared_start.as_ref()
     }
 
     /// The named refusal/rejection counters.

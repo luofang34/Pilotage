@@ -9,21 +9,21 @@ use navigate_contract::{
 use navigate_guidance::guide_velocity;
 use navigate_route::{SequenceEvent, SequenceReason};
 use pilotage_mission_core::{
-    EngineEvent as CoreEvent, EngineStart, FlightAction as CoreFlightAction,
-    MissionEngine as CoreMissionEngine, MissionObservation as CoreObservation,
-    MissionTerminal as CoreTerminal, NavigationObservation, TickInput,
-    TickOutput as CoreTickOutput, VehicleObservation, WallDeadline,
+    EngineEvent as CoreEvent, EngineStart, MissionEngine as CoreMissionEngine,
+    MissionObservation as CoreObservation, MissionTerminal as CoreTerminal, NavigationObservation,
+    TickInput, TickOutput as CoreTickOutput, VehicleObservation, WallDeadline,
 };
-use pilotage_protocol::{ControlIntent, ReferenceFrame, VelocityIntent};
+use pilotage_protocol::ControlIntent;
 
-use crate::body_frame::{clamp_symmetric, project_guidance_setpoint, project_ned_velocity};
+use crate::body_frame::{project_guidance_setpoint, project_ned_velocity};
 use crate::policy::OPERATIONAL_WALL_DEADLINE_NS;
 
-use super::document::{ARM_PHASE_ID, CLIMB_CAPTURE_MARGIN_M};
+use super::document::ARM_PHASE_ID;
 use super::{MissionAction, MissionEngine, MissionEvent, MissionOutput, MissionState};
 
+mod climb;
 mod directives;
-mod outputs;
+pub(super) mod outputs;
 mod overflight;
 mod speed;
 mod terminal;
@@ -241,6 +241,12 @@ impl MissionEngine {
         now: MonotonicNanos,
         events: &mut Vec<MissionEvent>,
     ) -> Option<ControlIntent> {
+        if self.steers_by_heading() {
+            return self.heading_intent_for_state(state, solution, now, events);
+        }
+        if matches!(state, MissionState::Climb | MissionState::Enroute) && solution.is_none() {
+            return self.hold_position(now, events);
+        }
         match state {
             MissionState::Climb => self.climb_intent(solution),
             MissionState::Enroute => self.follow_plan_intent(solution, now, events),
@@ -265,43 +271,7 @@ impl MissionEngine {
         }
     }
 
-    fn climb_intent(&self, solution: Option<&NavigationSolution>) -> Option<ControlIntent> {
-        let Some(CoreFlightAction::Climb { target_altitude_m }) = self.active_action.as_ref()
-        else {
-            return None;
-        };
-        climb_toward(&self.config, solution?, *target_altitude_m)
-    }
-
-    /// The intent streamed from the arm request on, so the flight
-    /// controller has a command the moment it arms instead of none until
-    /// the arm's confirmation comes back: the climb that follows the arm,
-    /// or, with no climb to fly, the hold of the present course and height.
-    fn arming_intent(&self, solution: Option<&NavigationSolution>) -> Option<ControlIntent> {
-        let target_altitude_m = self.config.anchor.altitude_m + self.config.cruise_height_m;
-        if self.config.cruise_height_m > 0.0
-            && let Some(climb) = climb_toward(&self.config, solution?, target_altitude_m)
-        {
-            return Some(climb);
-        }
-        // A hold with no known heading would be a body-frame command with
-        // nothing to rotate it by; the stream waits for a heading.
-        self.last_yaw_rad?;
-        Some(outputs::zero_velocity_intent())
-    }
-
-    fn climb_is_captured(&self, solution: Option<&NavigationSolution>) -> bool {
-        let Some(solution) = solution else {
-            return false;
-        };
-        let Some(CoreFlightAction::Climb { target_altitude_m }) = self.active_action.as_ref()
-        else {
-            return false;
-        };
-        solution.position.altitude_m >= *target_altitude_m - CLIMB_CAPTURE_MARGIN_M
-    }
-
-    fn follow_plan_intent(
+    pub(super) fn follow_plan_intent(
         &mut self,
         solution: Option<&NavigationSolution>,
         now: MonotonicNanos,
@@ -412,6 +382,10 @@ impl MissionEngine {
             &self.guidance,
         );
         match guided {
+            Ok(command) if self.steers_by_heading() => {
+                self.last_refusal = None;
+                self.steer(solution, &command.setpoint, to.position.altitude_m, now)
+            }
             Ok(command) => self.guided_intent(command.setpoint),
             Err(refusal) => {
                 self.counters.guidance_refused = self.counters.guidance_refused.wrapping_add(1);
@@ -460,24 +434,4 @@ impl MissionEngine {
             self.config.yaw_gain_per_s,
         )
     }
-}
-
-/// The climb toward `target_altitude_m`, or `None` once the vehicle is
-/// within the capture margin of it.
-fn climb_toward(
-    config: &crate::MissionConfig,
-    solution: &NavigationSolution,
-    target_altitude_m: f64,
-) -> Option<ControlIntent> {
-    if solution.position.altitude_m >= target_altitude_m - CLIMB_CAPTURE_MARGIN_M {
-        return None;
-    }
-    let up_mps = clamp_symmetric(config.climb_rate_mps, config.limits.max_vertical_mps);
-    Some(ControlIntent::Velocity(VelocityIntent {
-        frame: ReferenceFrame::BodyFrd,
-        vx: 0.0,
-        vy: 0.0,
-        vz: -up_mps as f32,
-        yaw_rate: 0.0,
-    }))
 }

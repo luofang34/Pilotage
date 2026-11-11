@@ -112,4 +112,12 @@ pub enum MissionBuildError {
          simulator execution target"
     )]
     TruthOwnshipOnRealVehicle,
+    /// The operator's declared start holds a statement no navigator can
+    /// take.
+    #[error("the declared start is refused")]
+    DeclaredStart {
+        /// The refused part.
+        #[source]
+        source: crate::DeclaredStartError,
+    },
 }

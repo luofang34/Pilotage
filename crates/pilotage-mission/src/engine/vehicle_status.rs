@@ -25,8 +25,59 @@ pub struct VehicleStatus {
     /// would accept an arm now. A MAVLink flight controller says so with a
     /// HEARTBEAT `system_status` of STANDBY or ACTIVE.
     pub ready_to_arm: bool,
+    /// Whether the flight controller's own estimate has a valid position,
+    /// or `None` when it does not say. Without satellite navigation it
+    /// usually has none, while its attitude, height, and airspeed stay
+    /// valid.
+    pub position_valid: Option<bool>,
+    /// The flight controller's height above its local origin, metres, when
+    /// its estimate states a valid height.
+    pub height_above_origin_m: Option<f64>,
+    /// The flight controller's indicated airspeed, m/s, when it measures
+    /// one.
+    pub airspeed_mps: Option<f64>,
     /// When the report was received, on the engine's clock domain.
     pub acquired_at: MonotonicNanos,
+}
+
+impl VehicleStatus {
+    /// A report that states readiness only, received at `acquired_at`.
+    #[must_use]
+    pub const fn ready(ready_to_arm: bool, acquired_at: MonotonicNanos) -> Self {
+        Self {
+            ready_to_arm,
+            position_valid: None,
+            height_above_origin_m: None,
+            airspeed_mps: None,
+            acquired_at,
+        }
+    }
+}
+
+/// When a vehicle counts as launched by its flight controller's own
+/// measurements, with no position needed: the airframe's numbers, set by
+/// the host. Either one met is a launch.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LaunchDetection {
+    /// The height above the flight controller's local origin at which the
+    /// vehicle is airborne, metres.
+    pub min_height_m: f64,
+    /// The indicated airspeed at which a fixed wing is flying, m/s: above
+    /// its stall speed, so no taxi reaches it.
+    pub min_airspeed_mps: f64,
+}
+
+impl LaunchDetection {
+    /// Whether `status` shows a launched vehicle.
+    #[must_use]
+    pub fn launched(&self, status: &VehicleStatus) -> bool {
+        status
+            .height_above_origin_m
+            .is_some_and(|height| height >= self.min_height_m)
+            || status
+                .airspeed_mps
+                .is_some_and(|airspeed| airspeed >= self.min_airspeed_mps)
+    }
 }
 
 /// Why the engine holds back the start of the mission.
@@ -78,10 +129,36 @@ impl MissionEngine {
     /// Whether the vehicle reported itself ready to arm within
     /// [`VEHICLE_STATUS_MAX_AGE_NS`] of `now`.
     pub(super) fn vehicle_ready(&self, now: MonotonicNanos) -> bool {
-        self.vehicle.latest.is_some_and(|status| {
-            status.ready_to_arm
-                && now.as_nanos().saturating_sub(status.acquired_at.as_nanos())
-                    <= VEHICLE_STATUS_MAX_AGE_NS
+        self.fresh_status(now)
+            .is_some_and(|status| status.ready_to_arm)
+    }
+
+    /// Whether the latest fresh vehicle status shows a launch under the
+    /// configured [`LaunchDetection`]. `false` with no detection
+    /// configured: the vehicle is then launched when the mission says so.
+    #[must_use]
+    pub fn launched(&self, now: MonotonicNanos) -> bool {
+        let (Some(detection), Some(status)) =
+            (self.config.launch_detection, self.fresh_status(now))
+        else {
+            return false;
+        };
+        detection.launched(&status)
+    }
+
+    /// Whether the latest fresh vehicle status says the flight
+    /// controller's own position is valid.
+    pub(super) fn fc_position_valid(&self, now: MonotonicNanos) -> bool {
+        self.fresh_status(now)
+            .is_some_and(|status| status.position_valid == Some(true))
+    }
+
+    /// The latest vehicle status no older than
+    /// [`VEHICLE_STATUS_MAX_AGE_NS`] at `now`.
+    fn fresh_status(&self, now: MonotonicNanos) -> Option<VehicleStatus> {
+        self.vehicle.latest.filter(|status| {
+            now.as_nanos().saturating_sub(status.acquired_at.as_nanos())
+                <= VEHICLE_STATUS_MAX_AGE_NS
         })
     }
 

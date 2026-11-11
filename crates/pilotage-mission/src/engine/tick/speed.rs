@@ -9,7 +9,7 @@ use super::super::MissionEngine;
 
 impl MissionEngine {
     /// The cruise speed guidance commands, within the horizontal ceiling.
-    pub(super) fn commanded_cruise_mps(&self) -> f64 {
+    pub(in crate::engine) fn commanded_cruise_mps(&self) -> f64 {
         self.config
             .cruise_mps
             .min(self.config.limits.max_horizontal_mps)

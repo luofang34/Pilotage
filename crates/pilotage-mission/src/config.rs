@@ -191,6 +191,16 @@ pub struct MissionConfig {
     /// still starting up. Default false: a host that feeds no status gets
     /// the arm request at once.
     pub arm_when_vehicle_ready: bool,
+    /// When the vehicle counts as launched by its flight controller's own
+    /// height or airspeed, with no position: a fixed wing launched with no
+    /// solution fit to fly then climbs on its heading instead of waiting
+    /// without a command. Default none.
+    pub launch_detection: Option<crate::LaunchDetection>,
+    /// The operator's statement of the start, for a navigator with no
+    /// satellite fix to start from. The engine does not fly it or read it:
+    /// [`crate::MissionEngine::declared_start`] hands it on to the
+    /// navigator as stated. Default none.
+    pub declared_start: Option<crate::DeclaredStart>,
 }
 
 impl MissionConfig {
@@ -209,6 +219,18 @@ impl MissionConfig {
     /// [`ExecutionTarget::RealVehicle`]: a real vehicle has no truth
     /// oracle, so the mission would wait in flight for a solution that
     /// never comes.
+    /// Refuses a declared start no navigator can take.
+    ///
+    /// # Errors
+    ///
+    /// [`MissionBuildError::DeclaredStart`] naming the refused part.
+    pub(crate) fn check_declared_start(&self) -> Result<(), MissionBuildError> {
+        self.declared_start
+            .as_ref()
+            .map_or(Ok(()), crate::DeclaredStart::validate)
+            .map_err(|source| MissionBuildError::DeclaredStart { source })
+    }
+
     pub(crate) fn check_ownship_source(&self) -> Result<(), MissionBuildError> {
         match (self.ownship_source, self.execution_target) {
             (OwnshipSource::SimulationTruth, ExecutionTarget::RealVehicle) => {
@@ -243,6 +265,8 @@ impl MissionConfig {
             terminal_orbit: TerminalOrbit::default(),
             route_bank_deg: crate::DEFAULT_ORBIT_BANK_DEG,
             arm_when_vehicle_ready: false,
+            launch_detection: None,
+            declared_start: None,
         }
     }
 }
