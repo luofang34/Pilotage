@@ -20,6 +20,13 @@ use super::{MissionEngine, StartWithheldReason};
 const OWNSHIP_SOURCE: SourceId = SourceId::new(1);
 
 impl MissionEngine {
+    /// The solution the engine published at its last tick: the one it
+    /// flies, or `None` when it has none to fly.
+    #[must_use]
+    pub fn solution(&self) -> Option<&NavigationSolution> {
+        self.last_solution.as_ref()
+    }
+
     /// Offers one ownship sample. The configured [`OwnshipSource`] names
     /// the one role the engine admits — see [`OwnshipSample`] for why any
     /// other role is a counted refusal, never an aid. Under

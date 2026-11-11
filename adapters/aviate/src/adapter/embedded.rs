@@ -24,6 +24,13 @@ use crate::uplink::FlightUplink;
 #[cfg(test)]
 mod tests;
 
+/// The inter-group skew budget of an embedded adapter whose link
+/// configuration leaves it at 0, milliseconds: one period of the slower of
+/// Aviate's attitude (about 20 Hz) and local-position (10 Hz) groups. At
+/// 0, every other attitude and position pair would be refused as
+/// reordered. A non-zero budget in the configuration is kept.
+pub const AVIATE_GROUP_SKEW_MS: u32 = 100;
+
 /// The identities an embedded adapter stamps its sources with: one for
 /// the estimate link and one for the FC state reports on the uplink.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,6 +66,10 @@ impl AviateAdapter {
         let mut uplink = FlightUplink::in_memory(control_feel, now)
             .map_err(|source| AviateAdapterError::EmbeddedUplink { source })?;
         uplink.set_expected_source(config.system_id, config.component_id);
+        let mut config = config;
+        if config.maximum_inter_group_skew_ms == 0 {
+            config.maximum_inter_group_skew_ms = AVIATE_GROUP_SKEW_MS;
+        }
         let state = Arc::new(Mutex::new(LinkState::for_source(
             config,
             incarnations.estimate,

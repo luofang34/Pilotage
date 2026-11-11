@@ -32,14 +32,10 @@ fn config() -> HostCoreConfig {
     mission.cruise_height_m = 0.0;
     mission.cruise_mps = 55.0;
     mission.limits.max_horizontal_mps = 65.0;
-    // Aviate streams the attitude at about 20 Hz and the local position
-    // at 10 Hz: a pair is coherent within one period of the slower group.
-    let link = LinkConfig {
-        maximum_inter_group_skew_ms: 100,
-        ..LinkConfig::default()
-    };
+    // The default link configuration: the adapter supplies Aviate's
+    // inter-group skew budget.
     HostCoreConfig {
-        link,
+        link: LinkConfig::default(),
         airframe: AviateAirframe::FixedWing(
             ValidatedFixedWingEnvelope::new(FixedWingEnvelope::C172).unwrap(),
         ),
@@ -169,6 +165,15 @@ fn the_core_arms_the_c172_and_keeps_framing() {
         "replay done"
     );
     assert!(after.len() > 100, "{} frames after the arm", after.len());
+    assert_eq!(
+        core.status().frames_rejected,
+        0,
+        "every frame met a measurement"
+    );
+    assert!(
+        core.status().estimate.is_some(),
+        "the core reports the estimate it flies"
+    );
     assert!(
         longest_gap <= 200_000_000,
         "a {longest_gap} ns gap in the frames"

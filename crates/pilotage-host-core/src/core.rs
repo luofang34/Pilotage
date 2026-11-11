@@ -347,6 +347,10 @@ impl HostCore {
         let automation = principal.status();
         let rejected_before = self.status.frames_rejected;
         self.status.mission_state = automation.mission_state;
+        self.status.estimate = principal
+            .mission()
+            .and_then(MissionEngine::solution)
+            .cloned();
         self.status.plan_complete = automation.plan_complete;
         self.status.frames_sent = automation.frames_sent;
         self.status.frames_rejected = automation.frames_rejected;

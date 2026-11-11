@@ -46,7 +46,7 @@ mod shm_sampling;
 mod sources;
 mod startup;
 use control::{process_flight_actions, rejected_control};
-pub use embedded::EmbeddedIncarnations;
+pub use embedded::{AVIATE_GROUP_SKEW_MS, EmbeddedIncarnations};
 use sampling::mavlink_batch;
 use sources::{ArmReport, EstimateSource};
 pub(crate) use startup::validate_aviate_profile_bindings;

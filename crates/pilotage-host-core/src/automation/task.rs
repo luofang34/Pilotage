@@ -10,6 +10,7 @@ mod frames;
 mod nav_guidance;
 mod run_control;
 mod session_flow;
+mod stepping;
 
 pub use run_control::RunControl;
 
@@ -21,8 +22,8 @@ use pilotage_mission::{
     ExecutionTarget, MissionAction, MissionEngine, MissionEvent, NavGuidance, OwnshipSource,
 };
 use pilotage_protocol::{
-    ClientHello, ControlActionCommand, ControlIntent, ControlPayload, Generation, PrincipalId,
-    SESSION_PROTOCOL_VERSION, ScopeId, ScopedControlFrame, SequenceNum, SessionId,
+    ControlActionCommand, ControlIntent, ControlPayload, Generation, PrincipalId, ScopeId,
+    ScopedControlFrame, SequenceNum, SessionId,
 };
 use pilotage_session::DomainEnvelope;
 use pilotage_timing::MonoTimestamp;
@@ -156,74 +157,6 @@ impl MissionTask {
             stopping: None,
             flight: flight_watch::FlightWatch::default(),
         }
-    }
-
-    /// Registers with the engine and opens the session: the commands go
-    /// to the outbox for the core to deliver.
-    pub fn start(&mut self) -> bool {
-        let connected = self.send_command(ToEngine::ClientConnected {
-            client: self.client,
-        });
-        if !connected {
-            return false;
-        }
-        let hello = DomainEnvelope::Hello(ClientHello {
-            protocol_version: SESSION_PROTOCOL_VERSION,
-            client_name: "mission-executor".to_owned(),
-            join_token: Vec::new(),
-        });
-        self.send_message(hello)
-    }
-
-    /// Sets the time of the current call, nanoseconds since the core's
-    /// origin.
-    pub fn set_now(&mut self, now_ns: u64) {
-        self.now_ns = now_ns;
-    }
-
-    /// Takes the commands for the engine, in order.
-    pub fn take_outbox(&mut self) -> Vec<ToEngine> {
-        core::mem::take(&mut self.outbox)
-    }
-
-    /// The principal's status.
-    pub fn status(&self) -> &AutomationStatus {
-        &self.status
-    }
-
-    /// The mission engine, once built.
-    pub fn mission_mut(&mut self) -> Option<&mut MissionEngine> {
-        self.mission.as_mut()
-    }
-
-    /// Whether no command waits for the engine.
-    pub fn outbox_is_empty(&self) -> bool {
-        self.outbox.is_empty()
-    }
-
-    /// Takes the mission events, in order.
-    pub fn take_events(&mut self) -> Vec<MissionEvent> {
-        core::mem::take(&mut self.events)
-    }
-
-    /// Registers the principal under `client` instead of
-    /// [`super::MISSION_CLIENT`], as a mission lane's run is.
-    pub fn bind_client(&mut self, client: ClientKey) {
-        self.client = client;
-    }
-
-    /// Ends the principal: it clears the guidance group, so no instrument
-    /// keeps a frozen leg on screen after it is gone, and logs its
-    /// counters.
-    pub fn finish(&mut self) {
-        let nanos = self.elapsed_nanos();
-        self.publish_nav_guidance(None, nanos);
-        self.log_counters();
-    }
-
-    /// The principal's client key.
-    pub fn client(&self) -> ClientKey {
-        self.client
     }
 
     /// Handles one engine-actor delivery; `false` stops the task.
@@ -394,6 +327,9 @@ impl MissionTask {
         }
         let wire_id = self.next_action_id;
         self.pending_actions.insert(wire_id, action.action_id);
+        if action.action == pilotage_protocol::ControlAction::Arm {
+            self.flight.arm.action = Some(action);
+        }
         info!(action = ?action.action, action_id = wire_id, "mission action command");
         let command = ControlActionCommand {
             sampled_at: pilotage_timing::MonoTimestamp::from_nanos(0),

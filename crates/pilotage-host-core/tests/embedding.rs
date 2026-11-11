@@ -10,7 +10,7 @@ use navigate_contract::{GeodeticPosition, MonotonicNanos};
 use pilotage_adapter_api::SourceIncarnation;
 use pilotage_adapter_aviate::{AviateAirframe, EmbeddedIncarnations};
 use pilotage_control_feel::{FlightFeelProfile, ValidatedFlightFeelProfile};
-use pilotage_host_core::{HostCore, HostCoreConfig, HostCoreError, MISSION_CLOCK};
+use pilotage_host_core::{HostCore, HostCoreConfig, HostCoreError, HostEvent, MISSION_CLOCK};
 use pilotage_mavlink::link::LinkConfig;
 use pilotage_mission::{MissionConfig, OwnshipSource, PlannedWaypoint, WaypointPlan};
 use web_time::Instant;
@@ -70,7 +70,11 @@ fn a_loaded_mission_opens_its_session_and_builds_its_engine() {
         core.status().mission_state,
         Some(pilotage_mission::MissionState::AwaitSolution)
     );
-    assert!(core.drain_events().is_empty());
+    // The engine says, once, that it waits for the vehicle before the arm.
+    assert!(core.drain_events().iter().all(|event| matches!(
+        event,
+        HostEvent::Mission(pilotage_mission::MissionEvent::StartWithheld { .. })
+    )));
     assert_eq!(core.declared_start(), config().mission.anchor);
 }
 
