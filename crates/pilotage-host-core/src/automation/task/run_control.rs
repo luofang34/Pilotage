@@ -5,7 +5,7 @@
 //! ends the run.
 
 use navigate_contract::MonotonicNanos;
-use pilotage_protocol::{ControlIntent, LeaseRelease, ReferenceFrame, ScopeId, VelocityIntent};
+use pilotage_protocol::{LeaseRelease, ScopeId};
 use pilotage_session::DomainEnvelope;
 use pilotage_timing::MonoTimestamp;
 use tracing::info;
@@ -69,14 +69,12 @@ impl MissionTask {
     /// run ends.
     pub(super) fn hold_tick(&mut self) -> bool {
         let sampled = MonoTimestamp::from_nanos(self.elapsed_nanos());
-        let stop = ControlIntent::Velocity(VelocityIntent {
-            frame: ReferenceFrame::BodyFrd,
-            vx: 0.0,
-            vy: 0.0,
-            vz: 0.0,
-            yaw_rate: 0.0,
-        });
-        if self.generation.is_some() && !self.held && !self.send_intent(stop, sampled) {
+        let stop = self.stop_intent();
+        if self.generation.is_some()
+            && !self.held
+            && stop.is_some()
+            && !self.send_intent(stop, sampled)
+        {
             return false;
         }
         let Some(remaining) = self.stopping else {

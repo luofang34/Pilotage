@@ -97,6 +97,9 @@ pub struct MissionTask {
     real_vehicle: bool,
     /// A human holds the motion scope; the mission waits for it back.
     held: bool,
+    /// Whether the vehicle can stop in place: false for a fixed wing,
+    /// whose stop is a held heading and altitude.
+    can_stop: bool,
     /// Frames still owed as neutral input under a new generation.
     neutral_frames: u8,
     /// A real vehicle's mission waits for the pilot's launch before it
@@ -149,6 +152,7 @@ impl MissionTask {
             ownship_source,
             held: false,
             neutral_frames: 0,
+            can_stop: true,
             awaiting_launch: false,
             lease_due: false,
             lease_wanted: false,
@@ -191,6 +195,7 @@ impl MissionTask {
         }
         let now = self.elapsed_nanos();
         self.settle_expired_arm(now);
+        self.check_launch(None);
         if self.lease_due || self.lease_retry_due(now) {
             self.lease_due = false;
             self.lease_retry_at = None;
@@ -230,7 +235,7 @@ impl MissionTask {
         }
         if output.action.is_some()
             && self.neutral_frames > 0
-            && !self.send_intent(neutral_intent(), MonoTimestamp::from_nanos(nanos))
+            && !self.send_intent(Some(neutral_intent()), MonoTimestamp::from_nanos(nanos))
         {
             return false;
         }
@@ -271,13 +276,13 @@ impl MissionTask {
     /// sequence and an exact host-clock sample stamp. The first frames
     /// after a resume are neutral: a vehicle that requires neutral input
     /// on a new lease admits the new generation on them.
-    fn send_intent(&mut self, intent: ControlIntent, sampled_at: MonoTimestamp) -> bool {
+    fn send_intent(&mut self, intent: Option<ControlIntent>, sampled_at: MonoTimestamp) -> bool {
         let (Some(session), Some(generation)) = (self.session, self.generation) else {
             return true;
         };
-        let intent = if self.neutral_frames > 0 {
+        let intent = if intent.is_some() && self.neutral_frames > 0 {
             self.neutral_frames = self.neutral_frames.saturating_sub(1);
-            neutral_intent()
+            Some(neutral_intent())
         } else {
             intent
         };
@@ -294,7 +299,7 @@ impl MissionTask {
             profile_revision: PROFILE_REVISION,
             activation_revision: ACTIVATION_REVISION,
             payload: ControlPayload::default(),
-            intent: Some(intent),
+            intent,
             actions: Vec::new(),
             action_ids: Vec::new(),
         };

@@ -32,6 +32,7 @@ impl MissionTask {
             ownship_source: OwnshipSource::SimulationTruth,
             held: false,
             neutral_frames: 0,
+            can_stop: true,
             awaiting_launch: false,
             lease_due: false,
             lease_wanted: false,

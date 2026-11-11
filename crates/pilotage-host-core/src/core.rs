@@ -333,10 +333,10 @@ impl HostCore {
             return;
         };
         if let Some(mission) = self.principal.as_mut().and_then(MissionTask::mission_mut) {
-            mission.on_vehicle_status(VehicleStatus {
+            mission.on_vehicle_status(VehicleStatus::ready(
                 ready_to_arm,
-                acquired_at: MonotonicNanos::from_nanos(now_ns),
-            });
+                MonotonicNanos::from_nanos(now_ns),
+            ));
         }
     }
 

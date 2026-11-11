@@ -23,6 +23,9 @@ const CAPTURE: &str = include_str!("fixtures/aviate-c172-link-15s.txt");
 /// The closed-loop power-up run's traffic with the board kept in BOOT for
 /// 8 s (its heartbeats rewritten, the recorded arm's answer removed).
 const BOOT_8S: &str = include_str!("fixtures/aviate-c172-boot-8s.txt");
+/// The board's traffic in the closed-loop power-up run that fenced the
+/// mission on a silent holder (its first 15 s).
+const POWER_UP: &str = include_str!("fixtures/aviate-c172-powerup-15s.txt");
 const LAT_DEG: f64 = 41.7;
 const LON_DEG: f64 = -1.07;
 const ALT_M: f64 = 2050.0;
@@ -262,4 +265,18 @@ fn a_board_that_boots_for_eight_seconds_keeps_the_mission_alive_until_it_arms() 
         )),
         "the mission did not fail"
     );
+}
+
+#[test]
+fn the_power_up_run_that_fenced_the_mission_now_reaches_the_arm() {
+    let Replay { sent, events, .. } = replay_of(POWER_UP, 0);
+    assert!(
+        events.iter().any(|(_, event)| matches!(
+            event,
+            HostEvent::Mission(MissionEvent::ArmRequested { .. })
+        )),
+        "the core asked for the arm"
+    );
+    let last = sent.last().map(|(at, _)| *at).unwrap_or_default();
+    assert!(last >= 14_900_000_000, "the frames stopped at {last} ns");
 }

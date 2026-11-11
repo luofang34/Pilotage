@@ -134,6 +134,7 @@ impl MissionTask {
             return true;
         };
         let mut config = plan.config();
+        self.can_stop = config.can_stop();
         if !tighten_limits(&mut config.limits, capabilities) {
             if self.real_vehicle {
                 info!("the vehicle advertises no velocity control yet; the mission waits for it");
@@ -228,7 +229,7 @@ impl MissionTask {
 
     /// Notes the vehicle airborne: the next tick asks for the lease, and
     /// the mission keeps asking while another principal holds the scope.
-    fn on_airborne(&mut self, height_m: f64) {
+    pub(super) fn on_airborne(&mut self, height_m: f64) {
         self.awaiting_launch = false;
         self.lease_due = true;
         self.lease_wanted = true;
@@ -400,10 +401,7 @@ impl MissionTask {
         if holding != self.status.holding {
             self.update(|status| status.holding = holding);
         }
-        let height_m = -ownship.ned[2];
-        if self.awaiting_launch && height_m >= AIRBORNE_HEIGHT_M {
-            self.on_airborne(height_m);
-        }
+        self.check_launch(Some(-ownship.ned[2]));
     }
 }
 
