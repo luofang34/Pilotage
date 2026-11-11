@@ -47,7 +47,6 @@ fn repository_guards_are_discovered() {
         "flight-build",
         "flight-tune-boundaries",
         "flight-tune-journal-storage-boundary",
-        "geodetic-datum-codes",
         "monotonic-counter-arithmetic",
         "navdata-tile-bundle",
         "situation-layer-controls",
