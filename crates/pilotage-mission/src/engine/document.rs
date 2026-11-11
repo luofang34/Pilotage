@@ -32,6 +32,8 @@ pub(super) const ROUTE_REVISION_PREFIX: &str = "operational-route-v1";
 pub(super) const SURVEY_REVISION_PREFIX: &str = "operational-survey-v1";
 /// Revision prefix of a mission that flies home.
 pub(super) const HOME_REVISION_PREFIX: &str = "operational-home-v1";
+/// Revision prefix of a mission built from a waypoint list.
+pub(super) const WAYPOINTS_REVISION_PREFIX: &str = "operational-waypoints-v1";
 
 /// One task of a plan flown in segments: its phase identifier and the waypoints, by
 /// index, it flies toward.

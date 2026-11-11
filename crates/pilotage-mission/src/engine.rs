@@ -7,6 +7,7 @@ mod home;
 mod nav_guidance;
 mod output;
 mod tick;
+mod waypoints;
 
 use core::mem::Discriminant;
 
