@@ -340,22 +340,11 @@ impl MissionEngine {
         }
     }
 
-    /// Publishes the solution for `now` and clears stale display data: the
-    /// filter's solution under simulation truth, the latest fresh vehicle
-    /// estimate otherwise.
+    /// Publishes the configured source's solution for `now`. A tick with
+    /// no solution clears the published one, so display data cannot go
+    /// stale.
     fn publish_solution(&mut self, now: MonotonicNanos) -> Option<NavigationSolution> {
-        self.last_solution = match self.estimate_budget() {
-            None => self.filter.tick(now),
-            Some(budget) => {
-                let solution = self
-                    .estimate
-                    .solution(now, &self.plane, self.config.clock, budget);
-                if solution.is_none() && self.estimate.has_sample() {
-                    self.counters.estimate_stale = self.counters.estimate_stale.wrapping_add(1);
-                }
-                solution
-            }
-        };
+        self.last_solution = self.source_solution(now);
         self.last_solution
     }
 

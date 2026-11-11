@@ -5,7 +5,9 @@
 mod document;
 mod home;
 mod nav_guidance;
+mod onboard;
 mod output;
+mod ownship;
 mod tick;
 mod waypoints;
 
@@ -14,12 +16,11 @@ use core::mem::Discriminant;
 use aerocontext_core::NavDataSnapshot;
 use aerocontext_planning::route::{RouteToken, expand_str};
 use navigate_contract::{
-    AltitudeConstraint, GeodeticPosition, Ident, MonotonicNanos, NavigationSolution,
-    ObservationStamp, PlanRole, SensorClass, SourceComposition, SourceEpoch, SourceId,
-    SymmetricCov3, Waypoint, WrappingSequence,
+    AltitudeConstraint, GeodeticPosition, Ident, MonotonicNanos, NavigationSolution, PlanRole,
+    Waypoint,
 };
-use navigate_fusion::{FusionConfig, NavigationFilter, Observation, ObservationValue};
-use navigate_geodesy::{LocalTangentPlane, NedOffset};
+use navigate_fusion::{FusionConfig, NavigationFilter};
+use navigate_geodesy::LocalTangentPlane;
 use navigate_guidance::{GuidanceRefusal, VelocityGuidanceConfig};
 use navigate_route::ExecutionConfig;
 use pilotage_mission_core::{
@@ -31,9 +32,8 @@ use pilotage_mission_core::{
 pub use nav_guidance::{NavGuidance, NavQuality};
 pub use output::{MissionAction, MissionCounters, MissionEvent, MissionOutput, MissionState};
 
-use crate::config::{MissionConfig, OwnshipSource};
+use crate::config::MissionConfig;
 use crate::error::MissionBuildError;
-use crate::ownship::{OwnshipAltitude, OwnshipSample, TruthRole};
 use crate::route::MissionRoute;
 
 mod estimate;
@@ -41,16 +41,13 @@ mod hold;
 
 use crate::provenance::{MissionPlanRecord, SnapshotProvenance};
 use crate::survey::{SurveyPlanRecord, SurveyRequest, plan_survey};
-use estimate::{EstimateBudget, VehicleEstimate};
-
-/// The single synthesized-GNSS source identity the engine stamps its
-/// observations with.
-const OWNSHIP_SOURCE: SourceId = SourceId::new(1);
+use estimate::VehicleEstimate;
+use onboard::OnboardNavigation;
 
 /// A Navigate-backed operational handler around the shared mission core.
 ///
 /// The host owns the boundary: it converts telemetry into
-/// [`OwnshipSample`]s, frames the emitted intents and actions onto the
+/// [`crate::OwnshipSample`]s, frames the emitted intents and actions onto the
 /// session wire, and supplies each `now` on the configured clock domain.
 /// The shared core owns phase transitions. This handler owns Navigate
 /// observations, guidance, and directive interpretation.
@@ -83,6 +80,8 @@ pub struct MissionEngine {
     overflown_fix: Option<usize>,
     /// The latest admitted sample under the vehicle-estimate source.
     estimate: VehicleEstimate,
+    /// The latest solution the onboard navigator published.
+    onboard: OnboardNavigation,
     /// When the current hold began, while a human holds the motion scope.
     hold_started: Option<MonotonicNanos>,
     /// Time spent held before the current hold; the sequencing clock
@@ -104,8 +103,9 @@ impl MissionEngine {
     ///
     /// Any [`MissionBuildError`]: expansion failure (with cycle
     /// context), a route carrying an unexecuted SID/STAR procedure, an
-    /// empty expansion, an implausible anchor, or a plan the sequencer
-    /// refuses to activate.
+    /// empty expansion, an implausible anchor, a plan the sequencer
+    /// refuses to activate, or the simulation-truth ownship source for a
+    /// real vehicle.
     pub fn new(
         snapshot: &NavDataSnapshot,
         provenance: SnapshotProvenance,
@@ -237,6 +237,7 @@ impl MissionEngine {
         revision_prefix: &str,
         segments: &[document::Segment],
     ) -> Result<Self, MissionBuildError> {
+        config.check_ownship_source()?;
         let (document, plan_reference) = document::build_document(
             plan_id,
             &route.plan(),
@@ -268,99 +269,11 @@ impl MissionEngine {
             last_refusal: None,
             overflown_fix: None,
             estimate: VehicleEstimate::default(),
+            onboard: OnboardNavigation::default(),
             hold_started: None,
             held_total_ns: 0,
             hold_events: Vec::new(),
         })
-    }
-
-    /// Offers one ownship sample. The configured [`OwnshipSource`] names
-    /// the one role the engine admits — see [`OwnshipSample`] for why any
-    /// other role is a counted refusal, never an aid. `now` is the
-    /// admission reference on the engine's clock domain.
-    pub fn on_ownship(&mut self, sample: &OwnshipSample, now: MonotonicNanos) {
-        let admitted = match self.config.ownship_source {
-            OwnshipSource::SimulationTruth => TruthRole::SimulationTruth,
-            OwnshipSource::VehicleEstimate { .. } => TruthRole::OperationalEstimate,
-        };
-        if sample.role != admitted {
-            self.counters.rejected_role = self.counters.rejected_role.wrapping_add(1);
-            return;
-        }
-        self.last_yaw_rad = sample.yaw_rad;
-        if admitted == TruthRole::OperationalEstimate {
-            self.estimate.accept(sample);
-            return;
-        }
-        self.fuse_truth(sample, now);
-    }
-
-    /// NED meters from the mission anchor of a geodetic reading, for a
-    /// host that converts the vehicle's own fix into an ownship sample.
-    /// An above-anchor height is measured from the anchor altitude.
-    #[must_use]
-    pub fn ned_of(
-        &self,
-        latitude_rad: f64,
-        longitude_rad: f64,
-        altitude: OwnshipAltitude,
-    ) -> [f64; 3] {
-        let altitude_m = match altitude {
-            OwnshipAltitude::Ellipsoid(altitude_m) => altitude_m,
-            OwnshipAltitude::AboveAnchor(height_m) => self.config.anchor.altitude_m + height_m,
-        };
-        let offset = self.plane.to_ned(&GeodeticPosition::new(
-            latitude_rad,
-            longitude_rad,
-            altitude_m,
-        ));
-        [offset.north_m, offset.east_m, offset.down_m]
-    }
-
-    /// The pass-through solution budget, when the source is the vehicle's
-    /// own estimate.
-    fn estimate_budget(&self) -> Option<EstimateBudget> {
-        match self.config.ownship_source {
-            OwnshipSource::SimulationTruth => None,
-            OwnshipSource::VehicleEstimate {
-                sigma_m,
-                velocity_sigma_mps,
-                max_age,
-            } => Some(EstimateBudget {
-                sigma_m,
-                velocity_sigma_mps,
-                max_age,
-            }),
-        }
-    }
-
-    /// Synthesizes a GNSS-class fix from a simulation-truth sample and
-    /// offers it to the fusion filter.
-    fn fuse_truth(&mut self, sample: &OwnshipSample, now: MonotonicNanos) {
-        let position =
-            self.plane
-                .from_ned(&NedOffset::new(sample.ned[0], sample.ned[1], sample.ned[2]));
-        let variance = self.config.gnss_sigma_m * self.config.gnss_sigma_m;
-        let stamp = ObservationStamp::new(
-            OWNSHIP_SOURCE,
-            // Epoch stays 0 until a reset/relaunch story exists; the
-            // filter treats a new epoch as a new source incarnation.
-            SourceEpoch::new(0),
-            WrappingSequence::new(sample.sequence),
-            sample.acquired_at,
-            self.config.clock,
-        );
-        let observation = Observation::new(
-            stamp,
-            ObservationValue::PositionFix {
-                position,
-                covariance: SymmetricCov3::from_diagonal(variance, variance, variance),
-            },
-            SourceComposition::of(SensorClass::Gnss),
-        );
-        if !self.filter.ingest(&observation, now).is_accepted() {
-            self.counters.fusion_rejected = self.counters.fusion_rejected.wrapping_add(1);
-        }
     }
 
     /// Reports the correlated result of a previously emitted action.

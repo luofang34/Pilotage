@@ -10,7 +10,7 @@ use navigate_route::SequenceReason;
 use pilotage_mission::fixture::{self, GeoPointDegrees};
 use pilotage_mission::{
     MissionConfig, MissionEngine, MissionEvent, MissionState, NavGuidance, NavQuality,
-    OwnshipSample, TruthRole, decode_snapshot,
+    OwnshipSample, OwnshipSource, TruthRole, decode_snapshot,
 };
 use pilotage_protocol::{ControlAction, ControlIntent, ReferenceFrame};
 
@@ -94,11 +94,9 @@ fn build_engine() -> (MissionEngine, pilotage_mission::MissionPlanRecord) {
         ANCHOR.lon_deg.to_radians(),
         ANCHOR.alt_m,
     );
-    let config = MissionConfig::new(
-        fixture::DEMO_ROUTE.to_owned(),
-        anchor,
-        ClockDomainId::new(7),
-    );
+    let route = fixture::DEMO_ROUTE.to_owned();
+    let mut config = MissionConfig::new(route, anchor, ClockDomainId::new(7));
+    config.ownship_source = OwnshipSource::SimulationTruth;
     MissionEngine::new(&snapshot, provenance, config).expect("mission builds")
 }
 
@@ -453,12 +451,10 @@ fn a_missing_heading_withholds_intents_and_is_counted() {
         ANCHOR.lon_deg.to_radians(),
         ANCHOR.alt_m,
     );
-    let mut config = MissionConfig::new(
-        fixture::DEMO_ROUTE.to_owned(),
-        anchor,
-        ClockDomainId::new(7),
-    );
+    let route = fixture::DEMO_ROUTE.to_owned();
+    let mut config = MissionConfig::new(route, anchor, ClockDomainId::new(7));
     config.cruise_height_m = 0.0;
+    config.ownship_source = OwnshipSource::SimulationTruth;
     let (mut engine, _record) =
         MissionEngine::new(&snapshot, provenance, config).expect("mission builds");
     let mut truth = Truth::new();

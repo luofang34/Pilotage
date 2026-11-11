@@ -16,7 +16,7 @@ use navigate_geodesy::wgs84::tangent_plane;
 use pilotage_mission::fixture::{self, GeoPointDegrees};
 use pilotage_mission::{
     MissionBuildError, MissionConfig, MissionEngine, MissionOutput, MissionPlanRecord,
-    MissionState, NavGuidance, OwnshipSample, TruthRole, decode_snapshot,
+    MissionState, NavGuidance, OwnshipSample, OwnshipSource, TruthRole, decode_snapshot,
 };
 use pilotage_protocol::{ControlAction, ControlIntent, ReferenceFrame};
 
@@ -258,8 +258,14 @@ pub fn try_engine_over_offsets(
     let snapshot = NavDataSnapshot::new(cycle, points);
     let blob = blob::encode(&snapshot).expect("the snapshot encodes");
     let (snapshot, provenance) = decode_snapshot(&blob, true).expect("the blob decodes");
-    let config = MissionConfig::new(route.to_owned(), anchor_position(), ClockDomainId::new(7));
-    MissionEngine::new(&snapshot, provenance, config)
+    MissionEngine::new(&snapshot, provenance, truth_config(route))
+}
+
+/// The config of a simulated flight on the truth oracle.
+fn truth_config(route: &str) -> MissionConfig {
+    let mut config = MissionConfig::new(route.to_owned(), anchor_position(), ClockDomainId::new(7));
+    config.ownship_source = OwnshipSource::SimulationTruth;
+    config
 }
 
 /// The anchor as the engine sees it: radians and meters.
@@ -275,8 +281,7 @@ fn anchor_position() -> GeodeticPosition {
 /// mission defaults.
 fn engine_over(packed: &[u8], route: &str) -> MissionEngine {
     let (snapshot, provenance) = decode_snapshot(packed, true).expect("the blob decodes");
-    let config = MissionConfig::new(route.to_owned(), anchor_position(), ClockDomainId::new(7));
     let (engine, _record) =
-        MissionEngine::new(&snapshot, provenance, config).expect("the mission builds");
+        MissionEngine::new(&snapshot, provenance, truth_config(route)).expect("the mission builds");
     engine
 }

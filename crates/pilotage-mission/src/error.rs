@@ -105,4 +105,11 @@ pub enum MissionBuildError {
         /// The unsupported value.
         value: String,
     },
+    /// The mission is for a real vehicle and names simulation truth as its
+    /// ownship source. Only a simulator has a truth oracle.
+    #[error(
+        "a real vehicle has no simulation truth: the simulation-truth ownship source needs the \
+         simulator execution target"
+    )]
+    TruthOwnshipOnRealVehicle,
 }

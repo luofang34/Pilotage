@@ -4,17 +4,20 @@ use navigate_contract::{ClockDomainId, DurationNanos, GeodeticPosition};
 use pilotage_mission_core::ExecutionTarget;
 use pilotage_protocol::VehicleClass;
 
+use crate::error::MissionBuildError;
+
 /// Where the engine's ownship position comes from.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum OwnshipSource {
     /// A simulator's truth oracle. The engine synthesizes a GNSS-class fix
-    /// from each sample and fuses it. This is the default.
+    /// from each sample and fuses it. No vehicle has this source, so a
+    /// mission for [`ExecutionTarget::RealVehicle`] refuses it at build.
     SimulationTruth,
     /// The vehicle's own estimate lane, as its flight controller exports
     /// it under the operational-estimate role. The engine flies the latest
     /// fresh sample as a pass-through solution, declares it
     /// estimator-derived, and runs no fusion. The solution never grades
-    /// better than degraded.
+    /// better than degraded. This is the default.
     VehicleEstimate {
         /// 1-sigma position uncertainty the solution declares per NED
         /// axis, meters.
@@ -24,6 +27,17 @@ pub enum OwnshipSource {
         velocity_sigma_mps: f64,
         /// Age past which the latest sample yields no solution.
         max_age: DurationNanos,
+    },
+    /// The onboard navigator's own solution, as the host hands it to
+    /// [`crate::MissionEngine::on_onboard_solution`]. The engine flies the
+    /// latest solution with the covariance, integrity, and composition
+    /// the navigator gave it, and runs no fusion.
+    OnboardNavigation {
+        /// Age past which the latest solution yields no solution.
+        max_age: DurationNanos,
+        /// 1-sigma horizontal uncertainty above which the latest solution
+        /// is not flown, meters.
+        max_horizontal_1sigma_m: f64,
     },
 }
 
@@ -36,6 +50,19 @@ impl OwnshipSource {
             sigma_m: 3.0,
             velocity_sigma_mps: 0.5,
             max_age: DurationNanos::from_millis(1_000),
+        }
+    }
+
+    /// The onboard-navigation source with its documented defaults: one
+    /// second of age and 50 m of horizontal uncertainty. The age equals
+    /// the bound guidance applies to every solution; the uncertainty
+    /// equals the vertical bound guidance applies to an
+    /// altitude-constrained leg.
+    #[must_use]
+    pub const fn onboard_navigation() -> Self {
+        Self::OnboardNavigation {
+            max_age: DurationNanos::from_millis(1_000),
+            max_horizontal_1sigma_m: 50.0,
         }
     }
 }
@@ -121,7 +148,7 @@ pub struct MissionConfig {
     /// The clock domain all mission time lives on.
     pub clock: ClockDomainId,
     /// Where ownship position comes from. Default
-    /// [`OwnshipSource::SimulationTruth`].
+    /// [`OwnshipSource::vehicle_estimate`].
     pub ownship_source: OwnshipSource,
     /// The execution target the mission document is admitted for.
     /// Default [`ExecutionTarget::Simulator`]; a physical vehicle needs
@@ -155,6 +182,24 @@ impl MissionConfig {
         self.vehicle_class != VehicleClass::FixedWing
     }
 
+    /// Refuses an ownship source the execution target cannot supply.
+    ///
+    /// # Errors
+    ///
+    /// [`MissionBuildError::TruthOwnshipOnRealVehicle`] for
+    /// [`OwnshipSource::SimulationTruth`] with
+    /// [`ExecutionTarget::RealVehicle`]: a real vehicle has no truth
+    /// oracle, so the mission would wait in flight for a solution that
+    /// never comes.
+    pub(crate) fn check_ownship_source(&self) -> Result<(), MissionBuildError> {
+        match (self.ownship_source, self.execution_target) {
+            (OwnshipSource::SimulationTruth, ExecutionTarget::RealVehicle) => {
+                Err(MissionBuildError::TruthOwnshipOnRealVehicle)
+            }
+            _ => Ok(()),
+        }
+    }
+
     /// A config over the documented defaults; the route, anchor, and
     /// clock domain have no meaningful default and are always the
     /// caller's.
@@ -171,7 +216,7 @@ impl MissionConfig {
             gnss_sigma_m: 1.5,
             frame_interval: DurationNanos::from_millis(50),
             clock,
-            ownship_source: OwnshipSource::SimulationTruth,
+            ownship_source: OwnshipSource::vehicle_estimate(),
             execution_target: ExecutionTarget::Simulator,
             task_ids: Vec::new(),
             arm_confirm_timeout: DurationNanos::from_nanos(crate::policy::ARM_CONFIRM_TIMEOUT_NS),

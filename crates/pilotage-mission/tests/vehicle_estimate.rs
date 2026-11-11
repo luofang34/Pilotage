@@ -79,7 +79,13 @@ fn build_engine(source: OwnshipSource) -> MissionEngine {
     let (snapshot, provenance) = decode_snapshot(&blob, true).expect("demo blob decodes");
     let mut config = MissionConfig::new(fixture::DEMO_ROUTE.to_owned(), anchor(), CLOCK);
     config.ownship_source = source;
-    config.execution_target = ExecutionTarget::RealVehicle;
+    // Only a simulator has a truth oracle; every other source flies a
+    // real vehicle here.
+    config.execution_target = if source == OwnshipSource::SimulationTruth {
+        ExecutionTarget::Simulator
+    } else {
+        ExecutionTarget::RealVehicle
+    };
     MissionEngine::new(&snapshot, provenance, config)
         .expect("mission builds")
         .0

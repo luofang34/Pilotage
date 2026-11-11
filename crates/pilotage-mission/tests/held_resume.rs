@@ -51,14 +51,14 @@ fn engine() -> MissionEngine {
         .0
 }
 
-struct Truth {
+struct Estimate {
     ned: [f64; 3],
     ned_velocity: [f64; 3],
     yaw: f64,
     sequence: u32,
 }
 
-impl Truth {
+impl Estimate {
     fn new() -> Self {
         Self {
             ned: [0.0; 3],
@@ -73,7 +73,7 @@ impl Truth {
             ned: self.ned,
             ned_velocity: self.ned_velocity,
             yaw_rad: Some(self.yaw),
-            role: TruthRole::SimulationTruth,
+            role: TruthRole::OperationalEstimate,
             acquired_at: now,
             sequence: self.sequence,
         }
@@ -97,20 +97,20 @@ impl Truth {
 /// One closed-loop step; returns the output.
 fn step(
     engine: &mut MissionEngine,
-    truth: &mut Truth,
+    estimate: &mut Estimate,
     now: &mut MonotonicNanos,
     events: &mut Vec<MissionEvent>,
 ) -> pilotage_mission::MissionOutput {
     *now = MonotonicNanos::from_nanos(now.as_nanos() + STEP_NANOS);
-    truth.sequence = truth.sequence.wrapping_add(1);
-    engine.on_ownship(&truth.sample(*now), *now);
+    estimate.sequence = estimate.sequence.wrapping_add(1);
+    engine.on_ownship(&estimate.sample(*now), *now);
     let out = engine.tick(*now);
     if let Some(action) = out.action {
         assert!(matches!(action.action, ControlAction::Arm));
         engine.on_action_result(action.action_id, true);
     }
     if let Some(intent) = out.intent.as_ref() {
-        truth.integrate(intent);
+        estimate.integrate(intent);
     }
     events.extend(out.events.iter().cloned());
     out
@@ -119,12 +119,12 @@ fn step(
 /// Steps until the mission flies a leg, returning the step count.
 fn fly_until_enroute(
     engine: &mut MissionEngine,
-    truth: &mut Truth,
+    estimate: &mut Estimate,
     now: &mut MonotonicNanos,
     events: &mut Vec<MissionEvent>,
 ) {
     for _ in 0..4_000 {
-        let output = step(engine, truth, now, events);
+        let output = step(engine, estimate, now, events);
         if output.state == MissionState::Enroute && output.intent.is_some() {
             return;
         }
@@ -139,20 +139,20 @@ fn count(events: &[MissionEvent], predicate: impl Fn(&MissionEvent) -> bool) -> 
 #[test]
 fn a_held_mission_commands_nothing_and_pauses_its_phase_clock() {
     let mut engine = engine();
-    let mut truth = Truth::new();
+    let mut estimate = Estimate::new();
     let mut now = MonotonicNanos::from_nanos(1_000_000_000);
     let mut events = Vec::new();
-    fly_until_enroute(&mut engine, &mut truth, &mut now, &mut events);
+    fly_until_enroute(&mut engine, &mut estimate, &mut now, &mut events);
     assert!(engine.nav_guidance().is_some());
 
     engine.hold(now);
     assert!(engine.is_held());
     assert_eq!(engine.state(), MissionState::Held);
     engine.hold(now);
-    // A human flies: the truth moves off the line while the engine is held.
+    // A human flies: the estimate moves off the line while the engine is held.
     for _ in 0..40 {
-        truth.ned[1] += 0.5;
-        let output = step(&mut engine, &mut truth, &mut now, &mut events);
+        estimate.ned[1] += 0.5;
+        let output = step(&mut engine, &mut estimate, &mut now, &mut events);
         assert_eq!(output.state, MissionState::Held);
         assert!(output.intent.is_none() && output.action.is_none());
         assert!(engine.nav_guidance().is_none(), "no guidance while held");
@@ -176,7 +176,7 @@ fn a_held_mission_commands_nothing_and_pauses_its_phase_clock() {
     let mut completed = false;
     let mut resumed_guidance = false;
     for _ in 0..40_000 {
-        let output = step(&mut engine, &mut truth, &mut now, &mut events);
+        let output = step(&mut engine, &mut estimate, &mut now, &mut events);
         assert_ne!(
             output.state,
             MissionState::Failed,
@@ -208,24 +208,24 @@ fn a_held_mission_commands_nothing_and_pauses_its_phase_clock() {
 #[test]
 fn an_unpaused_hold_of_that_length_would_have_expired_the_phase() {
     let mut engine = engine();
-    let mut truth = Truth::new();
+    let mut estimate = Estimate::new();
     let mut now = MonotonicNanos::from_nanos(1_000_000_000);
     let mut events = Vec::new();
-    fly_until_enroute(&mut engine, &mut truth, &mut now, &mut events);
+    fly_until_enroute(&mut engine, &mut estimate, &mut now, &mut events);
     // Same gap, no hold: the follow-plan phase deadline passes.
     now = MonotonicNanos::from_nanos(now.as_nanos() + LONG_HOLD_NANOS);
-    let output = step(&mut engine, &mut truth, &mut now, &mut events);
+    let output = step(&mut engine, &mut estimate, &mut now, &mut events);
     assert_eq!(output.state, MissionState::Failed);
 }
 
 #[test]
 fn a_terminal_mission_is_not_held() {
     let mut engine = engine();
-    let mut truth = Truth::new();
+    let mut estimate = Estimate::new();
     let mut now = MonotonicNanos::from_nanos(1_000_000_000);
     let mut events = Vec::new();
     for _ in 0..40_000 {
-        if step(&mut engine, &mut truth, &mut now, &mut events).state == MissionState::Complete {
+        if step(&mut engine, &mut estimate, &mut now, &mut events).state == MissionState::Complete {
             break;
         }
     }
@@ -238,11 +238,15 @@ fn a_terminal_mission_is_not_held() {
 
 /// Steps until the engine asks the vehicle to arm, without answering it;
 /// the arm's action identifier.
-fn until_arm_asked(engine: &mut MissionEngine, truth: &mut Truth, now: &mut MonotonicNanos) -> u64 {
+fn until_arm_asked(
+    engine: &mut MissionEngine,
+    estimate: &mut Estimate,
+    now: &mut MonotonicNanos,
+) -> u64 {
     for _ in 0..4_000 {
         *now = MonotonicNanos::from_nanos(now.as_nanos() + STEP_NANOS);
-        truth.sequence = truth.sequence.wrapping_add(1);
-        engine.on_ownship(&truth.sample(*now), *now);
+        estimate.sequence = estimate.sequence.wrapping_add(1);
+        engine.on_ownship(&estimate.sample(*now), *now);
         if let Some(action) = engine.tick(*now).action {
             assert!(matches!(action.action, ControlAction::Arm));
             return action.action_id;
@@ -267,10 +271,10 @@ const MINUTE_NANOS: u64 = 60_000_000_000;
 #[test]
 fn a_receipt_that_arrives_during_a_hold_is_taken_after_the_resume() {
     let mut engine = simulated_engine();
-    let mut truth = Truth::new();
+    let mut estimate = Estimate::new();
     let mut now = MonotonicNanos::from_nanos(1_000_000_000);
     let mut events = Vec::new();
-    let arm = until_arm_asked(&mut engine, &mut truth, &mut now);
+    let arm = until_arm_asked(&mut engine, &mut estimate, &mut now);
     engine.hold(now);
     now = MonotonicNanos::from_nanos(now.as_nanos() + MINUTE_NANOS);
     engine.tick(now);
@@ -279,7 +283,7 @@ fn a_receipt_that_arrives_during_a_hold_is_taken_after_the_resume() {
     now = MonotonicNanos::from_nanos(now.as_nanos() + MINUTE_NANOS);
     engine.resume(now);
     let climbed = (0..400).any(|_| {
-        let output = step(&mut engine, &mut truth, &mut now, &mut events);
+        let output = step(&mut engine, &mut estimate, &mut now, &mut events);
         assert_ne!(output.state, MissionState::Failed, "{events:?}");
         assert!(output.action.is_none(), "the arm is not asked again");
         output.state == MissionState::Climb
@@ -293,14 +297,14 @@ fn a_receipt_that_arrives_during_a_hold_is_taken_after_the_resume() {
 #[test]
 fn a_receipt_that_never_came_times_out_at_the_first_step_after_the_resume() {
     let mut engine = simulated_engine();
-    let mut truth = Truth::new();
+    let mut estimate = Estimate::new();
     let mut now = MonotonicNanos::from_nanos(1_000_000_000);
-    until_arm_asked(&mut engine, &mut truth, &mut now);
+    until_arm_asked(&mut engine, &mut estimate, &mut now);
     engine.hold(now);
     now = MonotonicNanos::from_nanos(now.as_nanos() + MINUTE_NANOS);
     engine.resume(now);
     now = MonotonicNanos::from_nanos(now.as_nanos() + STEP_NANOS);
-    engine.on_ownship(&truth.sample(now), now);
+    engine.on_ownship(&estimate.sample(now), now);
     let output = engine.tick(now);
     // The hold does not stop the receipt timeout: no receipt came, so the
     // first step after the resume ends the run on it.

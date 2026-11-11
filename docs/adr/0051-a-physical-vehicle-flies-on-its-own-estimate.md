@@ -28,11 +28,19 @@ executor needs a declared way to place that height and to use that heading.
 
 ### One admitted source, named in the configuration
 
-The mission configuration names the ownship source. `simulation-truth`
-keeps the fused truth path and is the default. `vehicle-estimate` admits
-only samples under the operational-estimate role. Every other role is a
-counted refusal in both modes. The host refuses a real-vehicle target with
-the simulation-truth source at startup.
+The mission configuration names the ownship source. `vehicle-estimate` is
+the default. It admits only samples under the operational-estimate role.
+`simulation-truth` keeps the fused truth path for a simulator. Every other
+role is a counted refusal in both modes. The mission engine refuses a
+real-vehicle target with the simulation-truth source when it builds the
+mission. The host refuses the same pairing at startup.
+
+`onboard-navigation` admits no sample. Its ownship is the navigation
+solution of the onboard navigator (ADR-0024). A host that embeds the
+mission engine gives each solution to the engine. The engine flies the
+latest solution while it is fresh and fit, and it does no fusion. No
+telemetry group carries that solution, so the session host refuses this
+source at startup.
 
 ### The estimate is a pass-through solution, declared as such
 

@@ -5,8 +5,8 @@
 use navigate_contract::{ClockDomainId, GeodeticPosition, MonotonicNanos};
 use pilotage_mission::fixture::{self, GeoPointDegrees};
 use pilotage_mission::{
-    MissionConfig, MissionEngine, MissionEvent, MissionState, OwnshipSample, TruthRole,
-    decode_snapshot,
+    MissionConfig, MissionEngine, MissionEvent, MissionState, OwnshipSample, OwnshipSource,
+    TruthRole, decode_snapshot,
 };
 
 const ANCHOR: GeoPointDegrees = GeoPointDegrees {
@@ -30,6 +30,7 @@ fn engine_with_cruise_height(cruise_height_m: f64) -> MissionEngine {
         ClockDomainId::new(7),
     );
     config.cruise_height_m = cruise_height_m;
+    config.ownship_source = OwnshipSource::SimulationTruth;
     MissionEngine::new(&snapshot, provenance, config)
         .expect("mission builds")
         .0
