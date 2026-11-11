@@ -173,10 +173,17 @@ pub struct MissionConfig {
     pub capture_time_s: f64,
     /// The orbit after a waypoint plan for a vehicle that cannot stop.
     pub terminal_orbit: TerminalOrbit,
-    /// The bank angle the vehicle turns at on a route, degrees: the
-    /// airframe's route bank limit. With the speed over the ground it sizes
-    /// the turn ahead of a fly-by waypoint, and with the true airspeed the
-    /// orbit after the plan. Default [`crate::DEFAULT_ORBIT_BANK_DEG`].
+    /// The bank angle the mission plans its turns at, degrees. With the
+    /// speed over the ground it sizes the turn ahead of a fly-by waypoint,
+    /// and with the true airspeed the orbit after the plan.
+    ///
+    /// The host sets it below the bank the flight controller turns at on a
+    /// route. A turn planned at the airframe's bank limit leaves the
+    /// aircraft no bank to spare: the time it takes to roll in, and every
+    /// gust or shift of wind in the turn, then carry it outside the planned
+    /// path, and it has no authority left to come back. The margin below
+    /// the limit is that authority. Default
+    /// [`crate::DEFAULT_ORBIT_BANK_DEG`].
     pub route_bank_deg: f64,
     /// Whether the arm request waits for a vehicle status that says the
     /// vehicle is ready to arm; see [`crate::VehicleStatus`]. A host that
