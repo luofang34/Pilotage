@@ -13,7 +13,6 @@ aerocontext-core = { workspace = true }
 navigate-contract = { workspace = true }
 pilotage-adapter-api = { workspace = true }
 pilotage-adapter-aviate = { workspace = true }
-pilotage-control-feel = { workspace = true }
 pilotage-geo = { workspace = true }
 pilotage-mavlink = { workspace = true }
 pilotage-mission = { workspace = true }
@@ -28,3 +27,4 @@ tracing = { workspace = true }
 web-time = { workspace = true }
 
 [dev-dependencies]
+pilotage-control-feel = { workspace = true }

@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use navigate_contract::{GeodeticPosition, MonotonicNanos};
 use pilotage_adapter_api::SourceIncarnation;
-use pilotage_adapter_aviate::EmbeddedIncarnations;
+use pilotage_adapter_aviate::{AviateAirframe, EmbeddedIncarnations};
 use pilotage_control_feel::{FlightFeelProfile, ValidatedFlightFeelProfile};
 use pilotage_host_core::{HostCore, HostCoreConfig, HostCoreError, MISSION_CLOCK};
 use pilotage_mavlink::link::LinkConfig;
@@ -21,8 +21,10 @@ fn config() -> HostCoreConfig {
     mission.ownship_source = OwnshipSource::vehicle_estimate();
     HostCoreConfig {
         link: LinkConfig::default(),
-        control_feel: ValidatedFlightFeelProfile::new(FlightFeelProfile::legacy_compatibility())
-            .unwrap(),
+        airframe: AviateAirframe::Multirotor(Box::new(
+            ValidatedFlightFeelProfile::new(FlightFeelProfile::legacy_compatibility()).unwrap(),
+        )),
+        fc_origin_height_m: Some(500.0),
         incarnations: EmbeddedIncarnations {
             estimate: SourceIncarnation::new([1; 16]),
             fc_state: SourceIncarnation::new([2; 16]),
@@ -88,4 +90,20 @@ fn time_does_not_go_back() {
         core.tick(MonotonicNanos::from_nanos(10)),
         Err(HostCoreError::TimeWentBack { .. })
     ));
+}
+
+#[test]
+fn a_fixed_wing_core_builds_with_its_envelope_and_origin() {
+    let mut config = config();
+    config.airframe = AviateAirframe::FixedWing(
+        pilotage_control_feel::ValidatedFixedWingEnvelope::new(
+            pilotage_control_feel::FixedWingEnvelope::C172,
+        )
+        .unwrap(),
+    );
+    config.mission.vehicle_class = pilotage_protocol::VehicleClass::FixedWing;
+    let mut core = HostCore::new(config, Instant::now()).unwrap();
+    core.load_mission(plan()).unwrap();
+    core.tick(MonotonicNanos::from_nanos(0)).unwrap();
+    assert!(core.status().mission_state.is_some(), "the C172 mission builds");
 }

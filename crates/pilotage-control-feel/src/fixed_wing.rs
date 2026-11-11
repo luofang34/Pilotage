@@ -81,7 +81,10 @@ impl ValidatedFixedWingEnvelope {
             }
         };
         positive(envelope.min_airspeed_mps, "fixed_wing.min_airspeed_mps")?;
-        positive(envelope.cruise_airspeed_mps, "fixed_wing.cruise_airspeed_mps")?;
+        positive(
+            envelope.cruise_airspeed_mps,
+            "fixed_wing.cruise_airspeed_mps",
+        )?;
         positive(envelope.max_airspeed_mps, "fixed_wing.max_airspeed_mps")?;
         positive(envelope.max_climb_mps, "fixed_wing.max_climb_mps")?;
         positive(envelope.max_sink_mps, "fixed_wing.max_sink_mps")?;

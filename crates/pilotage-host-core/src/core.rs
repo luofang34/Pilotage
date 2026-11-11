@@ -61,18 +61,26 @@ impl HostCore {
     /// # Errors
     ///
     /// [`HostCoreError::Adapter`] when the adapter does not accept the
-    /// control-feel law or the link configuration.
+    /// airframe, the link configuration or the origin height.
     pub fn new(config: HostCoreConfig, origin: Instant) -> Result<Self, HostCoreError> {
-        let adapter = AviateAdapter::embedded(
+        let mut adapter = AviateAdapter::embedded_for(
             HOST_VEHICLE,
             config.link,
-            config.control_feel.clone(),
+            config.airframe.clone(),
             config.incarnations,
             origin,
         )
         .map_err(|source| HostCoreError::Adapter {
             source: Box::new(source),
         })?;
+        // Before the session reads the capabilities the adapter advertises.
+        if let Some(height_m) = config.fc_origin_height_m {
+            adapter
+                .set_local_origin_height(height_m)
+                .map_err(|source| HostCoreError::Adapter {
+                    source: Box::new(source),
+                })?;
+        }
         let capabilities = pilotage_adapter_api::VehicleAdapter::capabilities(&adapter);
         let session = SessionEngine::new(
             capabilities,
