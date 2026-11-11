@@ -25,8 +25,11 @@ pub enum TruthRole {
 /// [`crate::OwnshipSource::VehicleEstimate`] only
 /// [`TruthRole::OperationalEstimate`] samples are admitted, and the engine
 /// flies them as a declared estimator-derived solution without fusion
-/// (ADR-0024 correlation rule). Every other role is a counted refusal,
-/// never an aid.
+/// (ADR-0024 correlation rule). Under
+/// [`crate::OwnshipSource::OnboardNavigation`] no sample is admitted: the
+/// ownship is the navigator's solution, which the host offers through
+/// [`crate::MissionEngine::on_onboard_solution`]. Every other role is a
+/// counted refusal, never an aid.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct OwnshipSample {
     /// Position as NED meters from the mission anchor.

@@ -173,4 +173,19 @@ pub struct MissionCounters {
     /// Ticks flown direct back to a fix the vehicle passed without
     /// capturing it.
     pub fix_overflown: u64,
+    /// Onboard navigation solutions refused when offered: on another
+    /// ellipsoid, with an implausible position or a non-finite velocity,
+    /// or stamped later than the offer.
+    pub onboard_refused: u64,
+    /// Onboard navigation solutions offered again, or older than the held
+    /// one. They are not new solutions and do not renew the held one's
+    /// age.
+    pub onboard_repeated: u64,
+    /// Ticks under the onboard-navigation source on which the held
+    /// solution was too old to fly, so no solution was published.
+    pub onboard_stale: u64,
+    /// Ticks under the onboard-navigation source on which the held
+    /// solution was graded unusable or had a horizontal uncertainty above
+    /// the configured limit, so no solution was published.
+    pub onboard_unfit: u64,
 }
