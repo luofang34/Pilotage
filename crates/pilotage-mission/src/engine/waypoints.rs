@@ -62,8 +62,9 @@ impl MissionEngine {
         let end = plan_end(plan, &config, &waypoints, cruise_mps, capture_radius_m);
         let mut execution = ExecutionConfig::new(capture_radius_m);
         execution.bank_limit_rad = config.route_bank_deg.to_radians();
-        let route =
-            MissionRoute::activate(&name, PlanRole::Mission, waypoints, execution)?.with_end(end);
+        let route = MissionRoute::activate(&name, PlanRole::Mission, waypoints, execution)?
+            .with_end(end)
+            .passing_a_first_waypoint_behind();
         let engine = Self::from_route(
             route,
             &plan_id,

@@ -7,7 +7,7 @@ use navigate_contract::{
     NedVelocity, Waypoint,
 };
 use navigate_guidance::guide_velocity;
-use navigate_route::SequenceEvent;
+use navigate_route::{SequenceEvent, SequenceReason};
 use pilotage_mission_core::{
     EngineEvent as CoreEvent, EngineStart, FlightAction as CoreFlightAction,
     MissionEngine as CoreMissionEngine, MissionObservation as CoreObservation,
@@ -325,6 +325,13 @@ impl MissionEngine {
         }
         if self.route.approaching() {
             self.plan_complete = self.route.arrive(&solution.position);
+            return;
+        }
+        if let Some((to_index, cross_track_m)) = self.route.pass_start(&solution.position) {
+            events.push(MissionEvent::LegAdvanced {
+                to_index,
+                reason: SequenceReason::Passed { cross_track_m },
+            });
             return;
         }
         match self

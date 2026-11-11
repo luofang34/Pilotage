@@ -1,6 +1,7 @@
 #![cfg(test)]
 
-//! A fixed wing at 2000 m flown closed-loop: it holds the indicated
+//! A fixed wing at 2000 m flown closed-loop. It joins a plan ahead of it,
+//! and it holds the indicated
 //! airspeed it is commanded, so it flies faster over the ground than that
 //! number, and it turns no tighter than its route bank allows. The turn
 //! ahead of each fly-by waypoint and the orbit after the plan must be sized
@@ -15,9 +16,10 @@
 use navigate_contract::{ClockDomainId, GeodeticPosition, MonotonicNanos};
 use navigate_geodesy::NedOffset;
 use navigate_geodesy::wgs84::tangent_plane;
+use navigate_route::SequenceReason;
 use pilotage_mission::{
     ExecutionTarget, MissionConfig, MissionEngine, MissionEvent, MissionState, OwnshipSample,
-    OwnshipSource, PlannedWaypoint, TruthRole, WaypointPlan, true_airspeed_for,
+    OwnshipSource, PlannedWaypoint, TruthRole, WaypointPlan, WaypointTurn, true_airspeed_for,
 };
 use pilotage_protocol::{ControlAction, ControlIntent, VehicleClass};
 
@@ -79,10 +81,12 @@ fn corners() -> [[f64; 2]; 5] {
     ]
 }
 
-fn plan() -> WaypointPlan {
+/// A fly-by plan through anchor-plane NED `points` at the anchor's
+/// altitude.
+fn plan_through(points: &[[f64; 2]]) -> WaypointPlan {
     let plane = tangent_plane(anchor()).expect("anchor is plausible");
     WaypointPlan::new(
-        corners()
+        points
             .iter()
             .map(|[north, east]| {
                 let p = plane.from_ned(&NedOffset::new(*north, *east, 0.0));
@@ -94,6 +98,10 @@ fn plan() -> WaypointPlan {
             })
             .collect(),
     )
+}
+
+fn plan() -> WaypointPlan {
+    plan_through(&corners())
 }
 
 /// A fixed wing that flies the engine's velocity intents the way Aviate's
@@ -174,11 +182,32 @@ struct Flight {
     orbit_radius_m: Option<f64>,
     /// The tick at which the plan completed.
     completed_at: Option<usize>,
+    /// Each leg advance: the leg and why the waypoint before it sequenced.
+    reasons: Vec<(usize, SequenceReason)>,
 }
 
+/// The flight of the square plan from 1500 m south of its first waypoint.
 fn fly(engine: &mut MissionEngine, ticks_after_complete: usize) -> Flight {
+    fly_from(
+        engine,
+        [-1_500.0, 0.0],
+        &corners(),
+        60_000,
+        ticks_after_complete,
+    )
+}
+
+/// Flies `engine` from `start`, northbound, for at most `ticks`, and for
+/// `ticks_after_complete` once the plan through `points` completes.
+fn fly_from(
+    engine: &mut MissionEngine,
+    start: [f64; 2],
+    points: &[[f64; 2]],
+    ticks: u32,
+    ticks_after_complete: usize,
+) -> Flight {
     let mut aircraft = Aircraft {
-        ned: [-1_500.0, 0.0, 0.0],
+        ned: [start[0], start[1], 0.0],
         course_rad: 0.0,
         bank_rad: 0.0,
         turn_rate_integrator: 0.0,
@@ -189,10 +218,11 @@ fn fly(engine: &mut MissionEngine, ticks_after_complete: usize) -> Flight {
         leads: Vec::new(),
         orbit_radius_m: None,
         completed_at: None,
+        reasons: Vec::new(),
     };
     let mut leg = 0;
     let mut now = MonotonicNanos::from_nanos(1_000_000_000);
-    for sequence in 0..60_000_u32 {
+    for sequence in 0..ticks {
         now = MonotonicNanos::from_nanos(now.as_nanos() + STEP_NANOS);
         let sample = OwnshipSample {
             ned: aircraft.ned,
@@ -218,11 +248,12 @@ fn fly(engine: &mut MissionEngine, ticks_after_complete: usize) -> Flight {
         };
         for event in &output.events {
             match event {
-                MissionEvent::LegAdvanced { to_index, .. } => {
+                MissionEvent::LegAdvanced { to_index, reason } => {
                     leg = *to_index;
-                    let corner = corners()[leg - 1];
+                    let corner = points[leg - 1];
                     let lead = (aircraft.ned[0] - corner[0]).hypot(aircraft.ned[1] - corner[1]);
                     flight.leads.push((leg, lead));
+                    flight.reasons.push((leg, *reason));
                 }
                 MissionEvent::OrbitStarted { radius_m, .. } => {
                     flight.orbit_radius_m = Some(*radius_m);
@@ -315,4 +346,87 @@ fn the_true_airspeed_of_an_indicated_one_grows_with_height() {
     // Above the tropopause the density keeps falling.
     assert!(true_airspeed_for(50.0, 12_000.0) > true_airspeed_for(50.0, 11_000.0));
     assert!(true_airspeed_for(f64::NAN, 1_000.0).is_nan());
+}
+
+/// A plan whose first waypoint lies 2 km behind the aircraft, on the
+/// first leg's line: north along the first leg, then east.
+fn behind_plan_points() -> [[f64; 2]; 3] {
+    [[0.0, 0.0], [6_000.0, 0.0], [6_000.0, 4_000.0]]
+}
+
+/// The closest the aircraft came to the first waypoint.
+fn closest_to_first_m(flight: &Flight) -> f64 {
+    flight
+        .track
+        .iter()
+        .map(|(ned, _)| ned[0].hypot(ned[1]))
+        .fold(f64::INFINITY, f64::min)
+}
+
+#[test]
+fn an_airborne_fixed_wing_past_the_first_waypoint_joins_the_first_leg_ahead() {
+    let points = behind_plan_points();
+    let (mut engine, _) =
+        MissionEngine::from_waypoints(&plan_through(&points), config()).expect("builds");
+    let flight = fly_from(&mut engine, [2_000.0, 0.0], &points, 2_400, 0);
+    assert!(
+        matches!(
+            flight.reasons.first(),
+            Some((1, SequenceReason::Passed { cross_track_m })) if cross_track_m.abs() < 1.0
+        ),
+        "the first waypoint is passed at the start: {:?}",
+        flight.reasons
+    );
+    let closest = closest_to_first_m(&flight);
+    assert!(
+        closest > 1_900.0,
+        "the aircraft turned back to {closest:.0} m of the first waypoint"
+    );
+    // It keeps flying the first leg's way, north, to the second waypoint.
+    assert!(
+        flight
+            .track
+            .windows(2)
+            .take_while(|pair| pair[1].1 == 1)
+            .all(|pair| pair[1].0[0] > pair[0].0[0]),
+        "the aircraft flew south on the first leg"
+    );
+}
+
+#[test]
+fn a_first_waypoint_marked_fly_over_is_turned_back_for() {
+    let points = behind_plan_points();
+    let mut plan = plan_through(&points);
+    if let Some(first) = plan.waypoints.first_mut() {
+        first.turn = WaypointTurn::FlyOver;
+    }
+    let (mut engine, record) = MissionEngine::from_waypoints(&plan, config()).expect("builds");
+    let flight = fly_from(&mut engine, [2_000.0, 0.0], &points, 6_000, 0);
+    assert!(
+        !matches!(
+            flight.reasons.first(),
+            Some((1, SequenceReason::Passed { .. }))
+        ),
+        "a fly-over first waypoint is not passed at the start: {:?}",
+        flight.reasons
+    );
+    let closest = closest_to_first_m(&flight);
+    assert!(
+        closest < record.capture_radius_m,
+        "the aircraft came to {closest:.0} m of the fly-over waypoint, not over it"
+    );
+}
+
+#[test]
+fn a_fixed_wing_short_of_the_first_waypoint_flies_to_it() {
+    let points = behind_plan_points();
+    let (mut engine, record) =
+        MissionEngine::from_waypoints(&plan_through(&points), config()).expect("builds");
+    let flight = fly_from(&mut engine, [-2_000.0, 0.0], &points, 2_400, 0);
+    assert!(
+        matches!(flight.reasons.first(), Some((1, reason)) if !matches!(reason, SequenceReason::Passed { .. })),
+        "the first waypoint ahead is flown to: {:?}",
+        flight.reasons
+    );
+    assert!(closest_to_first_m(&flight) < record.capture_radius_m);
 }
