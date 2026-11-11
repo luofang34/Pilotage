@@ -8,12 +8,24 @@
 //! controller's two links, and calls [`HostCore::tick`] again at the
 //! time it returns. The same inputs give the same output bytes.
 
+pub mod automation;
 mod config;
+mod connection;
 mod core;
+mod engine_actor;
 mod error;
 mod output;
+mod registry;
+mod wire_codec;
 
 pub use config::HostCoreConfig;
 pub use core::HostCore;
 pub use error::HostCoreError;
 pub use output::{HostEvent, HostStatus, NextWake};
+
+use pilotage_protocol::VehicleId;
+
+pub use automation::MISSION_CLOCK;
+
+/// The vehicle the core hosts, as the session host numbers it.
+pub const HOST_VEHICLE: VehicleId = VehicleId::new(1);

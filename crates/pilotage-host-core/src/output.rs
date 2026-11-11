@@ -34,6 +34,8 @@ pub struct HostStatus {
     pub mission_state: Option<MissionState>,
     /// The solution the mission flies, if it has one.
     pub estimate: Option<NavigationSolution>,
+    /// The flight controller confirmed the mission's arm.
+    pub armed: bool,
     /// Whether the plan's last waypoint is done.
     pub plan_complete: bool,
     /// Intent frames the mission submitted to the session engine.

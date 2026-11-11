@@ -2319,12 +2319,20 @@ name = "pilotage-host-core"
 version = "0.1.0"
 dependencies = [
  "navigate-contract",
+ "pilotage-adapter-api",
  "pilotage-adapter-aviate",
  "pilotage-control-feel",
+ "pilotage-geo",
  "pilotage-mavlink",
  "pilotage-mission",
  "pilotage-protocol",
+ "pilotage-session",
+ "pilotage-timing",
+ "pilotage-world",
+ "prost",
+ "sha2 0.10.9",
  "thiserror",
+ "tracing",
  "web-time",
 ]
 
