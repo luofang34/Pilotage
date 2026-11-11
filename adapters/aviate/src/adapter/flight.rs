@@ -51,9 +51,12 @@ fn send_motion_intent(
             Some(constrained || uplink_constrained)
         }
         (FLIGHT_SCOPE, Some(ControlIntent::HeadingAltitude(_))) => {
+            let demand = heading_altitude?;
             // A refused send is the flight controller not receiving the
-            // demand, which the operator sees as a constrained frame.
-            Some(!uplink.send_heading_altitude(heading_altitude?))
+            // demand, and an airspeed it refuses to take is a part of the
+            // demand it does not fly: both are a constrained frame.
+            let sent = uplink.send_heading_altitude(demand);
+            Some(!sent || (demand.airspeed_mps.is_some() && uplink.airspeed_refused()))
         }
         (DIRECT_SCOPE, Some(ControlIntent::AttitudeThrust(attitude))) => {
             let (roll, pitch, yaw) = pilotage_adapter_api::attitude_euler(&attitude);

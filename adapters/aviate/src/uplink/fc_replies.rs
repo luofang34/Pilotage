@@ -47,6 +47,17 @@ impl FlightUplink {
                         } else {
                             warn!(command, result, "FC rejected command");
                         }
+                        if command == pilotage_mavlink::codec::MAV_CMD_DO_CHANGE_SPEED
+                            && addressed_to_gcs(target_system, target_component)
+                            && self.policy.airspeed_answered(result)
+                                == pilotage_flight_uplink::AirspeedAnswer::Refused
+                        {
+                            warn!(
+                                result,
+                                "the FC refuses airspeed targets; heading and altitude fly at \
+                                 its own cruise airspeed"
+                            );
+                        }
                         if command == pilotage_mavlink::codec::MAV_CMD_COMPONENT_ARM_DISARM
                             && addressed_to_gcs(target_system, target_component)
                             && let Some(arm) = self.arm_sent

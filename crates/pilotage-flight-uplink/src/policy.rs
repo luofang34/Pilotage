@@ -15,7 +15,7 @@ mod tests;
 pub use control::{
     ActivationStep, AttitudeOutcome, DirectFrame, DirectRefusal, StickFrame, StickOutcome,
 };
-pub use fixed_wing::{AIRSPEED_REPEAT, HeadingAltitudeDemand};
+pub use fixed_wing::{AIRSPEED_REPEAT, AirspeedAnswer, HeadingAltitudeDemand};
 
 /// Longest believable gap between control frames when integrating the
 /// yaw-rate stick; anything longer is a stall, not a dt.
@@ -58,9 +58,9 @@ pub struct UplinkPolicy {
     hold_pos_ned: Option<[f32; 3]>,
     // When the link-loss hold last went out.
     last_hold: Option<Duration>,
-    // The airspeed command last sent and when. An arm or a reset forgets
-    // it: the flight controller may then hold another airspeed.
-    airspeed_sent: Option<(f32, Duration)>,
+    // The airspeed command: what was last sent, and what the flight
+    // controller answered.
+    airspeed: fixed_wing::AirspeedCommand,
     feel: feel::UplinkFeel,
     system_id: u8,
     component_id: u8,
@@ -82,7 +82,7 @@ impl UplinkPolicy {
             airborne: false,
             hold_pos_ned: None,
             last_hold: None,
-            airspeed_sent: None,
+            airspeed: fixed_wing::AirspeedCommand::default(),
             feel: feel::UplinkFeel::new(profile),
             system_id: 1,
             component_id: 1,
@@ -167,7 +167,7 @@ impl UplinkPolicy {
         self.reset_temporal_state();
         self.quiet_until = Some(now + ARM_QUIET);
         self.airborne = false;
-        self.airspeed_sent = None;
+        self.airspeed.forget_sent();
         let frame = encode_arm_command(self.seq, arm, self.system_id, self.component_id);
         self.seq = self.seq.wrapping_add(1);
         info!(arm, "arm command frame");
@@ -210,7 +210,7 @@ impl UplinkPolicy {
         self.airborne = false;
         self.quiet_until = None;
         self.heading.valid = false;
-        self.airspeed_sent = None;
+        self.airspeed = fixed_wing::AirspeedCommand::default();
     }
 
     fn reset_temporal_state(&mut self) {

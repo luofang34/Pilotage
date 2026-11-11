@@ -2298,6 +2298,7 @@ dependencies = [
 name = "pilotage-flight-uplink"
 version = "0.1.0"
 dependencies = [
+ "pilotage-adapter-api",
  "pilotage-control-feel",
  "pilotage-mavlink",
  "tracing",

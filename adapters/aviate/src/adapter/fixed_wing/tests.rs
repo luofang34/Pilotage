@@ -426,3 +426,52 @@ fn the_fc_state_says_whether_the_fc_would_accept_an_arm() {
     assert_eq!(ready(&mut adapter, 3), Some(Some(true)), "standing by");
     assert_eq!(ready(&mut adapter, 0), Some(None), "uninitialized");
 }
+
+#[test]
+fn an_fc_that_refuses_airspeed_targets_is_not_asked_again() {
+    let start = host_start();
+    let mut adapter = fixed_wing(start);
+    let mut changes_after_refusal = 0;
+    let mut setpoints_after_refusal = 0;
+    let mut refused = false;
+    for tick in 0..60_u32 {
+        let now_ms = 1_000 + 50 * tick;
+        adapter.set_now(start + Duration::from_millis(u64::from(now_ms)));
+        send_attitude_only(&mut adapter, now_ms);
+        let outcome = adapter.apply_control(&frame_with(
+            Some(heading_altitude(AltitudeReference::LocalOrigin, Some(55.0))),
+            vec![],
+        ));
+        let sent = adapter.drain_uplink();
+        if refused {
+            assert_eq!(outcome.disposition, Disposition::Constrained);
+            changes_after_refusal += sent
+                .iter()
+                .filter(|frame| {
+                    message_ids(std::slice::from_ref(frame)) == [COMMAND_LONG_ID]
+                        && command_of(frame) == MAV_CMD_DO_CHANGE_SPEED
+                })
+                .count();
+            setpoints_after_refusal += message_ids(&sent)
+                .iter()
+                .filter(|id| **id == SET_POSITION_TARGET_ID)
+                .count();
+        } else if sent
+            .iter()
+            .any(|frame| command_of(frame) == MAV_CMD_DO_CHANGE_SPEED)
+        {
+            // The fake FC: MAV_RESULT_UNSUPPORTED, addressed to this GCS.
+            let ack =
+                pilotage_mavlink::codec::encode_command_ack(0, MAV_CMD_DO_CHANGE_SPEED, 3, 1, 1);
+            assert!(adapter.on_uplink_reply(&ack));
+            adapter.sample_telemetry();
+            refused = true;
+        }
+    }
+    assert!(refused, "the airspeed command went out once");
+    assert_eq!(changes_after_refusal, 0, "never asked again");
+    assert!(
+        setpoints_after_refusal > 50,
+        "the heading and altitude fly on"
+    );
+}

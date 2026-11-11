@@ -126,3 +126,86 @@ fn a_fixed_wing_velocity_needs_no_climb_input_to_go_out() {
     );
     assert!(policy.airborne(), "the stream is open for the keep-alive");
 }
+
+/// How many airspeed commands go out over `seconds` of demands at 20 Hz
+/// from `start`.
+fn airspeed_commands(policy: &mut UplinkPolicy, start: Duration, seconds: u64) -> usize {
+    (0..seconds * 20)
+        .map(|tick| start + Duration::from_millis(50 * tick))
+        .flat_map(|now| policy.heading_altitude_frames(now, demand(Some(55.0))))
+        .filter(|frame| message_id(frame) == 76)
+        .count()
+}
+
+#[test]
+fn an_unsupported_airspeed_is_refused_for_good_and_the_setpoint_flies_on() {
+    use super::AirspeedAnswer;
+    let mut policy = policy();
+    let start = Duration::from_secs(10);
+    assert_eq!(airspeed_commands(&mut policy, start, 1), 1);
+    // MAV_RESULT_UNSUPPORTED.
+    assert_eq!(policy.airspeed_answered(3), AirspeedAnswer::Refused);
+    assert!(policy.airspeed_refused());
+    assert_eq!(
+        policy.airspeed_answered(3),
+        AirspeedAnswer::Ignored,
+        "said once"
+    );
+    let later = start + Duration::from_secs(1);
+    assert_eq!(airspeed_commands(&mut policy, later, 10), 0, "never again");
+    let frames = policy.heading_altitude_frames(later, demand(Some(48.0)));
+    assert_eq!(
+        frames
+            .iter()
+            .map(|frame| message_id(frame))
+            .collect::<Vec<_>>(),
+        [84],
+        "a new airspeed is not sent either; the setpoint still is"
+    );
+    // An arm keeps the refusal: it is the flight controller's.
+    policy.arm(later, 0.0);
+    let after_arm = later + Duration::from_secs(1);
+    assert_eq!(airspeed_commands(&mut policy, after_arm, 2), 0);
+    // A vehicle reset may bring another flight controller.
+    policy.reset_for_vehicle_reset();
+    assert!(!policy.airspeed_refused());
+}
+
+#[test]
+fn a_denied_airspeed_is_refused_and_a_temporary_rejection_retried() {
+    use super::AirspeedAnswer;
+    let mut denied = policy();
+    airspeed_commands(&mut denied, Duration::from_secs(1), 1);
+    // MAV_RESULT_DENIED.
+    assert_eq!(denied.airspeed_answered(2), AirspeedAnswer::Refused);
+
+    let mut busy = policy();
+    let start = Duration::from_secs(1);
+    airspeed_commands(&mut busy, start, 1);
+    // MAV_RESULT_TEMPORARILY_REJECTED.
+    assert_eq!(busy.airspeed_answered(1), AirspeedAnswer::Retry);
+    assert_eq!(
+        airspeed_commands(&mut busy, start + Duration::from_secs(1), 3),
+        3,
+        "once a second"
+    );
+}
+
+#[test]
+fn an_accepted_airspeed_is_not_repeated_until_it_changes() {
+    use super::AirspeedAnswer;
+    let mut policy = policy();
+    let start = Duration::from_secs(1);
+    airspeed_commands(&mut policy, start, 1);
+    assert_eq!(policy.airspeed_answered(0), AirspeedAnswer::Accepted);
+    assert_eq!(
+        airspeed_commands(&mut policy, start + Duration::from_secs(1), 5),
+        0
+    );
+    let frames = policy.heading_altitude_frames(start + Duration::from_secs(7), demand(Some(48.0)));
+    assert_eq!(
+        command(&frames[0]),
+        MAV_CMD_DO_CHANGE_SPEED,
+        "a new airspeed goes out"
+    );
+}

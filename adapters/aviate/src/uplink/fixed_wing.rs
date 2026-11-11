@@ -18,6 +18,13 @@ impl FlightUplink {
         self.send_failures == failures_before
     }
 
+    /// Whether the FC refused airspeed targets for good: it then flies
+    /// every heading and altitude at its own cruise airspeed, and no
+    /// airspeed command is sent again.
+    pub fn airspeed_refused(&self) -> bool {
+        self.policy.airspeed_refused()
+    }
+
     /// Sends one fixed-wing velocity setpoint in the local NED frame, with
     /// the yaw held when the velocity has no horizontal direction. Returns
     /// whether the setpoint was sent, or nothing was due.
