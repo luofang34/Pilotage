@@ -16,6 +16,7 @@ mod pipefail_pipelines;
 mod production_lints;
 mod terrain_base_layer;
 mod vehicle_writes;
+mod wasm_portable;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -71,6 +72,25 @@ fn run_rust_guards(repo_root: &Path, failed: &mut Vec<String>) {
     run_production_lints(repo_root, failed);
     run_terrain_base_layer(repo_root, failed);
     run_vehicle_writes(repo_root, failed);
+    run_wasm_portable(repo_root, failed);
+}
+
+fn run_wasm_portable(repo_root: &Path, failed: &mut Vec<String>) {
+    let name = wasm_portable::NAME;
+    match wasm_portable::check(repo_root) {
+        Ok(refusals) if refusals.is_empty() => print_line(&format!("guard {name}: ok")),
+        Ok(refusals) => {
+            for refusal in &refusals {
+                print_line(refusal);
+            }
+            print_line(&format!("guard {name}: FAILED at the check"));
+            failed.push(name.to_owned());
+        }
+        Err(error) => {
+            print_line(&format!("guard {name}: FAILED: {error}"));
+            failed.push(name.to_owned());
+        }
+    }
 }
 
 fn run_terrain_base_layer(repo_root: &Path, failed: &mut Vec<String>) {

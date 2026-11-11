@@ -95,6 +95,10 @@ pub struct AutomationStatus {
     pub mission_state: Option<MissionState>,
     /// Typed intent frames submitted to the session engine.
     pub frames_sent: u64,
+    /// The running digest of the wire bytes of every intent frame sent,
+    /// in order: two runs that send the same frames end with the same
+    /// digest.
+    pub frame_digest: [u8; 32],
     /// `FrameRejected` notices received back for submitted frames.
     pub frames_rejected: u64,
     /// The engine closed this principal's connection.

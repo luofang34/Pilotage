@@ -349,4 +349,5 @@ impl PayloadChannel {
 }
 
 #[cfg(test)]
+#[cfg(feature = "net")]
 mod tests;

@@ -16,6 +16,7 @@ impl PartialEq for PayloadWrite {
 impl PayloadWrite {
     /// Revalidate and perform one nonblocking write while authority cannot change.
     /// Readiness waits must complete before this method is called.
+    #[cfg(feature = "net")]
     pub(crate) fn write(
         &self,
         expected: usize,
