@@ -39,6 +39,7 @@ members = [
     "crates/pilotage-xplane-trial",
     "crates/pilotage-control",
     "crates/pilotage-control-feel",
+    "crates/pilotage-flight-uplink",
     "crates/pilotage-flight-quality",
     "crates/pilotage-durable-storage",
     "crates/pilotage-tuning-feedback",
@@ -181,6 +182,7 @@ pilotage-presentation = { path = "crates/pilotage-presentation" }
 pilotage-trial = { path = "crates/pilotage-trial" }
 pilotage-xplane-trial = { path = "crates/pilotage-xplane-trial" }
 pilotage-control-feel = { path = "crates/pilotage-control-feel" }
+pilotage-flight-uplink = { path = "crates/pilotage-flight-uplink" }
 pilotage-flight-quality = { path = "crates/pilotage-flight-quality" }
 pilotage-durable-storage = { path = "crates/pilotage-durable-storage" }
 pilotage-tuning-feedback = { path = "crates/pilotage-tuning-feedback" }

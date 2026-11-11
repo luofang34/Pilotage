@@ -9,6 +9,10 @@
 //! yaw, the yaw stick is a rate demand integrated on the ground into an
 //! absolute heading setpoint (Aviate's velocity mode takes absolute
 //! yaw), and throttle is a climb-rate demand.
+//!
+//! The sans-IO `pilotage_flight_uplink::UplinkPolicy` decides every
+//! frame. This module adds the UDP socket, the monotonic clock, and the
+//! count of refused sends.
 
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
@@ -16,12 +20,10 @@ use std::time::{Duration, Instant};
 use tracing::{info, warn};
 
 use pilotage_control_feel::{FeelDigest, FlightFeelProfile, ValidatedFlightFeelProfile};
-use pilotage_mavlink::codec::{encode_arm_command, encode_velocity_setpoint};
+use pilotage_flight_uplink::{ActivationStep, StickFrame, UplinkPolicy};
 
-mod control;
 mod direct;
 mod fc_replies;
-mod feel;
 #[cfg(test)]
 mod tests;
 
@@ -29,15 +31,6 @@ pub use direct::{
     ATTITUDE_SETPOINT_FRAME_BYTES, ExactDirectError, ExactDirectSetpoint, SimulatorDirectAuthority,
     TransmittedDirectSetpoint,
 };
-
-/// Longest believable gap between control frames when integrating the
-/// yaw-rate stick; anything longer is a stall, not a dt.
-pub(crate) const MAX_DT_S: f32 = 0.1;
-/// Stick frames are suppressed this long after an arm/disarm send: the
-/// FC stages inbound commands in a single slot, so a setpoint arriving
-/// in the same poll batch would overwrite the arm before the control
-/// loop consumes it.
-const ARM_QUIET: Duration = Duration::from_millis(150);
 
 /// The uplink's time source. Production reads the system monotonic clock;
 /// tests substitute a manually advanced instant so timing behavior (the
@@ -60,37 +53,16 @@ impl UplinkClock {
     }
 }
 
-/// How often a latched hold is repeated: well inside the FC's 500 ms
-/// command timeout.
-const HOLD_KEEPALIVE: Duration = Duration::from_millis(100);
-
-/// The UDP MAVLink command uplink to the FC.
+/// The UDP MAVLink command uplink to the FC: the socket and the clock
+/// around the sans-IO [`UplinkPolicy`], which decides every frame.
 #[derive(Debug)]
 pub struct FlightUplink {
     socket: UdpSocket,
     target: SocketAddr,
-    seq: u8,
-    heading_sp_rad: f32,
-    heading_valid: bool,
-    last_frame: Option<Instant>,
-    quiet_until: Option<Instant>,
-    // Motors-idle gate: after arm, no velocity setpoints stream until
-    // the first deliberate climb input. Streaming vz=0 to a grounded
-    // vehicle commands "hold zero vertical velocity" at near-hover
-    // thrust, which tips it over — real drones idle until the first
-    // climb, so this does too.
-    airborne: bool,
-    // Brake-then-hold state: the captured hold point while every stick
-    // is centered.
-    hold_pos_ned: Option<[f32; 3]>,
-    // When the link-loss hold last reached the FC.
-    last_hold: Option<Instant>,
-    feel: feel::UplinkFeel,
+    policy: UplinkPolicy,
     started: Instant,
     clock: UplinkClock,
     send_failures: u64,
-    expected_system_id: u8,
-    expected_component_id: u8,
 }
 
 impl FlightUplink {
@@ -151,20 +123,10 @@ impl FlightUplink {
         Ok(Self {
             socket,
             target,
-            seq: 0,
-            heading_sp_rad: 0.0,
-            heading_valid: false,
-            last_frame: None,
-            last_hold: None,
-            quiet_until: None,
-            airborne: false,
-            hold_pos_ned: None,
-            feel: feel::UplinkFeel::new(profile),
+            policy: UplinkPolicy::new(profile),
             started: Instant::now(),
             clock: UplinkClock::System,
             send_failures: 0,
-            expected_system_id: 1,
-            expected_component_id: 1,
         })
     }
 
@@ -177,7 +139,7 @@ impl FlightUplink {
 
     /// Advances the manual clock; a no-op on the system clock.
     #[cfg(test)]
-    pub(crate) fn advance_clock(&mut self, dt: std::time::Duration) {
+    pub(crate) fn advance_clock(&mut self, dt: Duration) {
         if let UplinkClock::Manual(at) = &mut self.clock {
             *at += dt;
         }
@@ -187,6 +149,11 @@ impl FlightUplink {
         self.clock.now()
     }
 
+    /// The policy time: the monotonic time since the uplink started.
+    fn elapsed(&self) -> Duration {
+        self.clock.now().saturating_duration_since(self.started)
+    }
+
     /// The FC command endpoint every uplink frame is addressed to.
     pub const fn command_endpoint(&self) -> SocketAddr {
         self.target
@@ -194,10 +161,11 @@ impl FlightUplink {
 
     /// Selects the MAVLink system/component whose replies may affect state.
     pub fn set_expected_source(&mut self, system_id: u8, component_id: u8) {
-        self.expected_system_id = system_id;
-        self.expected_component_id = component_id;
+        self.policy.set_target(system_id, component_id);
     }
 
+    /// Sends one frame. A refused send counts, and the count is logged
+    /// on the first refusal and on every hundredth.
     fn send(&mut self, frame: &[u8]) {
         if self.socket.send_to(frame, self.target).is_err() {
             self.send_failures = self.send_failures.wrapping_add(1);
@@ -209,83 +177,137 @@ impl FlightUplink {
                 );
             }
         }
-        self.seq = self.seq.wrapping_add(1);
     }
 
     /// Arms and re-seeds heading from the measured yaw.
     pub fn send_arm(&mut self, current_yaw_rad: f32) {
-        self.heading_sp_rad = if current_yaw_rad.is_finite() {
-            current_yaw_rad
-        } else {
-            0.0
-        };
-        self.heading_valid = current_yaw_rad.is_finite();
-        self.send_arm_command(true);
+        let frame = self.policy.arm(self.elapsed(), current_yaw_rad);
+        self.send(&frame);
+        info!(arm = true, "sent arm command to FC");
     }
 
     /// Disarms without requiring a measurement that may have failed.
     pub fn send_disarm(&mut self) {
-        self.send_arm_command(false);
-    }
-
-    fn send_arm_command(&mut self, arm: bool) {
-        self.reset_temporal_state();
-        self.quiet_until = Some(self.clock.now() + ARM_QUIET);
-        self.airborne = false;
-        let frame = encode_arm_command(
-            self.seq,
-            arm,
-            self.expected_system_id,
-            self.expected_component_id,
-        );
+        let frame = self.policy.disarm(self.elapsed());
         self.send(&frame);
-        info!(arm, "sent arm command to FC");
+        info!(arm = false, "sent arm command to FC");
     }
 
     /// Sends a zero-velocity setpoint holding the current heading — the
     /// link-loss neutralize action (the FC's velocity mode brakes to a
     /// hover on zero demand).
     pub fn send_neutral(&mut self) {
-        self.last_hold = Some(self.clock.now());
-        let time_boot_ms = self
-            .clock
-            .now()
-            .saturating_duration_since(self.started)
-            .as_millis() as u32;
-        let frame = encode_velocity_setpoint(
-            self.seq,
-            time_boot_ms,
-            [0.0; 3],
-            self.heading_sp_rad,
-            self.expected_system_id,
-            self.expected_component_id,
-        );
+        let frame = self.policy.neutral(self.elapsed());
         self.send(&frame);
     }
 
-    /// Repeats the link-loss hold while a latch holds the vehicle. The FC
-    /// treats a command older than its 500 ms timeout as a lost uplink and
-    /// descends, so one zero-velocity setpoint is not a hover: the hold has
-    /// to keep arriving until the host clears the latch. Nothing is sent
-    /// to a vehicle that has not taken off.
+    /// Repeats the link-loss hold while a latch holds the vehicle; see
+    /// [`UplinkPolicy::keep_holding`].
     pub(crate) fn keep_holding(&mut self) {
-        if !self.airborne {
-            return;
-        }
-        let now = self.clock.now();
-        if self
-            .last_hold
-            .is_none_or(|at| now.saturating_duration_since(at) >= HOLD_KEEPALIVE)
-        {
-            self.send_neutral();
+        if let Some(frame) = self.policy.keep_holding(self.elapsed()) {
+            self.send(&frame);
         }
     }
 
-    /// The socket's local address, for tests.
+    /// Prepares one neutral control-feel activation.
+    ///
+    /// `Ok(false)` means that the active command sequence is not ready.
+    /// `Ok(true)` means that the adapter can commit the candidate.
+    pub(crate) fn prepare_control_feel_activation(
+        &mut self,
+        current_yaw_rad: f32,
+    ) -> Result<bool, &'static str> {
+        match self
+            .policy
+            .prepare_control_feel_activation(self.elapsed(), current_yaw_rad)?
+        {
+            ActivationStep::NotReady => Ok(false),
+            ActivationStep::Ready => Ok(true),
+            ActivationStep::Send { frame, prior } => {
+                let failures_before = self.send_failures;
+                self.send(&frame);
+                if self.send_failures != failures_before {
+                    self.policy.restore_heading(prior);
+                    return Err("the neutral activation setpoint was not sent");
+                }
+                Ok(true)
+            }
+        }
+    }
+
+    /// Sends one direct attitude and thrust setpoint.
+    pub fn send_attitude_frame(
+        &mut self,
+        roll_rad: f32,
+        pitch_rad: f32,
+        yaw_rad: f32,
+        thrust_norm: f32,
+    ) -> bool {
+        let heading = self.policy.heading().heading_rad;
+        self.send_attitude_frame_seeded(
+            roll_rad,
+            pitch_rad,
+            yaw_rad,
+            thrust_norm,
+            [0.0, 0.0, heading],
+        )
+    }
+
+    /// Sends one direct setpoint and seeds a new direct mode from measured attitude.
+    pub(crate) fn send_attitude_frame_seeded(
+        &mut self,
+        roll_rad: f32,
+        pitch_rad: f32,
+        yaw_rad: f32,
+        thrust_norm: f32,
+        seed_attitude_rad: [f32; 3],
+    ) -> bool {
+        let outcome = self.policy.attitude_frame(
+            self.elapsed(),
+            [roll_rad, pitch_rad, yaw_rad],
+            thrust_norm,
+            seed_attitude_rad,
+        );
+        if let Some(frame) = outcome.frame {
+            self.send(&frame);
+        }
+        outcome.constrained
+    }
+
+    /// Shapes one normalized stick frame and sends a velocity or hold setpoint.
+    #[allow(clippy::too_many_arguments)]
+    pub fn send_stick_frame(
+        &mut self,
+        roll: f32,
+        pitch: f32,
+        throttle: f32,
+        yaw: f32,
+        current_yaw_rad: f32,
+        current_pos_ned_m: [f32; 3],
+        current_vel_ned_mps: Option<[f32; 3]>,
+        current_accel_ned_mps2: Option<[f32; 3]>,
+    ) -> bool {
+        let stick = StickFrame {
+            roll,
+            pitch,
+            throttle,
+            yaw,
+            current_yaw_rad,
+            current_pos_ned_m,
+            current_vel_ned_mps,
+            current_accel_ned_mps2,
+        };
+        let outcome = self.policy.stick_frame(self.elapsed(), &stick);
+        if let Some(frame) = outcome.frame {
+            self.send(&frame);
+        }
+        outcome.constrained
+    }
+
     /// The MAVLink (system, component) identity this uplink accepts FC
     /// reports from — the provenance identity for those reports.
     pub fn expected_source(&self) -> (u8, u8) {
-        (self.expected_system_id, self.expected_component_id)
+        self.policy.target()
     }
 
     /// Wrapping count of datagrams the socket refused to send. A safety
@@ -296,47 +318,42 @@ impl FlightUplink {
         self.send_failures
     }
 
-    /// Invalidates any captured position-hold context. A link-loss
-    /// transition MUST call this: the hold point was captured under the
-    /// lost lease, and the vehicle may have drifted arbitrarily far while
-    /// neutralized, so a hold surviving the loss would command recovery
-    /// back toward an obsolete point the instant control resumes.
+    /// Invalidates any captured position-hold context; see
+    /// [`UplinkPolicy::clear_hold_state`].
     pub fn clear_hold_state(&mut self) {
-        self.reset_temporal_state();
+        self.policy.clear_hold_state();
     }
 
     /// Clears all command state after a vehicle or simulator reset.
     pub fn reset_for_vehicle_reset(&mut self) {
-        self.reset_temporal_state();
-        self.airborne = false;
-        self.quiet_until = None;
-        self.heading_valid = false;
+        self.policy.reset_for_vehicle_reset();
     }
 
     /// Whether a position-hold point is currently captured, for tests.
     #[cfg(test)]
     pub(crate) fn hold_captured(&self) -> bool {
-        self.hold_pos_ned.is_some()
+        self.policy.hold_point().is_some()
     }
 
     /// Plants a captured hold point, for tests exercising the stale-hold
     /// invalidation contract without flying a full trajectory.
     #[cfg(test)]
     pub(crate) fn seed_hold_for_test(&mut self, pos_ned_m: [f32; 3]) {
-        self.hold_pos_ned = Some(pos_ned_m);
+        self.policy.seed_hold(pos_ned_m);
     }
 
     /// Returns the heading state for activation rollback tests.
     #[cfg(test)]
     pub(crate) const fn heading_state_for_test(&self) -> (f32, bool) {
-        (self.heading_sp_rad, self.heading_valid)
+        let heading = self.policy.heading();
+        (heading.heading_rad, heading.valid)
     }
 
     /// Expires the post-arm quiet window immediately, so tests advance
     /// past it deterministically instead of sleeping wall-clock time.
     #[cfg(test)]
     pub(crate) fn expire_quiet_for_test(&mut self) {
-        self.quiet_until = None;
+        self.policy.expire_quiet();
     }
 
     /// The local socket address this uplink receives FC replies on.
@@ -355,23 +372,16 @@ impl FlightUplink {
     }
 
     pub(crate) fn envelope(&self) -> pilotage_control_feel::DemandEnvelope {
-        self.feel.envelope()
+        self.policy.envelope()
     }
 
     pub(crate) fn install_profile(&mut self, profile: ValidatedFlightFeelProfile) {
-        self.reset_temporal_state();
-        self.feel.install(profile);
+        self.policy.install_profile(profile);
     }
 
     #[cfg(test)]
     pub(crate) fn active_profile_for_test(&self) -> &ValidatedFlightFeelProfile {
-        self.feel.validated_profile()
-    }
-
-    fn reset_temporal_state(&mut self) {
-        self.last_frame = None;
-        self.hold_pos_ned = None;
-        self.feel.reset();
+        self.policy.profile()
     }
 }
 

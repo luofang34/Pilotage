@@ -22,9 +22,8 @@ impl FlightUplink {
             messages.clear();
             pilotage_mavlink::codec::parse_datagram(buf.get(..len).unwrap_or(&[]), &mut messages);
             for (source, message) in &messages {
-                if source.system_id != self.expected_system_id
-                    || source.component_id != self.expected_component_id
-                {
+                let (system_id, component_id) = self.policy.target();
+                if source.system_id != system_id || source.component_id != component_id {
                     continue;
                 }
                 match *message {

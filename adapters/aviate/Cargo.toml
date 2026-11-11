@@ -14,6 +14,7 @@ aviate-xil-shm = { workspace = true, optional = true }
 getrandom = { version = "0.3.4", features = ["std"] }
 pilotage-adapter-api = { workspace = true }
 pilotage-control-feel = { workspace = true }
+pilotage-flight-uplink = { workspace = true }
 pilotage-geo = { workspace = true }
 pilotage-mavlink = { workspace = true }
 pilotage-sim-video = { workspace = true, optional = true }
@@ -24,6 +25,7 @@ tokio = { workspace = true, features = ["net", "rt", "sync", "time", "macros"] }
 tracing = { workspace = true }
 
 [dev-dependencies]
+pilotage-flight-uplink = { workspace = true, features = ["test-support"] }
 pilotage-control-web = { path = "../../clients/web-control" }
 pilotage-input = { workspace = true }
 serde = { workspace = true }

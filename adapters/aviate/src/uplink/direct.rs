@@ -16,7 +16,7 @@
 use std::net::SocketAddr;
 
 use pilotage_control_feel::DemandEnvelope;
-use pilotage_mavlink::codec::{AttitudeTargetKind, encode_attitude_target};
+use pilotage_flight_uplink::DirectRefusal;
 use thiserror::Error;
 
 use crate::adapter::AviateProfile;
@@ -208,24 +208,25 @@ impl FlightUplink {
         setpoint: ExactDirectSetpoint,
     ) -> Result<TransmittedDirectSetpoint, ExactDirectError> {
         authority.require_simulation()?;
-        setpoint.validate(self.feel.envelope())?;
-        let now = self.clock.now();
-        if self.in_quiet_interval(now) {
-            return Err(ExactDirectError::QuietInterval);
-        }
-        if !self.airborne {
-            return Err(ExactDirectError::StreamClosed);
-        }
-        let sequence = self.seq;
-        let time_boot_ms = self.time_boot_ms();
-        let frame = encode_attitude_target(
-            sequence,
-            time_boot_ms,
-            AttitudeTargetKind::from_euler(setpoint.roll_rad, setpoint.pitch_rad, setpoint.yaw_rad),
-            setpoint.collective_force,
-            self.expected_system_id,
-            self.expected_component_id,
-        );
+        setpoint.validate(self.policy.envelope())?;
+        let direct = self
+            .policy
+            .exact_attitude_frame(
+                self.elapsed(),
+                [setpoint.roll_rad, setpoint.pitch_rad, setpoint.yaw_rad],
+                setpoint.collective_force,
+            )
+            .map_err(|refusal| match refusal {
+                DirectRefusal::QuietInterval => ExactDirectError::QuietInterval,
+                DirectRefusal::StreamClosed => ExactDirectError::StreamClosed,
+            })?;
+        let frame: [u8; ATTITUDE_SETPOINT_FRAME_BYTES] = direct
+            .frame
+            .as_slice()
+            .try_into()
+            .map_err(|_| ExactDirectError::SendRefused {
+                endpoint: self.target,
+            })?;
         let failures_before = self.send_failures;
         self.send(&frame);
         if self.send_failures != failures_before {
@@ -233,12 +234,13 @@ impl FlightUplink {
                 endpoint: self.target,
             });
         }
+        let (system_id, component_id) = self.policy.target();
         Ok(TransmittedDirectSetpoint {
             setpoint,
-            sequence,
-            time_boot_ms,
-            system_id: self.expected_system_id,
-            component_id: self.expected_component_id,
+            sequence: direct.sequence,
+            time_boot_ms: direct.time_boot_ms,
+            system_id,
+            component_id,
             endpoint: self.target,
             frame,
         })
@@ -252,7 +254,7 @@ impl FlightUplink {
     /// reachable instead of being worked around with a shaped frame.
     pub fn open_setpoint_stream(&mut self, authority: &SimulatorDirectAuthority) {
         if authority.require_simulation().is_ok() {
-            self.airborne = true;
+            self.policy.open_setpoint_stream();
         }
     }
 }

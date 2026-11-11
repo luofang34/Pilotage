@@ -2004,6 +2004,7 @@ dependencies = [
  "pilotage-adapter-api",
  "pilotage-control-feel",
  "pilotage-control-web",
+ "pilotage-flight-uplink",
  "pilotage-geo",
  "pilotage-input",
  "pilotage-mavlink",
@@ -2290,6 +2291,15 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+]
+
+[[package]]
+name = "pilotage-flight-uplink"
+version = "0.1.0"
+dependencies = [
+ "pilotage-control-feel",
+ "pilotage-mavlink",
+ "tracing",
 ]
 
 [[package]]
