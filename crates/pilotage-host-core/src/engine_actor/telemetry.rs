@@ -304,6 +304,7 @@ fn sim_truth_to_wire(sample: SimTruthSample) -> wire::SimTruthState {
 fn fc_state_to_wire(sample: FcStateSample) -> wire::FcState {
     wire::FcState {
         arm_state: sample.arm_state,
+        ready_to_arm: sample.ready_to_arm,
         landed_state: sample
             .landed_state
             .map(|landed| wire::LandedStateObservation {
