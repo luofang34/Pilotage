@@ -240,3 +240,48 @@ fn a_missing_required_file_is_refused_before_any_other_check() {
             .all(|r| r.contains("required terrain file is missing"))
     );
 }
+
+#[test]
+fn source_order_is_the_file_order_not_the_key_order() {
+    let style = br#"{"version": 8, "sources": {"zeta": {"url": "z"}, "alpha": {"url": "a"}}}"#;
+    assert_eq!(super::order::source_order(style), ["zeta", "alpha"]);
+    assert!(super::order::source_order(b"{}").is_empty());
+    assert!(super::order::source_order(b"not json").is_empty());
+}
+
+/// A copy of the detail source under `name`, with the text that follows
+/// the detail source in the style.
+fn detail_copy(name: &str) -> String {
+    format!(
+        "\"{name}\": {{\n      \"type\": \"raster-dem\",\n      \"url\": \"__PILOTAGE_TERRAIN_MBTILES_URL__\",\n      \"tileSize\": 256,\n      \"encoding\": \"terrarium\",\n      \"maxzoom\": 13,\n      \"minzoom\": 6\n    }}"
+    )
+}
+
+/// The guard takes the first qualifying detail source in file order, as
+/// jq's `to_entries` does, not the first in key order: a second source
+/// whose name sorts first changes the choice only when it also comes
+/// first in the file.
+#[test]
+fn the_first_detail_source_in_the_file_is_the_detail_source() {
+    let after = Fixture::new("detail_after");
+    after.replace(
+        STYLE,
+        "      \"minzoom\": 6\n    }\n  },",
+        &format!(
+            "      \"minzoom\": 6\n    }},\n    {}\n  }},",
+            detail_copy("a-terrain-detail")
+        ),
+    );
+    assert_eq!(after.refusals(), Vec::<String>::new());
+
+    let before = Fixture::new("detail_before");
+    before.replace(
+        STYLE,
+        "    \"pilotage-terrain-detail\": {",
+        &format!(
+            "    {},\n    \"pilotage-terrain-detail\": {{",
+            detail_copy("a-terrain-detail")
+        ),
+    );
+    before.assert_refused("a-terrain-detail");
+}
