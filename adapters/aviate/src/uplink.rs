@@ -59,6 +59,8 @@ pub struct FlightUplink {
     arm_ack: Option<pilotage_adapter_api::FcCommandAck>,
     /// The MAV_TYPE of the FC's last heartbeat on this link.
     fc_mav_type: Option<u8>,
+    /// The MAV_STATE of the FC's last heartbeat on this link.
+    fc_system_status: Option<u8>,
 }
 
 impl FlightUplink {
@@ -164,6 +166,7 @@ impl FlightUplink {
             arm_sent: None,
             arm_ack: None,
             fc_mav_type: None,
+            fc_system_status: None,
         }
     }
 

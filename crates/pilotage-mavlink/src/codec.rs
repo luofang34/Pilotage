@@ -18,7 +18,7 @@ mod heading_altitude;
 pub use camera::{
     CAMERA_INFORMATION_ID, CAMERA_SETTINGS_ID, CameraMessage, MAV_CMD_SET_CAMERA_ZOOM,
 };
-pub use flight_state::{EXTENDED_SYS_STATE_ID, GLOBAL_POSITION_INT_ID, LandedState};
+pub use flight_state::{EXTENDED_SYS_STATE_ID, GLOBAL_POSITION_INT_ID, LandedState, ready_to_arm};
 pub use gimbal_manager::{
     GIMBAL_MANAGER_INFORMATION_ID, GIMBAL_MANAGER_STATUS_ID, GimbalManagerInformation,
     GimbalManagerStatus,
@@ -134,6 +134,8 @@ pub enum FcMessage {
         autopilot: u8,
         /// MAV_TYPE of the sender: the airframe it says it flies.
         mav_type: u8,
+        /// MAV_STATE of the sender: booting, ready, armed, or failed.
+        system_status: u8,
     },
     /// ArduPilot's EKF health summary (ardupilotmega EKF_STATUS_REPORT).
     /// The message has no timestamp of its own.

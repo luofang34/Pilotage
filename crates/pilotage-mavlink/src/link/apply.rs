@@ -344,12 +344,14 @@ fn apply_message(latest: &mut LinkState, message: FcMessage, now: Instant) {
             custom_mode,
             autopilot,
             mav_type,
+            system_status,
         } => {
             latest.last_heartbeat = Some(now);
             latest.heartbeat_armed = Some(armed);
             latest.fc_reports.custom_mode = Some(custom_mode);
             latest.fc_reports.autopilot = Some(autopilot);
             latest.fc_reports.mav_type = Some(mav_type);
+            latest.fc_reports.system_status = Some(system_status);
         }
         FcMessage::EkfStatusReport { flags } => apply_ekf_status(latest, flags, now),
         FcMessage::StatusText { severity, text } => {

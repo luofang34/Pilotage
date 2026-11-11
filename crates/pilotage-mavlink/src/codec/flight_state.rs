@@ -31,3 +31,18 @@ impl LandedState {
         }
     }
 }
+
+/// Whether a flight controller whose HEARTBEAT `system_status` (MAV_STATE)
+/// is `system_status` would accept an arm now: `Some(true)` once it stands
+/// by or is active, `Some(false)` while it boots, calibrates, or reports a
+/// failure, and `None` for an uninitialized or unknown state.
+#[must_use]
+pub const fn ready_to_arm(system_status: u8) -> Option<bool> {
+    match system_status {
+        // STANDBY, ACTIVE.
+        3 | 4 => Some(true),
+        // BOOT, CALIBRATING, CRITICAL, EMERGENCY, POWEROFF, FLIGHT_TERMINATION.
+        1 | 2 | 5..=8 => Some(false),
+        _ => None,
+    }
+}

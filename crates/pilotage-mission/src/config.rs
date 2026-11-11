@@ -178,6 +178,12 @@ pub struct MissionConfig {
     /// the turn ahead of a fly-by waypoint, and with the true airspeed the
     /// orbit after the plan. Default [`crate::DEFAULT_ORBIT_BANK_DEG`].
     pub route_bank_deg: f64,
+    /// Whether the arm request waits for a vehicle status that says the
+    /// vehicle is ready to arm; see [`crate::VehicleStatus`]. A host that
+    /// feeds vehicle status sets it, so no arm goes to a flight controller
+    /// still starting up. Default false: a host that feeds no status gets
+    /// the arm request at once.
+    pub arm_when_vehicle_ready: bool,
 }
 
 impl MissionConfig {
@@ -229,6 +235,7 @@ impl MissionConfig {
             capture_time_s: 2.0,
             terminal_orbit: TerminalOrbit::default(),
             route_bank_deg: crate::DEFAULT_ORBIT_BANK_DEG,
+            arm_when_vehicle_ready: false,
         }
     }
 }

@@ -137,6 +137,7 @@ pub(super) fn fc_state_sample(
         landed_state: None,
         motor_state: None,
         arm_state: if report.armed { 2 } else { 1 },
+        ready_to_arm: None,
         // The uplink pairs the FC's COMMAND_ACK with the arm or disarm it
         // sent last; until that ack arrives the lane stays empty.
         last_command: arm_ack,
@@ -158,4 +159,21 @@ pub(super) fn fc_state_sample(
             clock: MeasurementClock::HostMonotonic,
         }),
     })
+}
+
+impl super::AviateAdapter {
+    /// Whether the FC reports it would accept an arm now, from the state in
+    /// its last heartbeat: the one on the command link, or else the one on
+    /// the telemetry link. `None` before either states a readiness.
+    pub(super) fn fc_ready_to_arm(&self) -> Option<bool> {
+        let status = self
+            .uplink
+            .as_ref()
+            .and_then(crate::uplink::FlightUplink::fc_system_status)
+            .or_else(|| {
+                let source = self.estimate.as_ref()?;
+                source.state.lock().ok()?.fc_reports.system_status
+            })?;
+        pilotage_mavlink::codec::ready_to_arm(status)
+    }
 }

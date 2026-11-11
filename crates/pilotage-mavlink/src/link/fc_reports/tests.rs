@@ -86,6 +86,7 @@ fn heartbeat_records_the_mode_and_autopilot() {
             custom_mode: 4,
             autopilot: 3,
             mav_type: 1,
+            system_status: 0,
         },
     );
 

@@ -78,6 +78,10 @@ impl MissionEngine {
             }
             state = self.state();
         }
+        let action = match action {
+            Some(arm) => self.gate_arm(arm, now, &mut events),
+            None => self.release_held_arm(now, &mut events),
+        };
         let intent = self.intent_for_state(state, solution.as_ref(), now, &mut events);
         MissionOutput {
             intent,
@@ -154,6 +158,7 @@ impl MissionEngine {
         self.core_failed = true;
         self.active_action = None;
         self.outstanding_arm = None;
+        self.drop_held_arm();
         events.push(MissionEvent::MissionEngineRefused { detail });
     }
 
@@ -200,6 +205,7 @@ impl MissionEngine {
                 CoreEvent::Terminal { result } => {
                     self.active_action = None;
                     self.outstanding_arm = None;
+                    self.drop_held_arm();
                     match result {
                         CoreTerminal::Complete { .. } => {
                             events.push(MissionEvent::MissionComplete);
@@ -226,6 +232,7 @@ impl MissionEngine {
             MissionState::Climb => self.climb_intent(solution),
             MissionState::Enroute => self.follow_plan_intent(solution, now, events),
             MissionState::Complete => self.end_of_plan_intent(solution, now, events),
+            MissionState::Arming if self.arm_request_sent() => self.arming_intent(solution),
             MissionState::AwaitSolution
             | MissionState::Arming
             | MissionState::Held
@@ -246,25 +253,28 @@ impl MissionEngine {
     }
 
     fn climb_intent(&self, solution: Option<&NavigationSolution>) -> Option<ControlIntent> {
-        let solution = solution?;
         let Some(CoreFlightAction::Climb { target_altitude_m }) = self.active_action.as_ref()
         else {
             return None;
         };
-        if solution.position.altitude_m >= *target_altitude_m - CLIMB_CAPTURE_MARGIN_M {
-            return None;
+        climb_toward(&self.config, solution?, *target_altitude_m)
+    }
+
+    /// The intent streamed from the arm request on, so the flight
+    /// controller has a command the moment it arms instead of none until
+    /// the arm's confirmation comes back: the climb that follows the arm,
+    /// or, with no climb to fly, the hold of the present course and height.
+    fn arming_intent(&self, solution: Option<&NavigationSolution>) -> Option<ControlIntent> {
+        let target_altitude_m = self.config.anchor.altitude_m + self.config.cruise_height_m;
+        if self.config.cruise_height_m > 0.0
+            && let Some(climb) = climb_toward(&self.config, solution?, target_altitude_m)
+        {
+            return Some(climb);
         }
-        let up_mps = clamp_symmetric(
-            self.config.climb_rate_mps,
-            self.config.limits.max_vertical_mps,
-        );
-        Some(ControlIntent::Velocity(VelocityIntent {
-            frame: ReferenceFrame::BodyFrd,
-            vx: 0.0,
-            vy: 0.0,
-            vz: -up_mps as f32,
-            yaw_rate: 0.0,
-        }))
+        // A hold with no known heading would be a body-frame command with
+        // nothing to rotate it by; the stream waits for a heading.
+        self.last_yaw_rad?;
+        Some(outputs::zero_velocity_intent())
     }
 
     fn climb_is_captured(&self, solution: Option<&NavigationSolution>) -> bool {
@@ -437,4 +447,24 @@ impl MissionEngine {
             self.config.yaw_gain_per_s,
         )
     }
+}
+
+/// The climb toward `target_altitude_m`, or `None` once the vehicle is
+/// within the capture margin of it.
+fn climb_toward(
+    config: &crate::MissionConfig,
+    solution: &NavigationSolution,
+    target_altitude_m: f64,
+) -> Option<ControlIntent> {
+    if solution.position.altitude_m >= target_altitude_m - CLIMB_CAPTURE_MARGIN_M {
+        return None;
+    }
+    let up_mps = clamp_symmetric(config.climb_rate_mps, config.limits.max_vertical_mps);
+    Some(ControlIntent::Velocity(VelocityIntent {
+        frame: ReferenceFrame::BodyFrd,
+        vx: 0.0,
+        vy: 0.0,
+        vz: -up_mps as f32,
+        yaw_rate: 0.0,
+    }))
 }
