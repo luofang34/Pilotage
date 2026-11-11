@@ -70,11 +70,17 @@ fn a_loaded_mission_opens_its_session_and_builds_its_engine() {
         core.status().mission_state,
         Some(pilotage_mission::MissionState::AwaitSolution)
     );
-    // The engine says, once, that it waits for the vehicle before the arm.
+    // The engine says that it waits before the arm, and the holder's
+    // frames meet an adapter with no measurement yet: nothing else.
     assert!(core.drain_events().iter().all(|event| matches!(
         event,
         HostEvent::Mission(pilotage_mission::MissionEvent::StartWithheld { .. })
+            | HostEvent::FrameRejected
     )));
+    assert!(
+        core.status().frames_sent > 0,
+        "the holder frames while it waits"
+    );
     assert_eq!(core.declared_start(), config().mission.anchor);
 }
 

@@ -20,6 +20,9 @@ use pilotage_protocol::VehicleClass;
 use web_time::Instant;
 
 const CAPTURE: &str = include_str!("fixtures/aviate-c172-link-15s.txt");
+/// The closed-loop power-up run's traffic with the board kept in BOOT for
+/// 8 s (its heartbeats rewritten, the recorded arm's answer removed).
+const BOOT_8S: &str = include_str!("fixtures/aviate-c172-boot-8s.txt");
 const LAT_DEG: f64 = 41.7;
 const LON_DEG: f64 = -1.07;
 const ALT_M: f64 = 2050.0;
@@ -56,9 +59,9 @@ fn plan() -> WaypointPlan {
     ])
 }
 
-/// The FC's datagrams of the capture, with their times.
-fn from_fc() -> Vec<(u64, Vec<u8>)> {
-    CAPTURE
+/// The FC's datagrams of `capture`, with their times.
+fn from_fc(capture: &str) -> Vec<(u64, Vec<u8>)> {
+    capture
         .lines()
         .filter_map(|line| {
             let mut parts = line.split_whitespace();
@@ -85,6 +88,10 @@ struct Replay {
 }
 
 fn replay(load_at_ns: u64) -> Replay {
+    replay_of(CAPTURE, load_at_ns)
+}
+
+fn replay_of(capture: &str, load_at_ns: u64) -> Replay {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_test_writer()
@@ -103,7 +110,7 @@ fn replay(load_at_ns: u64) -> Replay {
             events.extend(core.drain_events().into_iter().map(|event| (at, event)));
         }
     };
-    for (at, datagram) in from_fc() {
+    for (at, datagram) in from_fc(capture) {
         if !loaded && at >= load_at_ns {
             run_to(&mut core, load_at_ns, &mut wake);
             core.load_mission(plan()).unwrap();
@@ -217,5 +224,42 @@ fn the_arm_waits_until_the_c172_reports_itself_ready() {
             HostEvent::ArmRefused | HostEvent::Mission(MissionEvent::MissionFailed { .. })
         )),
         "no arm is refused"
+    );
+}
+
+#[test]
+fn a_board_that_boots_for_eight_seconds_keeps_the_mission_alive_until_it_arms() {
+    // Loaded at power-up; the board says BOOT until 8 s, then STANDBY.
+    let Replay { sent, events, core } = replay_of(BOOT_8S, 0);
+    let requested = events
+        .iter()
+        .find(|(_, event)| matches!(event, HostEvent::Mission(MissionEvent::ArmRequested { .. })))
+        .map(|(at, _)| *at)
+        .expect("the core asked for the arm once the board was ready");
+    assert!(requested >= 8_000_000_000, "asked at {requested} ns");
+    // The holder frames through the whole wait, so the session never
+    // finds it silent and fences the mission.
+    let times: Vec<u64> = sent.iter().map(|(at, _)| *at).collect();
+    let longest_gap = times
+        .windows(2)
+        .map(|pair| pair[1] - pair[0])
+        .max()
+        .unwrap_or(u64::MAX);
+    assert!(
+        longest_gap <= 200_000_000,
+        "a {longest_gap} ns gap in the frames"
+    );
+    // A fenced principal stops framing; this one frames to the end. (The
+    // adapter refuses the first frames for want of a measurement before
+    // the board streams one; that is not a fence.)
+    let last = times.last().copied().unwrap_or_default();
+    assert!(last >= 14_900_000_000, "the frames stopped at {last} ns");
+    assert!(core.status().frames_sent > 250, "{:?}", core.status());
+    assert!(
+        !events.iter().any(|(_, event)| matches!(
+            event,
+            HostEvent::Mission(MissionEvent::MissionFailed { .. })
+        )),
+        "the mission did not fail"
     );
 }
