@@ -2315,6 +2315,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-host-core"
+version = "0.1.0"
+dependencies = [
+ "navigate-contract",
+ "pilotage-adapter-aviate",
+ "pilotage-control-feel",
+ "pilotage-mavlink",
+ "pilotage-mission",
+ "pilotage-protocol",
+ "thiserror",
+ "web-time",
+]
+
+[[package]]
 name = "pilotage-ingress"
 version = "0.1.0"
 

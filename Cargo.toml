@@ -70,6 +70,7 @@ members = [
     "clients/web-agent",
     "clients/apple-instrument-bridge",
     "crates/pilotage-aircraft",
+    "crates/pilotage-host-core",
 ]
 # The world-model camera links the maplibre-rs fork and its GPU stack; it
 # builds on its own so the workspace does not compile a renderer.
@@ -175,6 +176,7 @@ pilotage-adapter-dji = { path = "adapters/dji" }
 pilotage-dji-usb = { path = "adapters/dji-usb" }
 pilotage-session = { path = "crates/pilotage-session" }
 pilotage-mission = { path = "crates/pilotage-mission" }
+pilotage-host-core = { path = "crates/pilotage-host-core" }
 pilotage-decision = { path = "crates/pilotage-decision" }
 pilotage-client-link = { path = "crates/pilotage-client-link" }
 pilotage-coordination = { path = "crates/pilotage-coordination" }
