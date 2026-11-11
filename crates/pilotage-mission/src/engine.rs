@@ -6,6 +6,7 @@ mod document;
 mod holding_pattern;
 mod home;
 mod nav_guidance;
+mod navigation_display;
 mod onboard;
 mod output;
 mod ownship;
@@ -33,6 +34,9 @@ use pilotage_mission_core::{
 };
 
 pub use nav_guidance::{NavGuidance, NavQuality};
+pub use navigation_display::{
+    DisplayFix, DisplayWaypoint, LegDisplay, NavigationDisplay, ToFrom, WaypointProgress,
+};
 pub use output::{MissionAction, MissionCounters, MissionEvent, MissionOutput, MissionState};
 pub use vehicle_status::{
     LaunchDetection, StartWithheldReason, VEHICLE_STATUS_MAX_AGE_NS, VehicleStatus,

@@ -114,6 +114,11 @@ impl MissionEngine {
             .route
             .final_course_rad()
             .unwrap_or_else(|| course.rem_euclid(TAU));
+        // The wind along the inbound course makes the outbound leg slower
+        // or faster over the ground by twice as much as the inbound leg.
+        let tailwind_mps = wind.map_or(0.0, |[north, east]| {
+            north * inbound_course_rad.cos() + east * inbound_course_rad.sin()
+        });
         let mut fix = last.position;
         fix.altitude_m = altitude_m;
         let pattern = HoldingPattern {
@@ -127,13 +132,9 @@ impl MissionEngine {
                 self.config.route_bank_deg,
                 wind_mps,
             ),
+            leg_length_m: (airspeed_mps + tailwind_mps) * leg_time_s,
         };
         let frame = PatternFrame::new(&pattern)?;
-        // The wind along the inbound course makes the outbound leg slower
-        // or faster over the ground by twice as much as the inbound leg.
-        let tailwind_mps = wind.map_or(0.0, |[north, east]| {
-            north * inbound_course_rad.cos() + east * inbound_course_rad.sin()
-        });
         let outbound_time_s = leg_time_s * (airspeed_mps + tailwind_mps)
             / (airspeed_mps - tailwind_mps).max(0.25 * airspeed_mps);
         let mut flight = PatternFlight::new(
@@ -155,6 +156,21 @@ impl MissionEngine {
             flight,
             announced_entries: 0,
         })
+    }
+
+    /// The display leg of the holding pattern for a vehicle at `solution`.
+    pub(super) fn holding_pattern_leg(
+        &self,
+        solution: &NavigationSolution,
+    ) -> Option<super::navigation_display::LegDisplay> {
+        let active = self.holding_pattern.as_ref()?;
+        let status = self.holding_pattern()?;
+        let cross_track_m = active.frame.right_of_inbound_m(&solution.position);
+        Some(super::navigation_display::holding_leg(
+            solution,
+            &status,
+            cross_track_m,
+        ))
     }
 
     /// The course over the ground of `solution`, radians clockwise from

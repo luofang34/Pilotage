@@ -104,6 +104,7 @@ fn the_frame_puts_the_holding_side_at_positive_y_for_either_turn() {
         turn,
         leg_time_s: 60.0,
         turn_radius_m: 1_000.0,
+        leg_length_m: 3_000.0,
     };
     let right = PatternFrame::new(&pattern(HoldingTurn::Right)).unwrap();
     let left = PatternFrame::new(&pattern(HoldingTurn::Left)).unwrap();
@@ -113,6 +114,9 @@ fn the_frame_puts_the_holding_side_at_positive_y_for_either_turn() {
     assert!(close(right.point(&west), [-1_000.0, 0.0]));
     assert!((right.course(PI) - FRAC_PI_2).abs() < 1e-12);
     assert!((left.course(0.0) - FRAC_PI_2).abs() < 1e-12);
+    // South of an eastbound course is right of it, for either turn.
+    assert!((right.right_of_inbound_m(&south) - 1_000.0).abs() < 0.01);
+    assert!((left.right_of_inbound_m(&south) - 1_000.0).abs() < 0.01);
     let back = left.position([-1_000.0, 1_000.0]);
     assert!(close(left.point(&back), [-1_000.0, 1_000.0]));
     assert_eq!(back.altitude_m, 1_000.0);

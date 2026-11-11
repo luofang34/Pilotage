@@ -9,6 +9,8 @@
 
 #[path = "holding_pattern/aircraft.rs"]
 mod aircraft;
+#[path = "holding_pattern/display.rs"]
+mod display;
 
 use aircraft::{ALTITUDE_M, Aircraft, CLOCK, CRUISE_IAS_MPS, STEP_NANOS, STEP_S, anchor};
 use navigate_contract::MonotonicNanos;
@@ -16,8 +18,8 @@ use navigate_geodesy::NedOffset;
 use navigate_geodesy::wgs84::tangent_plane;
 use pilotage_mission::{
     ExecutionTarget, HoldingEntry, HoldingLeg, HoldingPattern, HoldingTurn, MissionConfig,
-    MissionEngine, MissionEvent, MissionState, OwnshipSample, OwnshipSource, PlannedWaypoint,
-    TruthRole, WaypointPlan, true_airspeed_for,
+    MissionEngine, MissionEvent, MissionState, NavigationDisplay, OwnshipSample, OwnshipSource,
+    PlannedWaypoint, TruthRole, WaypointPlan, true_airspeed_for,
 };
 use pilotage_protocol::{ControlAction, VehicleClass};
 
@@ -76,6 +78,7 @@ struct Sample {
     leg: Option<HoldingLeg>,
     circuits: u32,
     outbound_time_s: f64,
+    display: NavigationDisplay,
 }
 
 /// A closed-loop flight of one engine.
@@ -144,6 +147,7 @@ impl Run {
             outbound_time_s: status
                 .as_ref()
                 .map_or(f64::NAN, |status| status.outbound_time_s),
+            display: self.engine.navigation_display(),
         });
         self.aircraft.fly(output.intent.as_ref());
     }

@@ -105,6 +105,10 @@ pub struct HoldingPattern {
     pub leg_time_s: f64,
     /// The radius of the two turns over the ground, metres.
     pub turn_radius_m: f64,
+    /// The length of the inbound leg over the ground in the wind known
+    /// when the pattern started, metres: the leg time at the inbound
+    /// groundspeed.
+    pub leg_length_m: f64,
 }
 
 /// What a vehicle in a holding pattern flies now.
@@ -245,6 +249,13 @@ impl PatternFrame {
             ned.north_m * cos + ned.east_m * sin,
             self.side * (-ned.north_m * sin + ned.east_m * cos),
         ]
+    }
+
+    /// The distance of `position` right of the inbound course line through
+    /// the fix, metres.
+    pub(crate) fn right_of_inbound_m(&self, position: &GeodeticPosition) -> f64 {
+        let [_, y] = self.point(position);
+        self.side * y
     }
 
     /// A course over the ground in the frame: radians from `x` toward `y`.

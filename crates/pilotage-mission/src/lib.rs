@@ -39,6 +39,9 @@ pub use declared_start::{
     DeclaredStartError, SpeedReference,
 };
 pub use engine::{
+    DisplayFix, DisplayWaypoint, LegDisplay, NavigationDisplay, ToFrom, WaypointProgress,
+};
+pub use engine::{
     LaunchDetection, MissionAction, MissionCounters, MissionEngine, MissionEvent, MissionOutput,
     MissionState, NavGuidance, NavQuality, StartWithheldReason, VEHICLE_STATUS_MAX_AGE_NS,
     VehicleStatus,
