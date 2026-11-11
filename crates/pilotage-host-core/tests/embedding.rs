@@ -120,3 +120,28 @@ fn a_fixed_wing_core_builds_with_its_envelope_and_origin() {
         "the C172 mission builds"
     );
 }
+
+#[test]
+fn the_declared_start_is_the_navigators_initial_state() {
+    let mut core = HostCore::new(config(), Instant::now()).unwrap();
+    assert_eq!(core.navigator_initial_state(), None, "no mission yet");
+    let declared = pilotage_mission::DeclaredStart {
+        position: None,
+        height: None,
+        heading: Some(pilotage_mission::DeclaredHeading {
+            heading_rad: 1.2,
+            sigma_rad: 0.05,
+        }),
+        speed: None,
+        declared_at: MonotonicNanos::from_nanos(0),
+    };
+    let mut config = config();
+    config.mission.declared_start = Some(declared);
+    let mut core_with = HostCore::new(config, Instant::now()).unwrap();
+    core_with.load_mission(plan()).unwrap();
+    core_with.tick(MonotonicNanos::from_nanos(0)).unwrap();
+    assert_eq!(core_with.navigator_initial_state(), Some(declared));
+    core.load_mission(plan()).unwrap();
+    core.tick(MonotonicNanos::from_nanos(0)).unwrap();
+    assert_eq!(core.navigator_initial_state(), None, "the plan states none");
+}

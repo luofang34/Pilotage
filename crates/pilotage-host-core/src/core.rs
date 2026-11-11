@@ -256,6 +256,20 @@ impl HostCore {
         self.config.mission.anchor
     }
 
+    /// What the operator stated about the vehicle's start (position,
+    /// height, true heading, speed, each with its uncertainty), validated
+    /// when the mission was built: the initial state the embedding host
+    /// hands its onboard navigator. `None` before a mission is loaded or
+    /// when the mission states none.
+    #[must_use]
+    pub fn navigator_initial_state(&self) -> Option<pilotage_mission::DeclaredStart> {
+        self.principal
+            .as_ref()
+            .and_then(MissionTask::mission)
+            .and_then(MissionEngine::declared_start)
+            .copied()
+    }
+
     /// Where the core stands after its last call.
     #[must_use]
     pub fn status(&self) -> &HostStatus {
