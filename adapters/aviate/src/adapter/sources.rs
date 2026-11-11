@@ -114,6 +114,7 @@ async fn estimate_source(
 /// fabricated stamp.
 pub(super) fn fc_state_sample(
     report: Option<ArmReport>,
+    arm_ack: Option<pilotage_adapter_api::FcCommandAck>,
     incarnation: SourceIncarnation,
     started_at: Instant,
 ) -> Option<FcStateSample> {
@@ -127,10 +128,9 @@ pub(super) fn fc_state_sample(
         landed_state: None,
         motor_state: None,
         arm_state: if report.armed { 2 } else { 1 },
-        // The Aviate uplink logs COMMAND_ACKs but does not yet pair them
-        // with the command they answer; the enactment lane stays empty
-        // rather than carrying an unpaired verdict.
-        last_command: None,
+        // The uplink pairs the FC's COMMAND_ACK with the arm or disarm it
+        // sent last; until that ack arrives the lane stays empty.
+        last_command: arm_ack,
         stamp: Some(MeasurementStamp {
             // Role is the discriminator; the id carries the configured
             // FC identity: (system id << 8) | component id.

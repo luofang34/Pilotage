@@ -115,6 +115,10 @@ pub struct MissionConfig {
     /// The identities of the run's tasks in plan order, each survey line then the way
     /// home, which the core's phases take. Empty, the phases take the tasks' names.
     pub task_ids: Vec<String>,
+    /// How long a host waits for the vehicle to confirm an arm before it
+    /// answers the arm as refused. Default
+    /// [`crate::policy::ARM_CONFIRM_TIMEOUT_NS`].
+    pub arm_confirm_timeout: DurationNanos,
 }
 
 impl MissionConfig {
@@ -137,6 +141,7 @@ impl MissionConfig {
             ownship_source: OwnshipSource::SimulationTruth,
             execution_target: ExecutionTarget::Simulator,
             task_ids: Vec::new(),
+            arm_confirm_timeout: DurationNanos::from_nanos(crate::policy::ARM_CONFIRM_TIMEOUT_NS),
         }
     }
 }

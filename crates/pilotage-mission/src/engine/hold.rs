@@ -35,6 +35,12 @@ impl MissionEngine {
         Some(held)
     }
 
+    /// How long the host waits for the vehicle to confirm an arm.
+    #[must_use]
+    pub const fn arm_confirm_timeout(&self) -> navigate_contract::DurationNanos {
+        self.config.arm_confirm_timeout
+    }
+
     /// The plan's progress: the index of the waypoint the plan flies
     /// toward, and whether its last waypoint is captured.
     #[must_use]

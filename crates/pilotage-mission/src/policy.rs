@@ -12,6 +12,16 @@ pub const OPERATIONAL_RETRY_LIMIT: u16 = 3;
 /// still stops a run promptly when the action path does not answer.
 pub const OPERATIONAL_RECEIPT_TIMEOUT_NS: u64 = 5_000_000_000;
 
+/// Default wait for the vehicle to confirm an arm, in nanoseconds.
+///
+/// A host that sent the arm waits for the flight controller to report
+/// itself armed, or to refuse the command, before it gives the arm
+/// receipt. Three seconds covers two periods of a 1 Hz heartbeat and the
+/// acknowledgement of the command, and it is shorter than
+/// [`OPERATIONAL_RECEIPT_TIMEOUT_NS`], so the engine receives the
+/// receipt before its own wait ends and can retry the arm.
+pub const ARM_CONFIRM_TIMEOUT_NS: u64 = 3_000_000_000;
+
 /// Maximum wall-clock duration of one operational mission, in nanoseconds.
 ///
 /// The 24-hour limit permits a full-day session. It also prevents an
