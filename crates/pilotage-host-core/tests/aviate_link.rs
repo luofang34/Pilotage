@@ -20,7 +20,6 @@ use pilotage_protocol::VehicleClass;
 use web_time::Instant;
 
 const CAPTURE: &str = include_str!("fixtures/aviate-c172-link-15s.txt");
-const LOAD_AT_NS: u64 = 2_000_000_000;
 const LAT_DEG: f64 = 41.7;
 const LON_DEG: f64 = -1.07;
 const ALT_M: f64 = 2050.0;
@@ -89,7 +88,7 @@ struct Replay {
     core: HostCore,
 }
 
-fn replay() -> Replay {
+fn replay(load_at_ns: u64) -> Replay {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_test_writer()
@@ -109,8 +108,8 @@ fn replay() -> Replay {
         }
     };
     for (at, datagram) in from_fc() {
-        if !loaded && at >= LOAD_AT_NS {
-            run_to(&mut core, LOAD_AT_NS, &mut wake);
+        if !loaded && at >= load_at_ns {
+            run_to(&mut core, load_at_ns, &mut wake);
             core.load_mission(plan()).unwrap();
             loaded = true;
         }
@@ -125,7 +124,7 @@ fn replay() -> Replay {
 
 #[test]
 fn the_core_arms_the_c172_and_keeps_framing() {
-    let Replay { sent, events, core } = replay();
+    let Replay { sent, events, core } = replay(2_000_000_000);
     for (at, event) in &events {
         tracing::info!(
             at_s = Duration::from_nanos(*at).as_secs_f64(),
@@ -138,6 +137,11 @@ fn the_core_arms_the_c172_and_keeps_framing() {
         .find(|(_, event)| matches!(event, HostEvent::ArmConfirmed))
         .map(|(at, _)| *at)
         .expect("the core armed the aircraft");
+    let requested = events
+        .iter()
+        .find(|(_, event)| matches!(event, HostEvent::Mission(MissionEvent::ArmRequested { .. })))
+        .map(|(at, _)| *at)
+        .expect("the core asked for the arm");
     assert!(
         !events.iter().any(|(_, event)| matches!(
             event,
@@ -145,10 +149,11 @@ fn the_core_arms_the_c172_and_keeps_framing() {
         )),
         "the mission did not fail"
     );
-    // From the arm on, the holder frames the FC at the mission cadence.
+    // From the arm request on, through the wait for the arm's receipt,
+    // the holder frames the FC at the mission cadence.
     let after: Vec<u64> = sent
         .iter()
-        .filter(|(at, _)| *at >= armed)
+        .filter(|(at, _)| *at >= requested)
         .map(|(at, _)| *at)
         .collect();
     let longest_gap = after
@@ -172,13 +177,40 @@ fn the_core_arms_the_c172_and_keeps_framing() {
 
 #[test]
 fn the_same_traffic_gives_the_same_bytes() {
-    let first = replay();
-    let second = replay();
+    let first = replay(2_000_000_000);
+    let second = replay(2_000_000_000);
     assert_eq!(first.sent, second.sent);
     assert_eq!(first.core.status(), second.core.status());
     assert_ne!(
         first.core.status().frame_digest,
         [0; 32],
         "frames were sent"
+    );
+}
+
+#[test]
+fn the_arm_waits_until_the_c172_reports_itself_ready() {
+    // Loaded at 0.1 s, while the board still boots: its heartbeat says
+    // STANDBY from 1.008 s on.
+    let Replay { events, .. } = replay(100_000_000);
+    let withheld = events.iter().any(|(_, event)| {
+        matches!(
+            event,
+            HostEvent::Mission(MissionEvent::StartWithheld { .. })
+        )
+    });
+    assert!(withheld, "the engine said it waits for the vehicle");
+    let requested = events
+        .iter()
+        .find(|(_, event)| matches!(event, HostEvent::Mission(MissionEvent::ArmRequested { .. })))
+        .map(|(at, _)| *at)
+        .expect("the core asked for the arm once the board was ready");
+    assert!(requested >= 1_008_000_000, "asked at {requested} ns");
+    assert!(
+        !events.iter().any(|(_, event)| matches!(
+            event,
+            HostEvent::ArmRefused | HostEvent::Mission(MissionEvent::MissionFailed { .. })
+        )),
+        "no arm is refused"
     );
 }

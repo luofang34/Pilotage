@@ -6,7 +6,7 @@
 use pilotage_protocol::wire;
 
 /// What the flight controller has reported during this run.
-#[derive(Debug, Default, Clone, Copy, PartialEq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(super) struct FlightWatch {
     armed: bool,
     in_air: bool,

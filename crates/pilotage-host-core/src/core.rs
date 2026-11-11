@@ -4,15 +4,18 @@ use std::time::Duration;
 
 use navigate_contract::{GeodeticPosition, MonotonicNanos, NavigationSolution};
 use pilotage_adapter_aviate::AviateAdapter;
-use pilotage_mission::{MissionEngine, MissionEvent, WaypointPlan, WaypointPlanRecord};
+use pilotage_mission::{
+    MissionEngine, MissionEvent, VehicleStatus, WaypointPlan, WaypointPlanRecord,
+};
 use pilotage_session::{SessionConfig, SessionEngine};
+use pilotage_timing::MonoTimestamp;
 use pilotage_timing::StalenessPolicy;
 use web_time::Instant;
 
 use crate::HOST_VEHICLE;
 use crate::automation::{MissionPlan, MissionTask, RunControl, TICK_INTERVAL as MISSION_TICK};
 use crate::config::HostCoreConfig;
-use crate::engine_actor::{EngineActor, TICK_INTERVAL};
+use crate::engine_actor::{EngineActor, TICK_INTERVAL, TelemetryTap};
 use crate::error::HostCoreError;
 use crate::output::{HostEvent, HostStatus, NextWake};
 
@@ -122,10 +125,11 @@ impl HostCore {
             .map_err(|source| HostCoreError::MissionBuild {
                 source: Box::new(source),
             })?;
-        let mut principal = MissionTask::new(
-            MissionPlan::waypoints(plan, self.config.mission.clone()),
-            false,
-        );
+        let mut config = self.config.mission.clone();
+        // The engine holds the arm until the flight controller reports
+        // itself ready, from the reports `tick` hands it.
+        config.arm_when_vehicle_ready = true;
+        let mut principal = MissionTask::new(MissionPlan::waypoints(plan, config), false);
         principal.set_now(self.last_now.as_nanos());
         principal.start();
         self.principal = Some(principal);
@@ -155,7 +159,9 @@ impl HostCore {
                 !mission_due || (engine_due && self.next_engine_tick <= self.next_mission_tick);
             if engine_first {
                 self.set_times(self.next_engine_tick);
-                self.actor.tick();
+                let mut readiness = Readiness::default();
+                self.actor.tick_with(&mut readiness);
+                self.report_readiness(readiness.ready_to_arm, self.next_engine_tick);
                 self.next_engine_tick = self.next_engine_tick.saturating_add(nanos(TICK_INTERVAL));
             } else {
                 self.set_times(self.next_mission_tick);
@@ -320,6 +326,20 @@ impl HostCore {
         }
     }
 
+    /// Hands the mission engine the flight controller's readiness to
+    /// arm, received at `now_ns` on the mission clock.
+    fn report_readiness(&mut self, ready_to_arm: Option<bool>, now_ns: u64) {
+        let Some(ready_to_arm) = ready_to_arm else {
+            return;
+        };
+        if let Some(mission) = self.principal.as_mut().and_then(MissionTask::mission_mut) {
+            mission.on_vehicle_status(VehicleStatus {
+                ready_to_arm,
+                acquired_at: MonotonicNanos::from_nanos(now_ns),
+            });
+        }
+    }
+
     fn refresh_status(&mut self) {
         let Some(principal) = self.principal.as_ref() else {
             return;
@@ -338,6 +358,23 @@ impl HostCore {
         if automation.plan_complete && !self.counters_logged {
             self.counters_logged = true;
             principal.log_counters();
+        }
+    }
+}
+
+/// The flight controller's readiness to arm, as the adapter's last
+/// telemetry sample of a tick reports it.
+#[derive(Debug, Default)]
+struct Readiness {
+    ready_to_arm: Option<bool>,
+}
+
+impl TelemetryTap for Readiness {
+    fn fill(&mut self, _sample: &mut pilotage_adapter_api::TelemetrySample) {}
+
+    fn record(&mut self, sample: &pilotage_adapter_api::TelemetrySample, _now: MonoTimestamp) {
+        if let Some(ready) = sample.fc_state.and_then(|state| state.ready_to_arm) {
+            self.ready_to_arm = Some(ready);
         }
     }
 }
