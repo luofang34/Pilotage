@@ -197,6 +197,8 @@ struct Flight {
     /// The position, active state, and intent at each tick.
     track: Vec<([f64; 3], MissionState, Option<ControlIntent>)>,
     holds: Vec<StartWithheldReason>,
+    /// Each heading bias the engine reported, radians.
+    bias_reports: Vec<f64>,
 }
 
 fn fly(engine: &mut MissionEngine, ticks: usize, navigator: &Navigator) -> Flight {
@@ -224,6 +226,7 @@ fn fly_in(
     let mut flight = Flight {
         track: Vec::new(),
         holds: Vec::new(),
+        bias_reports: Vec::new(),
     };
     let mut now = MonotonicNanos::from_nanos(1_000_000_000);
     for tick in 0..ticks {
@@ -239,8 +242,12 @@ fn fly_in(
             engine.on_action_result(action.action_id, true);
         }
         for event in &output.events {
-            if let MissionEvent::NavigationHold { reason } = event {
-                flight.holds.push(*reason);
+            match event {
+                MissionEvent::NavigationHold { reason } => flight.holds.push(*reason),
+                MissionEvent::HeadingBiasEstimated { bias_rad } => {
+                    flight.bias_reports.push(*bias_rad);
+                }
+                _ => {}
             }
         }
         if let Some(intent) = output.intent.as_ref() {
@@ -485,6 +492,22 @@ fn a_navigator_offset_moves_the_true_track_by_the_offset() {
             [30.0, 0.0, 0.0],
             heading_bias_rad,
         );
+        // The bias the engine absorbs is reported, to the degree; a
+        // flight controller on true north reports none.
+        let estimate = engine.heading_bias_rad().unwrap_or(0.0);
+        assert!(
+            (estimate - heading_bias_rad).abs() < 0.02,
+            "{estimate} rad estimated"
+        );
+        let reported = flight.bias_reports.last().copied().unwrap_or(0.0);
+        assert!(
+            (reported - heading_bias_rad).abs() < 0.03,
+            "{:?} reported for {heading_bias_rad}",
+            flight.bias_reports
+        );
+        if heading_bias_rad == 0.0 {
+            assert!(flight.bias_reports.is_empty(), "{:?}", flight.bias_reports);
+        }
         let (low, high) = second_leg_band(&flight);
         assert!(
             (low + 30.0).abs() < 5.0 && (high + 30.0).abs() < 5.0,

@@ -384,7 +384,13 @@ impl MissionEngine {
         match guided {
             Ok(command) if self.steers_by_heading() => {
                 self.last_refusal = None;
-                self.steer(solution, &command.setpoint, to.position.altitude_m, now)
+                self.steer(
+                    solution,
+                    &command.setpoint,
+                    to.position.altitude_m,
+                    now,
+                    events,
+                )
             }
             Ok(command) => {
                 if !self.config.can_stop() {
