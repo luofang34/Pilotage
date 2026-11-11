@@ -66,10 +66,12 @@ impl MissionEngine {
         setpoint: &GuidanceSetpoint,
         altitude_m: f64,
         now: MonotonicNanos,
+        events: &mut Vec<MissionEvent>,
     ) -> Option<ControlIntent> {
         self.end_hold();
         self.update_wind(solution, now);
         self.update_heading_bias(now);
+        self.report_heading_bias(events);
         let course = match setpoint {
             GuidanceSetpoint::Velocity { velocity }
                 if velocity.north_mps.hypot(velocity.east_mps) > 0.0 =>
