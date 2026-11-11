@@ -183,14 +183,13 @@ fn run(engine: &mut MissionEngine, role: TruthRole) -> (Vec<MissionEvent>, Vec<f
     (events, nearest, truth)
 }
 
-fn fly(source: OwnshipSource, role: TruthRole) {
+fn fly(source: OwnshipSource, role: TruthRole, target: ExecutionTarget) {
+    let mut config = config(source);
+    config.execution_target = target;
     let (mut engine, record) =
-        MissionEngine::from_survey(&request(), config(source)).expect("survey builds");
+        MissionEngine::from_survey(&request(), config).expect("survey builds");
     assert_record(&record);
-    assert_eq!(
-        engine.mission_document().execution_policy.target,
-        ExecutionTarget::RealVehicle
-    );
+    assert_eq!(engine.mission_document().execution_policy.target, target);
     let (events, nearest, truth) = run(&mut engine, role);
     let advances: Vec<usize> = events
         .iter()
@@ -233,7 +232,11 @@ fn fly(source: OwnshipSource, role: TruthRole) {
 
 #[test]
 fn a_survey_is_flown_line_by_line_on_simulation_truth() {
-    fly(OwnshipSource::SimulationTruth, TruthRole::SimulationTruth);
+    fly(
+        OwnshipSource::SimulationTruth,
+        TruthRole::SimulationTruth,
+        ExecutionTarget::Simulator,
+    );
 }
 
 #[test]
@@ -241,6 +244,7 @@ fn a_survey_is_flown_line_by_line_on_the_vehicle_estimate() {
     fly(
         OwnshipSource::vehicle_estimate(),
         TruthRole::OperationalEstimate,
+        ExecutionTarget::RealVehicle,
     );
 }
 
@@ -315,7 +319,7 @@ fn a_real_vehicle_starts_from_the_hover_and_a_simulator_arms_first() {
 fn a_survey_that_does_not_plan_refuses_the_engine() {
     let mut request = request();
     request.polygon_deg.truncate(2);
-    let error = MissionEngine::from_survey(&request, config(OwnshipSource::SimulationTruth))
+    let error = MissionEngine::from_survey(&request, config(OwnshipSource::vehicle_estimate()))
         .expect_err("two vertices");
     assert!(matches!(
         error,

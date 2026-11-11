@@ -38,12 +38,13 @@
 //!   the host then tightens the ceiling to the envelope the vehicle
 //!   advertises. Unset keeps the [`pilotage_mission::MissionConfig`]
 //!   default.
-//! - `PILOTAGE_MISSION_OWNSHIP`: `simulation-truth` (the default) fuses a
-//!   simulator's truth oracle; `vehicle-estimate` flies the vehicle's own
-//!   exported estimate as a declared pass-through solution (ADR-0051).
-//!   Under `vehicle-estimate` the anchor is the launch point: a height the
-//!   vehicle measures from its launch point is read as height above the
-//!   anchor.
+//! - `PILOTAGE_MISSION_OWNSHIP`: `vehicle-estimate` (the default) flies
+//!   the vehicle's own exported estimate as a declared pass-through
+//!   solution (ADR-0051); `simulation-truth` fuses a simulator's truth
+//!   oracle. Under `vehicle-estimate` the anchor is the launch point: a
+//!   height the vehicle measures from its launch point is read as height
+//!   above the anchor. `onboard-navigation` fails startup: no telemetry
+//!   group carries the onboard navigator's solution to this host.
 //! - `PILOTAGE_MISSION_TARGET`: `simulator` (the default) or
 //!   `real-vehicle`. A real vehicle requires `vehicle-estimate`. Its
 //!   mission has no arm phase: the pilot arms and launches the aircraft,
@@ -228,7 +229,7 @@ fn mission_from_env() -> Result<Option<MissionOptions>, HostError> {
         Some(value) => Some(parse_cruise_speed(&value)?),
     };
     let ownship_source = match env_var("PILOTAGE_MISSION_OWNSHIP")? {
-        None => OwnshipSource::SimulationTruth,
+        None => OwnshipSource::vehicle_estimate(),
         Some(value) => parse_ownship_source(&value)?,
     };
     let execution_target = match env_var("PILOTAGE_MISSION_TARGET")? {
@@ -335,6 +336,7 @@ pub(super) fn parse_ownship_source(value: &str) -> Result<OwnshipSource, HostErr
     match value {
         "simulation-truth" => Ok(OwnshipSource::SimulationTruth),
         "vehicle-estimate" => Ok(OwnshipSource::vehicle_estimate()),
+        "onboard-navigation" => Ok(OwnshipSource::onboard_navigation()),
         _ => Err(HostError::MissionOwnshipSource {
             value: value.to_owned(),
         }),
@@ -352,12 +354,17 @@ pub(super) fn parse_execution_target(value: &str) -> Result<ExecutionTarget, Hos
     }
 }
 
-/// A real vehicle exports no simulation truth: that pairing never gets a
-/// solution, so it is refused at startup instead of waiting in flight.
+/// Refuses at startup a source that would never give this host a
+/// solution, instead of waiting in flight. A real vehicle exports no
+/// simulation truth. No telemetry group carries the onboard navigator's
+/// solution to this host.
 fn check_vehicle_pairing(source: OwnshipSource, target: ExecutionTarget) -> Result<(), HostError> {
     match (source, target) {
         (OwnshipSource::SimulationTruth, ExecutionTarget::RealVehicle) => {
             Err(HostError::MissionTruthOnRealVehicle)
+        }
+        (OwnshipSource::OnboardNavigation { .. }, _) => {
+            Err(HostError::MissionOnboardNavigationUnlinked)
         }
         _ => Ok(()),
     }

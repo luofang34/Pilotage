@@ -292,7 +292,7 @@ pub enum HostError {
     },
     /// `PILOTAGE_MISSION_OWNSHIP` named no known ownship source.
     #[error(
-        "invalid PILOTAGE_MISSION_OWNSHIP value {value:?} (expected \"simulation-truth\" or \"vehicle-estimate\")"
+        "invalid PILOTAGE_MISSION_OWNSHIP value {value:?} (expected \"simulation-truth\", \"vehicle-estimate\" or \"onboard-navigation\")"
     )]
     MissionOwnshipSource {
         /// The rejected value.
@@ -312,6 +312,14 @@ pub enum HostError {
         "PILOTAGE_MISSION_TARGET=real-vehicle requires PILOTAGE_MISSION_OWNSHIP=vehicle-estimate"
     )]
     MissionTruthOnRealVehicle,
+    /// No telemetry group carries the onboard navigator's solution to this
+    /// host, so that source would wait for a first solution for the whole
+    /// mission. A host that embeds the mission engine offers the solution
+    /// to it directly.
+    #[error(
+        "PILOTAGE_MISSION_OWNSHIP=onboard-navigation has no telemetry source in this host; use vehicle-estimate"
+    )]
+    MissionOnboardNavigationUnlinked,
     /// More than one plan was given; a mission flies one plan.
     #[error(
         "set one of PILOTAGE_MISSION_ROUTE, PILOTAGE_MISSION_AREA and PILOTAGE_MISSION_WAYPOINTS"

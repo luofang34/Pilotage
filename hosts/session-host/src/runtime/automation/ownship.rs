@@ -10,13 +10,33 @@
 
 use navigate_contract::MonotonicNanos;
 use pilotage_geo::{HorizontalDatum, VerticalDatum};
-use pilotage_mission::{OwnshipAltitude, OwnshipSample, TruthRole};
+use pilotage_mission::{OwnshipAltitude, OwnshipSample, OwnshipSource, TruthRole};
 use pilotage_protocol::wire;
 
 /// Estimator authorization bit for position.
 const VALID_POSITION: u32 = 0b0100;
 /// Estimate quality the vehicle grades unusable.
 const QUALITY_UNUSABLE: u32 = 2;
+
+/// The ownship sample the configured source reads from one wire telemetry
+/// sample. No telemetry group carries the onboard navigator's solution, so
+/// that source reads nothing here: a host that embeds the mission engine
+/// offers the solution to it directly.
+pub(super) fn from_wire(
+    source: OwnshipSource,
+    sample: &wire::TelemetrySample,
+    received_at: MonotonicNanos,
+    planar_pose_is_truth: bool,
+    ned_of: impl Fn(f64, f64, OwnshipAltitude) -> [f64; 3],
+) -> Option<OwnshipSample> {
+    match source {
+        OwnshipSource::SimulationTruth => {
+            ownship_from_wire(sample, received_at, planar_pose_is_truth)
+        }
+        OwnshipSource::VehicleEstimate { .. } => estimate_from_wire(sample, received_at, ned_of),
+        OwnshipSource::OnboardNavigation { .. } => None,
+    }
+}
 
 /// Converts one wire telemetry sample into an ownship sample, preferring
 /// the simulation-truth group, then stamped avionics kinematics, then —

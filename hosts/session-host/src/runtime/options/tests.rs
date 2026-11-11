@@ -77,6 +77,10 @@ fn ownship_source_and_target_words_parse_and_unknown_words_fail() {
         parse_ownship_source("vehicle-estimate").expect("known"),
         OwnshipSource::vehicle_estimate()
     );
+    assert_eq!(
+        parse_ownship_source("onboard-navigation").expect("known"),
+        OwnshipSource::onboard_navigation()
+    );
     assert!(matches!(
         parse_ownship_source("truth").expect_err("unknown"),
         HostError::MissionOwnshipSource { value } if value == "truth"
@@ -93,6 +97,16 @@ fn ownship_source_and_target_words_parse_and_unknown_words_fail() {
         parse_execution_target("drone").expect_err("unknown"),
         HostError::MissionTarget { value } if value == "drone"
     ));
+}
+
+#[test]
+fn the_onboard_navigation_source_is_refused_at_startup_for_every_target() {
+    for target in [ExecutionTarget::Simulator, ExecutionTarget::RealVehicle] {
+        assert!(matches!(
+            check_vehicle_pairing(OwnshipSource::onboard_navigation(), target),
+            Err(HostError::MissionOnboardNavigationUnlinked)
+        ));
+    }
 }
 
 #[test]

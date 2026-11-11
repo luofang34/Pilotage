@@ -242,3 +242,23 @@ fn geographic_guidance_refuses_unknown_stale_or_unauthorized_attitude() {
         assert!(estimate_from_wire(&sample, now(), recording_ned).is_none());
     }
 }
+
+#[test]
+fn each_source_reads_its_own_group_and_onboard_navigation_reads_none() {
+    let truth = stamped_kinematics(wire::SourceRole::SimulationTruth);
+    let estimate = vehicle_estimate(wire::SourceRole::OperationalEstimate);
+    let read = |source, sample: &wire::TelemetrySample| {
+        from_wire(source, sample, now(), false, recording_ned).map(|ownship| ownship.role)
+    };
+    assert_eq!(
+        read(OwnshipSource::SimulationTruth, &truth),
+        Some(TruthRole::SimulationTruth)
+    );
+    assert_eq!(
+        read(OwnshipSource::vehicle_estimate(), &estimate),
+        Some(TruthRole::OperationalEstimate)
+    );
+    for sample in [&truth, &estimate] {
+        assert_eq!(read(OwnshipSource::onboard_navigation(), sample), None);
+    }
+}
