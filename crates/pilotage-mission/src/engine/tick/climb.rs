@@ -23,6 +23,29 @@ impl MissionEngine {
         climb_toward(&self.config, solution?, *target_altitude_m)
     }
 
+    /// The climb of a vehicle that cannot stop: the plan's lateral
+    /// guidance, with the climb toward the target as its vertical rate
+    /// until the vehicle is within the capture margin of it. Without
+    /// lateral guidance (none refused, none yet) the vertical climb alone
+    /// is flown, on the present course.
+    pub(super) fn climb_along_route_intent(
+        &mut self,
+        solution: Option<&NavigationSolution>,
+        now: MonotonicNanos,
+        events: &mut Vec<super::super::MissionEvent>,
+    ) -> Option<ControlIntent> {
+        let climb = self.climb_intent(solution);
+        let Some(ControlIntent::Velocity(mut lateral)) =
+            self.follow_plan_intent(solution, now, events)
+        else {
+            return climb;
+        };
+        if let Some(ControlIntent::Velocity(vertical)) = climb {
+            lateral.vz = vertical.vz;
+        }
+        Some(ControlIntent::Velocity(lateral))
+    }
+
     /// The intent streamed from the arm request on, so the flight
     /// controller has a command the moment it arms instead of none until
     /// the arm's confirmation comes back: the climb that follows the arm,

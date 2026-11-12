@@ -104,6 +104,18 @@ impl MissionEngine {
         )
     }
 
+    /// Whether the plan's lateral path is flown and sequenced now: while
+    /// following it, and in the climb of a vehicle that cannot stop. That
+    /// vehicle climbs along the route, as an FMS climbs, because holding
+    /// its heading through a long climb carries it kilometres off the plan
+    /// and past fixes it would then turn back for. A vehicle that can stop
+    /// climbs in place, by design, and follows the plan from the top.
+    pub(in crate::engine) fn flies_route(&self) -> bool {
+        self.following()
+            || (!self.config.can_stop()
+                && matches!(self.active_action, Some(CoreFlightAction::Climb { .. })))
+    }
+
     /// How many of the plan's waypoints are captured, from its first.
     pub(super) fn waypoints_captured(&self) -> usize {
         let total = self.route.waypoints().len();

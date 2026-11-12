@@ -9,7 +9,7 @@
 //! the completion flag. Each operation builds the borrowed views over the
 //! owned slice, runs, and keeps the new progress.
 
-use navigate_contract::{FlightPlan, GeodeticPosition, Ident, PlanRole, TurnType, Waypoint};
+use navigate_contract::{FlightPlan, GeodeticPosition, Ident, PlanRole, Waypoint};
 use navigate_route::{ExecutionConfig, Leg, PlanExecution, SequenceEvent};
 
 use crate::body;
@@ -40,11 +40,9 @@ pub(crate) struct MissionRoute {
     complete: bool,
     end: PlanEnd,
     arrived: bool,
-    /// Whether a first waypoint the vehicle starts past is passed rather
+    /// Whether a first waypoint the vehicle is past is passed rather
     /// than turned back for; see [`Self::pass_start`].
     pass_first_behind: bool,
-    /// Whether [`Self::pass_start`] has judged the start.
-    start_judged: bool,
 }
 
 impl MissionRoute {
@@ -78,7 +76,6 @@ impl MissionRoute {
             end: PlanEnd::Sequenced,
             arrived: false,
             pass_first_behind: false,
-            start_judged: false,
         };
         PlanExecution::new(route.plan(), route.config)?;
         Ok(route)
@@ -97,40 +94,34 @@ impl MissionRoute {
         self
     }
 
-    /// Judges the start of the plan, once, at the first position it flies
-    /// from. A vehicle already on the first leg, past the perpendicular
-    /// through the first waypoint and short of the second's, has passed
-    /// the first waypoint: the first leg becomes the active one, and the
-    /// vehicle joins it ahead instead of turning back. An airborne fixed
-    /// wing turning back would fly a reversal at its route bank for a
-    /// point it is already past. A first waypoint marked fly-over is still
-    /// turned back for: the plan asks for the vehicle over it.
+    /// Passes the first waypoint once the vehicle is at or beyond the
+    /// perpendicular through it on the first leg, as an FMS sequences the
+    /// initial fix of a plan it starts on or past. The first leg is flown
+    /// direct to the first waypoint, which has no inbound course, so
+    /// Navigate ends it only by capture: a vehicle that climbed out past
+    /// the first waypoint, however far along the first leg and even past
+    /// the second waypoint, would otherwise turn back for it. Judged on
+    /// every position while the first waypoint is active; a vehicle short
+    /// of the perpendicular flies to the first waypoint and captures it.
+    /// Once the first leg is active, Navigate passes each later fix the
+    /// vehicle is beyond (NAV-TT-006), one per position. A first waypoint
+    /// marked fly-over is passed the same way: a plan never pulls the
+    /// vehicle back to a start it is on or past, and one short of it still
+    /// flies over it.
     ///
     /// Returns the index of the leg made active and the cross-track
     /// distance from the first leg, metres, positive right of it.
     pub(crate) fn pass_start(&mut self, position: &GeodeticPosition) -> Option<(usize, f64)> {
-        if !self.pass_first_behind || self.start_judged {
+        if !self.pass_first_behind || self.active_index != 0 || self.complete {
             return None;
         }
-        self.start_judged = true;
         let [first, second, ..] = self.waypoints.as_slice() else {
             return None;
         };
-        if self.active_index != 0 || self.complete || first.turn != TurnType::FlyBy {
-            return None;
-        }
-        let along_m = navigate_geodesy::along_track_m(
-            position,
-            &first.position,
-            &second.position,
-            body::GEODESY,
-        )
-        .ok()?;
-        let length_m =
-            navigate_geodesy::distance_m(&first.position, &second.position, body::GEODESY);
-        if !(along_m > 0.0 && along_m < length_m) {
-            return None;
-        }
+        // At or beyond the perpendicular through the first waypoint.
+        navigate_geodesy::along_track_m(position, &first.position, &second.position, body::GEODESY)
+            .ok()
+            .filter(|along_m| *along_m >= 0.0)?;
         let cross_track_m = navigate_geodesy::cross_track_m(
             position,
             &first.position,
@@ -183,11 +174,6 @@ impl MissionRoute {
     /// The bank the turns ahead of fly-by waypoints are sized at, radians.
     pub(crate) const fn bank_limit_rad(&self) -> f64 {
         self.config.bank_limit_rad
-    }
-
-    /// The radius within which a waypoint counts as reached, metres.
-    pub(crate) const fn capture_radius_m(&self) -> f64 {
-        self.config.capture_radius_m
     }
 
     /// The courses into and out of the waypoint the active leg flies to,

@@ -50,7 +50,7 @@ impl MissionEngine {
         let solution = self.publish_solution(now);
         self.report_dead_reckoning(solution.is_some(), &mut events);
         let mut plan_advanced = false;
-        if self.state() == MissionState::Enroute {
+        if matches!(self.state(), MissionState::Climb | MissionState::Enroute) {
             plan_advanced = self.advance_active_plan(solution.as_ref(), &mut events);
         }
         let observation = self.core_observation(solution.as_ref(), now);
@@ -68,7 +68,7 @@ impl MissionEngine {
             }
             state = self.state();
         }
-        if state == MissionState::Enroute && !plan_advanced {
+        if matches!(state, MissionState::Climb | MissionState::Enroute) && !plan_advanced {
             self.advance_active_plan(solution.as_ref(), &mut events);
         }
         if self.plan_complete && state == MissionState::Enroute {
@@ -250,6 +250,9 @@ impl MissionEngine {
             return self.hold_position(now, events);
         }
         match state {
+            MissionState::Climb if !self.config.can_stop() => {
+                self.climb_along_route_intent(solution, now, events)
+            }
             MissionState::Climb => self.climb_intent(solution),
             MissionState::Enroute => self.follow_plan_intent(solution, now, events),
             MissionState::Complete => self.end_of_plan_intent(solution, now, events),
@@ -280,7 +283,7 @@ impl MissionEngine {
         events: &mut Vec<MissionEvent>,
     ) -> Option<ControlIntent> {
         let solution = solution?;
-        if !self.following() {
+        if !self.flies_route() {
             return None;
         }
         if self.plan_complete {
@@ -307,7 +310,7 @@ impl MissionEngine {
         let Some(solution) = solution else {
             return false;
         };
-        if !self.following() {
+        if !self.flies_route() {
             return false;
         }
         self.advance_plan(solution, events);
@@ -384,8 +387,9 @@ impl MissionEngine {
             &self.guidance,
         );
         let guided = guided.map(|mut command| {
+            let intercept = self.intercept_setpoint(command.setpoint, &reference, &to.position);
             command.setpoint =
-                self.trimmed_setpoint(command.setpoint, &reference, &to.position, solution, now);
+                self.trimmed_setpoint(intercept, &reference, &to.position, solution, now);
             command
         });
         match guided {

@@ -9,7 +9,6 @@ use super::DEG;
 
 const STEP_S: f64 = 0.05;
 const SPEED_MPS: f64 = 60.0;
-const CAPTURE_M: f64 = 120.0;
 /// How far the racetrack flown may reach outside the planned one, metres.
 /// The point model turns with a lag, so it flies each turn a little wide.
 const STEADY_MARGIN_M: f64 = 300.0;
@@ -71,7 +70,7 @@ fn fly(
     at_fix: bool,
     duration_s: f64,
 ) -> (PatternFlight, Vec<Sample>) {
-    let mut flight = PatternFlight::new(radius_m(), leg_time_s, SPEED_MPS, CAPTURE_M, leg_time_s);
+    let mut flight = PatternFlight::new(radius_m(), leg_time_s, SPEED_MPS, leg_time_s);
     let mut point = Point { position, course };
     flight.begin(position, course, 0.0, at_fix);
     let mut samples = Vec::new();
@@ -290,7 +289,7 @@ fn the_parallel_entry_turns_left_and_the_teardrop_right_back_to_the_inbound_trac
 
 #[test]
 fn a_gap_in_the_steps_enters_again_from_where_the_vehicle_is() {
-    let mut flight = PatternFlight::new(radius_m(), 60.0, SPEED_MPS, CAPTURE_M, 60.0);
+    let mut flight = PatternFlight::new(radius_m(), 60.0, SPEED_MPS, 60.0);
     flight.begin([0.0, 0.0], 0.0, 0.0, true);
     assert_eq!(flight.leg(), HoldingLeg::Entry(HoldingEntry::Direct));
     // Five seconds later the vehicle is 4 km away heading away from the fix.
@@ -307,9 +306,50 @@ fn a_gap_in_the_steps_enters_again_from_where_the_vehicle_is() {
 
 #[test]
 fn a_vehicle_flown_far_out_of_the_pattern_enters_again() {
-    let mut flight = PatternFlight::new(radius_m(), 60.0, SPEED_MPS, CAPTURE_M, 60.0);
+    let mut flight = PatternFlight::new(radius_m(), 60.0, SPEED_MPS, 60.0);
     flight.begin([0.0, 0.0], 0.0, 0.0, true);
     // With no gap in the steps, the vehicle is 10 km to the side.
     flight.step([0.0, -10_000.0], 0.0, 0.05);
     assert_eq!(flight.leg(), HoldingLeg::ToFix);
+}
+
+#[test]
+fn the_outbound_timer_starts_within_a_leg_time_even_never_abeam() {
+    let radius = radius_m();
+    let mut flight = PatternFlight::new(radius, 60.0, SPEED_MPS, 60.0);
+    // Entered 100 m past the fix: the turn ends 100 m ahead of abeam.
+    flight.begin([100.0, 0.0], 0.0, 0.0, true);
+    flight.step([100.0, 2.0 * radius], PI, 0.1);
+    assert_eq!(flight.leg(), HoldingLeg::Outbound);
+    // The aircraft stays ahead of abeam: the timer starts after one leg
+    // time, and the outbound leg ends one outbound time later.
+    let mut t = 0.2;
+    while t < 119.0 {
+        flight.step([100.0, 2.0 * radius], PI, t);
+        assert_eq!(flight.leg(), HoldingLeg::Outbound, "{t} s");
+        t += 0.1;
+    }
+    while t < 120.5 {
+        flight.step([100.0, 2.0 * radius], PI, t);
+        t += 0.1;
+    }
+    assert_eq!(flight.leg(), HoldingLeg::OutboundTurn);
+}
+
+#[test]
+fn a_part_of_the_pattern_that_does_not_end_is_entered_again() {
+    let radius = radius_m();
+    let mut flight = PatternFlight::new(radius, 60.0, SPEED_MPS, 60.0);
+    flight.begin([0.0, 0.0], 0.0, 0.0, true);
+    assert_eq!(flight.leg(), HoldingLeg::Entry(HoldingEntry::Direct));
+    // The aircraft never moves round the turn: after five leg times the
+    // pattern starts again from where it is.
+    let mut t = 0.1;
+    while t < 299.0 {
+        flight.step([0.0, 0.0], 0.0, t);
+        t += 0.1;
+    }
+    assert_eq!(flight.entries(), 1);
+    flight.step([0.0, 0.0], 0.0, 301.0);
+    assert_eq!(flight.entries(), 2, "{:?}", flight.leg());
 }
