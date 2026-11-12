@@ -167,7 +167,14 @@ impl MissionEngine {
                     return None;
                 };
                 let target = *target_altitude_m;
-                self.steer_level(target)
+                // Along the route, at the climb's target altitude; on the
+                // present heading only while there is no route guidance.
+                match self.follow_plan_intent(solution, now, events) {
+                    Some(ControlIntent::HeadingAltitude(demand)) => {
+                        Some(self.heading_altitude(f64::from(demand.heading_rad), target))
+                    }
+                    _ => self.steer_level(target),
+                }
             }
             MissionState::Enroute => self.follow_plan_intent(solution, now, events),
             MissionState::Complete => self.end_of_plan_intent(solution, now, events),
