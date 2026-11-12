@@ -197,6 +197,8 @@ pub(super) struct NavGuidance {
     leg_index: u32,
     waypoint_count: u32,
     solution_quality: u32,
+    sequencing: u32,
+    to_from: u32,
     stamp: Stamp,
 }
 
@@ -281,6 +283,8 @@ pub(super) fn nav_guidance_message(state: wire::NavGuidanceState) -> Option<NavG
         leg_index: state.leg_index,
         waypoint_count: state.waypoint_count,
         solution_quality: state.solution_quality,
+        sequencing: state.sequencing,
+        to_from: state.to_from,
         stamp: stamp_message(stamp),
     })
 }

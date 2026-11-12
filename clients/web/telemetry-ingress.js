@@ -457,9 +457,9 @@ export class NavGuidanceTracker {
         };
     // Uninterpretable guidance values poison the course, which the core
     // refuses as malformed guidance — never a partial display.
-    const counted = [navGuidance.legIndex, navGuidance.waypointCount, navGuidance.solutionQuality];
+    const counted = ["legIndex", "waypointCount", "solutionQuality", "sequencing", "toFrom"];
     const wellShaped =
-      counted.every((value) => Number.isInteger(value) && value >= 0) &&
+      counted.every((key) => Number.isInteger(navGuidance[key]) && navGuidance[key] >= 0) &&
       typeof navGuidance.toIdent === "string" &&
       typeof navGuidance.fromIdent === "string" &&
       [
@@ -476,9 +476,7 @@ export class NavGuidanceTracker {
       lateralDeviationM: wellShaped ? navGuidance.lateralDeviationM : NaN,
       verticalDeviationM: wellShaped ? navGuidance.verticalDeviationM : NaN,
       distanceToWaypointM: wellShaped ? navGuidance.distanceToWaypointM : NaN,
-      legIndex: wellShaped ? navGuidance.legIndex : 0,
-      waypointCount: wellShaped ? navGuidance.waypointCount : 0,
-      solutionQuality: wellShaped ? navGuidance.solutionQuality : 0,
+      ...Object.fromEntries(counted.map((key) => [key, wellShaped ? navGuidance[key] : 0])),
     };
   }
 }

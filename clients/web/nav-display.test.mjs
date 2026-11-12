@@ -27,6 +27,8 @@ function snapshot(overrides = {}, ageMs = 40) {
       legIndex: 2,
       waypointCount: 5,
       solutionQuality: 0,
+      sequencing: 0,
+      toFrom: 1,
       ...overrides,
     },
     ageMs,
@@ -101,7 +103,8 @@ testVerticalDeflectionIsFlyTo();
 console.log("ok - testVerticalDeflectionIsFlyTo");
 
 function testUntrackedLateralCourseRemovesTheBarWithoutFailingTheGroup() {
-  const nav = navDisplayState(snapshot({ lateralDeviationM: NaN }));
+  // The source states OFF when it tracks no lateral course.
+  const nav = navDisplayState(snapshot({ lateralDeviationM: NaN, toFrom: 0 }));
   // TO/FROM off is what removes the deviation bar; the deflection value is
   // then inert and must stay FINITE, because a NaN CDI fails the whole nav
   // group and would take the still-valid course and distance down with it.
@@ -148,5 +151,19 @@ function testAbsentGuidanceIsAbsentNotCentered() {
 }
 testAbsentGuidanceIsAbsentNotCentered();
 console.log("ok - testAbsentGuidanceIsAbsentNotCentered");
+
+function testAHoldIsAnnunciatedAndItsOutboundLegFlagsFrom() {
+  const outbound = navDisplayState(snapshot({ sequencing: 1, toFrom: 2 }));
+  assert.equal(outbound.sequencing, 1, "the holding pattern annunciates HOLD");
+  assert.equal(outbound.fromto, 2, "the outbound leg flies from the holding fix");
+  const inbound = navDisplayState(snapshot({ sequencing: 1, toFrom: 1 }));
+  assert.equal(inbound.fromto, 1, "the inbound leg flies to it");
+  // An unknown sequencing or flag removes the display rather than guess.
+  assert.equal(navDisplayState(snapshot({ sequencing: 9 })), null);
+  assert.equal(navDisplayState(snapshot({ toFrom: 9 })), null);
+  assert.equal(navDisplayState(snapshot({ toFrom: undefined })), null);
+}
+testAHoldIsAnnunciatedAndItsOutboundLegFlagsFrom();
+console.log("ok - testAHoldIsAnnunciatedAndItsOutboundLegFlagsFrom");
 
 console.log("\nall nav display profile checks passed");

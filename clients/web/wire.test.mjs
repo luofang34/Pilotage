@@ -606,7 +606,7 @@ check(
 // other role: guidance is display context and never a substitute for the
 // estimate lane.
 {
-  function navGuidance(role, { lateral = -30.0, vertical = 12.5 } = {}) {
+  function navGuidance(role, { lateral = -30.0, vertical = 12.5, hold = false } = {}) {
     const out = [];
     if (role !== null) {
       bytesField(out, 1, measurementStamp(21, 2, 7, 7_000_000, 3, 0x44, role));
@@ -617,7 +617,11 @@ check(
     f32Field(out, 5, lateral); // lateral_deviation_m
     f32Field(out, 6, vertical); // vertical_deviation_m
     f32Field(out, 7, 3704.0); // distance_to_waypoint_m
-    for (const [field, value] of [[8, 2], [9, 5], [10, 1]]) {
+    // A hold states sequencing 1 (HOLD) and TO/FROM 2 (FROM); a plan leg
+    // leaves both at the schema's zero, which the decoder reads as the
+    // sequencing default and OFF.
+    const held = hold ? [[11, 1], [12, 2]] : [];
+    for (const [field, value] of [[8, 2], [9, 5], [10, 1], ...held]) {
       varint(out, (field << 3) | 0);
       varint(out, value);
     }
@@ -641,6 +645,11 @@ check(
     && nav?.verticalDeviationM === 12.5 && nav?.distanceToWaypointM === 3704.0);
   check("guidance lane decodes leg position and solution quality",
     nav?.legIndex === 2 && nav?.waypointCount === 5 && nav?.solutionQuality === 1);
+  check("a plan leg's sequencing and TO/FROM decode as their zero defaults",
+    nav?.sequencing === 0 && nav?.toFrom === 0);
+  const holding = decodeGuidanceOnly(navGuidance(6, { hold: true })).navGuidance;
+  check("a hold decodes as HOLD with the outbound leg's FROM",
+    holding?.sequencing === 1 && holding?.toFrom === 2);
   check("guidance stamp carries the navigation-solution role",
     nav?.stamp?.role === 6 && nav?.stamp?.clock === 3);
 

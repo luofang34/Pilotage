@@ -15,7 +15,7 @@ use navigate_geodesy::{cross_track_m, distance_m};
 use crate::body::GEODESY;
 use navigate_route::Leg;
 
-use super::{MissionEngine, MissionState};
+use super::{MissionEngine, MissionState, ToFrom};
 
 #[cfg(test)]
 mod tests;
@@ -75,12 +75,21 @@ pub struct NavGuidance {
     pub waypoint_count: u32,
     /// Quality of the solution this geometry rests on.
     pub quality: NavQuality,
+    /// Whether the active waypoint is ahead of (`To`) or behind (`From`)
+    /// the vehicle along the desired course; `None` while no lateral
+    /// course is tracked, which removes the deviation bar.
+    pub to_from: Option<ToFrom>,
+    /// The vehicle flies the holding pattern at the plan's end instead of
+    /// sequencing its legs: the geometry is the inbound leg to the holding
+    /// fix, whose TO/FROM flips every circuit.
+    pub holding: bool,
 }
 
 impl MissionEngine {
     /// The guidance the executor is flying, or `None` when it is flying
     /// nothing: before a first solution, while arming, and once the plan
-    /// is complete. The geometry comes from the solution and active leg
+    /// is complete with no holding pattern flown after it. In the holding
+    /// pattern it is the inbound leg to the holding fix. The geometry comes from the solution and active leg
     /// the latest [`MissionEngine::tick`] left behind, so this reads
     /// state and never re-runs fusion or sequencing.
     ///
@@ -91,10 +100,26 @@ impl MissionEngine {
     pub fn nav_guidance(&self) -> Option<NavGuidance> {
         let solution = self.last_solution.as_ref()?;
         match self.state() {
+            MissionState::Complete => {
+                let leg = self.holding_pattern_leg(solution)?;
+                let waypoint_count = self.route.waypoints().len();
+                Some(NavGuidance {
+                    to_ident: leg.to.ident,
+                    from_ident: None,
+                    course_rad: leg.desired_track_rad,
+                    lateral_deviation_m: leg.cross_track_m,
+                    vertical_deviation_m: leg.vertical_deviation_m,
+                    distance_to_waypoint_m: leg.distance_to_go_m,
+                    leg_index: u32::try_from(waypoint_count.saturating_sub(1)).unwrap_or(u32::MAX),
+                    waypoint_count: u32::try_from(waypoint_count).unwrap_or(u32::MAX),
+                    quality: leg.quality,
+                    to_from: Some(leg.to_from),
+                    holding: true,
+                })
+            }
             MissionState::AwaitSolution
             | MissionState::Arming
             | MissionState::Held
-            | MissionState::Complete
             | MissionState::Failed => None,
             MissionState::Climb | MissionState::Enroute => {
                 let leg = self.route.active_leg()?;
@@ -125,18 +150,29 @@ fn leg_guidance(
         || initial_bearing_rad(position, &to.position),
         |from| initial_bearing_rad(&from.position, &to.position),
     );
+    let lateral_deviation_m = leg
+        .from
+        .and_then(|from| cross_track_m(position, &from.position, &to.position, GEODESY).ok());
+    let distance_to_waypoint_m = distance_m(position, &to.position, GEODESY);
     NavGuidance {
         to_ident: to.ident.as_str().to_owned(),
         from_ident: leg.from.map(|from| from.ident.as_str().to_owned()),
         course_rad,
-        lateral_deviation_m: leg
-            .from
-            .and_then(|from| cross_track_m(position, &from.position, &to.position, GEODESY).ok()),
+        lateral_deviation_m,
         vertical_deviation_m: profile_deviation_m(position.altitude_m, to.altitude.as_ref()),
-        distance_to_waypoint_m: distance_m(position, &to.position, GEODESY),
+        distance_to_waypoint_m,
+        to_from: lateral_deviation_m.map(|_| {
+            super::navigation_display::to_from(
+                position,
+                &to.position,
+                course_rad,
+                distance_to_waypoint_m,
+            )
+        }),
         leg_index: u32::try_from(leg.index).unwrap_or(u32::MAX),
         waypoint_count: u32::try_from(waypoint_count).unwrap_or(u32::MAX),
         quality,
+        holding: false,
     }
 }
 

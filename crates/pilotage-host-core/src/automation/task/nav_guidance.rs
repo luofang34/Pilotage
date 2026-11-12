@@ -9,7 +9,7 @@
 //! byte-identical, and guidance that ends is cleared rather than frozen
 //! or centered.
 
-use pilotage_mission::{NavGuidance, NavQuality};
+use pilotage_mission::{NavGuidance, NavQuality, ToFrom};
 use pilotage_protocol::{SessionId, wire};
 
 /// Source identity of the mission principal's guidance group. Role
@@ -98,6 +98,11 @@ impl NavGuidancePublisher {
     }
 }
 
+/// The wire's sequencing state of a source flying its plan's legs.
+const SEQUENCING_LEGS: u32 = 0;
+/// The wire's sequencing state of a source flying a holding pattern.
+const SEQUENCING_HOLD: u32 = 1;
+
 /// The wire shape of one guidance sample. A deviation the executor is not
 /// tracking travels as NaN — the schema's "no reading" encoding — because
 /// zero would read as on-course or on-profile.
@@ -116,6 +121,16 @@ fn to_wire(guidance: &NavGuidance, stamp: wire::MeasurementStamp) -> wire::NavGu
             NavQuality::Good => 0,
             NavQuality::Degraded => 1,
             NavQuality::Unusable => 2,
+        },
+        sequencing: if guidance.holding {
+            SEQUENCING_HOLD
+        } else {
+            SEQUENCING_LEGS
+        },
+        to_from: match guidance.to_from {
+            None => 0,
+            Some(ToFrom::To) => 1,
+            Some(ToFrom::From) => 2,
         },
     }
 }

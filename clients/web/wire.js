@@ -1202,15 +1202,15 @@ function decodeNavGuidance(bytes) {
     toIdent: decodeStringField(f, 2),
     fromIdent: decodeStringField(f, 3),
     courseRad: decodeFloat32(firstBytes(f, 4)),
-    // NaN survives the decode: guidance that tracks no lateral course, or a
-    // leg with no vertical constraint, must remove that deviation rather
-    // than present a centered needle.
+    // NaN survives the decode: an untracked lateral course or an unconstrained
+    // leg removes that deviation rather than presenting a centered needle.
     lateralDeviationM: decodeFloat32(firstBytes(f, 5)),
     verticalDeviationM: decodeFloat32(firstBytes(f, 6)),
     distanceToWaypointM: decodeFloat32(firstBytes(f, 7)),
-    legIndex: firstVarint(f, 8) ?? 0,
-    waypointCount: firstVarint(f, 9) ?? 0,
-    solutionQuality: firstVarint(f, 10) ?? 0,
+    ...Object.fromEntries(
+      Object.entries({ legIndex: 8, waypointCount: 9, solutionQuality: 10, sequencing: 11, toFrom: 12 })
+        .map(([key, field]) => [key, firstVarint(f, field) ?? 0]),
+    ),
     stamp,
   };
 }

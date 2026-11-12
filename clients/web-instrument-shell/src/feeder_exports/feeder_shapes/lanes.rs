@@ -111,26 +111,36 @@ pub(in super::super) struct JsGuidanceSample {
     leg_index: u32,
     waypoint_count: u32,
     solution_quality: u32,
+    sequencing: u32,
+    to_from: u32,
 }
 
-/// The phase scale and TO/FROM flag of a guidance sample. The wire's
-/// guidance carries neither, so the lane states what Pilotage flies: the
-/// terminal-area scale, and the fix ahead while a lateral course is
-/// tracked. A sample with no cross-track deviation tracks no course, so
-/// its flag is off and the deviation bar is removed. Nor does it state
-/// whether the source sequences its legs, so the lane says it does
-/// ([`LANE_SEQUENCING`]).
-fn scale_and_flag(lateral_deviation_m: f32) -> (NavScale, NavFromTo) {
-    let flag = if lateral_deviation_m.is_finite() {
-        NavFromTo::To
-    } else {
-        NavFromTo::Off
-    };
-    (NavScale::Terminal, flag)
+/// The phase scale of every guidance sample. The wire's guidance carries
+/// none, so the lane states the terminal-area scale Pilotage flies to.
+const LANE_SCALE: NavScale = NavScale::Terminal;
+
+/// The sequencing state the wire codes as 0 sequencing its legs, 1
+/// holding, and 2 suspended; any other value is unknown, which removes
+/// the display.
+fn sequencing_of(code: u32) -> NavSequencing {
+    match code {
+        0 => NavSequencing::Sequencing,
+        1 => NavSequencing::Hold,
+        2 => NavSequencing::Suspended,
+        _ => NavSequencing::Unknown,
+    }
 }
 
-/// The sequencing state the lane states for every guidance sample.
-const LANE_SEQUENCING: NavSequencing = NavSequencing::Sequencing;
+/// The TO/FROM flag the wire codes as 0 off (no lateral course), 1 to,
+/// and 2 from; any other value is unknown, which removes the display.
+fn to_from_of(code: u32) -> NavFromTo {
+    match code {
+        0 => NavFromTo::Off,
+        1 => NavFromTo::To,
+        2 => NavFromTo::From,
+        _ => NavFromTo::Unknown,
+    }
+}
 
 fn ident_or_invalid(text: &str) -> IdentStr {
     IdentStr::new(text).unwrap_or(IdentStr::INVALID)
@@ -150,13 +160,12 @@ impl JsGuidanceSample {
             acquired_at_ns: 0,
             clock: 0,
         });
-        let (scale, to_from) = scale_and_flag(self.lateral_deviation_m);
         (
             stamp,
             Guidance {
-                scale,
-                to_from,
-                sequencing: LANE_SEQUENCING,
+                scale: LANE_SCALE,
+                to_from: to_from_of(self.to_from),
+                sequencing: sequencing_of(self.sequencing),
                 to_ident: ident_or_invalid(&self.to_ident),
                 from_ident: ident_or_invalid(&self.from_ident),
                 course_rad: self.course_rad,
@@ -184,6 +193,7 @@ struct JsGuidanceOut {
     waypoint_count: u32,
     solution_quality: u32,
     sequencing: u8,
+    to_from: u8,
 }
 
 /// The guidance snapshot the script consumes.
@@ -209,6 +219,12 @@ impl From<NavSnapshot> for JsNavSnapshot {
                 waypoint_count: guidance.waypoint_count,
                 solution_quality: guidance.solution_quality,
                 sequencing: guidance.sequencing.to_u8(),
+                to_from: match guidance.to_from {
+                    NavFromTo::Off => 0,
+                    NavFromTo::To => 1,
+                    NavFromTo::From => 2,
+                    NavFromTo::Unknown => 255,
+                },
             },
             age_ms: snapshot.age_ms,
         }
@@ -239,16 +255,17 @@ struct JsGuidanceIn {
     #[serde(default)]
     waypoint_count: u32,
     solution_quality: u32,
+    sequencing: u32,
+    to_from: u32,
 }
 
 impl JsNavSnapshotIn {
     pub(in super::super) fn into_snapshot(self) -> NavSnapshot {
-        let (scale, to_from) = scale_and_flag(self.nav_guidance.lateral_deviation_m);
         NavSnapshot {
             guidance: Guidance {
-                scale,
-                to_from,
-                sequencing: LANE_SEQUENCING,
+                scale: LANE_SCALE,
+                to_from: to_from_of(self.nav_guidance.to_from),
+                sequencing: sequencing_of(self.nav_guidance.sequencing),
                 to_ident: ident_or_invalid(&self.nav_guidance.to_ident),
                 from_ident: ident_or_invalid(&self.nav_guidance.from_ident),
                 course_rad: self.nav_guidance.course_rad,
