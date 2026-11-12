@@ -1,11 +1,12 @@
 #![cfg(test)]
 
-//! A route that runs straight into its last waypoint, a fly-by one, and
-//! the holding pattern that follows, closed loop with Aviate's C172
+//! A route that runs straight into its last waypoint, fly-by or fly-over,
+//! and the holding pattern that follows, closed loop with Aviate's C172
 //! lateral law at 60 m/s: in still air and in a 12 m/s crosswind, on the
 //! onboard navigator and on simulation truth. The aircraft flies over the
-//! last waypoint before it turns, every outbound leg ends, and the
-//! racetrack stays in its area for three circuits.
+//! last waypoint before it turns, every outbound leg ends, the racetrack
+//! stays in its area for three circuits, and the racetrack flown is the
+//! one planned.
 
 #[path = "holding_pattern/aircraft.rs"]
 mod aircraft;
@@ -16,7 +17,7 @@ use navigate_geodesy::NedOffset;
 use navigate_geodesy::wgs84::tangent_plane;
 use pilotage_mission::{
     ExecutionTarget, HoldingLeg, MissionConfig, MissionEngine, MissionEvent, MissionState,
-    OwnshipSample, OwnshipSource, PlannedWaypoint, TruthRole, WaypointPlan,
+    OwnshipSample, OwnshipSource, PlannedWaypoint, TruthRole, WaypointPlan, WaypointTurn,
 };
 use pilotage_protocol::{ControlAction, VehicleClass};
 
@@ -42,21 +43,24 @@ fn config(navigator: bool) -> MissionConfig {
     config
 }
 
-fn plan() -> WaypointPlan {
+/// The route, its last waypoint of `last_turn`.
+fn plan(last_turn: WaypointTurn) -> WaypointPlan {
     let plane = tangent_plane(anchor()).expect("anchor is plausible");
-    WaypointPlan::new(
-        ROUTE_NED
-            .iter()
-            .map(|[north, east]| {
-                let p = plane.from_ned(&NedOffset::new(*north, *east, 0.0));
-                PlannedWaypoint::new(
-                    p.latitude_rad.to_degrees(),
-                    p.longitude_rad.to_degrees(),
-                    ALTITUDE_M,
-                )
-            })
-            .collect(),
-    )
+    let mut waypoints: Vec<PlannedWaypoint> = ROUTE_NED
+        .iter()
+        .map(|[north, east]| {
+            let p = plane.from_ned(&NedOffset::new(*north, *east, 0.0));
+            PlannedWaypoint::new(
+                p.latitude_rad.to_degrees(),
+                p.longitude_rad.to_degrees(),
+                ALTITUDE_M,
+            )
+        })
+        .collect();
+    if let Some(last) = waypoints.last_mut() {
+        last.turn = last_turn;
+    }
+    WaypointPlan::new(waypoints)
 }
 
 /// One tick of the flight after the plan completed: the time, where the
@@ -68,12 +72,18 @@ struct Held {
     right_m: f64,
     leg: Option<HoldingLeg>,
     circuits: u32,
+    turn_radius_m: f64,
 }
 
 /// Flies the route and `hold_s` of the pattern after it.
-fn fly(navigator: bool, wind_mps: [f64; 2], hold_s: f64) -> (Vec<Held>, Vec<MissionEvent>) {
+fn fly(
+    navigator: bool,
+    wind_mps: [f64; 2],
+    hold_s: f64,
+    last_turn: WaypointTurn,
+) -> (Vec<Held>, Vec<MissionEvent>) {
     let (mut engine, _) =
-        MissionEngine::from_waypoints(&plan(), config(navigator)).expect("builds");
+        MissionEngine::from_waypoints(&plan(last_turn), config(navigator)).expect("builds");
     let mut aircraft = Aircraft::new([-500.0, 500.0, 0.0], -45.0_f64.to_radians(), wind_mps);
     let mut now = MonotonicNanos::from_nanos(1_000_000_000);
     let (mut held, mut events) = (Vec::new(), Vec::new());
@@ -109,6 +119,9 @@ fn fly(navigator: bool, wind_mps: [f64; 2], hold_s: f64) -> (Vec<Held>, Vec<Miss
                 right_m: -north * sin + east * cos,
                 leg: status.as_ref().map(|status| status.leg),
                 circuits: status.as_ref().map_or(0, |status| status.circuits),
+                turn_radius_m: status
+                    .as_ref()
+                    .map_or(f64::NAN, |status| status.pattern.turn_radius_m),
             });
             if held.len() as f64 * STEP_S >= hold_s {
                 break;
@@ -132,11 +145,17 @@ fn legs(held: &[Held]) -> Vec<(HoldingLeg, f64)> {
 }
 
 #[test]
-fn a_straight_in_fly_by_last_waypoint_is_flown_over_and_held_at() {
-    for navigator in [true, false] {
+fn a_straight_in_last_waypoint_of_either_kind_is_flown_over_and_held_at() {
+    let cases = [WaypointTurn::FlyBy, WaypointTurn::FlyOver]
+        .into_iter()
+        .flat_map(|turn| [true, false].map(|navigator| (turn, navigator)));
+    for (turn, navigator) in cases {
         for wind in [[0.0, 0.0], [8.485, 8.485], [-8.485, -8.485]] {
-            let (held, events) = fly(navigator, wind, 1_200.0);
-            let summary = format!("navigator {navigator}, wind {wind:?}: {:?}", legs(&held));
+            let (held, events) = fly(navigator, wind, 1_200.0, turn);
+            let summary = format!(
+                "{turn:?}, navigator {navigator}, wind {wind:?}: {:?}",
+                legs(&held)
+            );
             // The entry turn starts over the fix, not short of it.
             let entry = held
                 .iter()
@@ -177,6 +196,49 @@ fn a_straight_in_fly_by_last_waypoint_is_flown_over_and_held_at() {
                 );
                 assert!(tick.right_m > -800.0 && tick.right_m < 4_000.0, "{summary}");
             }
+        }
+    }
+}
+
+/// How far the racetrack flown after the first circuit strays from the
+/// planned one, metres: the turn at the fix past the outbound line, the
+/// outbound leg outside it, and the inbound leg across to the non-holding
+/// side.
+fn strays(held: &[Held]) -> [f64; 3] {
+    let settled = held.iter().filter(|tick| tick.circuits >= 1);
+    settled.fold([0.0_f64; 3], |worst, tick| {
+        let outbound_line = 2.0 * tick.turn_radius_m;
+        match tick.leg {
+            Some(HoldingLeg::FixTurn) => [
+                worst[0].max(tick.right_m - outbound_line),
+                worst[1],
+                worst[2],
+            ],
+            Some(HoldingLeg::Outbound) => [
+                worst[0],
+                worst[1].max(tick.right_m - outbound_line),
+                worst[2],
+            ],
+            Some(HoldingLeg::Inbound) => [worst[0], worst[1], worst[2].max(-tick.right_m)],
+            _ => worst,
+        }
+    })
+}
+
+#[test]
+fn the_racetrack_flown_is_the_racetrack_planned() {
+    for navigator in [true, false] {
+        for wind in [[0.0, 0.0], [8.485, 8.485]] {
+            let (held, _) = fly(navigator, wind, 1_500.0, WaypointTurn::FlyBy);
+            let worst = strays(&held);
+            assert!(
+                worst.iter().all(|stray| *stray <= 30.0),
+                "navigator {navigator}, wind {wind:?}: turn wide by {:.0} m, outbound outside \
+                 by {:.0} m, inbound across by {:.0} m",
+                worst[0],
+                worst[1],
+                worst[2]
+            );
         }
     }
 }

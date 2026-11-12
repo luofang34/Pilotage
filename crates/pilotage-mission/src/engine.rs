@@ -5,6 +5,7 @@
 mod document;
 mod holding_pattern;
 mod home;
+mod intercept;
 mod nav_guidance;
 mod navigation_display;
 mod onboard;

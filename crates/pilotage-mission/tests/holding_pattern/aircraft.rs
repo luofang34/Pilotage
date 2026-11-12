@@ -1,7 +1,7 @@
 //! A fixed wing with Aviate's C172 lateral laws: the proportional
 //! heading-to-bank law for heading and altitude demands, as on the onboard
-//! navigator, and the trimmed course law for velocity demands, as on
-//! simulation truth. It flies in a steady wind.
+//! navigator, and the trimmed course law on the course over the ground for
+//! velocity demands, as on simulation truth. It flies in a steady wind.
 
 use navigate_contract::{
     AttitudeQuaternion, ClockDomainId, Ellipsoid, FaultDetection, GeodeticPosition,
@@ -97,9 +97,15 @@ impl Aircraft {
             _ => {}
         }
         let rate_per_tangent = GRAVITY_MPS2 / self.airspeed_mps();
-        let error = (wanted - self.heading_rad)
-            .sin()
-            .atan2((wanted - self.heading_rad).cos());
+        // A heading demand is held against the heading, a velocity
+        // demand's direction against the course over the ground.
+        let held = if heading_law {
+            self.heading_rad
+        } else {
+            let velocity = self.ground_velocity();
+            velocity[1].atan2(velocity[0])
+        };
+        let error = (wanted - held).sin().atan2((wanted - held).cos());
         // Aviate holds a heading demand with the proportional heading-to-bank
         // law, and a velocity demand's course with the trimmed course law.
         let wanted_bank = if heading_law {

@@ -29,6 +29,17 @@ pub(crate) const REENTRY_GAP_S: f64 = 1.0;
 /// inbound time cannot drive the outbound leg to nothing or without end.
 const OUTBOUND_SHARE: (f64, f64) = (0.25, 3.0);
 
+/// How long a turn is flown before its radius error trims the turns, seconds:
+/// the roll into the turn is its own transient.
+const TURN_TRIM_SETTLE_S: f64 = 10.0;
+
+/// How fast the turn trim follows the radius error, per second: slow against
+/// the heading loop's lag of a few seconds, fast against a turn of a minute.
+const TURN_TRIM_GAIN_PER_S: f64 = 0.05;
+
+/// The largest turn trim, as a share of the turn radius.
+const TURN_TRIM_SHARE: f64 = 0.3;
+
 /// How close to the fix, metres, a vehicle starting the pattern counts as
 /// over it: closer than this the direction to the fix says nothing.
 const AT_FIX_M: f64 = 1.0;
@@ -114,6 +125,9 @@ pub(crate) struct PatternFlight {
     last_step_s: Option<f64>,
     /// When the part of the pattern flown now started.
     phase_since_s: f64,
+    /// How far inside its circle each turn is guided, metres: what the
+    /// turns flown so far showed the aircraft drifts outside it.
+    turn_trim_m: f64,
 }
 
 impl PatternFlight {
@@ -139,6 +153,7 @@ impl PatternFlight {
             outbound_speed_mps: None,
             last_step_s: None,
             phase_since_s: 0.0,
+            turn_trim_m: 0.0,
         }
     }
 
@@ -169,7 +184,9 @@ impl PatternFlight {
         if gap || away {
             self.begin(position, course, now_s, false);
         }
+        let dt_s = self.last_step_s.map_or(0.0, |last| now_s - last);
         self.last_step_s = Some(now_s);
+        self.trim_turn(position, now_s, dt_s);
         let part = core::mem::discriminant(&self.phase);
         self.advance(position, course, now_s);
         let overdue = now_s - self.phase_since_s > MAX_PART_LEG_TIMES * self.leg_time_s;
@@ -190,6 +207,29 @@ impl PatternFlight {
             || x < -self.far_m
             || y < -margin_m
             || y > 2.0 * self.radius_m + margin_m
+    }
+
+    /// Folds how far outside the turn flown the vehicle at `position` is
+    /// into the turn trim. A heading loop lags a turning command, and the
+    /// aircraft settles on a wider circle than the one it is guided round:
+    /// the trim guides it round a smaller one, so it flies the planned
+    /// radius. All the pattern's turns are at one radius and speed, so the
+    /// trim one turn learns serves the next.
+    fn trim_turn(&mut self, position: [f64; 2], now_s: f64, dt_s: f64) {
+        let (Phase::DirectTurn(turn)
+        | Phase::EntryTurn { turn, .. }
+        | Phase::FixTurn(turn)
+        | Phase::OutboundTurn(turn)) = self.phase
+        else {
+            return;
+        };
+        let error_m = turn.radial_error_m(position);
+        let settled = now_s - self.phase_since_s >= TURN_TRIM_SETTLE_S;
+        if settled && error_m.abs() <= 0.5 * self.radius_m && dt_s > 0.0 && dt_s <= REENTRY_GAP_S {
+            let bound = TURN_TRIM_SHARE * self.radius_m;
+            self.turn_trim_m =
+                (self.turn_trim_m + TURN_TRIM_GAIN_PER_S * error_m * dt_s).clamp(-bound, bound);
+        }
     }
 
     /// The part of the pattern flown now.
@@ -396,7 +436,7 @@ impl PatternFlight {
             | Phase::EntryTurn { turn, .. }
             | Phase::FixTurn(turn)
             | Phase::OutboundTurn(turn) => Steer::Toward {
-                point: turn.lead(position),
+                point: turn.lead(position, self.turn_trim_m),
             },
             Phase::EntryLeg { from, course, .. } => Steer::Track {
                 from,

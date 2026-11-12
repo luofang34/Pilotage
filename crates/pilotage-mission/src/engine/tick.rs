@@ -383,8 +383,9 @@ impl MissionEngine {
             &self.guidance,
         );
         let guided = guided.map(|mut command| {
+            let intercept = self.intercept_setpoint(command.setpoint, &reference, &to.position);
             command.setpoint =
-                self.trimmed_setpoint(command.setpoint, &reference, &to.position, solution, now);
+                self.trimmed_setpoint(intercept, &reference, &to.position, solution, now);
             command
         });
         match guided {
