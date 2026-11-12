@@ -33,6 +33,11 @@ pub struct NavigationDisplay {
     pub leg: Option<LegDisplay>,
     /// The holding pattern flown after the plan; `None` before it.
     pub holding_pattern: Option<HoldingPatternStatus>,
+    /// The dead reckoning the plan is flown on, with its uncertainty;
+    /// `None` while the solution flown is within its limits. A display
+    /// shows it beside the guidance, which it does not remove: the
+    /// vehicle flies that guidance.
+    pub dead_reckoning: Option<super::DeadReckoning>,
 }
 
 /// One waypoint of the plan.
@@ -131,6 +136,7 @@ impl MissionEngine {
             plan_complete: self.plan_complete,
             leg: self.leg_display(),
             holding_pattern: self.holding_pattern(),
+            dead_reckoning: self.dead_reckoning(),
         }
     }
 

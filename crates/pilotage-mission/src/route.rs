@@ -180,6 +180,27 @@ impl MissionRoute {
         self.arrived
     }
 
+    /// The bank the turns ahead of fly-by waypoints are sized at, radians.
+    pub(crate) const fn bank_limit_rad(&self) -> f64 {
+        self.config.bank_limit_rad
+    }
+
+    /// The courses into and out of the waypoint the active leg flies to,
+    /// radians clockwise from true north: the turn ahead. `None` with no
+    /// leg before it or after it.
+    pub(crate) fn turn_ahead_courses(&self) -> Option<(f64, f64)> {
+        if self.complete {
+            return None;
+        }
+        let index = self.active_index;
+        let previous = self.waypoints.get(index.checked_sub(1)?)?;
+        let turn = self.waypoints.get(index)?;
+        let next = self.waypoints.get(index.checked_add(1)?)?;
+        let back = navigate_geodesy::initial_bearing_rad(&turn.position, &previous.position);
+        let out = navigate_geodesy::initial_bearing_rad(&turn.position, &next.position);
+        Some((back + core::f64::consts::PI, out))
+    }
+
     /// The course of the last leg where it reaches the last waypoint,
     /// radians clockwise from true north; `None` for a plan of one
     /// waypoint, or a last leg too short to have a course.

@@ -1,10 +1,10 @@
 {
-  "indicateRevision": "11ee0fbc8c759200614186fb333722232ac3caee",
-  "stateAbiVersion": 9,
+  "indicateRevision": "217b88b46b45005cb7f21c2ad5a23923d432b32b",
+  "stateAbiVersion": 10,
   "sceneFormatVersion": 1,
-  "corpusVersion": 8,
-  "corpusDigest": "0b0c7ccb135bfc4107bc110e4b24dceffd84adf1b767fcd14d2c5ace7391f962",
-  "registrySceneDigest": "c61cb54b60c31a2cbc614e809c29e7c8d363178d3c30bc01c55552092d236459",
-  "screenCompositionDigest": "5f259d1a1410f06fe5cab40bfdbec9c6cfcbb786254218f35d4a25c5f267c094",
+  "corpusVersion": 9,
+  "corpusDigest": "dcd67f6cc789bb17199caeb364a67fbaaa211f32de5353d50eaffa989e846b2b",
+  "registrySceneDigest": "26fdba99a83fbbfc340f06350ab8f77e086e33b066a6c9d33a02a6fafad05189",
+  "screenCompositionDigest": "2b5bef44f5114690c100724768c4e2b43da8ebbb42627451499b15e68e52b442",
   "glyphRecordedHash": "281eef6229feee417c7090d8c8ea79489c017cd1c02fc7234876b2a64a532158"
 }

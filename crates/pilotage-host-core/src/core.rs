@@ -139,6 +139,9 @@ impl HostCore {
         // The engine holds the arm until the flight controller reports
         // itself ready, as the principal reads it from the telemetry.
         config.arm_when_vehicle_ready = true;
+        // The datum the adapter turns commanded altitudes by, so the climb
+        // can capture on the altitude the flight controller flies.
+        config.fc_origin_height_m = self.config.fc_origin_height_m;
         let principal = MissionTask::new(MissionPlan::waypoints(plan, config), false);
         self.begin_principal(Box::new(principal));
         Ok(record)

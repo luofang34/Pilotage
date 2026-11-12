@@ -78,6 +78,8 @@ function fullState() {
       courseReference: 2,
       toIdent: "WPT-2",
       fromIdent: "KMRY",
+      facility: 0,
+      sequencing: 0,
       ageMs: 80,
     },
     wind: { fromRad: 2.1, speedMps: 7.5, ageMs: 80 },
@@ -173,6 +175,8 @@ function dataGatewayState() {
       courseReference: 1,
       toIdent: "WPT-3",
       fromIdent: "GATE-A",
+      facility: 0,
+      sequencing: 0,
       ageMs: 150,
     },
     quality: 0,
@@ -206,19 +210,19 @@ function flightControllerState() {
   };
 }
 
-check("writer version is the pinned wire version", STATE_ABI_VERSION === 9);
+check("writer version is the pinned wire version", STATE_ABI_VERSION === 10);
 
 for (const [stem, build] of [
-  ["state-abi-v9.full", fullState],
-  ["state-abi-v9.data-gateway", dataGatewayState],
-  ["state-abi-v9.flight-controller", flightControllerState],
+  ["state-abi-v10.full", fullState],
+  ["state-abi-v10.data-gateway", dataGatewayState],
+  ["state-abi-v10.flight-controller", flightControllerState],
 ]) {
   check(`${stem} matches the committed golden frame byte for byte`, encodedHex(build()) === goldenHex(stem));
 }
 
 {
   // Presence is meaning: an empty state is exactly the two-byte header.
-  check("an empty state encodes the empty frame", encodedHex({}) === "0900");
+  check("an empty state encodes the empty frame", encodedHex({}) === "0a00");
 }
 
 {
@@ -238,14 +242,14 @@ for (const [stem, build] of [
   // Canonicalization: a trust group whose quality, flags, and snapshot
   // all equal their fail-closed defaults encodes as absent — matching
   // the Rust encoder, so equal states produce equal bytes.
-  check("an all-default trust group encodes as absent", encodedHex({ valid: {} }) === "0900");
+  check("an all-default trust group encodes as absent", encodedHex({ valid: {} }) === "0a00");
   check(
     "explicitly declared defaults still omit the trust group",
-    encodedHex({ quality: 255, valid: {}, snapshot: { coherence: 0, generation: 0 } }) === "0900",
+    encodedHex({ quality: 255, valid: {}, snapshot: { coherence: 0, generation: 0 } }) === "0a00",
   );
   check(
     "one set flag makes the trust group present",
-    encodedHex({ valid: { attitude: true } }) !== "0900",
+    encodedHex({ valid: { attitude: true } }) !== "0a00",
   );
 }
 
@@ -295,8 +299,8 @@ for (const [stem, build] of [
   );
   const nav = payload({ nav: { source: 1, ageMs: 10 } });
   check(
-    "a nav group with no declared scale writes 43 bytes and the unknown scale",
-    nav.len === 43 && nav.bytes[42] === 0xff,
+    "a nav group with no declared scale, facility or sequencing writes 45 bytes and three unknowns",
+    nav.len === 45 && nav.bytes[42] === 0xff && nav.bytes[43] === 0xff && nav.bytes[44] === 0xff,
   );
   const dyn = payload({ dynamics: { turnBasis: 0, turnRps: 0.1, ageMs: 10 } });
   check(

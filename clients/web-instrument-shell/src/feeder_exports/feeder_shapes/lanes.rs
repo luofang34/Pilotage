@@ -6,7 +6,9 @@ use indicate_instrument_feeder::RawStamp;
 use indicate_instrument_feeder::fc_state::{FcCommand, FcReport, FcView};
 use indicate_instrument_feeder::nav_guidance::{Guidance, NavCounters, NavReject, NavSnapshot};
 use indicate_instrument_feeder::turn::TurnDeclaration;
-use indicate_instrument_state::{IdentStr, NavData, NavFromTo, NavSource, Stamped};
+use indicate_instrument_state::{
+    IdentStr, NavData, NavFromTo, NavScale, NavSequencing, NavSource, Stamped,
+};
 use serde::{Deserialize, Serialize};
 
 use super::JsStamp;
@@ -111,6 +113,25 @@ pub(in super::super) struct JsGuidanceSample {
     solution_quality: u32,
 }
 
+/// The phase scale and TO/FROM flag of a guidance sample. The wire's
+/// guidance carries neither, so the lane states what Pilotage flies: the
+/// terminal-area scale, and the fix ahead while a lateral course is
+/// tracked. A sample with no cross-track deviation tracks no course, so
+/// its flag is off and the deviation bar is removed. Nor does it state
+/// whether the source sequences its legs, so the lane says it does
+/// ([`LANE_SEQUENCING`]).
+fn scale_and_flag(lateral_deviation_m: f32) -> (NavScale, NavFromTo) {
+    let flag = if lateral_deviation_m.is_finite() {
+        NavFromTo::To
+    } else {
+        NavFromTo::Off
+    };
+    (NavScale::Terminal, flag)
+}
+
+/// The sequencing state the lane states for every guidance sample.
+const LANE_SEQUENCING: NavSequencing = NavSequencing::Sequencing;
+
 fn ident_or_invalid(text: &str) -> IdentStr {
     IdentStr::new(text).unwrap_or(IdentStr::INVALID)
 }
@@ -129,9 +150,13 @@ impl JsGuidanceSample {
             acquired_at_ns: 0,
             clock: 0,
         });
+        let (scale, to_from) = scale_and_flag(self.lateral_deviation_m);
         (
             stamp,
             Guidance {
+                scale,
+                to_from,
+                sequencing: LANE_SEQUENCING,
                 to_ident: ident_or_invalid(&self.to_ident),
                 from_ident: ident_or_invalid(&self.from_ident),
                 course_rad: self.course_rad,
@@ -158,6 +183,7 @@ struct JsGuidanceOut {
     leg_index: u32,
     waypoint_count: u32,
     solution_quality: u32,
+    sequencing: u8,
 }
 
 /// The guidance snapshot the script consumes.
@@ -182,6 +208,7 @@ impl From<NavSnapshot> for JsNavSnapshot {
                 leg_index: guidance.leg_index,
                 waypoint_count: guidance.waypoint_count,
                 solution_quality: guidance.solution_quality,
+                sequencing: guidance.sequencing.to_u8(),
             },
             age_ms: snapshot.age_ms,
         }
@@ -216,8 +243,12 @@ struct JsGuidanceIn {
 
 impl JsNavSnapshotIn {
     pub(in super::super) fn into_snapshot(self) -> NavSnapshot {
+        let (scale, to_from) = scale_and_flag(self.nav_guidance.lateral_deviation_m);
         NavSnapshot {
             guidance: Guidance {
+                scale,
+                to_from,
+                sequencing: LANE_SEQUENCING,
                 to_ident: ident_or_invalid(&self.nav_guidance.to_ident),
                 from_ident: ident_or_invalid(&self.nav_guidance.from_ident),
                 course_rad: self.nav_guidance.course_rad,
@@ -275,6 +306,8 @@ pub(in super::super) struct JsNavGroup {
     course_rad: f32,
     course_reference: u8,
     scale: u8,
+    facility: u8,
+    sequencing: u8,
     cdi_dots: f32,
     vdev_dots: Option<f32>,
     dist_nm: Option<f32>,
@@ -303,6 +336,8 @@ impl From<Stamped<NavData>> for JsNavGroup {
             course_rad: nav.course_rad,
             course_reference: nav.course_reference.to_u8(),
             scale: nav.scale.to_u8(),
+            facility: nav.facility.to_u8(),
+            sequencing: nav.sequencing.to_u8(),
             cdi_dots: nav.cdi_dots,
             vdev_dots: nav.vdev_dots,
             dist_nm: nav.dist_nm,
@@ -312,3 +347,6 @@ impl From<Stamped<NavData>> for JsNavGroup {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

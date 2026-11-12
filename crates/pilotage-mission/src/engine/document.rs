@@ -26,6 +26,25 @@ pub(super) const FOLLOW_PLAN_PHASE_ID: &str = "follow-plan";
 /// Altitude margin below the target that completes the climb, in meters.
 pub(super) const CLIMB_CAPTURE_MARGIN_M: f64 = 1.0;
 
+/// Altitude window below the target that completes the climb of a vehicle
+/// that holds its altitude itself, in meters. Its flight controller flies
+/// the commanded altitude on its own air data whether or not the climb is
+/// captured, so capturing early costs nothing; a margin tighter than a
+/// navigator's honest vertical error would keep the mission in the climb.
+pub(super) const HELD_ALTITUDE_CAPTURE_WINDOW_M: f64 = 30.0;
+
+/// The margin below the target that completes the climb for `config`'s
+/// vehicle: the window of a vehicle that holds its altitude itself, the
+/// tight margin of one that climbs on the commanded vertical rate and
+/// stops climbing once captured.
+pub(super) fn climb_capture_margin_m(config: &MissionConfig) -> f64 {
+    if config.can_stop() {
+        CLIMB_CAPTURE_MARGIN_M
+    } else {
+        HELD_ALTITUDE_CAPTURE_WINDOW_M
+    }
+}
+
 const PLAN_DIGEST_DOMAIN: &[u8] = b"pilotage.flight-plan.v1\0";
 /// Revision prefix of a mission built from a navdata route.
 pub(super) const ROUTE_REVISION_PREFIX: &str = "operational-route-v1";
@@ -221,7 +240,7 @@ fn climb_phase(config: &MissionConfig, first: bool) -> MissionPhase {
         completion_conditions: vec![MissionCondition::Navigation(
             NavigationCondition::Altitude {
                 comparison: Comparison::GreaterOrEqual,
-                value_m: target_altitude_m - CLIMB_CAPTURE_MARGIN_M,
+                value_m: target_altitude_m - climb_capture_margin_m(config),
             },
         )],
         abort_conditions: Vec::new(),
