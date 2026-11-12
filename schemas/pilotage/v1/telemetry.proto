@@ -498,6 +498,14 @@ message NavGuidanceState {
   // 1 degraded, 2 unusable. Consumers remove the guidance display on
   // unusable rather than displaying it with a caution.
   uint32 solution_quality = 10;
+  // Whether the source sequences its legs (0), flies a holding pattern
+  // (1), or has suspended sequencing (2). A display annunciates HOLD or
+  // SUSP, so a TO/FROM flip over a holding fix does not read as a fault.
+  uint32 sequencing = 11;
+  // Whether the active waypoint is ahead of the vehicle along the desired
+  // course: 1 TO, 2 FROM, or 0 OFF while no lateral course is tracked,
+  // which removes the deviation bar.
+  uint32 to_from = 12;
 }
 
 message PayloadAxisObservation {

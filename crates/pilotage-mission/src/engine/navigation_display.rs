@@ -224,7 +224,7 @@ fn display_fix(waypoint: &Waypoint) -> DisplayFix {
 
 /// To when the bearing to `fix` is within 90° of `track_rad`. A vehicle
 /// over the fix counts as to.
-fn to_from(
+pub(super) fn to_from(
     position: &GeodeticPosition,
     fix: &GeodeticPosition,
     track_rad: f64,

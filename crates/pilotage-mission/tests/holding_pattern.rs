@@ -18,8 +18,8 @@ use navigate_geodesy::NedOffset;
 use navigate_geodesy::wgs84::tangent_plane;
 use pilotage_mission::{
     ExecutionTarget, HoldingEntry, HoldingLeg, HoldingPattern, HoldingTurn, MissionConfig,
-    MissionEngine, MissionEvent, MissionState, NavigationDisplay, OwnshipSample, OwnshipSource,
-    PlannedWaypoint, TruthRole, WaypointPlan, true_airspeed_for,
+    MissionEngine, MissionEvent, MissionState, NavGuidance, NavigationDisplay, OwnshipSample,
+    OwnshipSource, PlannedWaypoint, TruthRole, WaypointPlan, true_airspeed_for,
 };
 use pilotage_protocol::{ControlAction, VehicleClass};
 
@@ -79,6 +79,7 @@ struct Sample {
     circuits: u32,
     outbound_time_s: f64,
     display: NavigationDisplay,
+    guidance: Option<NavGuidance>,
 }
 
 /// A closed-loop flight of one engine.
@@ -148,6 +149,7 @@ impl Run {
                 .as_ref()
                 .map_or(f64::NAN, |status| status.outbound_time_s),
             display: self.engine.navigation_display(),
+            guidance: self.engine.nav_guidance(),
         });
         self.aircraft.fly(output.intent.as_ref());
     }

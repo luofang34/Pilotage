@@ -33,6 +33,11 @@ export function navDisplayState(snapshot) {
   // A quality outside the schema's non-negative integer coding removes
   // the display before any coercion could make it look presentable.
   if (!Number.isInteger(g.solutionQuality) || g.solutionQuality < 0) return null;
+  // The source states its sequencing and TO/FROM; a coding outside the
+  // schema's non-negative integers removes the display the same way.
+  for (const code of [g.sequencing, g.toFrom]) {
+    if (!Number.isInteger(code) || code < 0) return null;
+  }
   const marshalled = {
     navGuidance: {
       toIdent: typeof g.toIdent === "string" ? g.toIdent : "",
@@ -44,6 +49,8 @@ export function navDisplayState(snapshot) {
       legIndex: g.legIndex >>> 0,
       waypointCount: g.waypointCount >>> 0,
       solutionQuality: g.solutionQuality >>> 0,
+      sequencing: g.sequencing >>> 0,
+      toFrom: g.toFrom >>> 0,
     },
     ageMs: snapshot.ageMs,
   };
@@ -63,8 +70,8 @@ export function navDisplayState(snapshot) {
     distNm: out.distNm,
     toIdent: out.toIdent,
     fromIdent: out.fromIdent,
-    // The lane is the GPS solution, tuned to no facility, and sequencing
-    // its legs.
+    // The lane is the GPS solution, tuned to no facility; the source
+    // states whether it sequences its legs or holds.
     facility: out.facility,
     sequencing: out.sequencing,
     ageMs: out.ageMs,

@@ -1,6 +1,6 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use pilotage_mission::{NavGuidance, NavQuality};
+use pilotage_mission::{NavGuidance, NavQuality, ToFrom};
 use pilotage_protocol::{SessionId, wire};
 
 use super::{NavGuidancePublisher, NavPublication};
@@ -16,6 +16,8 @@ fn guidance() -> NavGuidance {
         leg_index: 1,
         waypoint_count: 3,
         quality: NavQuality::Degraded,
+        to_from: Some(ToFrom::To),
+        holding: false,
     }
 }
 
@@ -118,6 +120,7 @@ fn an_undefined_deviation_travels_as_nan_and_a_direct_to_leg_has_no_origin() {
         lateral_deviation_m: None,
         vertical_deviation_m: None,
         quality: NavQuality::Unusable,
+        to_from: None,
         ..guidance()
     };
     let state = sample(publisher.publication(Some(&direct_to), 0));
@@ -129,6 +132,7 @@ fn an_undefined_deviation_travels_as_nan_and_a_direct_to_leg_has_no_origin() {
     );
     assert!(state.vertical_deviation_m.is_nan());
     assert_eq!(state.solution_quality, 2);
+    assert_eq!(state.to_from, 0, "no lateral course: the flag is off");
 }
 
 #[test]
@@ -144,4 +148,20 @@ fn a_course_a_hair_under_north_narrows_inside_the_half_open_range() {
     let state = sample(publisher.publication(Some(&near_north), 0));
     assert_eq!(state.course_rad, 0.0, "the boundary folds to due north");
     assert!((0.0..std::f32::consts::TAU).contains(&state.course_rad));
+}
+
+#[test]
+fn a_holding_pattern_says_hold_and_from_and_a_plan_leg_says_sequencing_and_to() {
+    let mut publisher = NavGuidancePublisher::for_session(SessionId::new(7));
+    let leg = sample(publisher.publication(Some(&guidance()), 0));
+    assert_eq!(leg.sequencing, 0, "a plan leg is sequenced");
+    assert_eq!(leg.to_from, 1, "the waypoint ahead");
+    let holding = NavGuidance {
+        holding: true,
+        to_from: Some(ToFrom::From),
+        ..guidance()
+    };
+    let hold = sample(publisher.publication(Some(&holding), 0));
+    assert_eq!(hold.sequencing, 1, "the holding pattern is a hold");
+    assert_eq!(hold.to_from, 2, "the outbound leg flies from the fix");
 }
