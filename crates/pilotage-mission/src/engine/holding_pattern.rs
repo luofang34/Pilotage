@@ -14,7 +14,7 @@ use crate::holding_pattern::{
 };
 use pilotage_protocol::ControlIntent;
 
-use super::{MissionEngine, MissionEvent};
+use super::{LateralMode, MissionEngine, MissionEvent};
 
 /// The groundspeed below which the ground velocity has no usable course,
 /// m/s.
@@ -133,6 +133,7 @@ impl MissionEngine {
             )
         });
         let heading = timed.step(now_s, wind);
+        self.fly_lateral(LateralMode::TimedHold);
         self.announce_hold(events);
         let commanded = self.unbiased_heading(heading);
         Some(self.heading_altitude(commanded, altitude_m))

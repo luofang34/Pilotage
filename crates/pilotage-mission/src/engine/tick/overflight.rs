@@ -38,7 +38,7 @@ impl MissionEngine {
 
 /// Whether `position` lies beyond `to` along the track `from` → `to`.
 /// A track too short to have a direction is never overflown.
-pub(super) fn overflown(
+pub(in crate::engine) fn overflown(
     position: &GeodeticPosition,
     from: &GeodeticPosition,
     to: &GeodeticPosition,

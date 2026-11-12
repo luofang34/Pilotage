@@ -228,6 +228,7 @@ fn mission_arms_once_climbs_flies_the_route_and_completes() {
     assert_eq!(engine.counters().guidance_refused, 0);
     assert_eq!(engine.counters().fusion_rejected, 0);
     assert_eq!(engine.counters().vertical_mode_mismatch, 0);
+    assert_eq!(engine.counters().lateral_mode_mismatch, 0);
 
     let height_m = -truth.ned[2];
     assert!(height_m > 10.0, "still at cruise height, got {height_m}");

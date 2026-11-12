@@ -20,13 +20,15 @@ use crate::policy::OPERATIONAL_WALL_DEADLINE_NS;
 
 use super::document::ARM_PHASE_ID;
 use super::{
-    MissionAction, MissionEngine, MissionEvent, MissionOutput, MissionState, VerticalMode,
+    LateralMode, MissionAction, MissionEngine, MissionEvent, MissionOutput, MissionState,
+    VerticalMode,
 };
 
 mod climb;
 mod directives;
 pub(super) mod outputs;
 mod overflight;
+pub(super) use overflight::overflown;
 mod speed;
 mod terminal;
 mod wind_turn;
@@ -244,7 +246,8 @@ impl MissionEngine {
         action
     }
 
-    fn intent_for_state(
+    /// The engine's own selection of the intent of a tick in `state`.
+    pub(super) fn select_intent(
         &mut self,
         state: MissionState,
         solution: Option<&NavigationSolution>,
@@ -261,10 +264,16 @@ impl MissionEngine {
             MissionState::Climb if !self.config.can_stop() => {
                 self.climb_along_route_intent(solution, now, events)
             }
-            MissionState::Climb => self.climb_intent(solution),
+            MissionState::Climb => {
+                self.fly_lateral(LateralMode::PositionHold);
+                self.climb_intent(solution)
+            }
             MissionState::Enroute => self.follow_plan_intent(solution, now, events),
             MissionState::Complete => self.end_of_plan_intent(solution, now, events),
-            MissionState::Arming if self.arm_request_sent() => self.arming_intent(solution),
+            MissionState::Arming if self.arm_request_sent() => {
+                self.fly_lateral(LateralMode::Standby);
+                self.arming_intent(solution)
+            }
             MissionState::AwaitSolution
             | MissionState::Arming
             | MissionState::Held
@@ -386,6 +395,10 @@ impl MissionEngine {
         now: MonotonicNanos,
         events: &mut Vec<MissionEvent>,
     ) -> Option<ControlIntent> {
+        self.fly_lateral(match reference {
+            LateralReference::PresentPosition => LateralMode::DirectTo,
+            _ => LateralMode::Track,
+        });
         let guided = guide_velocity(
             solution,
             reference,

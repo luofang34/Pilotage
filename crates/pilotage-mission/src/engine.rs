@@ -7,6 +7,7 @@ mod document;
 mod holding_pattern;
 mod home;
 mod intercept;
+mod lateral_mode;
 mod modes;
 mod nav_guidance;
 mod nav_source;
@@ -42,6 +43,7 @@ use pilotage_mission_core::{
 };
 
 pub use dead_reckoning::DeadReckoning;
+use lateral_mode::LateralMode;
 pub use nav_guidance::{NavGuidance, NavQuality};
 pub use navigation_display::{
     DisplayFix, DisplayWaypoint, LegDisplay, NavigationDisplay, ToFrom, WaypointProgress,

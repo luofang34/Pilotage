@@ -11,7 +11,7 @@ use navigate_contract::{GeodeticPosition, MonotonicNanos, NavigationSolution};
 use navigate_route::SequenceReason;
 use pilotage_protocol::{ControlIntent, ReferenceFrame, VelocityIntent};
 
-use super::super::{MissionEngine, MissionEvent, MissionOutput, MissionState};
+use super::super::{LateralMode, MissionEngine, MissionEvent, MissionOutput, MissionState};
 use super::outputs::{terminal_output, zero_velocity_intent};
 
 impl MissionEngine {
@@ -40,11 +40,19 @@ impl MissionEngine {
         events: &mut Vec<MissionEvent>,
     ) -> Option<ControlIntent> {
         if self.config.can_stop() {
+            self.fly_lateral(LateralMode::PositionHold);
             return Some(zero_velocity_intent());
         }
         let guided = solution.and_then(|solution| {
             let (reference, target) = self.holding_pattern_target(solution, now, events)?;
             self.guide_to(solution, reference, &target, now, events)
+        });
+        // With a position the pattern is flown, whatever guidance gives;
+        // without one a vehicle steered by velocity flies on.
+        self.fly_lateral(if solution.is_some() {
+            LateralMode::Pattern
+        } else {
+            LateralMode::Coast
         });
         guided.or_else(|| self.holding_pattern_fallback())
     }

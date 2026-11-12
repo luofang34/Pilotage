@@ -226,6 +226,7 @@ fn fly(by_heading: bool) -> Flight {
         }
     }
     assert_eq!(engine.counters().vertical_mode_mismatch, 0);
+    assert_eq!(engine.counters().lateral_mode_mismatch, 0);
     flight
 }
 

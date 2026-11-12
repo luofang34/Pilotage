@@ -238,6 +238,7 @@ fn a_crosswind_is_flown_out_along_each_leg() {
         "{worst:.1} m off the second leg in the crosswind"
     );
     assert!(flight.holds.is_empty(), "{:?}", flight.holds);
+    assert_eq!(engine.counters().lateral_mode_mismatch, 0);
 }
 
 #[test]
@@ -292,6 +293,7 @@ fn an_uncertain_or_absent_solution_holds_heading_and_altitude_and_says_why() {
         "the uncertain stretch holds one command"
     );
     assert!(held(2_021..2_400), "the absent stretch holds one command");
+    assert_eq!(engine.counters().lateral_mode_mismatch, 0);
 }
 
 #[test]
@@ -348,6 +350,7 @@ fn a_launch_seen_by_airspeed_alone_gets_a_climb_on_its_heading_without_a_solutio
                 }
             )))
     );
+    assert_eq!(engine.counters().lateral_mode_mismatch, 0);
 }
 
 #[test]
