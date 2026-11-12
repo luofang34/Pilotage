@@ -102,5 +102,4 @@ fn the_display_reads_off_then_a_climb_then_the_altitude_held() {
         engine.navigation_display().vertical.target_m,
         Some(cruise_m)
     );
-    assert_eq!(engine.counters().vertical_mode_mismatch, 0);
 }

@@ -51,6 +51,9 @@ fn navigation(condition: &NavigationCondition, observation: &MissionObservation)
             .navigation
             .waypoints_captured
             .is_some_and(|captured| captured > *index),
+        NavigationCondition::AltitudeCaptured { expected } => {
+            observation.navigation.altitude_captured == Some(*expected)
+        }
         NavigationCondition::Altitude {
             comparison,
             value_m,

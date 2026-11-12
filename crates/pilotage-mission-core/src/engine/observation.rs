@@ -47,6 +47,9 @@ pub struct NavigationObservation {
     pub waypoints_captured: Option<u32>,
     /// The observed altitude in meters, when available.
     pub altitude_m: Option<f64>,
+    /// Whether the executor's vertical target is captured, when it judges one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub altitude_captured: Option<bool>,
 }
 
 /// Vehicle values in one observation frame.
