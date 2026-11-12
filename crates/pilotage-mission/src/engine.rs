@@ -54,6 +54,7 @@ pub use steering_source::{
 pub use vehicle_status::{
     LaunchDetection, StartWithheldReason, VEHICLE_STATUS_MAX_AGE_NS, VehicleStatus,
 };
+pub use vertical_mode::{VerticalMode, VerticalStatus};
 
 use crate::config::MissionConfig;
 use crate::error::MissionBuildError;

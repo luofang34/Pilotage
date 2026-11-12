@@ -14,9 +14,13 @@
 //! vehicle that sags out of the margin is still holding that altitude,
 //! not climbing to it again.
 //!
-//! The engine runs the machine beside the mission core's judgment of the
-//! climb each tick and counts every tick on which the two disagree
-//! ([`super::MissionCounters::vertical_mode_mismatch`]).
+//! The mode drives what the engine itself decides: the climb's vertical
+//! command and the mode a display reads. The mission core still ends its
+//! climb phase by the altitude threshold in the mission document, with
+//! the same margin and altitude. The engine counts every tick on which
+//! the machine and the core disagree
+//! ([`super::MissionCounters::vertical_mode_mismatch`]), so the two
+//! judges cannot drift apart unseen.
 
 use navigate_contract::{MonotonicNanos, NavigationSolution};
 use pilotage_mission_core::FlightAction as CoreFlightAction;
@@ -29,7 +33,8 @@ mod tests;
 
 /// The vertical mode.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub(super) enum VerticalMode {
+#[non_exhaustive]
+pub enum VerticalMode {
     /// No altitude is flown to.
     #[default]
     Off,
@@ -127,18 +132,32 @@ pub(super) const fn next(
     (to, effect)
 }
 
-/// The machine's state with the target it flies to.
-#[derive(Debug, Default)]
-pub(super) struct Vertical {
+/// The vertical mode with the altitude it flies to.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct VerticalStatus {
     /// The mode after the latest tick.
-    pub(super) mode: VerticalMode,
+    pub mode: VerticalMode,
     /// The target altitude above the ellipsoid, metres; `None` in
     /// [`VerticalMode::Off`].
-    pub(super) target_m: Option<f64>,
+    pub target_m: Option<f64>,
 }
 
 impl MissionEngine {
-    /// Steps the machine for a tick that begins in `state` at `now`.
+    /// The vertical mode and its target, from the state the latest
+    /// [`MissionEngine::tick`] left.
+    #[must_use]
+    pub const fn vertical_status(&self) -> VerticalStatus {
+        self.modes.vertical
+    }
+
+    /// The vertical mode after the latest step.
+    pub(super) const fn vertical_mode(&self) -> VerticalMode {
+        self.modes.vertical.mode
+    }
+
+    /// Steps the machine for a tick in `state` at `now`. A step with an
+    /// unchanged target and altitude changes nothing, so a tick may step
+    /// again once its phase is known.
     pub(super) fn step_vertical(
         &mut self,
         state: MissionState,
@@ -162,7 +181,7 @@ impl MissionEngine {
             }
         };
         let (mode, _) = next(self.modes.vertical.mode, event);
-        self.modes.vertical = Vertical { mode, target_m };
+        self.modes.vertical = VerticalStatus { mode, target_m };
     }
 
     /// Counts a disagreement between the machine and the mission core on
