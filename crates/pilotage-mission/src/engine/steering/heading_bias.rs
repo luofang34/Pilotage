@@ -89,7 +89,7 @@ impl MissionEngine {
     }
 
     /// The heading to command for the aircraft to hold `heading` true.
-    pub(super) fn unbiased_heading(&self, heading: f64) -> f64 {
+    pub(in crate::engine) fn unbiased_heading(&self, heading: f64) -> f64 {
         self.steering
             .heading_bias
             .estimate

@@ -11,6 +11,8 @@
 mod aircraft;
 #[path = "holding_pattern/display.rs"]
 mod display;
+#[path = "holding_pattern/no_solution.rs"]
+mod no_solution;
 
 use aircraft::{ALTITUDE_M, Aircraft, CLOCK, CRUISE_IAS_MPS, STEP_NANOS, STEP_S, anchor};
 use navigate_contract::MonotonicNanos;

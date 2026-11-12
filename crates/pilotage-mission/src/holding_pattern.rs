@@ -25,6 +25,7 @@
 //! converges to its standard time in any steady wind.
 
 mod flight;
+mod timed;
 
 #[cfg(test)]
 mod tests;
@@ -33,6 +34,7 @@ use navigate_contract::GeodeticPosition;
 use navigate_geodesy::{LocalTangentPlane, NedOffset};
 
 pub(crate) use flight::{PatternFlight, Steer};
+pub(crate) use timed::{CircuitShape, TimedCircuit};
 
 /// The standard rate of turn, radians per second (3°/s).
 pub const STANDARD_RATE_RPS: f64 = 3.0 * core::f64::consts::PI / 180.0;

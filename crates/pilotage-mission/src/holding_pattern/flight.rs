@@ -267,6 +267,12 @@ impl PatternFlight {
         self.outbound_time_s
     }
 
+    /// How long the part of the pattern flown now has lasted at `now_s`,
+    /// seconds.
+    pub(crate) fn part_elapsed_s(&self, now_s: f64) -> f64 {
+        now_s - self.phase_since_s
+    }
+
     /// Starts the entry the course at the fix selects.
     fn enter(&mut self, position: [f64; 2], course: f64, now_s: f64) {
         let entry = entry_for(0.0, HoldingTurn::Right, course);
