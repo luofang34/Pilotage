@@ -13,6 +13,7 @@ mod onboard;
 mod output;
 mod ownship;
 mod steering;
+mod steering_source;
 mod tick;
 mod track_trim;
 mod vehicle_status;
@@ -42,6 +43,7 @@ pub use navigation_display::{
     DisplayFix, DisplayWaypoint, LegDisplay, NavigationDisplay, ToFrom, WaypointProgress,
 };
 pub use output::{MissionAction, MissionCounters, MissionEvent, MissionOutput, MissionState};
+pub use steering_source::{FlightPhase, PositionSource, SteeringIntegrity, SteeringSource};
 pub use vehicle_status::{
     LaunchDetection, StartWithheldReason, VEHICLE_STATUS_MAX_AGE_NS, VehicleStatus,
 };
@@ -85,6 +87,9 @@ pub struct MissionEngine {
     /// guidance view. A tick whose filter published nothing clears it, so
     /// [`MissionEngine::nav_guidance`] cannot serve stale geometry.
     last_solution: Option<NavigationSolution>,
+    /// Why the last tick published no solution; `None` while one is
+    /// published or before any tick.
+    no_solution: Option<StartWithheldReason>,
     /// The latest known heading. `None` until a sample carries an
     /// attitude group: intents need the NED→body rotation, and guessing
     /// zero would silently rotate every command to due north.
@@ -293,6 +298,7 @@ impl MissionEngine {
             plan_complete: false,
             counters: MissionCounters::default(),
             last_solution: None,
+            no_solution: None,
             last_yaw_rad: None,
             last_refusal: None,
             overflown_fix: None,
