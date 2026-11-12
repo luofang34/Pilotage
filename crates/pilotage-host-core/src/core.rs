@@ -4,9 +4,11 @@ mod handover;
 
 use std::time::Duration;
 
-use navigate_contract::{GeodeticPosition, MonotonicNanos, NavigationSolution};
+use navigate_contract::{GeodeticPosition, MonotonicNanos};
 use pilotage_adapter_aviate::AviateAdapter;
-use pilotage_mission::{MissionEngine, MissionEvent, WaypointPlan, WaypointPlanRecord};
+use pilotage_mission::{
+    MissionEngine, MissionEvent, OnboardSolution, WaypointPlan, WaypointPlanRecord,
+};
 use pilotage_session::{SessionConfig, SessionEngine};
 use pilotage_timing::StalenessPolicy;
 use web_time::Instant;
@@ -228,11 +230,18 @@ impl HostCore {
     /// One solution of the onboard navigator; the mission flies it when
     /// its ownship source is the onboard navigator. The solution's stamp
     /// is on [`crate::MISSION_CLOCK`] when its age is to count from its
-    /// own time.
-    pub fn on_onboard_solution(&mut self, solution: &NavigationSolution, now: MonotonicNanos) {
+    /// own time. What the navigator says of a position sensor it
+    /// monitors travels with the solution
+    /// ([`OnboardSolution::with_source_integrity`]).
+    pub fn on_onboard_solution(
+        &mut self,
+        offered: impl Into<OnboardSolution>,
+        now: MonotonicNanos,
+    ) {
+        let offered = offered.into();
         for principal in self.principals_mut() {
             if let Some(mission) = principal.mission_mut() {
-                mission.on_onboard_solution(solution, now);
+                mission.on_onboard_solution(offered, now);
             }
         }
     }

@@ -20,7 +20,7 @@ use navigate_contract::{
 
 use crate::config::{BeyondLimits, OwnshipSource};
 
-use super::{MissionEngine, StartWithheldReason};
+use super::{MissionEngine, OnboardSolution, SourceIntegrity, StartWithheldReason};
 
 /// How far a quaternion norm may be from one and still give a heading.
 const UNIT_NORM_TOLERANCE: f64 = 1e-3;
@@ -41,6 +41,9 @@ pub(super) struct OnboardLimits {
 #[derive(Debug, Default)]
 pub(super) struct OnboardNavigation {
     latest: Option<NavigationSolution>,
+    /// What the navigator said of a position sensor with the latest
+    /// solution kept.
+    source_integrity: Option<SourceIntegrity>,
     /// The solution flown by dead reckoning on the latest tick, if one
     /// was: fresh, beyond its limits, and flown all the same.
     pub(super) dead_reckoned: Option<NavigationSolution>,
@@ -50,6 +53,12 @@ pub(super) struct OnboardNavigation {
 }
 
 impl OnboardNavigation {
+    /// What the navigator said of a position sensor with the latest
+    /// solution kept.
+    pub(super) const fn source_integrity(&self) -> Option<SourceIntegrity> {
+        self.source_integrity
+    }
+
     /// The latest solution kept, whatever its age or fitness.
     pub(super) const fn held(&self) -> Option<&NavigationSolution> {
         self.latest.as_ref()
@@ -71,10 +80,19 @@ impl MissionEngine {
     /// into the body frame: a solution without an attitude clears the
     /// heading. Under another source the engine keeps the solution and
     /// does not fly it.
-    pub fn on_onboard_solution(&mut self, solution: &NavigationSolution, now: MonotonicNanos) {
-        let Some(held) = self.admit_onboard(solution, now) else {
+    ///
+    /// What the navigator says of a position sensor is kept with the
+    /// solution it came with, and dropped with a refused one.
+    pub fn on_onboard_solution(
+        &mut self,
+        offered: impl Into<OnboardSolution>,
+        now: MonotonicNanos,
+    ) {
+        let offered = offered.into();
+        let Some(held) = self.admit_onboard(&offered.solution, now) else {
             return;
         };
+        self.onboard.source_integrity = offered.source_integrity;
         if matches!(
             self.config.ownship_source,
             OwnshipSource::OnboardNavigation { .. }
