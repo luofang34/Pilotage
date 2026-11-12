@@ -9,12 +9,13 @@ use navigate_contract::{
 };
 
 use crate::holding_pattern::{
-    CircuitShape, HoldingPattern, HoldingPatternStatus, HoldingTurn, PatternFlight, PatternFrame,
-    Steer, TimedCircuit, holding_speed_limit_mps, holding_turn_radius_m, standard_leg_time_s,
+    CircuitShape, HoldingLeg, HoldingPattern, HoldingPatternStatus, HoldingTurn, PatternFlight,
+    PatternFrame, Steer, TimedCircuit, holding_speed_limit_mps, holding_turn_radius_m,
+    standard_leg_time_s,
 };
 use pilotage_protocol::ControlIntent;
 
-use super::{LateralMode, MissionEngine, MissionEvent};
+use super::{MissionEngine, MissionEvent};
 
 /// The groundspeed below which the ground velocity has no usable course,
 /// m/s.
@@ -109,7 +110,8 @@ impl MissionEngine {
             return None;
         }
         let now_s = seconds(now);
-        let wind = self.wind_estimate().unwrap_or([0.0, 0.0]);
+        self.holding_pattern.as_ref()?;
+        let wind = self.timed_hold_wind(now, events);
         let heading_now = self.current_heading()?;
         let indicated_mps = self.commanded_cruise_mps();
         let active = self.holding_pattern.as_mut()?;
@@ -133,10 +135,81 @@ impl MissionEngine {
             )
         });
         let heading = timed.step(now_s, wind);
-        self.fly_lateral(LateralMode::TimedHold);
         self.announce_hold(events);
         let commanded = self.unbiased_heading(heading);
         Some(self.heading_altitude(commanded, altitude_m))
+    }
+
+    /// The heading and altitude demand of a racetrack flown by time where
+    /// no pattern was flown: right turns and the standard leg time for
+    /// the altitude, inbound on the heading held, begun with the turn to
+    /// its outbound leg where the vehicle is. `None` with no heading to
+    /// begin it from.
+    pub(super) fn racetrack_intent(
+        &mut self,
+        now: MonotonicNanos,
+        events: &mut Vec<MissionEvent>,
+    ) -> Option<ControlIntent> {
+        let heading_now = self.current_heading()?;
+        let cruise_altitude_m = self.config.anchor.altitude_m + self.config.cruise_height_m;
+        let altitude_m = self.commanded_altitude_m().unwrap_or(cruise_altitude_m);
+        let now_s = seconds(now);
+        let wind = self.timed_hold_wind(now, events);
+        if self.modes.lateral.racetrack.is_none() {
+            let indicated_mps = self
+                .commanded_cruise_mps()
+                .min(holding_speed_limit_mps(altitude_m));
+            let airspeed_mps = crate::true_airspeed_for(indicated_mps, altitude_m);
+            let leg_time_s = standard_leg_time_s(altitude_m);
+            let shape = CircuitShape {
+                inbound_rad: heading_now,
+                right_turns: true,
+                airspeed_mps,
+                turn_radius_m: holding_turn_radius_m(
+                    airspeed_mps,
+                    self.config.route_bank_deg,
+                    wind[0].hypot(wind[1]),
+                ),
+                leg_time_s,
+            };
+            self.modes.lateral.racetrack = Some(TimedCircuit::take_over(
+                shape,
+                HoldingLeg::FixTurn,
+                0.0,
+                leg_time_s,
+                heading_now,
+                now_s,
+                wind,
+            ));
+            events.push(MissionEvent::TimedHoldStarted {
+                inbound_course_rad: heading_now.rem_euclid(TAU),
+                leg_time_s,
+            });
+        }
+        let heading = self.modes.lateral.racetrack.as_mut()?.step(now_s, wind);
+        self.announce_hold(events);
+        let commanded = self.unbiased_heading(heading);
+        Some(self.heading_altitude(commanded, altitude_m))
+    }
+
+    /// The wind a racetrack flown by time is corrected for, north and
+    /// east m/s: the last estimate while it is no older than the
+    /// configured age, and still air once it is, announced once.
+    fn timed_hold_wind(&mut self, now: MonotonicNanos, events: &mut Vec<MissionEvent>) -> [f64; 2] {
+        let Some((wind, at)) = self.wind_estimate_stamped() else {
+            return [0.0, 0.0];
+        };
+        let age_ns = now.elapsed_since(at).map_or(0, |age| age.as_nanos());
+        if age_ns <= self.config.timed_hold_wind_max_age.as_nanos() {
+            return wind;
+        }
+        if !self.modes.lateral.wind_dropped {
+            self.modes.lateral.wind_dropped = true;
+            events.push(MissionEvent::TimedHoldWindDropped {
+                age_s: age_ns as f64 * 1e-9,
+            });
+        }
+        [0.0, 0.0]
     }
 
     /// The pattern at the last waypoint for a vehicle at `solution` on

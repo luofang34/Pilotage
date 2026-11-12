@@ -218,6 +218,14 @@ pub struct MissionConfig {
     pub capture_time_s: f64,
     /// The holding pattern after a plan for a vehicle that cannot stop.
     pub terminal_holding_pattern: TerminalHoldingPattern,
+    /// How long a vehicle that cannot stop holds its heading with no
+    /// position to fly on before it flies a racetrack by time instead.
+    /// Default 60 s, one standard holding leg.
+    pub heading_hold_bound: DurationNanos,
+    /// The age past which a wind estimate no longer corrects a racetrack
+    /// flown by time: older than this it is flown as in still air.
+    /// Default 600 s.
+    pub timed_hold_wind_max_age: DurationNanos,
     /// The bank angle the mission plans its turns at, degrees. With the
     /// speed over the ground it sizes the turn ahead of a fly-by waypoint.
     /// It also limits the bank of the holding pattern after the plan.
@@ -314,6 +322,8 @@ impl MissionConfig {
             vehicle_class: VehicleClass::Multicopter,
             capture_time_s: 2.0,
             terminal_holding_pattern: TerminalHoldingPattern::default(),
+            heading_hold_bound: DurationNanos::from_millis(60_000),
+            timed_hold_wind_max_age: DurationNanos::from_millis(600_000),
             route_bank_deg: crate::DEFAULT_ROUTE_BANK_DEG,
             arm_when_vehicle_ready: false,
             launch_detection: None,

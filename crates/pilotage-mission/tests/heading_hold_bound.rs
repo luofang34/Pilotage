@@ -1,0 +1,281 @@
+#![cfg(test)]
+
+//! A fixed wing on the onboard navigator that loses its solution on a
+//! leg: it holds its heading for the configured bound, then flies a
+//! racetrack by heading and time near where the bound ran out, and
+//! rejoins the leg when the solution comes back. It never flies a
+//! straight line without end.
+
+use core::f64::consts::TAU;
+
+use navigate_contract::{
+    AttitudeQuaternion, ClockDomainId, Ellipsoid, FaultDetection, GeodeticPosition,
+    IntegrityAssessment, MonotonicNanos, NavigationSolution, NedVelocity, Redundancy, SensorClass,
+    SolutionQuality, SolutionStamp, SourceComposition, SourceEpoch, SymmetricCov3,
+    WrappingSequence,
+};
+use navigate_geodesy::NedOffset;
+use navigate_geodesy::wgs84::tangent_plane;
+use pilotage_mission::{
+    ExecutionTarget, LateralMode, MissionConfig, MissionEngine, MissionEvent, OwnshipSource,
+    PlannedWaypoint, WaypointPlan,
+};
+use pilotage_protocol::{ControlAction, VehicleClass};
+
+#[path = "fixed_wing_denied/aircraft.rs"]
+mod aircraft;
+use aircraft::Aircraft;
+
+const CLOCK: ClockDomainId = ClockDomainId::new(7);
+const STEP_NANOS: u64 = 50_000_000;
+const STEP_S: f64 = 0.05;
+const ALTITUDE_M: f64 = 2_000.0;
+const CRUISE_IAS_MPS: f64 = 55.0;
+const GRAVITY_MPS2: f64 = 9.806_65;
+const ROUTE_BANK_RAD: f64 = 0.44;
+const COURSE_TIME_CONSTANT_S: f64 = 3.0;
+const ROLL_TIME_CONSTANT_S: f64 = 0.5;
+const MAX_ROLL_RATE_RPS: f64 = 0.5;
+
+/// The bound of the heading hold, seconds: the default.
+const BOUND_S: f64 = 60.0;
+/// How far from where the bound ran out the racetrack may reach, metres.
+/// A one minute leg at this airspeed is 3.6 km and the racetrack is two
+/// turn radii wide, so its far corner is about 5.3 km away.
+const RACETRACK_REACH_M: f64 = 6_000.0;
+
+fn anchor() -> GeodeticPosition {
+    GeodeticPosition::new(40.0_f64.to_radians(), -75.0_f64.to_radians(), ALTITUDE_M)
+}
+
+/// A leg 60 km north, then east: long enough to lose the solution on.
+fn engine() -> MissionEngine {
+    let mut config = MissionConfig::new(String::new(), anchor(), CLOCK);
+    config.ownship_source = OwnshipSource::onboard_navigation();
+    config.execution_target = ExecutionTarget::Simulator;
+    config.vehicle_class = VehicleClass::FixedWing;
+    config.cruise_height_m = 0.0;
+    config.cruise_mps = CRUISE_IAS_MPS;
+    config.limits.max_horizontal_mps = 65.0;
+    config.limits.max_vertical_mps = 5.0;
+    config.route_bank_deg = 22.0;
+    let plane = tangent_plane(anchor()).expect("anchor is plausible");
+    let plan = WaypointPlan::new(
+        [[0.0, 0.0], [60_000.0, 0.0], [60_000.0, 6_000.0]]
+            .iter()
+            .map(|[north, east]| {
+                let p = plane.from_ned(&NedOffset::new(*north, *east, 0.0));
+                PlannedWaypoint::new(
+                    p.latitude_rad.to_degrees(),
+                    p.longitude_rad.to_degrees(),
+                    ALTITUDE_M,
+                )
+            })
+            .collect(),
+    );
+    MissionEngine::from_waypoints(&plan, config)
+        .expect("builds")
+        .0
+}
+
+fn solve(aircraft: &Aircraft, now: MonotonicNanos, sequence: u32) -> NavigationSolution {
+    let plane = tangent_plane(anchor()).expect("anchor is plausible");
+    let position = plane.from_ned(&NedOffset::new(
+        aircraft.ned[0],
+        aircraft.ned[1],
+        aircraft.ned[2],
+    ));
+    let velocity = aircraft.ground_velocity();
+    let composition = SourceComposition::of(SensorClass::VisualLandmark);
+    let half = aircraft.heading_rad / 2.0;
+    NavigationSolution::new(
+        SolutionStamp::new(
+            SourceEpoch::new(0),
+            WrappingSequence::new(sequence),
+            now,
+            CLOCK,
+        ),
+        position,
+        NedVelocity::new(velocity[0], velocity[1], velocity[2]),
+        SymmetricCov3::from_diagonal(25.0, 25.0, 25.0),
+        SymmetricCov3::from_diagonal(0.25, 0.25, 0.25),
+        IntegrityAssessment::new(
+            SolutionQuality::Good,
+            composition,
+            Redundancy::None,
+            5.0,
+            5.0,
+            FaultDetection::Unavailable,
+        ),
+        composition,
+        Ellipsoid::WGS84,
+    )
+    .with_attitude(AttitudeQuaternion::new(half.cos(), 0.0, 0.0, half.sin()))
+}
+
+/// One flight: the aircraft, the engine, and what each tick left.
+struct Flight {
+    engine: MissionEngine,
+    aircraft: Aircraft,
+    now: MonotonicNanos,
+    tick: u32,
+    events: Vec<MissionEvent>,
+}
+
+impl Flight {
+    fn new() -> Self {
+        Self {
+            engine: engine(),
+            aircraft: Aircraft {
+                ned: [-1_500.0, 0.0, 0.0],
+                heading_rad: 0.0,
+                bank_rad: 0.0,
+                indicated_mps: CRUISE_IAS_MPS,
+                wind: [0.0, 0.0],
+                heading_bias_rad: 0.0,
+            },
+            now: MonotonicNanos::from_nanos(1_000_000_000),
+            tick: 0,
+            events: Vec::new(),
+        }
+    }
+
+    /// One tick, with the navigator's solution offered or not. Returns
+    /// the lateral mode flown; every tick in flight must carry a command.
+    fn step(&mut self, solved: bool) -> LateralMode {
+        self.now = MonotonicNanos::from_nanos(self.now.as_nanos() + STEP_NANOS);
+        self.tick += 1;
+        if solved {
+            let solution = solve(&self.aircraft, self.now, self.tick);
+            self.engine.on_onboard_solution(&solution, self.now);
+        }
+        let output = self.engine.tick(self.now);
+        if let Some(action) = output.action {
+            assert_eq!(action.action, ControlAction::Arm);
+            self.engine.on_action_result(action.action_id, true);
+        }
+        self.events.extend(output.events);
+        let mode = self.engine.navigation_display().lateral;
+        if let Some(intent) = output.intent.as_ref() {
+            self.aircraft.fly(intent);
+        } else {
+            assert_eq!(mode, LateralMode::Off, "a tick in flight with no command");
+        }
+        self.aircraft.step();
+        mode
+    }
+
+    fn distance_from(&self, point: [f64; 2]) -> f64 {
+        (self.aircraft.ned[0] - point[0]).hypot(self.aircraft.ned[1] - point[1])
+    }
+}
+
+#[test]
+fn a_lost_solution_on_a_leg_is_a_bounded_heading_hold_then_a_racetrack_then_the_leg_again() {
+    let mut flight = Flight::new();
+    // On the leg, tracking north.
+    let mut mode = LateralMode::Off;
+    for _ in 0..1_200 {
+        mode = flight.step(true);
+    }
+    assert_eq!(mode, LateralMode::Track);
+
+    // The navigator stops solving. Once its last solution is too old the
+    // heading last commanded is held, for the bound and no longer.
+    while mode != LateralMode::HeadingHold {
+        mode = flight.step(false);
+    }
+    let held_heading = flight.aircraft.heading_rad;
+    let mut held_s = 0.0;
+    while mode == LateralMode::HeadingHold {
+        assert!(
+            (flight.aircraft.heading_rad - held_heading).abs() < 0.02,
+            "the heading is held"
+        );
+        mode = flight.step(false);
+        held_s += STEP_S;
+    }
+    assert_eq!(mode, LateralMode::TimedHold);
+    assert!(
+        (held_s - BOUND_S).abs() <= 2.0 * STEP_S,
+        "the heading was held for {held_s:.2} s"
+    );
+    let started: Vec<_> = flight
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            MissionEvent::TimedHoldStarted {
+                inbound_course_rad,
+                leg_time_s,
+            } => Some((*inbound_course_rad, *leg_time_s)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(started.len(), 1, "the racetrack is announced once");
+    let (inbound, leg_time_s) = started[0];
+    let off = inbound - held_heading;
+    assert!(
+        off.sin().atan2(off.cos()).abs() < 0.02,
+        "inbound on the heading held"
+    );
+    assert!((leg_time_s - 60.0).abs() < 1e-9, "the standard leg time");
+
+    // Five circuits by heading and time, all near where the bound ran out.
+    let expiry = [flight.aircraft.ned[0], flight.aircraft.ned[1]];
+    let (mut turned, mut heading, mut farthest_m) = (0.0, flight.aircraft.heading_rad, 0.0_f64);
+    let mut lost_s = 0.0;
+    while turned < 5.0 * TAU && lost_s < 2_400.0 {
+        assert_eq!(flight.step(false), LateralMode::TimedHold);
+        let change = flight.aircraft.heading_rad - heading;
+        turned += change.sin().atan2(change.cos());
+        heading = flight.aircraft.heading_rad;
+        farthest_m = farthest_m.max(flight.distance_from(expiry));
+        lost_s += STEP_S;
+    }
+    assert!(
+        turned >= 5.0 * TAU,
+        "turned {:.1} times in {lost_s:.0} s",
+        turned / TAU
+    );
+    assert!(
+        farthest_m <= RACETRACK_REACH_M,
+        "{farthest_m:.0} m from where the bound ran out"
+    );
+    assert!(
+        (flight.aircraft.ned[2]).abs() < 20.0,
+        "the altitude is held through it"
+    );
+
+    // The solution comes back: the leg is flown again, and said so.
+    mode = flight.step(true);
+    for _ in 0..20 {
+        mode = flight.step(true);
+    }
+    assert!(
+        matches!(mode, LateralMode::Track | LateralMode::DirectTo),
+        "{mode:?}"
+    );
+    assert!(
+        flight.events.iter().any(|event| matches!(
+            event,
+            MissionEvent::LateralResumed {
+                mode: LateralMode::Track | LateralMode::DirectTo
+            }
+        )),
+        "the recovery names the mode resumed"
+    );
+    let north_at_recovery = flight.aircraft.ned[0];
+    for _ in 0..6_000 {
+        mode = flight.step(true);
+    }
+    assert_eq!(mode, LateralMode::Track);
+    assert!(
+        flight.aircraft.ned[1].abs() < 50.0,
+        "{:.0} m off the leg five minutes after the solution came back",
+        flight.aircraft.ned[1]
+    );
+    assert!(
+        flight.aircraft.ned[0] > north_at_recovery + 10_000.0,
+        "and northbound along it"
+    );
+}

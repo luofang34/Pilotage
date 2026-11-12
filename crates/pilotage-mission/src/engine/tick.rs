@@ -20,8 +20,7 @@ use crate::policy::OPERATIONAL_WALL_DEADLINE_NS;
 
 use super::document::ARM_PHASE_ID;
 use super::{
-    LateralMode, MissionAction, MissionEngine, MissionEvent, MissionOutput, MissionState,
-    VerticalMode,
+    MissionAction, MissionEngine, MissionEvent, MissionOutput, MissionState, VerticalMode,
 };
 
 mod climb;
@@ -246,41 +245,6 @@ impl MissionEngine {
         action
     }
 
-    /// The engine's own selection of the intent of a tick in `state`.
-    pub(super) fn select_intent(
-        &mut self,
-        state: MissionState,
-        solution: Option<&NavigationSolution>,
-        now: MonotonicNanos,
-        events: &mut Vec<MissionEvent>,
-    ) -> Option<ControlIntent> {
-        if self.steers_by_heading() {
-            return self.heading_intent_for_state(state, solution, now, events);
-        }
-        if matches!(state, MissionState::Climb | MissionState::Enroute) && solution.is_none() {
-            return self.hold_position(now, events);
-        }
-        match state {
-            MissionState::Climb if !self.config.can_stop() => {
-                self.climb_along_route_intent(solution, now, events)
-            }
-            MissionState::Climb => {
-                self.fly_lateral(LateralMode::PositionHold);
-                self.climb_intent(solution)
-            }
-            MissionState::Enroute => self.follow_plan_intent(solution, now, events),
-            MissionState::Complete => self.end_of_plan_intent(solution, now, events),
-            MissionState::Arming if self.arm_request_sent() => {
-                self.fly_lateral(LateralMode::Standby);
-                self.arming_intent(solution)
-            }
-            MissionState::AwaitSolution
-            | MissionState::Arming
-            | MissionState::Held
-            | MissionState::Failed => None,
-        }
-    }
-
     /// A held tick: the ownship stays fresh for the first resumed tick,
     /// nothing is commanded, and the hold is announced once.
     fn held_output(&mut self, now: MonotonicNanos) -> MissionOutput {
@@ -395,10 +359,6 @@ impl MissionEngine {
         now: MonotonicNanos,
         events: &mut Vec<MissionEvent>,
     ) -> Option<ControlIntent> {
-        self.fly_lateral(match reference {
-            LateralReference::PresentPosition => LateralMode::DirectTo,
-            _ => LateralMode::Track,
-        });
         let guided = guide_velocity(
             solution,
             reference,

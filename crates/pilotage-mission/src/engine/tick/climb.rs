@@ -14,7 +14,7 @@ use super::outputs;
 impl MissionEngine {
     /// The climb's vertical demand: the climb rate while the vertical
     /// mode climbs to the climb's target, and none once it is captured.
-    pub(super) fn climb_intent(
+    pub(in crate::engine) fn climb_intent(
         &self,
         solution: Option<&NavigationSolution>,
     ) -> Option<ControlIntent> {
@@ -30,7 +30,7 @@ impl MissionEngine {
     /// until the vehicle is within the capture margin of it. Without
     /// lateral guidance (none refused, none yet) the vertical climb alone
     /// is flown, on the present course.
-    pub(super) fn climb_along_route_intent(
+    pub(in crate::engine) fn climb_along_route_intent(
         &mut self,
         solution: Option<&NavigationSolution>,
         now: MonotonicNanos,
@@ -52,7 +52,7 @@ impl MissionEngine {
     /// controller has a command the moment it arms instead of none until
     /// the arm's confirmation comes back: the climb that follows the arm,
     /// or, with no climb to fly, the hold of the present course and height.
-    pub(super) fn arming_intent(
+    pub(in crate::engine) fn arming_intent(
         &self,
         solution: Option<&NavigationSolution>,
     ) -> Option<ControlIntent> {
