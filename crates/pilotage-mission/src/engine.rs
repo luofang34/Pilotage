@@ -43,7 +43,7 @@ use pilotage_mission_core::{
 };
 
 pub use dead_reckoning::DeadReckoning;
-use lateral_mode::LateralMode;
+pub use lateral_mode::{LateralMode, LateralStatus};
 pub use nav_guidance::{NavGuidance, NavQuality};
 pub use navigation_display::{
     DisplayFix, DisplayWaypoint, LegDisplay, NavigationDisplay, ToFrom, WaypointProgress,

@@ -5,6 +5,8 @@ use navigate_guidance::GuidanceRefusal;
 use navigate_route::SequenceReason;
 use pilotage_protocol::{ControlAction, ControlIntent};
 
+use super::LateralMode;
+
 /// The mission phase the engine is in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MissionState {
@@ -179,6 +181,29 @@ pub enum MissionEvent {
         /// Index of the missed `to` waypoint in fly order.
         to_index: usize,
     },
+    /// The heading hold of a vehicle with no position to fly on ran its
+    /// bound, and a racetrack flown by heading and time began where the
+    /// vehicle was.
+    TimedHoldStarted {
+        /// The racetrack's inbound course, radians clockwise from true
+        /// north: the heading held.
+        inbound_course_rad: f64,
+        /// Its inbound leg time, seconds.
+        leg_time_s: f64,
+    },
+    /// The wind estimate that corrects the racetrack flown by time is
+    /// older than the configured age. The racetrack keeps it; where the
+    /// racetrack lies over the ground is an assumption from now on.
+    TimedHoldWindStale {
+        /// The estimate's age, seconds.
+        age_s: f64,
+    },
+    /// A position came back during a heading hold or a racetrack flown by
+    /// time, and this lateral mode is flown again.
+    LateralResumed {
+        /// The mode resumed.
+        mode: LateralMode,
+    },
 }
 
 /// What one call to [`crate::MissionEngine::tick`] produced.
@@ -241,8 +266,4 @@ pub struct MissionCounters {
     /// own threshold, disagreed on whether the climb's target is
     /// captured. Any count is a defect.
     pub vertical_mode_mismatch: u64,
-    /// Ticks on which the lateral mode machine and the engine's own
-    /// selection of the intent disagreed on the mode flown. Any count is
-    /// a defect.
-    pub lateral_mode_mismatch: u64,
 }

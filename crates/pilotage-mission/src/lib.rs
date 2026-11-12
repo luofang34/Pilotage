@@ -51,8 +51,8 @@ pub use engine::{
 pub use engine::{
     FlightPhase, PositionIntegrity, PositionKind, PositionSource, SteeringIntegrity, SteeringSource,
 };
+pub use engine::{LateralMode, LateralStatus, VerticalMode, VerticalStatus};
 pub use engine::{OnboardSolution, SourceIntegrity, SourceIntegrityState};
-pub use engine::{VerticalMode, VerticalStatus};
 pub use error::MissionBuildError;
 pub use holding_pattern::{
     HoldingEntry, HoldingLeg, HoldingPattern, HoldingPatternStatus, HoldingTurn,

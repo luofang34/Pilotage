@@ -14,7 +14,8 @@ use crate::body::GEODESY;
 use crate::holding_pattern::HoldingPatternStatus;
 
 use super::{
-    FlightPhase, MissionEngine, MissionState, NavGuidance, SteeringSource, VerticalStatus,
+    FlightPhase, LateralStatus, MissionEngine, MissionState, NavGuidance, SteeringSource,
+    VerticalStatus,
 };
 
 /// The groundspeed below which no time to go is given, m/s.
@@ -51,6 +52,10 @@ pub struct NavigationDisplay {
     /// annunciates a climb, a descent, or a held altitude from what the
     /// engine says.
     pub vertical: VerticalStatus,
+    /// The lateral mode flown, so a display annunciates a heading hold or
+    /// a racetrack flown by time, and a racetrack resting on an old wind,
+    /// from what the engine says.
+    pub lateral: LateralStatus,
 }
 
 /// One waypoint of the plan.
@@ -151,6 +156,7 @@ impl MissionEngine {
             phase: self.flight_phase(),
             steering: self.steering_source(),
             vertical: self.vertical_status(),
+            lateral: self.lateral_status(),
         }
     }
 

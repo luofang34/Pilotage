@@ -12,7 +12,8 @@
 //!
 //! When the navigator has no solution fit to fly, the engine never goes
 //! silent: silence is the flight controller's command-loss descent. It
-//! holds the heading and altitude it last commanded, and says why.
+//! holds the heading and altitude it last commanded, and says why, for a
+//! bounded time; then it flies a racetrack by heading and time.
 
 use navigate_contract::{GuidanceSetpoint, MonotonicNanos, NavigationSolution};
 use pilotage_protocol::{AltitudeReference, ControlIntent, HeadingAltitudeIntent};
@@ -21,8 +22,7 @@ use crate::config::OwnshipSource;
 
 mod heading_bias;
 
-use super::{LateralMode, MissionEngine, MissionEvent, MissionState, StartWithheldReason};
-use pilotage_mission_core::FlightAction as CoreFlightAction;
+use super::{MissionEngine, MissionEvent, StartWithheldReason};
 
 /// How long the wind estimate takes to follow a change, seconds: long
 /// against a turn, in which the air-velocity model is least exact, short
@@ -129,76 +129,8 @@ impl MissionEngine {
         fallback_altitude_m: f64,
         events: &mut Vec<MissionEvent>,
     ) -> Option<ControlIntent> {
-        self.fly_lateral(LateralMode::HeadingHold);
         self.announce_hold(events);
         self.repeat_heading(fallback_altitude_m)
-    }
-
-    /// The heading and altitude intent of a tick in `state`: guidance
-    /// steered by heading while a solution is fit, the climb or the level
-    /// flight of the arm request on the present heading, and the hold
-    /// while no solution is fit in flight.
-    pub(super) fn heading_intent_for_state(
-        &mut self,
-        state: MissionState,
-        solution: Option<&NavigationSolution>,
-        now: MonotonicNanos,
-        events: &mut Vec<MissionEvent>,
-    ) -> Option<ControlIntent> {
-        let cruise_altitude_m = self.config.anchor.altitude_m + self.config.cruise_height_m;
-        let in_flight = matches!(
-            state,
-            MissionState::Climb | MissionState::Enroute | MissionState::Complete
-        );
-        if in_flight && solution.is_none() {
-            // In a holding pattern the racetrack goes on by time; anywhere
-            // else the heading last commanded holds.
-            if state == MissionState::Complete
-                && let Some(intent) = self.timed_holding_intent(now, events)
-            {
-                return Some(intent);
-            }
-            return self.hold_heading(cruise_altitude_m, events);
-        }
-        // Launched with no solution fit to fly: climb on the present
-        // heading to the cruise altitude rather than leave the flight
-        // controller without a command.
-        if state == MissionState::AwaitSolution && solution.is_none() && self.launched(now) {
-            return self.hold_heading(cruise_altitude_m, events);
-        }
-        match state {
-            MissionState::Climb => {
-                let Some(CoreFlightAction::Climb { target_altitude_m }) =
-                    self.active_action.as_ref()
-                else {
-                    return None;
-                };
-                let target = *target_altitude_m;
-                // Along the route, at the climb's target altitude; on the
-                // present heading only while there is no route guidance.
-                match self.follow_plan_intent(solution, now, events) {
-                    Some(ControlIntent::HeadingAltitude(demand)) => {
-                        Some(self.heading_altitude(f64::from(demand.heading_rad), target))
-                    }
-                    _ => self.steer_level(target),
-                }
-            }
-            MissionState::Enroute => self.follow_plan_intent(solution, now, events),
-            MissionState::Complete => self.end_of_plan_intent(solution, now, events),
-            MissionState::Arming if self.arm_request_sent() => {
-                self.fly_lateral(LateralMode::Standby);
-                let altitude_m = if self.config.cruise_height_m > 0.0 {
-                    cruise_altitude_m
-                } else {
-                    solution?.position.altitude_m
-                };
-                self.steer_level(altitude_m)
-            }
-            MissionState::AwaitSolution
-            | MissionState::Arming
-            | MissionState::Held
-            | MissionState::Failed => None,
-        }
     }
 
     /// Announces the hold of a vehicle with no solution fit to fly, once
@@ -228,7 +160,6 @@ impl MissionEngine {
         if !self.fc_position_valid(now) {
             return None;
         }
-        self.fly_lateral(LateralMode::PositionHold);
         self.announce_hold(events);
         self.last_yaw_rad?;
         Some(super::tick::outputs::zero_velocity_intent())
@@ -356,6 +287,16 @@ impl MissionEngine {
         velocity.vx = (forward / asked * indicated) as f32;
         velocity.vy = (right / asked * indicated) as f32;
         ControlIntent::Velocity(velocity)
+    }
+
+    /// The wind estimate and when it was last updated.
+    pub(super) fn wind_estimate_stamped(&self) -> Option<([f64; 2], MonotonicNanos)> {
+        self.steering.wind
+    }
+
+    /// The altitude last commanded, metres above the ellipsoid.
+    pub(super) fn commanded_altitude_m(&self) -> Option<f64> {
+        self.steering.last.map(|(_, altitude_m)| altitude_m)
     }
 
     /// The wind the navigator's ground velocity shows, north and east m/s;

@@ -12,10 +12,8 @@
 //! a lost position: its heading hold is bounded by a timer, and when the
 //! timer runs out it flies a racetrack by time.
 //!
-//! The machine does not select the intent yet. Each tick steps it on the
-//! plan's demand, and the engine's own selection records the mode it
-//! flew; a tick on which the two differ is counted. The timer is not run
-//! until the machine selects the intent.
+//! Each tick steps the machine on the plan's demand and flies the mode it
+//! gives ([`MissionEngine::intent_for_state`]).
 
 use navigate_contract::{GeodeticPosition, MonotonicNanos, NavigationSolution};
 use pilotage_protocol::ControlIntent;
@@ -23,12 +21,16 @@ use pilotage_protocol::ControlIntent;
 use super::tick::overflown;
 use super::{MissionEngine, MissionEvent, MissionState};
 
+use crate::holding_pattern::TimedCircuit;
+
+mod fly;
 #[cfg(test)]
 mod tests;
 
 /// The lateral mode.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub(super) enum LateralMode {
+#[non_exhaustive]
+pub enum LateralMode {
     /// Nothing is flown.
     #[default]
     Off,
@@ -96,13 +98,6 @@ pub(super) enum LateralEvent {
     /// The demand needs a position and there is none.
     Lost(LossResponse),
     /// The bound of the heading hold ran out.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the engine runs no timer while it only observes the machine"
-        )
-    )]
     TimerExpired,
 }
 
@@ -155,20 +150,44 @@ pub(super) const fn next(mode: LateralMode, event: LateralEvent) -> (LateralMode
     (to, effect)
 }
 
-/// The machine's mode beside the mode the engine flew.
+/// The lateral mode as a display reads it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct LateralStatus {
+    /// The mode flown.
+    pub mode: LateralMode,
+    /// A racetrack flown by time is corrected with a wind estimate older
+    /// than the configured age: where it lies over the ground is an
+    /// assumption.
+    pub wind_stale: bool,
+}
+
+/// The machine's mode with what its holds keep between ticks.
 #[derive(Debug, Default)]
 pub(super) struct Lateral {
-    /// The machine's mode after the latest tick.
+    /// The mode after the latest tick.
     pub(super) mode: LateralMode,
-    /// The mode the engine's own selection flew on the latest tick.
-    pub(super) flown: LateralMode,
+    /// Since when the heading has been held, while it is.
+    held_since: Option<MonotonicNanos>,
+    /// The racetrack flown by time with no pattern to take it from.
+    pub(super) racetrack: Option<TimedCircuit>,
+    /// Whether the racetrack's wind estimate is stale.
+    pub(super) wind_stale: bool,
 }
 
 impl MissionEngine {
-    /// The intent of a tick in `state`. Steps the lateral machine on what
-    /// the plan demands, lets the engine select its intent, and counts a
-    /// tick on which the mode selected is not the machine's
-    /// ([`super::MissionCounters::lateral_mode_mismatch`]).
+    /// The lateral mode flown, from the state the latest
+    /// [`MissionEngine::tick`] left.
+    #[must_use]
+    pub const fn lateral_status(&self) -> LateralStatus {
+        LateralStatus {
+            mode: self.modes.lateral.mode,
+            wind_stale: self.modes.lateral.wind_stale,
+        }
+    }
+
+    /// The intent of a tick in `state`: steps the lateral machine on what
+    /// the plan demands, runs the heading hold's timer, and flies the
+    /// mode the machine gives.
     pub(super) fn intent_for_state(
         &mut self,
         state: MissionState,
@@ -177,22 +196,29 @@ impl MissionEngine {
         events: &mut Vec<MissionEvent>,
     ) -> Option<ControlIntent> {
         let event = self.lateral_event(state, solution, now);
-        let (mode, _) = next(self.modes.lateral.mode, event);
-        self.modes.lateral = Lateral {
-            mode,
-            flown: LateralMode::Off,
-        };
-        let intent = self.select_intent(state, solution, now, events);
-        if self.modes.lateral.flown != mode {
-            self.counters.lateral_mode_mismatch =
-                self.counters.lateral_mode_mismatch.wrapping_add(1);
+        let (mut mode, mut effect) = next(self.modes.lateral.mode, event);
+        if mode == LateralMode::HeadingHold {
+            let since = *self.modes.lateral.held_since.get_or_insert(now);
+            let bound = self.config.heading_hold_bound;
+            let expired = now
+                .elapsed_since(since)
+                .is_some_and(|held| held.as_nanos() >= bound.as_nanos());
+            if expired {
+                (mode, effect) = next(mode, LateralEvent::TimerExpired);
+            }
         }
-        intent
-    }
-
-    /// Records the lateral mode the engine's selection flies this tick.
-    pub(super) const fn fly_lateral(&mut self, mode: LateralMode) {
-        self.modes.lateral.flown = mode;
+        if mode != LateralMode::HeadingHold {
+            self.modes.lateral.held_since = None;
+        }
+        if mode != LateralMode::TimedHold {
+            self.modes.lateral.racetrack = None;
+            self.modes.lateral.wind_stale = false;
+        }
+        self.modes.lateral.mode = mode;
+        if effect == LateralEffect::Resumed {
+            events.push(MissionEvent::LateralResumed { mode });
+        }
+        self.fly_lateral(mode, event, state, solution, now, events)
     }
 
     /// What this tick asks of the lateral mode. The mission's phase is
