@@ -29,6 +29,17 @@ use pilotage_mission_core::FlightAction as CoreFlightAction;
 /// against a change of wind along a route.
 const WIND_TIME_CONSTANT_S: f64 = 10.0;
 
+/// The heading rate above which a solution says nothing about the wind,
+/// rad/s: in a turn the navigator's velocity lags the heading, and the
+/// difference reads as a wind that turns with the aircraft. Well under a
+/// standard-rate turn's 0.052 rad/s, above a straight leg's corrections.
+const WIND_STEADY_RATE_RPS: f64 = 0.02;
+
+/// How long the heading must have been steady before a solution says
+/// anything about the wind, seconds: the navigator's velocity has caught
+/// up with the end of a turn by then.
+const WIND_SETTLE_S: f64 = 5.0;
+
 /// The steering state of a fixed wing on the onboard navigator.
 #[derive(Debug, Default)]
 pub(super) struct Steering {
@@ -36,6 +47,11 @@ pub(super) struct Steering {
     last: Option<(f64, f64)>,
     /// The wind, north and east m/s, and when it was last updated.
     wind: Option<([f64; 2], MonotonicNanos)>,
+    /// The heading of the last solution offered to the wind estimate, and
+    /// when, so a turn can be told from a straight.
+    wind_heading: Option<(f64, MonotonicNanos)>,
+    /// Since when the heading has been steady.
+    wind_steady_since: Option<MonotonicNanos>,
     /// Why the engine holds heading and altitude, while it does.
     holding: Option<StartWithheldReason>,
     /// The indicated airspeed last commanded on the velocity path, m/s,
@@ -228,12 +244,31 @@ impl MissionEngine {
 
     /// Folds one solution into the wind estimate: the navigator's ground
     /// velocity less the air velocity, which is the cruise true airspeed
-    /// along the solution's heading. A solution without a heading leaves
-    /// the estimate as it is.
+    /// along the solution's heading. A solution without a heading, or one
+    /// taken in a turn, leaves the estimate as it is.
     pub(super) fn update_wind(&mut self, solution: &NavigationSolution, now: MonotonicNanos) {
         let Some(heading) = self.last_yaw_rad else {
             return;
         };
+        let turning = self.steering.wind_heading.is_some_and(|(previous, at)| {
+            let dt_s = now
+                .elapsed_since(at)
+                .map_or(0.0, |elapsed| elapsed.as_nanos() as f64 * 1e-9);
+            let turned = (heading - previous).sin().atan2((heading - previous).cos());
+            dt_s > 0.0 && (turned / dt_s).abs() > WIND_STEADY_RATE_RPS
+        });
+        self.steering.wind_heading = Some((heading, now));
+        if turning {
+            self.steering.wind_steady_since = None;
+            return;
+        }
+        let since = *self.steering.wind_steady_since.get_or_insert(now);
+        let settled = now
+            .elapsed_since(since)
+            .is_some_and(|steady| steady.as_nanos() as f64 * 1e-9 >= WIND_SETTLE_S);
+        if !settled {
+            return;
+        }
         let indicated = self
             .steering
             .indicated_mps

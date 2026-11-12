@@ -64,7 +64,23 @@ struct Flight {
     end_events: Vec<MissionEvent>,
 }
 
+/// How the simulated vehicle answers a velocity intent.
+#[derive(Clone, Copy, PartialEq)]
+enum Plant {
+    /// It flies the body-frame velocity as asked, over the ground, and
+    /// turns at the commanded yaw rate.
+    Kinematic,
+    /// A fixed wing's flight controller in still air: the horizontal
+    /// direction is the course over the ground, the horizontal speed the
+    /// indicated airspeed, and the heading is the course (no sideslip).
+    FixedWing,
+}
+
 fn fly(engine: &mut MissionEngine, ticks_after_complete: usize) -> Flight {
+    fly_as(engine, ticks_after_complete, Plant::Kinematic)
+}
+
+fn fly_as(engine: &mut MissionEngine, ticks_after_complete: usize, plant: Plant) -> Flight {
     let (mut ned, mut velocity, mut yaw) = ([0.0_f64; 3], [0.0_f64; 3], 0.0_f64);
     let mut now = MonotonicNanos::from_nanos(1_000_000_000);
     let mut flight = Flight {
@@ -93,7 +109,18 @@ fn fly(engine: &mut MissionEngine, ticks_after_complete: usize) -> Flight {
             let (sin, cos) = yaw.sin_cos();
             let (vx, vy) = (f64::from(v.vx), f64::from(v.vy));
             velocity = [vx * cos - vy * sin, vx * sin + vy * cos, f64::from(v.vz)];
-            yaw += f64::from(v.yaw_rate) * STEP_S;
+            match plant {
+                Plant::Kinematic => yaw += f64::from(v.yaw_rate) * STEP_S,
+                Plant::FixedWing => {
+                    let indicated = velocity[0].hypot(velocity[1]);
+                    if indicated > 0.0 {
+                        yaw = velocity[1].atan2(velocity[0]);
+                        let ground = true_airspeed_for(indicated, ANCHOR_ALT_M - ned[2]);
+                        velocity[0] *= ground / indicated;
+                        velocity[1] *= ground / indicated;
+                    }
+                }
+            }
         }
         for event in &output.events {
             match event {
@@ -204,7 +231,8 @@ fn in_pattern(plan: &WaypointPlan, ned: [f64; 3], turn: HoldingTurn) -> [f64; 2]
 }
 
 /// The greatest reach of the positions after the first `skip` ticks past
-/// the racetrack of `pattern` at 6 m/s, metres.
+/// the racetrack of `pattern`, metres: its own legs and turns, which it
+/// sizes at the true airspeed a fixed wing flies.
 fn reach_outside(
     plan: &WaypointPlan,
     flight: &Flight,
@@ -212,7 +240,7 @@ fn reach_outside(
     skip: usize,
 ) -> f64 {
     let radius = pattern.turn_radius_m;
-    let length = 6.0 * pattern.leg_time_s;
+    let length = pattern.leg_length_m;
     flight
         .after
         .iter()
@@ -245,7 +273,7 @@ fn a_fixed_wing_holds_at_the_last_waypoint_on_the_final_course_after_the_plan() 
     let mut config = config();
     config.vehicle_class = VehicleClass::FixedWing;
     let (mut engine, record) = MissionEngine::from_waypoints(&plan, config).expect("builds");
-    let flight = fly(&mut engine, 6_000);
+    let flight = fly_as(&mut engine, 6_000, Plant::FixedWing);
     // The plan completes when the last waypoint sequences: the aircraft
     // cannot stop at it.
     let completed_at = flight.completed_at.expect("the plan completes");
@@ -285,14 +313,10 @@ fn a_fixed_wing_holds_at_the_last_waypoint_on_the_final_course_after_the_plan() 
         flight.end_events
     );
     // The aircraft keeps its speed and its altitude, and flies the
-    // racetrack on the holding side. The kinematic vehicle flies the
-    // commanded speed over the ground, where a fixed wing flies it as
-    // indicated airspeed and goes faster in the thinner air. The engine
-    // reads the difference as a light headwind and asks a little less, so
-    // the speed settles a few percent under 6.
+    // racetrack on the holding side.
     for (ned, speed_mps) in &flight.after {
         let (_, vertical_m) = from_last_waypoint(&plan, *ned);
-        assert!(*speed_mps > 5.7, "{speed_mps} m/s in the pattern");
+        assert!(*speed_mps > 5.9, "{speed_mps} m/s in the pattern");
         assert!(vertical_m < 1.0, "{vertical_m} m off the holding altitude");
     }
     let reach = reach_outside(&plan, &flight, &pattern, 0);
@@ -311,7 +335,7 @@ fn a_configured_holding_pattern_overrides_the_default() {
     config.terminal_holding_pattern.turn = HoldingTurn::Left;
     config.terminal_holding_pattern.leg_time_s = Some(30.0);
     let (mut engine, _) = MissionEngine::from_waypoints(&plan, config).expect("builds");
-    let flight = fly(&mut engine, 6_000);
+    let flight = fly_as(&mut engine, 6_000, Plant::FixedWing);
     let pattern = started_pattern(&flight);
     assert_eq!(pattern.fix.altitude_m, ANCHOR_ALT_M + 25.0);
     assert_eq!(pattern.turn, HoldingTurn::Left);
