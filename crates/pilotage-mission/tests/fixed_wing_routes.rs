@@ -362,26 +362,40 @@ fn an_airborne_fixed_wing_past_the_first_waypoint_joins_the_first_leg_ahead() {
 }
 
 #[test]
-fn a_first_waypoint_marked_fly_over_is_turned_back_for() {
+fn a_fly_over_first_waypoint_is_flown_over_from_short_of_it_and_passed_from_past_it() {
     let points = behind_plan_points();
     let mut plan = plan_through(&points);
     if let Some(first) = plan.waypoints.first_mut() {
         first.turn = WaypointTurn::FlyOver;
     }
+    // Short of its perpendicular: flown over, as the plan asks.
     let (mut engine, record) = MissionEngine::from_waypoints(&plan, config()).expect("builds");
-    let flight = fly_from(&mut engine, [2_000.0, 0.0], &points, 6_000, 0);
+    let short = fly_from(&mut engine, [-2_000.0, 0.0], &points, 2_400, 0);
     assert!(
-        !matches!(
-            flight.reasons.first(),
+        matches!(short.reasons.first(), Some((1, reason)) if !matches!(reason, SequenceReason::Passed { .. })),
+        "a fly-over first waypoint ahead is flown to: {:?}",
+        short.reasons
+    );
+    let over = closest_to_first_m(&short);
+    assert!(
+        over < record.capture_radius_m,
+        "the aircraft came to {over:.0} m of the fly-over waypoint, not over it"
+    );
+    // Past it: passed at the start and never flown back to.
+    let (mut engine, _) = MissionEngine::from_waypoints(&plan, config()).expect("builds");
+    let past = fly_from(&mut engine, [2_000.0, 0.0], &points, 2_400, 0);
+    assert!(
+        matches!(
+            past.reasons.first(),
             Some((1, SequenceReason::Passed { .. }))
         ),
-        "a fly-over first waypoint is not passed at the start: {:?}",
-        flight.reasons
+        "a fly-over first waypoint behind is passed at the start: {:?}",
+        past.reasons
     );
-    let closest = closest_to_first_m(&flight);
+    let closest = closest_to_first_m(&past);
     assert!(
-        closest < record.capture_radius_m,
-        "the aircraft came to {closest:.0} m of the fly-over waypoint, not over it"
+        closest > 1_900.0,
+        "the aircraft turned back to {closest:.0} m of the fly-over waypoint"
     );
 }
 
