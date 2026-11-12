@@ -155,7 +155,7 @@ impl TimedCircuit {
             self.heading_rad = target;
             true
         } else {
-            self.heading_rad += self.sense * step;
+            self.heading_rad = (self.heading_rad + self.sense * step).rem_euclid(2.0 * PI);
             false
         }
     }
