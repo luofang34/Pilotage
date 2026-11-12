@@ -24,7 +24,7 @@ cgmath = "0.18.0"
 pilotage-sim-video = { path = "../../adapters/sim-video" }
 pilotage-camera-calibration = { path = "../../crates/pilotage-camera-calibration" }
 pilotage-calibration-id = { path = "../../crates/pilotage-calibration-id" }
-indicate-frames = { git = "https://github.com/luofang34/Indicate.git", rev = "217b88b46b45005cb7f21c2ad5a23923d432b32b" }
+indicate-frames = { git = "https://github.com/luofang34/Indicate.git", rev = "f57a825110d0a9f891fe5ea1fb99aca9e336a404" }
 prost = "0.14.4"
 tokio = { version = "1.48.0", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "macros"] }
 tracing = "0.1.44"

@@ -17,7 +17,7 @@ use navigate_geodesy::NedOffset;
 use navigate_geodesy::wgs84::tangent_plane;
 use pilotage_mission::{
     ExecutionTarget, FlightPhase, MissionConfig, MissionEngine, MissionEvent, MissionState,
-    NavQuality, OwnshipSource, PlannedWaypoint, PositionSource, StartWithheldReason,
+    NavQuality, OwnshipSource, PlannedWaypoint, PositionKind, PositionSource, StartWithheldReason,
     SteeringIntegrity, VehicleStatus, WaypointPlan,
 };
 use pilotage_protocol::{ControlAction, VehicleClass};
@@ -255,6 +255,11 @@ fn a_navigator_without_a_position_aid_flies_every_leg_by_dead_reckoning() {
         }),
         "the display can tell this is not a satellite position: {steering:?}"
     );
+    assert_eq!(
+        engine.nav_guidance().and_then(|guidance| guidance.position),
+        Some(PositionKind::DeadReckoning),
+        "the guidance flown names dead reckoning as its position"
+    );
     assert!(
         matches!(
             steering.integrity,
@@ -292,6 +297,11 @@ fn the_display_names_the_source_steered_on_and_why_there_is_none() {
     let flown = engine.navigation_display();
     assert_eq!(flown.phase, FlightPhase::Enroute);
     assert_eq!(flown.steering.source, PositionSource::OnboardNavigation);
+    assert_eq!(
+        flown.steering.position_kind(),
+        Some(PositionKind::Inertial),
+        "an inertial navigator with no position aid, within its limits"
+    );
     assert_eq!(
         flown.steering.integrity,
         SteeringIntegrity::WithinLimits {

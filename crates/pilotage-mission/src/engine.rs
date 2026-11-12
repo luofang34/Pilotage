@@ -43,7 +43,9 @@ pub use navigation_display::{
     DisplayFix, DisplayWaypoint, LegDisplay, NavigationDisplay, ToFrom, WaypointProgress,
 };
 pub use output::{MissionAction, MissionCounters, MissionEvent, MissionOutput, MissionState};
-pub use steering_source::{FlightPhase, PositionSource, SteeringIntegrity, SteeringSource};
+pub use steering_source::{
+    FlightPhase, PositionKind, PositionSource, SteeringIntegrity, SteeringSource,
+};
 pub use vehicle_status::{
     LaunchDetection, StartWithheldReason, VEHICLE_STATUS_MAX_AGE_NS, VehicleStatus,
 };

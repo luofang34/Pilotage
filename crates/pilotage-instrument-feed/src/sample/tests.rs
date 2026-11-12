@@ -40,7 +40,7 @@ fn reported_angles_cannot_supply_estimator_attitude_or_position() {
     let mut bytes = vec![0; Runtime::state_capacity()];
     let len = feed.state_frame(120.0, &mut bytes).expect("state encodes");
     let report =
-        indicate_instrument_state::abi::v10::decode_state(&bytes[..len]).expect("state decodes");
+        indicate_instrument_state::abi::v11::decode_state(&bytes[..len]).expect("state decodes");
     assert!(report.state.attitude.data.is_none());
     assert!(report.state.kinematics.data.is_none());
     assert!(!report.state.valid.attitude);
@@ -84,7 +84,7 @@ fn canonical_without_rates_keeps_measured_horizon_and_rate_authority_missing() {
     let mut bytes = vec![0; Runtime::state_capacity()];
     let len = feed.state_frame(120.0, &mut bytes).expect("state encodes");
     let report =
-        indicate_instrument_state::abi::v10::decode_state(&bytes[..len]).expect("state decodes");
+        indicate_instrument_state::abi::v11::decode_state(&bytes[..len]).expect("state decodes");
     let attitude = report.state.attitude.data.expect("measured attitude");
     assert!(attitude.rates_rps.iter().all(|rate| rate.is_nan()));
     assert!(report.state.valid.attitude);

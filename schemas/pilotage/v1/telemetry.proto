@@ -506,6 +506,11 @@ message NavGuidanceState {
   // course: 1 TO, 2 FROM, or 0 OFF while no lateral course is tracked,
   // which removes the deviation bar.
   uint32 to_from = 12;
+  // The kind of position this guidance rests on: 1 satellite, 2 visual,
+  // 3 inertial with no position aid, 4 dead reckoning, 5 a blend of aids
+  // or an estimate whose aids are not stated. 0 states none: a display
+  // that names its position source removes the guidance.
+  uint32 position_source = 13;
 }
 
 message PayloadAxisObservation {

@@ -6,11 +6,14 @@
 //! validation. It is stated so a display names its source and scales its
 //! deviations from what the engine says, never from what it assumes.
 
-use navigate_contract::SourceComposition;
+use navigate_contract::{SensorClass, SourceComposition};
 
 use crate::config::OwnshipSource;
 
 use super::{MissionEngine, NavQuality, StartWithheldReason};
+
+#[cfg(test)]
+mod tests;
 
 /// The phase of flight that sets the required navigation performance, and
 /// with it the scale a display gives its lateral deviation.
@@ -88,7 +91,65 @@ pub struct SteeringSource {
     pub integrity: SteeringIntegrity,
 }
 
+/// The kind of position the plan is steered on, as an instrument
+/// annunciates it beside its guidance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum PositionKind {
+    /// Satellite navigation is the only position aid.
+    Satellite,
+    /// A camera is the only position aid.
+    Visual,
+    /// No position aid contributes: the solution is carried by inertial
+    /// and air data alone, within its limits.
+    Inertial,
+    /// A solution beyond its limits is flown by dead reckoning.
+    DeadReckoning,
+    /// Several position aids contribute, or the position is an estimate
+    /// whose aids are not stated: the flight controller's own, another
+    /// navigator's, or a simulator's truth.
+    Blended,
+}
+
+/// The position aids of `contributing`, as the kinds an instrument names.
+fn kind_of(contributing: SourceComposition) -> PositionKind {
+    let satellite = contributing.contains(SensorClass::Gnss);
+    let visual = contributing.contains(SensorClass::VisualLandmark)
+        || contributing.contains(SensorClass::VisualOdometry);
+    // Aids an instrument has no name for, and estimates that do not state
+    // what aided them.
+    let other = [
+        SensorClass::Celestial,
+        SensorClass::RadioNavigation,
+        SensorClass::MagneticAnomaly,
+        SensorClass::FcState,
+        SensorClass::NavigationSolution,
+    ]
+    .into_iter()
+    .any(|class| contributing.contains(class));
+    match (satellite, visual, other) {
+        (false, false, false) => PositionKind::Inertial,
+        (true, false, false) => PositionKind::Satellite,
+        (false, true, false) => PositionKind::Visual,
+        _ => PositionKind::Blended,
+    }
+}
+
 impl SteeringSource {
+    /// The kind of position steered on; `None` while none is. Dead
+    /// reckoning is named whatever contributes. A simulator's truth names
+    /// no sensor, so it is a blend.
+    #[must_use]
+    pub fn position_kind(&self) -> Option<PositionKind> {
+        match self.integrity {
+            SteeringIntegrity::NoSolution { .. } => None,
+            SteeringIntegrity::DeadReckoning { .. } => Some(PositionKind::DeadReckoning),
+            SteeringIntegrity::WithinLimits { .. } => {
+                Some(self.contributing.map_or(PositionKind::Blended, kind_of))
+            }
+        }
+    }
+
     /// A steering source from its parts.
     #[must_use]
     pub const fn new(

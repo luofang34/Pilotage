@@ -48,7 +48,7 @@ pub use engine::{
 pub use engine::{
     DisplayFix, DisplayWaypoint, LegDisplay, NavigationDisplay, ToFrom, WaypointProgress,
 };
-pub use engine::{FlightPhase, PositionSource, SteeringIntegrity, SteeringSource};
+pub use engine::{FlightPhase, PositionKind, PositionSource, SteeringIntegrity, SteeringSource};
 pub use error::MissionBuildError;
 pub use holding_pattern::{
     HoldingEntry, HoldingLeg, HoldingPattern, HoldingPatternStatus, HoldingTurn,

@@ -73,6 +73,7 @@ fn guidance(stamp: Option<wire::MeasurementStamp>) -> wire::NavGuidanceState {
         solution_quality: 1,
         sequencing: 1,
         to_from: 2,
+        position_source: 2,
     }
 }
 
@@ -173,6 +174,7 @@ fn nav_guidance_needs_a_navigation_solution_stamp() {
     assert_eq!(nav.solution_quality, 1);
     assert_eq!(nav.sequencing, 1, "a hold reaches the display");
     assert_eq!(nav.to_from, 2, "so does the FROM of its outbound leg");
+    assert_eq!(nav.position_source, 2, "and the position it rests on");
     assert_eq!(nav.stamp.role, wire::SourceRole::NavigationSolution as i32);
     assert!(nav_guidance_message(guidance(None)).is_none());
     // Guidance is display context and never a fallback for a missing

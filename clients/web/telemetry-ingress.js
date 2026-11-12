@@ -476,7 +476,7 @@ export class NavGuidanceTracker {
       lateralDeviationM: wellShaped ? navGuidance.lateralDeviationM : NaN,
       verticalDeviationM: wellShaped ? navGuidance.verticalDeviationM : NaN,
       distanceToWaypointM: wellShaped ? navGuidance.distanceToWaypointM : NaN,
-      ...Object.fromEntries(counted.map((key) => [key, wellShaped ? navGuidance[key] : 0])),
+      ...Object.fromEntries([...counted, "positionSource"].map((key) => [key, wellShaped && navGuidance[key] >= 0 && Number.isInteger(navGuidance[key]) ? navGuidance[key] : 0])),
     };
   }
 }

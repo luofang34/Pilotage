@@ -1,6 +1,6 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use pilotage_mission::{NavGuidance, NavQuality, ToFrom};
+use pilotage_mission::{NavGuidance, NavQuality, PositionKind, ToFrom};
 use pilotage_protocol::{SessionId, wire};
 
 use super::{NavGuidancePublisher, NavPublication};
@@ -18,6 +18,7 @@ fn guidance() -> NavGuidance {
         quality: NavQuality::Degraded,
         to_from: Some(ToFrom::To),
         holding: false,
+        position: Some(PositionKind::Satellite),
     }
 }
 
@@ -164,4 +165,25 @@ fn a_holding_pattern_says_hold_and_from_and_a_plan_leg_says_sequencing_and_to() 
     let hold = sample(publisher.publication(Some(&holding), 0));
     assert_eq!(hold.sequencing, 1, "the holding pattern is a hold");
     assert_eq!(hold.to_from, 2, "the outbound leg flies from the fix");
+}
+
+#[test]
+fn the_position_kind_travels_as_its_code_and_none_as_zero() {
+    let mut publisher = NavGuidancePublisher::for_session(SessionId::new(7));
+    let cases = [
+        (Some(PositionKind::Satellite), 1),
+        (Some(PositionKind::Visual), 2),
+        (Some(PositionKind::Inertial), 3),
+        (Some(PositionKind::DeadReckoning), 4),
+        (Some(PositionKind::Blended), 5),
+        (None, 0),
+    ];
+    for (position, code) in cases {
+        let guidance = NavGuidance {
+            position,
+            ..guidance()
+        };
+        let state = sample(publisher.publication(Some(&guidance), 0));
+        assert_eq!(state.position_source, code, "{position:?}");
+    }
 }

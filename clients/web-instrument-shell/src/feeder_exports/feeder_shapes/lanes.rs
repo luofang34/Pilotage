@@ -7,7 +7,8 @@ use indicate_instrument_feeder::fc_state::{FcCommand, FcReport, FcView};
 use indicate_instrument_feeder::nav_guidance::{Guidance, NavCounters, NavReject, NavSnapshot};
 use indicate_instrument_feeder::turn::TurnDeclaration;
 use indicate_instrument_state::{
-    IdentStr, NavData, NavFromTo, NavScale, NavSequencing, NavSource, Stamped,
+    IdentStr, NavData, NavFromTo, NavScale, NavSequencing, NavSource, PositionIntegrity,
+    PositionSource, Stamped,
 };
 use serde::{Deserialize, Serialize};
 
@@ -113,6 +114,7 @@ pub(in super::super) struct JsGuidanceSample {
     solution_quality: u32,
     sequencing: u32,
     to_from: u32,
+    position_source: u32,
 }
 
 /// The phase scale of every guidance sample. The wire's guidance carries
@@ -139,6 +141,28 @@ fn to_from_of(code: u32) -> NavFromTo {
         1 => NavFromTo::To,
         2 => NavFromTo::From,
         _ => NavFromTo::Unknown,
+    }
+}
+
+/// The position source the wire codes as 1 satellite, 2 visual, 3
+/// inertial, 4 dead reckoning, and 5 blended. Zero states none and any
+/// other value is unread: both are unknown, which removes the display,
+/// because the flight-plan lane must name the position it rests on.
+fn position_source_of(code: u32) -> PositionSource {
+    match u8::try_from(code) {
+        Ok(code @ 1..=5) => PositionSource::from_u8(code),
+        _ => PositionSource::Unknown,
+    }
+}
+
+/// The position integrity of a solution the wire grades 0 good or 1
+/// degraded. An unusable or unread grade is unknown, which removes the
+/// display.
+fn position_integrity_of(solution_quality: u32) -> PositionIntegrity {
+    match solution_quality {
+        0 => PositionIntegrity::Normal,
+        1 => PositionIntegrity::Degraded,
+        _ => PositionIntegrity::Unknown,
     }
 }
 
@@ -175,6 +199,8 @@ impl JsGuidanceSample {
                 leg_index: self.leg_index,
                 waypoint_count: self.waypoint_count,
                 solution_quality: self.solution_quality,
+                position_source: position_source_of(self.position_source),
+                position_integrity: position_integrity_of(self.solution_quality),
             },
         )
     }
@@ -194,6 +220,7 @@ struct JsGuidanceOut {
     solution_quality: u32,
     sequencing: u8,
     to_from: u8,
+    position_source: u8,
 }
 
 /// The guidance snapshot the script consumes.
@@ -224,6 +251,12 @@ impl From<NavSnapshot> for JsNavSnapshot {
                     NavFromTo::To => 1,
                     NavFromTo::From => 2,
                     NavFromTo::Unknown => 255,
+                },
+                // The wire codes no source as zero; an unknown one goes
+                // back as zero too, and the display conversion refuses it.
+                position_source: match guidance.position_source {
+                    PositionSource::None | PositionSource::Unknown => 0,
+                    stated => stated.to_u8(),
                 },
             },
             age_ms: snapshot.age_ms,
@@ -257,6 +290,7 @@ struct JsGuidanceIn {
     solution_quality: u32,
     sequencing: u32,
     to_from: u32,
+    position_source: u32,
 }
 
 impl JsNavSnapshotIn {
@@ -275,6 +309,8 @@ impl JsNavSnapshotIn {
                 leg_index: self.nav_guidance.leg_index,
                 waypoint_count: self.nav_guidance.waypoint_count,
                 solution_quality: self.nav_guidance.solution_quality,
+                position_source: position_source_of(self.nav_guidance.position_source),
+                position_integrity: position_integrity_of(self.nav_guidance.solution_quality),
             },
             age_ms: self.age_ms,
         }
@@ -325,6 +361,8 @@ pub(in super::super) struct JsNavGroup {
     scale: u8,
     facility: u8,
     sequencing: u8,
+    position_source: u8,
+    position_integrity: u8,
     cdi_dots: f32,
     vdev_dots: Option<f32>,
     dist_nm: Option<f32>,
@@ -342,6 +380,7 @@ impl From<Stamped<NavData>> for JsNavGroup {
                 NavSource::Gps => 1,
                 NavSource::Nav1 => 2,
                 NavSource::Nav2 => 3,
+                NavSource::Fms => 4,
                 NavSource::Unknown => 255,
             },
             fromto: match nav.fromto {
@@ -355,6 +394,8 @@ impl From<Stamped<NavData>> for JsNavGroup {
             scale: nav.scale.to_u8(),
             facility: nav.facility.to_u8(),
             sequencing: nav.sequencing.to_u8(),
+            position_source: nav.position_source.to_u8(),
+            position_integrity: nav.position_integrity.to_u8(),
             cdi_dots: nav.cdi_dots,
             vdev_dots: nav.vdev_dots,
             dist_nm: nav.dist_nm,

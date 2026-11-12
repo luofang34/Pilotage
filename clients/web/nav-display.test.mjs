@@ -29,6 +29,7 @@ function snapshot(overrides = {}, ageMs = 40) {
       solutionQuality: 0,
       sequencing: 0,
       toFrom: 1,
+      positionSource: 1,
       ...overrides,
     },
     ageMs,
@@ -37,11 +38,13 @@ function snapshot(overrides = {}, ageMs = 40) {
 
 function testEveryQuantityMapsIntoTheInstrumentVocabulary() {
   const nav = navDisplayState(snapshot({ lateralDeviationM: 50, verticalDeviationM: -16 }));
-  assert.equal(nav.source, 1, "GPS/FMS course, drawn magenta");
+  assert.equal(nav.source, 4, "the flight-plan lane, drawn magenta");
+  assert.equal(nav.positionSource, 1, "flown on satellite position");
+  assert.equal(nav.positionIntegrity, 0, "a good solution");
   assert.equal(nav.fromto, 1, "flying toward the active waypoint");
   // Undeclared, either would be unknown and fail the whole nav group.
-  assert.equal(nav.facility, 0, "the GPS lane is tuned to no facility");
-  assert.equal(nav.sequencing, 0, "the GPS lane is sequencing its legs");
+  assert.equal(nav.facility, 0, "the flight-plan lane is tuned to no facility");
+  assert.equal(nav.sequencing, 0, "the flight-plan lane is sequencing its legs");
   assert.equal(nav.courseRad, 1.25, "course passes through in radians");
   assert.equal(nav.courseReference, 1, "true north, the reference the wire declares");
   assert.equal(nav.scale, 1, "the terminal scale, which the feeder declares");
@@ -165,5 +168,20 @@ function testAHoldIsAnnunciatedAndItsOutboundLegFlagsFrom() {
 }
 testAHoldIsAnnunciatedAndItsOutboundLegFlagsFrom();
 console.log("ok - testAHoldIsAnnunciatedAndItsOutboundLegFlagsFrom");
+
+function testTheLaneNamesThePositionItRestsOn() {
+  for (const [positionSource, label] of [[2, "visual"], [3, "inertial"], [5, "blended"]]) {
+    assert.equal(navDisplayState(snapshot({ positionSource })).positionSource, positionSource, label);
+  }
+  const reckoned = navDisplayState(snapshot({ positionSource: 4, solutionQuality: 1 }));
+  assert.equal(reckoned.positionSource, 4, "dead reckoning is named");
+  assert.equal(reckoned.positionIntegrity, 1, "and its solution is degraded");
+  // No position stated, or a code the lane cannot read, removes the display.
+  assert.equal(navDisplayState(snapshot({ positionSource: 0 })), null);
+  assert.equal(navDisplayState(snapshot({ positionSource: 9 })), null);
+  assert.equal(navDisplayState(snapshot({ positionSource: undefined })), null);
+}
+testTheLaneNamesThePositionItRestsOn();
+console.log("ok - testTheLaneNamesThePositionItRestsOn");
 
 console.log("\nall nav display profile checks passed");

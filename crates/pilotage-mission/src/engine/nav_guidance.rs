@@ -15,7 +15,7 @@ use navigate_geodesy::{cross_track_m, distance_m};
 use crate::body::GEODESY;
 use navigate_route::Leg;
 
-use super::{MissionEngine, MissionState, ToFrom};
+use super::{MissionEngine, MissionState, PositionKind, ToFrom};
 
 #[cfg(test)]
 mod tests;
@@ -83,6 +83,9 @@ pub struct NavGuidance {
     /// sequencing its legs: the geometry is the inbound leg to the holding
     /// fix, whose TO/FROM flips every circuit.
     pub holding: bool,
+    /// The kind of position this geometry rests on; `None` when the
+    /// engine cannot name one, which removes the display.
+    pub position: Option<PositionKind>,
 }
 
 impl MissionEngine {
@@ -115,6 +118,7 @@ impl MissionEngine {
                     quality: leg.quality,
                     to_from: Some(leg.to_from),
                     holding: true,
+                    position: self.steering_source().position_kind(),
                 })
             }
             MissionState::AwaitSolution
@@ -123,12 +127,14 @@ impl MissionEngine {
             | MissionState::Failed => None,
             MissionState::Climb | MissionState::Enroute => {
                 let leg = self.route.active_leg()?;
-                Some(leg_guidance(
+                let mut guidance = leg_guidance(
                     &solution.position,
                     &leg,
                     self.route.waypoints().len(),
                     solution.integrity.quality.into(),
-                ))
+                );
+                guidance.position = self.steering_source().position_kind();
+                Some(guidance)
             }
         }
     }
@@ -173,6 +179,7 @@ fn leg_guidance(
         waypoint_count: u32::try_from(waypoint_count).unwrap_or(u32::MAX),
         quality,
         holding: false,
+        position: None,
     }
 }
 
