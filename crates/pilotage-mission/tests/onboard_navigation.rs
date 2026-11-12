@@ -224,7 +224,9 @@ fn the_vehicle_flies_where_the_navigator_says_it_is() {
     );
     assert_eq!(engine.counters().onboard_refused, 0);
     assert_eq!(engine.counters().onboard_stale, 0);
+    assert_eq!(engine.counters().nav_source_mismatch, 0);
     assert_eq!(engine.counters().onboard_unfit, 0);
+    assert_eq!(engine.counters().nav_source_mismatch, 0);
 }
 
 #[test]
@@ -252,6 +254,7 @@ fn a_navigator_that_stops_solving_goes_stale_while_its_host_repeats_the_solution
     assert_eq!(silent_ticks, 20);
     assert_eq!(engine.counters().onboard_repeated, 40);
     assert_eq!(engine.counters().onboard_stale, 20);
+    assert_eq!(engine.counters().nav_source_mismatch, 0);
 }
 
 #[test]
@@ -333,6 +336,7 @@ fn a_solution_the_engine_cannot_place_is_a_counted_refusal() {
     assert_eq!(engine.counters().onboard_refused, 4);
     assert_eq!(engine.tick(now).state, MissionState::AwaitSolution);
     assert_eq!(engine.counters().onboard_stale, 0);
+    assert_eq!(engine.counters().nav_source_mismatch, 0);
 }
 
 #[test]

@@ -129,6 +129,7 @@ impl MissionEngine {
                 contributing: None,
                 integrity: SteeringIntegrity::NoSolution {
                     reason: self
+                        .nav
                         .no_solution
                         .unwrap_or(StartWithheldReason::NavigationNotStarted),
                 },

@@ -242,6 +242,7 @@ fn a_navigator_without_a_position_aid_flies_every_leg_by_dead_reckoning() {
         "no hold while a solution is flown"
     );
     assert!(engine.counters().onboard_dead_reckoned > 0);
+    assert_eq!(engine.counters().nav_source_mismatch, 0);
     let display = engine.navigation_display().dead_reckoning;
     assert!(
         display.is_some_and(|dead_reckoning| dead_reckoning.horizontal_1sigma_m > 1_000.0),
@@ -330,6 +331,7 @@ fn the_same_navigator_holds_under_the_default_limits() {
         }
     )));
     assert!(engine.dead_reckoning().is_none());
+    assert_eq!(engine.counters().nav_source_mismatch, 0);
     let steering = engine.navigation_display().steering;
     assert!(
         matches!(
