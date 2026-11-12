@@ -372,6 +372,7 @@ impl HostCore {
             .and_then(MissionEngine::solution)
             .cloned();
         self.status.plan_complete = automation.plan_complete;
+        self.status.navigation = automation.navigation.clone();
         self.status.frames_sent = automation.frames_sent;
         self.status.frames_rejected = automation.frames_rejected;
         self.status.frame_digest = automation.frame_digest;

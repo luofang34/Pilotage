@@ -5,6 +5,7 @@ use pilotage_mission_core::ExecutionTarget;
 use pilotage_protocol::VehicleClass;
 
 use crate::error::MissionBuildError;
+use crate::holding_pattern::HoldingTurn;
 
 /// Where the engine's ownship position comes from.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -67,18 +68,20 @@ impl OwnshipSource {
     }
 }
 
-/// The orbit a vehicle that cannot stop flies around the last waypoint
-/// after a waypoint plan completes. Each value left unset takes its
-/// default.
+/// The holding pattern a vehicle that cannot stop flies at the last
+/// waypoint when its plan completes and it has no further instruction; see
+/// [`crate::holding_pattern`]. Each value left unset takes its default.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct TerminalOrbit {
-    /// The orbit radius, metres. Default: the turn radius at the true
-    /// airspeed of the cruise speed at the orbit altitude and
-    /// [`MissionConfig::route_bank_deg`], and at least the capture radius.
-    pub radius_m: Option<f64>,
-    /// The orbit altitude on the WGS84 ellipsoid, metres. Default: the
+pub struct TerminalHoldingPattern {
+    /// The holding altitude on the WGS84 ellipsoid, metres. Default: the
     /// altitude of the last waypoint.
     pub altitude_m: Option<f64>,
+    /// The direction of the turns. Default: right turns.
+    pub turn: HoldingTurn,
+    /// The inbound leg time, seconds. Default:
+    /// [`crate::holding_pattern::standard_leg_time_s`] at the holding
+    /// altitude.
+    pub leg_time_s: Option<f64>,
 }
 
 /// Ceilings every emitted intent is clamped within.
@@ -166,16 +169,17 @@ pub struct MissionConfig {
     /// and is then commanded to zero velocity; a
     /// [`VehicleClass::FixedWing`], which cannot stop, completes the plan
     /// when the last waypoint sequences and then flies
-    /// [`Self::terminal_orbit`]. Default [`VehicleClass::Multicopter`].
+    /// [`Self::terminal_holding_pattern`]. Default
+    /// [`VehicleClass::Multicopter`].
     pub vehicle_class: VehicleClass,
     /// The time at cruise speed that sizes the capture radius of a
     /// waypoint plan that sets none, seconds. Default 2.0.
     pub capture_time_s: f64,
-    /// The orbit after a waypoint plan for a vehicle that cannot stop.
-    pub terminal_orbit: TerminalOrbit,
+    /// The holding pattern after a plan for a vehicle that cannot stop.
+    pub terminal_holding_pattern: TerminalHoldingPattern,
     /// The bank angle the mission plans its turns at, degrees. With the
-    /// speed over the ground it sizes the turn ahead of a fly-by waypoint,
-    /// and with the true airspeed the orbit after the plan.
+    /// speed over the ground it sizes the turn ahead of a fly-by waypoint.
+    /// It also limits the bank of the holding pattern after the plan.
     ///
     /// The host sets it below the bank the flight controller turns at on a
     /// route. A turn planned at the airframe's bank limit leaves the
@@ -183,7 +187,7 @@ pub struct MissionConfig {
     /// gust or shift of wind in the turn, then carry it outside the planned
     /// path, and it has no authority left to come back. The margin below
     /// the limit is that authority. Default
-    /// [`crate::DEFAULT_ORBIT_BANK_DEG`].
+    /// [`crate::DEFAULT_ROUTE_BANK_DEG`].
     pub route_bank_deg: f64,
     /// Whether the arm request waits for a vehicle status that says the
     /// vehicle is ready to arm; see [`crate::VehicleStatus`]. A host that
@@ -262,8 +266,8 @@ impl MissionConfig {
             arm_confirm_timeout: DurationNanos::from_nanos(crate::policy::ARM_CONFIRM_TIMEOUT_NS),
             vehicle_class: VehicleClass::Multicopter,
             capture_time_s: 2.0,
-            terminal_orbit: TerminalOrbit::default(),
-            route_bank_deg: crate::DEFAULT_ORBIT_BANK_DEG,
+            terminal_holding_pattern: TerminalHoldingPattern::default(),
+            route_bank_deg: crate::DEFAULT_ROUTE_BANK_DEG,
             arm_when_vehicle_ready: false,
             launch_detection: None,
             declared_start: None,

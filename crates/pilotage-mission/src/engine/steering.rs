@@ -102,11 +102,7 @@ impl MissionEngine {
         events: &mut Vec<MissionEvent>,
     ) -> Option<ControlIntent> {
         self.announce_hold(now, events);
-        let (heading, altitude_m) = match self.steering.last {
-            Some(last) => last,
-            None => (self.last_yaw_rad?, fallback_altitude_m),
-        };
-        Some(self.heading_altitude(heading, altitude_m))
+        self.repeat_heading(fallback_altitude_m)
     }
 
     /// The heading and altitude intent of a tick in `state`: guidance
@@ -248,6 +244,22 @@ impl MissionEngine {
             }
         };
         self.steering.wind = Some((wind, now));
+    }
+
+    /// The wind the navigator's ground velocity shows, north and east m/s;
+    /// `None` before a first estimate.
+    pub(super) fn wind_estimate(&self) -> Option<[f64; 2]> {
+        self.steering.wind.map(|(wind, _)| wind)
+    }
+
+    /// The heading and altitude last commanded, again, or the present
+    /// heading at `altitude_m` before any command.
+    pub(super) fn repeat_heading(&mut self, altitude_m: f64) -> Option<ControlIntent> {
+        let (heading, altitude_m) = match self.steering.last {
+            Some(last) => last,
+            None => (self.last_yaw_rad?, altitude_m),
+        };
+        Some(self.heading_altitude(heading, altitude_m))
     }
 
     /// The heading last commanded, or else the present one.

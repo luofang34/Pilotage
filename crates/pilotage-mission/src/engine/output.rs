@@ -20,8 +20,9 @@ pub enum MissionState {
     /// its ownship fresh, and pauses its sequencing clock until the host
     /// resumes it.
     Held,
-    /// The plan is complete; every tick commands zero velocity so the
-    /// adapter's brake-then-hold takes over.
+    /// The plan is complete. A vehicle that can stop is commanded to zero
+    /// velocity on every tick, so the adapter's brake-then-hold takes
+    /// over; one that cannot stop flies its holding pattern.
     Complete,
     /// The core refused or stopped the mission before plan completion.
     Failed,
@@ -51,13 +52,16 @@ pub enum MissionEvent {
         /// metres.
         distance_m: f64,
     },
-    /// A vehicle that cannot stop completed its plan and now orbits the
-    /// last waypoint clockwise.
-    OrbitStarted {
-        /// The orbit radius, metres.
-        radius_m: f64,
-        /// The orbit altitude on the WGS84 ellipsoid, metres.
-        altitude_m: f64,
+    /// A vehicle that cannot stop completed its plan with no further
+    /// instruction, and now flies a holding pattern at the last waypoint.
+    HoldingPatternStarted {
+        /// The pattern.
+        pattern: crate::HoldingPattern,
+    },
+    /// The vehicle reached the holding fix and started this entry.
+    HoldingPatternEntered {
+        /// The entry the course at the fix selected.
+        entry: crate::HoldingEntry,
     },
     /// An arm action was emitted with this correlation id.
     ArmRequested {

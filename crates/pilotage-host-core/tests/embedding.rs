@@ -12,7 +12,9 @@ use pilotage_adapter_aviate::{AviateAirframe, EmbeddedIncarnations};
 use pilotage_control_feel::{FlightFeelProfile, ValidatedFlightFeelProfile};
 use pilotage_host_core::{HostCore, HostCoreConfig, HostCoreError, HostEvent, MISSION_CLOCK};
 use pilotage_mavlink::link::LinkConfig;
-use pilotage_mission::{MissionConfig, OwnshipSource, PlannedWaypoint, WaypointPlan};
+use pilotage_mission::{
+    MissionConfig, OwnshipSource, PlannedWaypoint, WaypointPlan, WaypointProgress,
+};
 use web_time::Instant;
 
 fn config() -> HostCoreConfig {
@@ -119,6 +121,25 @@ fn a_fixed_wing_core_builds_with_its_envelope_and_origin() {
         core.status().mission_state.is_some(),
         "the C172 mission builds"
     );
+    // The plan is shown before it is flown: its waypoints, the first one
+    // active, and no leg guidance or holding pattern without a solution.
+    let navigation = core
+        .status()
+        .navigation
+        .clone()
+        .expect("a navigation display");
+    let idents: Vec<&str> = navigation
+        .waypoints
+        .iter()
+        .map(|w| w.fix.ident.as_str())
+        .collect();
+    assert_eq!(idents, ["WP1", "WP2"]);
+    assert_eq!(navigation.active_waypoint, Some(0));
+    assert_eq!(navigation.waypoints[0].progress, WaypointProgress::Active);
+    assert_eq!(navigation.waypoints[1].progress, WaypointProgress::Ahead);
+    assert!(!navigation.plan_complete);
+    assert_eq!(navigation.leg, None);
+    assert_eq!(navigation.holding_pattern, None);
 }
 
 #[test]

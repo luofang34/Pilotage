@@ -224,12 +224,12 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 [[package]]
 name = "aviate-xil-contract"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Aviate.git?rev=13e1e5580c3891db1a783c5c283cc44858a3b068#13e1e5580c3891db1a783c5c283cc44858a3b068"
+source = "git+https://github.com/luofang34/Aviate.git?rev=c864498e2b90498e84be4ca32599812ce878665d#c864498e2b90498e84be4ca32599812ce878665d"
 
 [[package]]
 name = "aviate-xil-shm"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Aviate.git?rev=13e1e5580c3891db1a783c5c283cc44858a3b068#13e1e5580c3891db1a783c5c283cc44858a3b068"
+source = "git+https://github.com/luofang34/Aviate.git?rev=c864498e2b90498e84be4ca32599812ce878665d#c864498e2b90498e84be4ca32599812ce878665d"
 dependencies = [
  "aviate-xil-contract",
  "libc",
@@ -1764,7 +1764,7 @@ dependencies = [
 [[package]]
 name = "navigate-astrodynamics"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Navigate.git?rev=f9179abd017fba04d80e53dc02b38038f6e726a8#f9179abd017fba04d80e53dc02b38038f6e726a8"
+source = "git+https://github.com/luofang34/Navigate.git?rev=8f56f3d503a1fd0bf6be64436b9d848ac1bb6702#8f56f3d503a1fd0bf6be64436b9d848ac1bb6702"
 dependencies = [
  "nalgebra",
  "navigate-contract",
@@ -1775,7 +1775,7 @@ dependencies = [
 [[package]]
 name = "navigate-contract"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Navigate.git?rev=f9179abd017fba04d80e53dc02b38038f6e726a8#f9179abd017fba04d80e53dc02b38038f6e726a8"
+source = "git+https://github.com/luofang34/Navigate.git?rev=8f56f3d503a1fd0bf6be64436b9d848ac1bb6702#8f56f3d503a1fd0bf6be64436b9d848ac1bb6702"
 dependencies = [
  "thiserror",
 ]
@@ -1783,7 +1783,7 @@ dependencies = [
 [[package]]
 name = "navigate-fusion"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Navigate.git?rev=f9179abd017fba04d80e53dc02b38038f6e726a8#f9179abd017fba04d80e53dc02b38038f6e726a8"
+source = "git+https://github.com/luofang34/Navigate.git?rev=8f56f3d503a1fd0bf6be64436b9d848ac1bb6702#8f56f3d503a1fd0bf6be64436b9d848ac1bb6702"
 dependencies = [
  "nalgebra",
  "navigate-astrodynamics",
@@ -1795,7 +1795,7 @@ dependencies = [
 [[package]]
 name = "navigate-geodesy"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Navigate.git?rev=f9179abd017fba04d80e53dc02b38038f6e726a8#f9179abd017fba04d80e53dc02b38038f6e726a8"
+source = "git+https://github.com/luofang34/Navigate.git?rev=8f56f3d503a1fd0bf6be64436b9d848ac1bb6702#8f56f3d503a1fd0bf6be64436b9d848ac1bb6702"
 dependencies = [
  "navigate-contract",
  "thiserror",
@@ -1804,7 +1804,7 @@ dependencies = [
 [[package]]
 name = "navigate-guidance"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Navigate.git?rev=f9179abd017fba04d80e53dc02b38038f6e726a8#f9179abd017fba04d80e53dc02b38038f6e726a8"
+source = "git+https://github.com/luofang34/Navigate.git?rev=8f56f3d503a1fd0bf6be64436b9d848ac1bb6702#8f56f3d503a1fd0bf6be64436b9d848ac1bb6702"
 dependencies = [
  "nalgebra",
  "navigate-astrodynamics",
@@ -1818,7 +1818,7 @@ dependencies = [
 [[package]]
 name = "navigate-route"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Navigate.git?rev=f9179abd017fba04d80e53dc02b38038f6e726a8#f9179abd017fba04d80e53dc02b38038f6e726a8"
+source = "git+https://github.com/luofang34/Navigate.git?rev=8f56f3d503a1fd0bf6be64436b9d848ac1bb6702#8f56f3d503a1fd0bf6be64436b9d848ac1bb6702"
 dependencies = [
  "navigate-contract",
  "navigate-geodesy",
@@ -1828,7 +1828,7 @@ dependencies = [
 [[package]]
 name = "navigate-trajectory"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Navigate.git?rev=f9179abd017fba04d80e53dc02b38038f6e726a8#f9179abd017fba04d80e53dc02b38038f6e726a8"
+source = "git+https://github.com/luofang34/Navigate.git?rev=8f56f3d503a1fd0bf6be64436b9d848ac1bb6702#8f56f3d503a1fd0bf6be64436b9d848ac1bb6702"
 dependencies = [
  "nalgebra",
  "navigate-astrodynamics",
