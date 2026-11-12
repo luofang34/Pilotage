@@ -3,7 +3,7 @@
 use indicate_instrument_scene::{
     LayerId, MAX_LAYER_COMMANDS, MAX_SCENE_BYTES, SceneCmds, SceneWriter,
 };
-use indicate_instrument_state::abi::v9::{CAPACITY, VERSION, encode_state};
+use indicate_instrument_state::abi::v10::{CAPACITY, VERSION, encode_state};
 use indicate_instrument_state::{AircraftState, Attitude, Quat, Stamped};
 
 use crate::runtime::SCENE_CAPACITY;

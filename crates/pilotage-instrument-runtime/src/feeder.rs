@@ -158,9 +158,15 @@ impl NavGuidance {
 }
 
 /// Converts one accepted guidance snapshot into the instrument model's
-/// nav group, or `None` when guidance must not display (ADR-0031).
+/// nav group, or `None` when guidance must not display (ADR-0031). The
+/// deviations are scaled for the small unmanned airframes Pilotage flies:
+/// 200 m lateral full scale enroute, 50 m terminal, 20 m approach, and
+/// 16 m vertical.
 pub fn nav_display_state(snapshot: Option<&NavSnapshot>) -> Option<Stamped<NavData>> {
-    indicate_instrument_feeder::nav_display::nav_display_state(snapshot)
+    indicate_instrument_feeder::nav_display::nav_display_state(
+        snapshot,
+        &indicate_instrument_feeder::nav_display::DeviationScaleProfile::SMALL_UNMANNED,
+    )
 }
 
 /// The semantic stamp-fault vocabulary as a `{field, rule}` pair, so
