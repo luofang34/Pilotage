@@ -51,6 +51,12 @@ impl FlightWatch {
     pub(super) const fn reports_state(&self) -> bool {
         self.reports
     }
+
+    /// Whether the flight controller's stamped state reported the vehicle
+    /// armed during this run.
+    pub(super) const fn armed(&self) -> bool {
+        self.armed
+    }
 }
 
 #[cfg(test)]

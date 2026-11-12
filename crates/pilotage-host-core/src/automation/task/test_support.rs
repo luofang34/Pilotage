@@ -42,6 +42,7 @@ impl MissionTask {
             operator_hold: false,
             stopping: None,
             flight: super::flight_watch::FlightWatch::default(),
+            takes_over: false,
         }
     }
 }
