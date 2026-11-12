@@ -350,12 +350,7 @@ impl MissionEngine {
     /// no solution clears the published one, so display data cannot go
     /// stale.
     fn publish_solution(&mut self, now: MonotonicNanos) -> Option<NavigationSolution> {
-        self.last_solution = self.source_solution(now);
-        self.nav.no_solution = match self.last_solution {
-            Some(_) => None,
-            None => Some(self.solution_absence(now)),
-        };
-        self.step_nav_source(now);
+        self.last_solution = self.judge_source(now);
         self.last_solution
     }
 

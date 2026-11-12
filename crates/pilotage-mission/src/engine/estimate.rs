@@ -44,11 +44,6 @@ impl VehicleEstimate {
         self.latest.map(|sample| sample.acquired_at)
     }
 
-    /// Whether a sample has ever been admitted.
-    pub(super) fn has_sample(&self) -> bool {
-        self.latest.is_some()
-    }
-
     /// The latest sample as a solution for `now`, or `None` when no
     /// sample is admitted, the sample is older than the budget allows,
     /// or the sample is stamped after `now`.
