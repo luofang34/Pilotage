@@ -103,5 +103,4 @@ fn the_display_reads_off_then_a_climb_then_the_altitude_held() {
         Some(cruise_m)
     );
     assert_eq!(engine.counters().vertical_mode_mismatch, 0);
-    assert_eq!(engine.counters().lifecycle_mismatch, 0);
 }

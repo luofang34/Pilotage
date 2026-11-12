@@ -4,17 +4,17 @@
 
 use navigate_contract::{DurationNanos, MonotonicNanos};
 
-use super::lifecycle::LifecycleEvent;
-use super::{MissionEngine, MissionEvent, MissionState};
+use super::lifecycle::{LifecycleEvent, Stage};
+use super::{MissionEngine, MissionEvent};
 
 impl MissionEngine {
     /// Holds the mission: a human took the motion scope. Ticks command
     /// nothing and the sequencing clock pauses until [`Self::resume`].
-    /// A terminal mission and a mission already held are unchanged.
+    /// A finished or failed mission and a mission already held are
+    /// unchanged; a vehicle flying on after its plan is held like any
+    /// other.
     pub fn hold(&mut self, now: MonotonicNanos) {
-        if self.hold_started.is_some()
-            || matches!(self.state(), MissionState::Complete | MissionState::Failed)
-        {
+        if !self.lifecycle_takes(LifecycleEvent::Held) {
             return;
         }
         self.hold_started = Some(now);
@@ -35,6 +35,11 @@ impl MissionEngine {
             held_ns: held.as_nanos(),
         });
         self.step_lifecycle(LifecycleEvent::Resumed);
+        // The pattern after the plan is entered again from where the
+        // human left the vehicle, not continued from where it was taken.
+        if self.lifecycle().stage == Stage::AfterPlan {
+            self.holding_pattern = None;
+        }
         Some(held)
     }
 

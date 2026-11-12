@@ -175,10 +175,11 @@ impl MissionEngine {
                     display_fix(leg.to),
                 ))
             }
-            MissionState::Complete => self.holding_pattern_leg(solution),
+            MissionState::AfterPlan => self.holding_pattern_leg(solution),
             MissionState::AwaitSolution
             | MissionState::Arming
             | MissionState::Held
+            | MissionState::Complete
             | MissionState::Failed => None,
         }
     }

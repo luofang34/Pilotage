@@ -38,9 +38,8 @@ use navigate_geodesy::LocalTangentPlane;
 use navigate_guidance::{GuidanceRefusal, VelocityGuidanceConfig};
 use navigate_route::ExecutionConfig;
 use pilotage_mission_core::{
-    ActionId, DirectiveReceipt, EngineState as CoreEngineState, FlightAction as CoreFlightAction,
-    FlightPlanReference, MissionDocument, MissionEngine as CoreMissionEngine,
-    MissionTerminal as CoreMissionTerminal, NavigationDataIdentity, PhaseStage, ReceiptResult,
+    ActionId, DirectiveReceipt, FlightAction as CoreFlightAction, FlightPlanReference,
+    MissionDocument, MissionEngine as CoreMissionEngine, NavigationDataIdentity, ReceiptResult,
 };
 
 pub use dead_reckoning::DeadReckoning;
@@ -365,44 +364,11 @@ impl MissionEngine {
         &self.counters
     }
 
-    /// The current mission phase.
+    /// Where the mission stands: the lifecycle machine's state, as it is
+    /// reported.
     #[must_use]
-    pub fn state(&self) -> MissionState {
-        if self.core_failed {
-            return MissionState::Failed;
-        }
-        if self.hold_started.is_some() {
-            return MissionState::Held;
-        }
-        let Some(core) = self.core.as_ref() else {
-            return MissionState::AwaitSolution;
-        };
-        match core.state() {
-            CoreEngineState::Running {
-                phase_id, stage, ..
-            } if phase_id == document::ARM_PHASE_ID => match stage {
-                PhaseStage::WaitingForEntry {} => MissionState::AwaitSolution,
-                PhaseStage::WaitingForReceipt { .. } | PhaseStage::WaitingForCompletion {} => {
-                    MissionState::Arming
-                }
-            },
-            CoreEngineState::Running {
-                phase_id, stage, ..
-            } if phase_id == document::CLIMB_PHASE_ID => match stage {
-                PhaseStage::WaitingForEntry {} => MissionState::AwaitSolution,
-                PhaseStage::WaitingForReceipt { .. } | PhaseStage::WaitingForCompletion {} => {
-                    MissionState::Climb
-                }
-            },
-            // The plan, whole or one of its tasks.
-            CoreEngineState::Running { .. } => MissionState::Enroute,
-            CoreEngineState::Terminal {
-                result: CoreMissionTerminal::Complete { .. },
-            } => MissionState::Complete,
-            CoreEngineState::CleaningUp { .. } | CoreEngineState::Terminal { .. } => {
-                MissionState::Failed
-            }
-        }
+    pub const fn state(&self) -> MissionState {
+        self.modes.lifecycle.reported()
     }
 
     /// Gets the validated mission document that owns phase transitions.

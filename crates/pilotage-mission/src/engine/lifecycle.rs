@@ -8,19 +8,16 @@
 //! is carried by the event that ends the plan, so the machine reads no
 //! configuration.
 //!
-//! The machine does not decide anything yet. The engine steps it after
-//! every change and counts each time its projection onto
-//! [`MissionState`] differs from the state the engine derives itself
-//! ([`super::MissionCounters::lifecycle_mismatch`]).
+//! The machine's state is the mission's state: the engine steps it after
+//! every change of the core and on every hold and resume, and
+//! [`MissionEngine::state`] reports it.
 
 use pilotage_mission_core::{
     EngineState as CoreEngineState, MissionTerminal as CoreMissionTerminal, PhaseStage,
 };
 
-use navigate_contract::MonotonicNanos;
-
 use super::document::{ARM_PHASE_ID, CLIMB_PHASE_ID};
-use super::{MissionEngine, MissionOutput, MissionState};
+use super::{MissionEngine, MissionState};
 
 #[cfg(test)]
 mod tests;
@@ -154,32 +151,44 @@ impl Lifecycle {
             Stage::Armed => MissionState::Arming,
             Stage::Climb => MissionState::Climb,
             Stage::Route => MissionState::Enroute,
-            Stage::AfterPlan | Stage::Complete => MissionState::Complete,
+            Stage::AfterPlan => MissionState::AfterPlan,
+            Stage::Complete => MissionState::Complete,
             Stage::Failed => MissionState::Failed,
         }
     }
 }
 
+impl Lifecycle {
+    /// Whether the vehicle is in flight under the mission: in its climb,
+    /// on its route, or flying on after its plan.
+    pub(super) const fn in_flight(self) -> bool {
+        matches!(self.stage, Stage::Climb | Stage::Route | Stage::AfterPlan)
+    }
+}
+
 impl MissionEngine {
-    /// Advances the operational mission with one caller clock value.
-    ///
-    /// The wrapper supplies the same monotonic value as simulator time and
-    /// wall time. It performs no clock read and no input or output operation.
-    pub fn tick(&mut self, now: MonotonicNanos) -> MissionOutput {
-        let output = self.tick_mission(now);
+    /// Steps the machine on what the mission core's state says now. The
+    /// engine calls it after every change of the core, so
+    /// [`MissionEngine::state`] is never behind it.
+    pub(super) fn sync_lifecycle(&mut self) {
         if let Some(event) = self.core_event() {
             self.step_lifecycle(event);
         }
-        output
     }
 
-    /// Steps the machine on `event` and counts a projection that differs
-    /// from the state the engine derives.
-    pub(super) fn step_lifecycle(&mut self, event: LifecycleEvent) {
+    /// Steps the machine on `event`.
+    pub(super) const fn step_lifecycle(&mut self, event: LifecycleEvent) {
         self.modes.lifecycle = next(self.modes.lifecycle, event);
-        if self.modes.lifecycle.reported() != self.state() {
-            self.counters.lifecycle_mismatch = self.counters.lifecycle_mismatch.wrapping_add(1);
-        }
+    }
+
+    /// Whether `event` would change the lifecycle.
+    pub(super) fn lifecycle_takes(&self, event: LifecycleEvent) -> bool {
+        next(self.modes.lifecycle, event) != self.modes.lifecycle
+    }
+
+    /// Where the mission stands.
+    pub(super) const fn lifecycle(&self) -> Lifecycle {
+        self.modes.lifecycle
     }
 
     /// What the mission core's state says of the lifecycle; `None` while

@@ -143,7 +143,7 @@ fn fly(navigator: bool, wind_mps: [f64; 2], plan: &WaypointPlan) -> Vec<[f64; 2]
             engine.on_action_result(action.action_id, true);
         }
         track.push(aircraft.ned);
-        if output.state == MissionState::Complete {
+        if output.state == MissionState::AfterPlan {
             break;
         }
         aircraft.fly(output.intent.as_ref());

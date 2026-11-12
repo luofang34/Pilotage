@@ -212,7 +212,7 @@ fn a_navigator_without_a_position_aid_flies_every_leg_by_dead_reckoning() {
     let flight = fly(&mut engine, 7_000, &dead_reckoning_navigator, false);
     assert_eq!(
         flight.states.last(),
-        Some(&MissionState::Complete),
+        Some(&MissionState::AfterPlan),
         "every waypoint sequenced on the navigator's own position"
     );
     let reports: Vec<f64> = flight
@@ -340,7 +340,7 @@ fn the_same_navigator_holds_under_the_default_limits() {
     )
     .expect("builds");
     let flight = fly(&mut engine, 7_000, &dead_reckoning_navigator, false);
-    assert_ne!(flight.states.last(), Some(&MissionState::Complete));
+    assert_ne!(flight.states.last(), Some(&MissionState::AfterPlan));
     assert!(flight.events.iter().any(|event| matches!(
         event,
         MissionEvent::NavigationHold {

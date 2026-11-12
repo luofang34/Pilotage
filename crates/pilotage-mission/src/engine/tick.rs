@@ -35,11 +35,14 @@ mod wind_turn;
 use outputs::{failed_output, terminal_output};
 
 impl MissionEngine {
-    /// One tick of the mission: the source, the core, the plan, and the
-    /// intent of the state they leave.
-    pub(super) fn tick_mission(&mut self, now: MonotonicNanos) -> MissionOutput {
+    /// Advances the operational mission with one caller clock value.
+    ///
+    /// The wrapper supplies the same monotonic value as simulator time and
+    /// wall time. It performs no clock read and no input or output operation.
+    pub fn tick(&mut self, now: MonotonicNanos) -> MissionOutput {
         match self.state() {
-            MissionState::Complete => return self.complete_output(now),
+            MissionState::Complete => return terminal_output(MissionState::Complete),
+            MissionState::AfterPlan => return self.after_plan_output(now),
             MissionState::Failed => return terminal_output(MissionState::Failed),
             MissionState::Held => return self.held_output(now),
             MissionState::AwaitSolution
@@ -136,7 +139,10 @@ impl MissionEngine {
         };
         let result = self.core.as_mut()?.tick(input);
         match result {
-            Ok(output) => Some(output),
+            Ok(output) => {
+                self.sync_lifecycle();
+                Some(output)
+            }
             Err(error) => {
                 self.refuse_core(error.to_string(), events);
                 None
@@ -174,6 +180,7 @@ impl MissionEngine {
         self.active_action = None;
         self.outstanding_arm = None;
         self.drop_held_arm();
+        self.sync_lifecycle();
         events.push(MissionEvent::MissionEngineRefused { detail });
     }
 

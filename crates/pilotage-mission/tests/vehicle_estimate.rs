@@ -184,7 +184,6 @@ fn the_estimate_flies_the_route_to_completion_as_a_degraded_solution() {
     assert_eq!(engine.counters().fusion_rejected, 0);
     assert_eq!(engine.counters().estimate_stale, 0);
     assert_eq!(engine.counters().vertical_mode_mismatch, 0);
-    assert_eq!(engine.counters().lifecycle_mismatch, 0);
     let height_m = -estimate.ned[2];
     assert!(height_m > 10.0, "still at cruise height, got {height_m}");
 }

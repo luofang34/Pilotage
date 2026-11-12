@@ -12,22 +12,19 @@ use navigate_route::SequenceReason;
 use pilotage_protocol::{ControlIntent, ReferenceFrame, VelocityIntent};
 
 use super::super::{MissionEngine, MissionEvent, MissionOutput, MissionState};
-use super::outputs::{terminal_output, zero_velocity_intent};
+use super::outputs::zero_velocity_intent;
 
 impl MissionEngine {
-    /// The output of a tick after the mission completed.
-    pub(super) fn complete_output(&mut self, now: MonotonicNanos) -> MissionOutput {
-        if self.config.can_stop() {
-            return terminal_output(MissionState::Complete);
-        }
+    /// The output of a tick of a vehicle flying on after its plan.
+    pub(super) fn after_plan_output(&mut self, now: MonotonicNanos) -> MissionOutput {
         let mut events = core::mem::take(&mut self.hold_events);
         let solution = self.publish_solution(now);
-        let intent =
-            self.intent_for_state(MissionState::Complete, solution.as_ref(), now, &mut events);
+        let state = MissionState::AfterPlan;
+        let intent = self.intent_for_state(state, solution.as_ref(), now, &mut events);
         MissionOutput {
             intent,
             action: None,
-            state: MissionState::Complete,
+            state,
             events,
         }
     }

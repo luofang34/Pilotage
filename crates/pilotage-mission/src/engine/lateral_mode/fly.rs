@@ -32,7 +32,7 @@ impl MissionEngine {
                 _ if state == MissionState::Climb => self.climb_intent(solution),
                 _ => self.end_of_plan_intent(solution, now, events),
             },
-            LateralMode::Pattern if state == MissionState::Complete => {
+            LateralMode::Pattern if state == MissionState::AfterPlan => {
                 self.end_of_plan_intent(solution, now, events)
             }
             LateralMode::DirectTo | LateralMode::Track | LateralMode::Pattern => {

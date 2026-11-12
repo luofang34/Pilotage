@@ -194,7 +194,7 @@ fn fly_and_hold(
         if let Some(status) = pattern {
             flight.turn_radius_m = status.pattern.turn_radius_m;
         }
-        if output.state == MissionState::Complete {
+        if output.state == MissionState::AfterPlan {
             held_steps += 1.0;
             if held_steps * STEP_S >= hold_s {
                 break;

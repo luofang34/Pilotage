@@ -22,9 +22,12 @@ pub enum MissionState {
     /// its ownship fresh, and pauses its sequencing clock until the host
     /// resumes it.
     Held,
-    /// The plan is complete. A vehicle that can stop is commanded to zero
-    /// velocity on every tick, so the adapter's brake-then-hold takes
-    /// over; one that cannot stop flies its holding pattern.
+    /// The plan is done and the vehicle, which cannot stop, flies on: its
+    /// holding pattern at the last waypoint, until told otherwise.
+    AfterPlan,
+    /// The mission is finished: the plan is done and the vehicle stopped.
+    /// It is commanded to zero velocity on every tick, so the adapter's
+    /// brake-then-hold takes over.
     Complete,
     /// The core refused or stopped the mission before plan completion.
     Failed,
@@ -266,8 +269,4 @@ pub struct MissionCounters {
     /// own threshold, disagreed on whether the climb's target is
     /// captured. Any count is a defect.
     pub vertical_mode_mismatch: u64,
-    /// Times the lifecycle machine's reported state differed from the
-    /// state the engine derives from the mission core and the hold. Any
-    /// count is a defect.
-    pub lifecycle_mismatch: u64,
 }

@@ -220,7 +220,7 @@ impl MissionEngine {
                 .active_leg()
                 .map(|leg| leg.to.position.altitude_m)
                 .or(self.modes.vertical.target_m),
-            MissionState::Complete => self.modes.vertical.target_m,
+            MissionState::Complete | MissionState::AfterPlan => self.modes.vertical.target_m,
             MissionState::AwaitSolution
             | MissionState::Arming
             | MissionState::Held

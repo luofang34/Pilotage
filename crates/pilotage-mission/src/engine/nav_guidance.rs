@@ -111,7 +111,7 @@ impl MissionEngine {
     pub fn nav_guidance(&self) -> Option<NavGuidance> {
         let solution = self.last_solution.as_ref()?;
         match self.state() {
-            MissionState::Complete => {
+            MissionState::AfterPlan => {
                 let leg = self.holding_pattern_leg(solution)?;
                 let waypoint_count = self.route.waypoints().len();
                 Some(NavGuidance {
@@ -133,6 +133,7 @@ impl MissionEngine {
             MissionState::AwaitSolution
             | MissionState::Arming
             | MissionState::Held
+            | MissionState::Complete
             | MissionState::Failed => None,
             MissionState::Climb | MissionState::Enroute => {
                 let leg = self.route.active_leg()?;

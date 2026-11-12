@@ -137,7 +137,10 @@ fn fly_as(engine: &mut MissionEngine, ticks_after_complete: usize, plant: Plant)
                 _ => {}
             }
         }
-        if output.state == MissionState::Complete {
+        if matches!(
+            output.state,
+            MissionState::Complete | MissionState::AfterPlan
+        ) {
             if flight.completed_at.is_none() {
                 flight.completed_at = Some(ned);
             } else {
