@@ -266,4 +266,8 @@ pub struct MissionCounters {
     /// own threshold, disagreed on whether the climb's target is
     /// captured. Any count is a defect.
     pub vertical_mode_mismatch: u64,
+    /// Times the lifecycle machine's reported state differed from the
+    /// state the engine derives from the mission core and the hold. Any
+    /// count is a defect.
+    pub lifecycle_mismatch: u64,
 }
