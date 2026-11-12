@@ -39,6 +39,11 @@ impl VehicleEstimate {
         self.latest = Some(*sample);
     }
 
+    /// When the latest admitted sample was acquired.
+    pub(super) fn acquired_at(&self) -> Option<MonotonicNanos> {
+        self.latest.map(|sample| sample.acquired_at)
+    }
+
     /// Whether a sample has ever been admitted.
     pub(super) fn has_sample(&self) -> bool {
         self.latest.is_some()

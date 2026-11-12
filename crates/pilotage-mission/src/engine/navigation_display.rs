@@ -13,7 +13,7 @@ use navigate_geodesy::{distance_m, initial_bearing_rad};
 use crate::body::GEODESY;
 use crate::holding_pattern::HoldingPatternStatus;
 
-use super::{FlightPhase, MissionEngine, MissionState, NavGuidance, NavQuality, SteeringSource};
+use super::{FlightPhase, MissionEngine, MissionState, NavGuidance, SteeringSource};
 
 /// The groundspeed below which no time to go is given, m/s.
 const MIN_TIME_TO_GO_SPEED_MPS: f64 = 1.0;
@@ -110,8 +110,6 @@ pub struct LegDisplay {
     pub time_to_go_s: Option<f64>,
     /// Whether [`Self::to`] is ahead along the desired track.
     pub to_from: ToFrom,
-    /// The quality of the solution this guidance rests on.
-    pub quality: NavQuality,
 }
 
 impl MissionEngine {
@@ -194,7 +192,6 @@ fn plan_leg(
         distance_to_go_m: guidance.distance_to_waypoint_m,
         time_to_go_s: time_to_go_s(solution, guidance.distance_to_waypoint_m),
         to_from,
-        quality: guidance.quality,
         to,
     }
 }
@@ -226,7 +223,6 @@ pub(super) fn holding_leg(
             pattern.inbound_course_rad,
             distance_to_go_m,
         ),
-        quality: solution.integrity.quality.into(),
     }
 }
 
