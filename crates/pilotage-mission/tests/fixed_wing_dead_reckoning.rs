@@ -16,8 +16,9 @@ use navigate_contract::{
 use navigate_geodesy::NedOffset;
 use navigate_geodesy::wgs84::tangent_plane;
 use pilotage_mission::{
-    ExecutionTarget, MissionConfig, MissionEngine, MissionEvent, MissionState, OwnshipSource,
-    PlannedWaypoint, StartWithheldReason, VehicleStatus, WaypointPlan,
+    ExecutionTarget, FlightPhase, MissionConfig, MissionEngine, MissionEvent, MissionState,
+    NavQuality, OwnshipSource, PlannedWaypoint, PositionSource, StartWithheldReason,
+    SteeringIntegrity, VehicleStatus, WaypointPlan,
 };
 use pilotage_protocol::{ControlAction, VehicleClass};
 
@@ -246,6 +247,70 @@ fn a_navigator_without_a_position_aid_flies_every_leg_by_dead_reckoning() {
         display.is_some_and(|dead_reckoning| dead_reckoning.horizontal_1sigma_m > 1_000.0),
         "the display carries the dead reckoning and its uncertainty: {display:?}"
     );
+    let steering = engine.navigation_display().steering;
+    assert_eq!(steering.source, PositionSource::OnboardNavigation);
+    assert!(
+        steering.contributing.is_some_and(|classes| {
+            classes.contains(SensorClass::Inertial) && !classes.contains(SensorClass::Gnss)
+        }),
+        "the display can tell this is not a satellite position: {steering:?}"
+    );
+    assert!(
+        matches!(
+            steering.integrity,
+            SteeringIntegrity::DeadReckoning {
+                quality: NavQuality::Unusable,
+                horizontal_1sigma_m,
+            } if horizontal_1sigma_m > 1_000.0
+        ),
+        "flown beyond its limits, with the navigator's own grade beside it: {steering:?}"
+    );
+}
+
+#[test]
+fn the_display_names_the_source_steered_on_and_why_there_is_none() {
+    let (mut engine, _) = MissionEngine::from_waypoints(
+        &plan(ALTITUDE_M),
+        config(OwnshipSource::onboard_navigation(), 0.0),
+    )
+    .expect("builds");
+    let before = engine.navigation_display();
+    assert_eq!(
+        before.phase,
+        FlightPhase::Enroute,
+        "no leg has a terminal role"
+    );
+    assert_eq!(before.steering.contributing, None);
+    assert_eq!(
+        before.steering.integrity,
+        SteeringIntegrity::NoSolution {
+            reason: StartWithheldReason::NavigationNotStarted
+        }
+    );
+
+    fly(&mut engine, 200, &low_navigator(0.0), false);
+    let flown = engine.navigation_display();
+    assert_eq!(flown.phase, FlightPhase::Enroute);
+    assert_eq!(flown.steering.source, PositionSource::OnboardNavigation);
+    assert_eq!(
+        flown.steering.integrity,
+        SteeringIntegrity::WithinLimits {
+            quality: NavQuality::Good,
+            horizontal_1sigma_m: 5.0,
+        }
+    );
+
+    // The navigator stops solving: its last solution ages past the limit.
+    let later = MonotonicNanos::from_nanos(1_000_000_000 + 200 * STEP_NANOS + 5_000_000_000);
+    engine.tick(later);
+    let stale = engine.navigation_display().steering;
+    assert_eq!(stale.contributing, None);
+    assert_eq!(
+        stale.integrity,
+        SteeringIntegrity::NoSolution {
+            reason: StartWithheldReason::NavigationStale
+        }
+    );
 }
 
 #[test]
@@ -265,6 +330,17 @@ fn the_same_navigator_holds_under_the_default_limits() {
         }
     )));
     assert!(engine.dead_reckoning().is_none());
+    let steering = engine.navigation_display().steering;
+    assert!(
+        matches!(
+            steering.integrity,
+            SteeringIntegrity::NoSolution {
+                reason: StartWithheldReason::NavigationTooUncertain { .. }
+                    | StartWithheldReason::NavigationUnusable
+            }
+        ),
+        "the heading held is not steered on a position: {steering:?}"
+    );
 }
 
 /// A navigator whose altitude sits `low_m` under the truth, with a

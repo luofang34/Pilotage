@@ -13,7 +13,7 @@ use navigate_geodesy::{distance_m, initial_bearing_rad};
 use crate::body::GEODESY;
 use crate::holding_pattern::HoldingPatternStatus;
 
-use super::{MissionEngine, MissionState, NavGuidance, NavQuality};
+use super::{FlightPhase, MissionEngine, MissionState, NavGuidance, NavQuality, SteeringSource};
 
 /// The groundspeed below which no time to go is given, m/s.
 const MIN_TIME_TO_GO_SPEED_MPS: f64 = 1.0;
@@ -38,6 +38,13 @@ pub struct NavigationDisplay {
     /// shows it beside the guidance, which it does not remove: the
     /// vehicle flies that guidance.
     pub dead_reckoning: Option<super::DeadReckoning>,
+    /// The flight phase of the active leg, which sets the scale of the
+    /// lateral deviation.
+    pub phase: FlightPhase,
+    /// The position source the plan is steered on and the engine's
+    /// judgment of it, present with or without a leg: a display names its
+    /// source from this.
+    pub steering: SteeringSource,
 }
 
 /// One waypoint of the plan.
@@ -137,6 +144,8 @@ impl MissionEngine {
             leg: self.leg_display(),
             holding_pattern: self.holding_pattern(),
             dead_reckoning: self.dead_reckoning(),
+            phase: self.flight_phase(),
+            steering: self.steering_source(),
         }
     }
 

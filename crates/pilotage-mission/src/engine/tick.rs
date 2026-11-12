@@ -351,6 +351,10 @@ impl MissionEngine {
     /// stale.
     fn publish_solution(&mut self, now: MonotonicNanos) -> Option<NavigationSolution> {
         self.last_solution = self.source_solution(now);
+        self.no_solution = match self.last_solution {
+            Some(_) => None,
+            None => Some(self.solution_absence(now)),
+        };
         self.last_solution
     }
 
