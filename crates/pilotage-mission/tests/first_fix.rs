@@ -292,37 +292,39 @@ fn starting_300_m_past_the_first_fix_it_is_passed_at_the_start() {
 }
 
 #[test]
-fn a_fix_missed_1_km_to_the_side_is_sequenced_on_passing_abeam() {
-    // Abeam the first fix 1 km to its east: the first leg is joined from
-    // there, and its 2 km cannot close a kilometre at the intercept a
-    // fixed wing flies, so the second fix is passed wide.
-    let flight = fly_from(&Start::at([0.0, 1_000.0]), 20_000);
+fn a_fix_missed_far_to_the_side_is_sequenced_on_passing_abeam() {
+    // 2 km east of the first leg, 500 m short of the second fix: the first
+    // fix is passed at the start, and the 500 m left cannot close the
+    // offset at the intercept a fixed wing flies, even climbing along the
+    // route, so the second fix is passed wide: wider than the turn ahead
+    // of it (about 900 m at this speed), inside which it would be
+    // anticipated instead.
+    let flight = fly_from(&Start::at([1_500.0, 2_000.0]), 20_000);
     assert_flies_through(&flight);
     let second = flight.advances.get(1);
+    let Some((2, SequenceReason::Passed { cross_track_m })) = second else {
+        panic!("the second fix is passed abeam: {:?}", flight.advances);
+    };
     assert!(
-        matches!(second, Some((2, SequenceReason::Passed { cross_track_m })) if cross_track_m.abs() > 100.0),
-        "the second fix is passed abeam, wide of it: {:?}",
+        cross_track_m.abs() > 100.0,
+        "wide of it: {:?}",
         flight.advances
     );
-    // No turn back toward the missed fix: from abeam it to the hold, the
-    // aircraft only draws away from it.
+    // No turn back for the missed fix: from abeam it to the hold, the
+    // aircraft stays well clear of it while it turns onto the next leg,
+    // where flying back would bring it over it.
     let [fix_north, fix_east] = POINTS[1];
-    let from_fix = |p: &[f64; 2]| (p[0] - fix_north).hypot(p[1] - fix_east);
-    let after_abeam: Vec<f64> = flight
+    let closest = flight
         .track
         .get(..flight.held_at.unwrap_or(0))
         .unwrap_or_default()
         .iter()
         .skip_while(|p| p[0] < fix_north)
-        .map(from_fix)
-        .collect();
-    let closer = after_abeam
-        .windows(2)
-        .map(|pair| pair[0] - pair[1])
-        .fold(0.0_f64, f64::max);
+        .map(|p| (p[0] - fix_north).hypot(p[1] - fix_east))
+        .fold(f64::INFINITY, f64::min);
     assert!(
-        closer < 0.5,
-        "the aircraft closed on the missed fix by {closer:.2} m in one tick"
+        closest > 0.5 * cross_track_m.abs(),
+        "the aircraft came back to {closest:.0} m of the fix it passed {cross_track_m:.0} m wide"
     );
 }
 
