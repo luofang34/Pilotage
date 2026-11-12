@@ -4,7 +4,7 @@
 
 #![allow(clippy::expect_used, clippy::panic)]
 
-use indicate_instrument_state::abi::v9::{VERSION, encode_state};
+use indicate_instrument_state::abi::v10::{VERSION, encode_state};
 use indicate_instrument_state::{AircraftState, Attitude, Quat, Stamped};
 use pilotage_instrument_runtime::RenderStatus;
 
@@ -15,11 +15,11 @@ use crate::{
 };
 
 const PINNED_SCENE_DIGEST: &str =
-    "c61cb54b60c31a2cbc614e809c29e7c8d363178d3c30bc01c55552092d236459";
+    "26fdba99a83fbbfc340f06350ab8f77e086e33b066a6c9d33a02a6fafad05189";
 const PINNED_COMPOSITION_DIGEST: &str =
-    "5f259d1a1410f06fe5cab40bfdbec9c6cfcbb786254218f35d4a25c5f267c094";
+    "2b5bef44f5114690c100724768c4e2b43da8ebbb42627451499b15e68e52b442";
 const PINNED_CORPUS_DIGEST: &str =
-    "0b0c7ccb135bfc4107bc110e4b24dceffd84adf1b767fcd14d2c5ace7391f962";
+    "dcd67f6cc789bb17199caeb364a67fbaaa211f32de5353d50eaffa989e846b2b";
 
 fn attitude_state() -> AircraftState {
     AircraftState {
@@ -44,7 +44,7 @@ fn attitude_state() -> AircraftState {
 }
 
 fn encode(state: &AircraftState) -> Vec<u8> {
-    let mut block = vec![0u8; indicate_instrument_state::abi::v9::CAPACITY];
+    let mut block = vec![0u8; indicate_instrument_state::abi::v10::CAPACITY];
     let len = encode_state(state, &mut block).expect("encodes");
     block.truncate(len);
     block
@@ -88,7 +88,7 @@ fn digest_identity_equals_the_pinned_tuple_values() {
         scene_format_version(),
         pilotage_instrument_runtime::scene_format_version()
     );
-    assert_eq!(corpus_version(), 8);
+    assert_eq!(corpus_version(), 9);
     assert_eq!(corpus_digest_hex(), PINNED_CORPUS_DIGEST);
     assert_eq!(scene_digest_hex(), PINNED_SCENE_DIGEST);
     assert_eq!(composition_digest_hex(), PINNED_COMPOSITION_DIGEST);
@@ -180,7 +180,7 @@ fn a_truncated_state_fails_with_unchanged_generation() {
 #[test]
 fn state_write_accepts_exact_capacity_and_refuses_capacity_plus_one() {
     let bridge = InstrumentBridge::new();
-    let capacity = indicate_instrument_state::abi::v9::CAPACITY;
+    let capacity = indicate_instrument_state::abi::v10::CAPACITY;
     assert_eq!(bridge.write_state(&vec![0; capacity], 0).status, 0);
 
     let error = bridge.write_state(&vec![0; capacity + 1], 0);
@@ -198,7 +198,7 @@ fn oversized_valid_prefix_is_not_truncated_into_an_accepted_frame() {
     assert_eq!(first.status, RenderStatus::Ok as u32);
 
     let mut oversized = encoded;
-    oversized.resize(indicate_instrument_state::abi::v9::CAPACITY + 1, 0);
+    oversized.resize(indicate_instrument_state::abi::v10::CAPACITY + 1, 0);
     assert_eq!(bridge.write_state(&oversized, 1).status, 1);
     let refused = bridge.composition_frame(1, true);
     assert_ne!(refused.status, RenderStatus::Ok as u32);

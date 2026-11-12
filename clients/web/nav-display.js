@@ -63,6 +63,10 @@ export function navDisplayState(snapshot) {
     distNm: out.distNm,
     toIdent: out.toIdent,
     fromIdent: out.fromIdent,
+    // The lane is the GPS solution, tuned to no facility, and sequencing
+    // its legs.
+    facility: out.facility,
+    sequencing: out.sequencing,
     ageMs: out.ageMs,
   };
 }

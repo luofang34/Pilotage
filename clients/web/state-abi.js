@@ -21,7 +21,7 @@
 import { EQUIPMENT_ENCODERS, EQUIPMENT_PROBE_STATE } from "./state-abi-equipment.js";
 import { RECORD_ENCODERS, RECORD_PROBE_STATE } from "./state-abi-records.js";
 
-export const STATE_ABI_VERSION = 9;
+export const STATE_ABI_VERSION = 10;
 
 const TAG = Object.freeze({
   ATTITUDE: 0x01,
@@ -161,7 +161,11 @@ function groupEncoders() {
         // An undeclared scale is unknown (255), which fails the nav
         // group: a dot has no distance until the source declares it.
         b(view, off + 42, nav.scale ?? 255);
-        return 43;
+        // The receiver's facility and the sequencing state: undeclared is
+        // unknown (255), which fails the nav group rather than guessing.
+        b(view, off + 43, nav.facility ?? 255);
+        b(view, off + 44, nav.sequencing ?? 255);
+        return 45;
       },
     ],
     [
