@@ -30,8 +30,10 @@ const ROUTE_BANK_RAD: f64 = 0.44;
 const COURSE_TIME_CONSTANT_S: f64 = 3.0;
 const ROLL_TIME_CONSTANT_S: f64 = 0.5;
 const MAX_ROLL_RATE_RPS: f64 = 0.5;
-/// The leg the test times: due north, 8 km.
+/// The leg the test flies: due north, 8 km.
 const LEG_M: f64 = 8_000.0;
+/// How far north the leg is timed to, metres.
+const TIMED_TO_M: f64 = 6_000.0;
 
 fn anchor() -> GeodeticPosition {
     GeodeticPosition::new(40.0_f64.to_radians(), -75.0_f64.to_radians(), ALTITUDE_M)
@@ -119,7 +121,7 @@ impl Aircraft {
     }
 }
 
-/// The time the first leg took, seconds, and the farthest the track
+/// The time the first leg took to [`TIMED_TO_M`], seconds, and the farthest the track
 /// strayed from it in its middle, metres.
 fn fly_first_leg(wind: [f64; 2]) -> (f64, f64) {
     let (mut engine, _) = MissionEngine::from_waypoints(&plan(), config()).expect("builds");
@@ -151,13 +153,14 @@ fn fly_first_leg(wind: [f64; 2]) -> (f64, f64) {
             engine.on_action_result(action.action_id, true);
         }
         for event in &output.events {
-            if let MissionEvent::LegAdvanced { to_index, .. } = event {
-                match to_index {
-                    1 => leg_start = Some(tick),
-                    2 => leg_end = Some(tick),
-                    _ => {}
-                }
+            if let MissionEvent::LegAdvanced { to_index: 1, .. } = event {
+                leg_start = Some(tick);
             }
+        }
+        // The leg is timed to a point short of the turn ahead, which
+        // starts where the wind puts it.
+        if leg_start.is_some() && aircraft.ned[0] >= TIMED_TO_M {
+            leg_end = Some(tick);
         }
         if leg_end.is_some() {
             break;
@@ -188,9 +191,10 @@ fn a_headwind_and_a_crosswind_are_made_good_over_the_ground() {
         "still air {still_s:.1} s / {still_m:.1} m, headwind {headwind_s:.1} s / \
          {headwind_m:.1} m, crosswind {crosswind_s:.1} s / {crosswind_m:.1} m"
     );
-    // Uncorrected, the headwind costs a fifth of the ground speed and the
-    // leg takes 30 % longer (154 s against 118 s). Made good, it takes 3 %
-    // longer: the airspeed it needs is capped at 65 m/s indicated.
+    // Uncorrected, the headwind costs a fifth of the ground speed, and the
+    // timed stretch takes a quarter longer. Made good, it takes 2 % longer
+    // (102 s against 101 s): the airspeed it needs is capped at 65 m/s
+    // indicated.
     assert!(headwind_s < 1.05 * still_s, "{summary}");
     assert!(crosswind_s < 1.03 * still_s, "{summary}");
     assert!(
