@@ -210,3 +210,48 @@ fn each_lifecycle_reports_its_mission_state() {
         assert_eq!(lifecycle.reported(), state, "{lifecycle:?}");
     }
 }
+
+#[test]
+fn each_lifecycle_projects_its_vertical_and_lateral_stage_facts() {
+    use Stage::{AfterPlan, Armed, Climb, Complete, Failed, Idle, Route};
+    let cases = [
+        (on(Idle), VerticalStage::Disengaged, LateralStage::Idle),
+        (on(Armed), VerticalStage::Arming, LateralStage::Arming),
+        (on(Climb), VerticalStage::Climb, LateralStage::Climb),
+        (on(Route), VerticalStage::Route, LateralStage::Route),
+        (
+            on(AfterPlan),
+            VerticalStage::PostPlan,
+            LateralStage::AfterPlan,
+        ),
+        (
+            on(Complete),
+            VerticalStage::PostPlan,
+            LateralStage::Complete,
+        ),
+        (
+            on(Failed),
+            VerticalStage::Disengaged,
+            LateralStage::Disengaged,
+        ),
+        (
+            held(Idle),
+            VerticalStage::Disengaged,
+            LateralStage::Disengaged,
+        ),
+        (
+            held(Route),
+            VerticalStage::Disengaged,
+            LateralStage::Disengaged,
+        ),
+        (
+            held(AfterPlan),
+            VerticalStage::Disengaged,
+            LateralStage::Disengaged,
+        ),
+    ];
+    for (lifecycle, vertical, lateral) in cases {
+        assert_eq!(lifecycle.vertical_stage(), vertical, "{lifecycle:?}");
+        assert_eq!(lifecycle.lateral_stage(), lateral, "{lifecycle:?}");
+    }
+}

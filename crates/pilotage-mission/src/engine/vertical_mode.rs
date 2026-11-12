@@ -5,8 +5,8 @@
 //! capture margin into where the vehicle is relative to the target.
 //! [`next`] turns a mode and one event into the next mode and whether the
 //! target was captured. Neither reads the mission's phase: the target is
-//! handed in, so no vertical behaviour is implied by another machine's
-//! state.
+//! handed in via [`VerticalStage`], so no vertical behaviour is implied by
+//! another machine's state.
 //!
 //! A capture is one-sided and it holds: a climb is captured at or above
 //! the target less the margin, a descent at or below the target plus it,
@@ -18,11 +18,13 @@
 //! command and the mode a display reads, and the mission core ends its
 //! climb phase when the engine reports the target captured.
 
-use navigate_contract::{MonotonicNanos, NavigationSolution};
+use navigate_contract::{AltitudeConstraint, MonotonicNanos, NavigationSolution};
+use navigate_route::Leg;
 use pilotage_mission_core::FlightAction as CoreFlightAction;
 
+use super::MissionEngine;
 use super::document::climb_capture_margin_m;
-use super::{MissionEngine, MissionState};
+use super::lifecycle::VerticalStage;
 
 #[cfg(test)]
 mod tests;
@@ -138,6 +140,19 @@ pub struct VerticalStatus {
     pub target_m: Option<f64>,
 }
 
+/// Target altitude derived from an active leg's altitude constraint.
+pub(super) fn leg_target_altitude_m(leg: &Leg<'_>, current_target_m: Option<f64>) -> f64 {
+    match leg.to.altitude {
+        Some(AltitudeConstraint::At(v)) => v,
+        Some(AltitudeConstraint::AtOrAbove(v)) => current_target_m.map_or(v, |cur| cur.max(v)),
+        Some(AltitudeConstraint::AtOrBelow(v)) => current_target_m.map_or(v, |cur| cur.min(v)),
+        Some(AltitudeConstraint::Window { lower_m, upper_m }) => {
+            current_target_m.map_or(0.5 * (lower_m + upper_m), |cur| cur.clamp(lower_m, upper_m))
+        }
+        _ => current_target_m.unwrap_or(leg.to.position.altitude_m),
+    }
+}
+
 impl MissionEngine {
     /// The vertical mode and its target, from the state the latest
     /// [`MissionEngine::tick`] left.
@@ -151,21 +166,20 @@ impl MissionEngine {
         self.modes.vertical.mode
     }
 
-    /// Steps the machine for a tick in `state` at `now`. A step with an
+    /// Steps the machine for a tick in `stage` at `now`. A step with an
     /// unchanged target and altitude changes nothing, so a tick may step
-    /// again once its phase is known.
+    /// again once its lifecycle stage advances.
     pub(super) fn step_vertical(
         &mut self,
-        state: MissionState,
+        stage: VerticalStage,
         solution: Option<&NavigationSolution>,
         now: MonotonicNanos,
     ) {
-        let target_m = self.vertical_target_m(state);
+        let target_m = self.vertical_target_m(stage);
         let event = match target_m {
             None => VerticalEvent::Disengaged,
             Some(target_m) => {
                 let fresh = self.modes.vertical.target_m != Some(target_m);
-                // A target just set, or one not yet held, is climbed to.
                 let climbing = fresh || self.modes.vertical.mode != VerticalMode::Hold;
                 let relation = relate(
                     self.target_altitude_source_m(solution, now, climbing),
@@ -183,32 +197,26 @@ impl MissionEngine {
         self.modes.vertical = VerticalStatus { mode, target_m };
     }
 
-    /// The altitude the mission flies to in `state`, metres above the
-    /// ellipsoid: the cruise altitude from the arm request, the climb's
-    /// target, the active leg's altitude, and after the plan the altitude
-    /// already flown. The mission's phase is read here once, to hand the
-    /// machine its target.
-    fn vertical_target_m(&self, state: MissionState) -> Option<f64> {
-        match state {
-            MissionState::Arming
+    /// The altitude the mission flies to in `stage`, metres above the
+    /// ellipsoid.
+    fn vertical_target_m(&self, stage: VerticalStage) -> Option<f64> {
+        match stage {
+            VerticalStage::Arming
                 if self.arm_request_sent() && self.config.cruise_height_m > 0.0 =>
             {
                 Some(self.config.anchor.altitude_m + self.config.cruise_height_m)
             }
-            MissionState::Climb => match self.active_action.as_ref() {
+            VerticalStage::Climb => match self.active_action.as_ref() {
                 Some(CoreFlightAction::Climb { target_altitude_m }) => Some(*target_altitude_m),
                 _ => None,
             },
-            MissionState::Enroute => self
+            VerticalStage::Route => self
                 .route
                 .active_leg()
-                .map(|leg| leg.to.position.altitude_m)
+                .map(|leg| leg_target_altitude_m(&leg, self.modes.vertical.target_m))
                 .or(self.modes.vertical.target_m),
-            MissionState::Complete | MissionState::AfterPlan => self.modes.vertical.target_m,
-            MissionState::AwaitSolution
-            | MissionState::Arming
-            | MissionState::Held
-            | MissionState::Failed => None,
+            VerticalStage::PostPlan => self.modes.vertical.target_m,
+            VerticalStage::Disengaged | VerticalStage::Arming => None,
         }
     }
 }

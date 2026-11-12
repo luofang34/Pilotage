@@ -9,12 +9,13 @@ use indicate_instrument_feeder::avionics::{
     IngressSnapshot,
 };
 use indicate_instrument_feeder::fc_state::{FcReport, FcStateTracker, FcView};
+use indicate_instrument_feeder::nav_display::{DeviationScaleProfile, PhaseWidths};
 use indicate_instrument_feeder::nav_guidance::{
     Guidance, NavCounters, NavGuidanceTracker, NavReject, NavSnapshot,
 };
 use indicate_instrument_feeder::turn::{TurnDeclaration, TurnDerivation};
 use indicate_instrument_feeder::{ROLE_OPERATIONAL_ESTIMATE, RawStamp, StampFault};
-use indicate_instrument_state::{NavData, Stamped};
+use indicate_instrument_state::{NavData, NavScale, Stamped};
 
 /// Construction parameters for [`Ingress`], in plain Rust.
 pub struct IngressParams {
@@ -128,6 +129,8 @@ impl FcState {
 #[derive(Default)]
 pub struct NavGuidance {
     inner: NavGuidanceTracker,
+    last_flight_phase: u8,
+    last_rnp_m: Option<f32>,
 }
 
 impl NavGuidance {
@@ -143,7 +146,32 @@ impl NavGuidance {
         sample: Option<&(RawStamp, Guidance)>,
         now_ms: f64,
     ) -> Option<NavSnapshot> {
-        self.inner.observe(sample, now_ms)
+        let phase = sample.map_or(0, |(_, guidance)| match guidance.scale {
+            NavScale::Enroute => 1,
+            NavScale::Terminal => 2,
+            NavScale::Approach => 3,
+            NavScale::Unknown => 0,
+        });
+        self.observe_with_phase_rnp(sample, phase, None, now_ms)
+    }
+
+    /// Feeds one decoded guidance sample with its wire flight-phase code
+    /// (`1..=4`) and optional RNP in meters, updating the retained phase
+    /// and RNP only when the tracker accepts a new sample.
+    pub fn observe_with_phase_rnp(
+        &mut self,
+        sample: Option<&(RawStamp, Guidance)>,
+        flight_phase: u8,
+        rnp_m: Option<f32>,
+        now_ms: f64,
+    ) -> Option<NavSnapshot> {
+        let accepted_before = self.inner.diagnostics().0.accepted;
+        let out = self.inner.observe(sample, now_ms);
+        if self.inner.diagnostics().0.accepted != accepted_before {
+            self.last_flight_phase = flight_phase;
+            self.last_rnp_m = rnp_m.filter(|value| value.is_finite() && *value > 0.0);
+        }
+        out
     }
 
     /// The current snapshot without feeding a sample.
@@ -151,9 +179,52 @@ impl NavGuidance {
         self.inner.snapshot(now_ms)
     }
 
+    /// The wire flight-phase code (`1..=4`, or `0` unstated) of the most
+    /// recently accepted sample.
+    #[must_use]
+    pub const fn last_flight_phase(&self) -> u8 {
+        self.last_flight_phase
+    }
+
+    /// The RNP in meters of the most recently accepted sample, when
+    /// positive and finite.
+    #[must_use]
+    pub const fn last_rnp_m(&self) -> Option<f32> {
+        self.last_rnp_m
+    }
+
     /// Acceptance/refusal counters plus the last refusal reason.
     pub fn diagnostics(&self) -> (NavCounters, Option<NavReject>) {
         self.inner.diagnostics()
+    }
+}
+
+/// Maps the wire's `flight_phase` (`1` enroute, `2` terminal, `3` approach,
+/// `4` missed approach) into the instrument model's [`NavScale`]; `0` or
+/// any unknown code maps to [`NavScale::Unknown`], which fail-closes the
+/// display.
+#[must_use]
+pub const fn nav_scale_from_wire_phase(flight_phase: u32) -> NavScale {
+    match flight_phase {
+        1 => NavScale::Enroute,
+        2 | 4 => NavScale::Terminal,
+        3 => NavScale::Approach,
+        _ => NavScale::Unknown,
+    }
+}
+
+fn tightened_profile(base: DeviationScaleProfile, rnp_m: Option<f32>) -> DeviationScaleProfile {
+    let Some(rnp) = rnp_m.filter(|value| value.is_finite() && *value > 0.0) else {
+        return base;
+    };
+    let tighten = |widths: PhaseWidths| PhaseWidths {
+        lateral_m: widths.lateral_m.min(rnp),
+        vertical_m: widths.vertical_m,
+    };
+    DeviationScaleProfile {
+        enroute: tighten(base.enroute),
+        terminal: tighten(base.terminal),
+        approach: tighten(base.approach),
     }
 }
 
@@ -163,10 +234,32 @@ impl NavGuidance {
 /// 200 m lateral full scale enroute, 50 m terminal, 20 m approach, and
 /// 16 m vertical.
 pub fn nav_display_state(snapshot: Option<&NavSnapshot>) -> Option<Stamped<NavData>> {
-    indicate_instrument_feeder::nav_display::nav_display_state(
-        snapshot,
-        &indicate_instrument_feeder::nav_display::DeviationScaleProfile::SMALL_UNMANNED,
-    )
+    nav_display_state_with_rnp(snapshot, None)
+}
+
+/// Converts one accepted guidance snapshot into the instrument model's
+/// nav group using Pilotage's small-unmanned profile, tightening full-scale
+/// lateral deflection when `rnp_m` specifies a tighter RNP than the phase
+/// baseline.
+pub fn nav_display_state_with_rnp(
+    snapshot: Option<&NavSnapshot>,
+    rnp_m: Option<f32>,
+) -> Option<Stamped<NavData>> {
+    let profile = tightened_profile(DeviationScaleProfile::SMALL_UNMANNED, rnp_m);
+    indicate_instrument_feeder::nav_display::nav_display_state(snapshot, &profile)
+}
+
+/// Converts one accepted guidance snapshot into the instrument model's
+/// nav group using the RTCA DO-229 GNSS navigator profile (`2.0 NM`
+/// enroute, `1.0 NM` terminal/missed, `0.3 NM` approach), tightening
+/// full-scale lateral deflection when `rnp_m` specifies a tighter
+/// procedure RNP.
+pub fn gnss_navigator_display_state(
+    snapshot: Option<&NavSnapshot>,
+    rnp_m: Option<f32>,
+) -> Option<Stamped<NavData>> {
+    let profile = tightened_profile(DeviationScaleProfile::GNSS_NAVIGATOR, rnp_m);
+    indicate_instrument_feeder::nav_display::nav_display_state(snapshot, &profile)
 }
 
 /// The semantic stamp-fault vocabulary as a `{field, rule}` pair, so

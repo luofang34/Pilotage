@@ -4,7 +4,7 @@ use core::mem::discriminant;
 
 use navigate_contract::{
     GeodeticPosition, GuidanceSetpoint, LateralReference, MonotonicNanos, NavigationSolution,
-    NedVelocity, Waypoint,
+    NedVelocity, TurnDirection, Waypoint,
 };
 use navigate_guidance::guide_velocity;
 use navigate_route::{SequenceEvent, SequenceReason};
@@ -30,9 +30,11 @@ mod overflight;
 pub(super) use overflight::overflown;
 mod speed;
 mod terminal;
+pub(in crate::engine) mod turn_direction;
 mod wind_turn;
 
 use outputs::{failed_output, terminal_output};
+use turn_direction::{TurnStageKey, active_mandatory_turn};
 
 impl MissionEngine {
     /// Advances the operational mission with one caller clock value.
@@ -51,21 +53,19 @@ impl MissionEngine {
             | MissionState::Enroute => {}
         }
         let mut events = core::mem::take(&mut self.hold_events);
-        let solution = self.publish_solution(now);
-        self.report_dead_reckoning(solution.is_some(), &mut events);
+        let solution = self.publish_solution(now, Some(&mut events));
         let mut plan_advanced = false;
         if matches!(self.state(), MissionState::Climb | MissionState::Enroute) {
             plan_advanced = self.advance_active_plan(solution.as_ref(), &mut events);
         }
-        let before = self.state();
-        self.step_vertical(before, solution.as_ref(), now);
+        self.step_vertical(self.lifecycle().vertical_stage(), solution.as_ref(), now);
         let observation = self.core_observation(solution.as_ref(), now);
         let Some(core_output) = self.tick_core(now, observation, &mut events) else {
             return failed_output(events);
         };
         let mut action = self.apply_core_output(&core_output, &mut events);
         let mut state = self.state();
-        self.step_vertical(state, solution.as_ref(), now);
+        self.step_vertical(self.lifecycle().vertical_stage(), solution.as_ref(), now);
         if state == MissionState::Climb && self.vertical_mode() == VerticalMode::Hold {
             let Some(extra_action) = self.continue_core(now, solution.as_ref(), &mut events) else {
                 return failed_output(events);
@@ -98,8 +98,13 @@ impl MissionEngine {
             None => self.release_held_arm(now, &mut events),
         };
         // The arm request above may have set the first target.
-        self.step_vertical(state, solution.as_ref(), now);
-        let intent = self.intent_for_state(state, solution.as_ref(), now, &mut events);
+        self.step_vertical(self.lifecycle().vertical_stage(), solution.as_ref(), now);
+        let intent = self.intent_for_tick(
+            self.lifecycle().lateral_stage(),
+            solution.as_ref(),
+            now,
+            &mut events,
+        );
         MissionOutput {
             intent,
             action,
@@ -253,7 +258,7 @@ impl MissionEngine {
     /// A held tick: the ownship stays fresh for the first resumed tick,
     /// nothing is commanded, and the hold is announced once.
     fn held_output(&mut self, now: MonotonicNanos) -> MissionOutput {
-        self.publish_solution(now);
+        self.publish_solution(now, None);
         MissionOutput {
             intent: None,
             action: None,
@@ -335,8 +340,12 @@ impl MissionEngine {
     /// Publishes the configured source's solution for `now`. A tick with
     /// no solution clears the published one, so display data cannot go
     /// stale.
-    fn publish_solution(&mut self, now: MonotonicNanos) -> Option<NavigationSolution> {
-        self.last_solution = self.judge_source(now);
+    fn publish_solution(
+        &mut self,
+        now: MonotonicNanos,
+        events: Option<&mut Vec<MissionEvent>>,
+    ) -> Option<NavigationSolution> {
+        self.last_solution = self.judge_source(now, events);
         self.last_solution
     }
 
@@ -346,21 +355,54 @@ impl MissionEngine {
         now: MonotonicNanos,
         events: &mut Vec<MissionEvent>,
     ) -> Option<ControlIntent> {
-        let (leg_from, leg_to): (Option<GeodeticPosition>, Waypoint) = {
+        let hold_status = self.route.hold_status();
+        let (index, mut reference, target, mandatory_turn): (
+            usize,
+            LateralReference,
+            Waypoint,
+            Option<TurnDirection>,
+        ) = {
             let leg = self.route.active_leg()?;
-            (leg.from.map(|waypoint| waypoint.position), *leg.to)
+            let mut target = *leg.to;
+            target.position.altitude_m =
+                super::vertical_mode::leg_target_altitude_m(&leg, self.modes.vertical.target_m);
+            let turn = active_mandatory_turn(&leg, hold_status);
+            (leg.index, leg.lateral_reference(), target, turn)
         };
-        let leg_from = self.track_start(&solution.position, leg_from, &leg_to, events);
-        let reference = leg_from.map_or(LateralReference::PresentPosition, LateralReference::track);
-        self.guide_to(solution, reference, &leg_to, now, events)
+        if let LateralReference::Track { from } = reference {
+            let start: Option<GeodeticPosition> =
+                self.track_start(&solution.position, Some(from), &target, events);
+            reference = start.map_or(LateralReference::PresentPosition, LateralReference::track);
+        }
+        let turn_key = (index, hold_status.map(|s| s.stage));
+        self.guide_to_with_turn(
+            solution,
+            reference,
+            &target,
+            Some((turn_key, mandatory_turn)),
+            now,
+            events,
+        )
     }
 
-    /// Guides along `reference` to `to`.
+    /// Guides along `reference` to `to` without a leg turn constraint.
     pub(super) fn guide_to(
         &mut self,
         solution: &NavigationSolution,
         reference: LateralReference,
         to: &Waypoint,
+        now: MonotonicNanos,
+        events: &mut Vec<MissionEvent>,
+    ) -> Option<ControlIntent> {
+        self.guide_to_with_turn(solution, reference, to, None, now, events)
+    }
+
+    fn guide_to_with_turn(
+        &mut self,
+        solution: &NavigationSolution,
+        reference: LateralReference,
+        to: &Waypoint,
+        turn_spec: Option<(TurnStageKey, Option<TurnDirection>)>,
         now: MonotonicNanos,
         events: &mut Vec<MissionEvent>,
     ) -> Option<ControlIntent> {
@@ -374,8 +416,8 @@ impl MissionEngine {
         );
         let guided = guided.map(|mut command| {
             let intercept = self.intercept_setpoint(command.setpoint, &reference, &to.position);
-            command.setpoint =
-                self.trimmed_setpoint(intercept, &reference, &to.position, solution, now);
+            let trimmed = self.trimmed_setpoint(intercept, &reference, &to.position, solution, now);
+            command.setpoint = self.enforce_mandatory_turn(trimmed, solution, turn_spec);
             command
         });
         match guided {
@@ -392,6 +434,11 @@ impl MissionEngine {
             Ok(command) => {
                 if !self.config.can_stop() {
                     self.update_wind(solution, now);
+                    self.record_guided_heading_altitude(
+                        &command.setpoint,
+                        to.position.altitude_m,
+                        solution.position.altitude_m,
+                    );
                 }
                 self.guided_intent(command.setpoint, solution.position.altitude_m)
             }

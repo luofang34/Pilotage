@@ -1,11 +1,21 @@
-//! A mission plan given as a list of waypoints: exact positions, one
-//! altitude for each waypoint, and the turn at each one. No route string
+//! A mission plan given as a list of waypoints: exact positions, the
+//! altitude constraint, turn, mandatory turn direction, leg path, speed
+//! limit, gradient, procedure role, and RNP at each one. No route string
 //! and no navigation data take part.
 
 use pilotage_mission_core::{Digest, MissionIdentity};
 use sha2::{Digest as _, Sha256};
 
-const WAYPOINT_LIST_DIGEST_DOMAIN: &[u8] = b"pilotage.waypoint-list.v1\0";
+mod legs;
+
+pub use legs::{
+    PlannedAltitude, PlannedCourseReference, PlannedHold, PlannedHoldLength, PlannedPath,
+    WaypointTurnDirection,
+};
+
+use crate::engine::LegRole;
+
+const WAYPOINT_LIST_DIGEST_DOMAIN: &[u8] = b"pilotage.waypoint-list.v2\0";
 
 /// The smallest capture radius derived from a speed, metres: below it a
 /// position estimate of ordinary quality can circle a fix.
@@ -22,11 +32,7 @@ pub const DEFAULT_ARRIVAL_RADIUS_M: f64 = 1.0;
 pub const DEFAULT_ROUTE_BANK_DEG: f64 = 25.0;
 
 /// The capture radius for a vehicle at `speed_mps`: the distance it
-/// flies in `capture_time_s`, and at least [`MIN_CAPTURE_RADIUS_M`]. The
-/// turn ahead of a fly-by waypoint is Navigate's turn anticipation, and a
-/// waypoint that the vehicle passes outside the radius still sequences,
-/// so the radius need not hold a turn. A non-finite or negative input
-/// gives the minimum.
+/// flies in `capture_time_s`, and at least [`MIN_CAPTURE_RADIUS_M`].
 #[must_use]
 pub fn capture_radius_for(speed_mps: f64, capture_time_s: f64) -> f64 {
     at_least(speed_mps * capture_time_s, MIN_CAPTURE_RADIUS_M)
@@ -45,13 +51,7 @@ pub fn turn_radius_for(speed_mps: f64, bank_deg: f64, floor_m: f64) -> f64 {
 }
 
 /// The true airspeed of an indicated airspeed `indicated_mps` at
-/// `altitude_m`, in the ISA standard atmosphere with no wind: the speed
-/// over the ground a fixed wing flies when its flight controller holds
-/// that indicated airspeed. Thinner air needs more true speed for the same
-/// dynamic pressure, `TAS = IAS / √σ`; the difference between indicated and
-/// equivalent airspeed is below a percent at a light aircraft's speeds.
-/// Above the 11 km tropopause the density falls exponentially. A
-/// non-finite input gives the indicated airspeed.
+/// `altitude_m`, in the ISA standard atmosphere with no wind.
 #[must_use]
 pub fn true_airspeed_for(indicated_mps: f64, altitude_m: f64) -> f64 {
     if !(indicated_mps.is_finite() && altitude_m.is_finite()) {
@@ -61,8 +61,7 @@ pub fn true_airspeed_for(indicated_mps: f64, altitude_m: f64) -> f64 {
 }
 
 /// The indicated airspeed of a true airspeed `true_mps` at `altitude_m`,
-/// the inverse of [`true_airspeed_for`]. A non-finite input gives the true
-/// airspeed.
+/// the inverse of [`true_airspeed_for`].
 #[must_use]
 pub fn indicated_airspeed_for(true_mps: f64, altitude_m: f64) -> f64 {
     if !(true_mps.is_finite() && altitude_m.is_finite()) {
@@ -73,13 +72,9 @@ pub fn indicated_airspeed_for(true_mps: f64, altitude_m: f64) -> f64 {
 
 /// The ISA density at `altitude_m` over the sea-level density.
 fn isa_density_ratio(altitude_m: f64) -> f64 {
-    /// Temperature lapse over the sea-level temperature, 1/m.
     const LAPSE_PER_M: f64 = 0.0065 / 288.15;
-    /// `g / (L·R) − 1` for dry air: the density exponent of the ISA
-    /// troposphere.
     const DENSITY_EXPONENT: f64 = 4.255_876;
     const TROPOPAUSE_M: f64 = 11_000.0;
-    /// Density scale height of the isothermal layer above it, metres.
     const STRATOSPHERE_SCALE_M: f64 = 6_341.62;
     let troposphere = |height_m: f64| (1.0 - LAPSE_PER_M * height_m).powf(DENSITY_EXPONENT);
     if altitude_m <= TROPOPAUSE_M {
@@ -114,33 +109,117 @@ pub struct PlannedWaypoint {
     pub latitude_deg: f64,
     /// Longitude, degrees east, on WGS84.
     pub longitude_deg: f64,
-    /// Height above the WGS84 ellipsoid that the vehicle holds at this
-    /// waypoint, metres.
-    pub altitude_m: f64,
+    /// Altitude constraint at this waypoint; its
+    /// [`PlannedAltitude::reference_m`] is the waypoint's 3D altitude.
+    pub altitude: PlannedAltitude,
     /// How the vehicle passes the waypoint.
     pub turn: WaypointTurn,
+    /// Optional mandatory turn direction (`L` or `R`) onto this leg.
+    pub turn_direction: Option<WaypointTurnDirection>,
     /// The waypoint name, at most 32 bytes; `WP<n>` when absent.
     pub name: Option<String>,
+    /// The path of the leg that ends here; `None` for a track from the
+    /// waypoint before (or `InitialFix` at index `0`).
+    pub path: Option<PlannedPath>,
+    /// Maximum speed along the leg that ends here, m/s; `None` for no
+    /// limit beyond the mission's.
+    pub max_speed_mps: Option<f64>,
+    /// Vertical gradient of the leg that ends here, metres of height per
+    /// metre along track, negative descending; `None` for none.
+    pub gradient: Option<f64>,
+    /// Operational flight-phase role of this leg (`Departure`, `Enroute`,
+    /// `Arrival`, `Approach`, `MissedApproach`).
+    pub role: Option<LegRole>,
+    /// Procedure-published RNP on this leg, nautical miles (`> 0`).
+    pub rnp_nm: Option<f64>,
 }
 
 impl PlannedWaypoint {
-    /// A fly-by waypoint with a generated name.
+    /// A fly-by waypoint with a generated name, crossed at `altitude_m`,
+    /// on a track from the waypoint before.
     #[must_use]
     pub const fn new(latitude_deg: f64, longitude_deg: f64, altitude_m: f64) -> Self {
         Self {
             latitude_deg,
             longitude_deg,
-            altitude_m,
+            altitude: PlannedAltitude::At(altitude_m),
             turn: WaypointTurn::FlyBy,
+            turn_direction: None,
             name: None,
+            path: None,
+            max_speed_mps: None,
+            gradient: None,
+            role: None,
+            rnp_nm: None,
         }
+    }
+
+    /// Sets the waypoint's [`PlannedAltitude`].
+    #[must_use]
+    pub const fn with_altitude(mut self, altitude: PlannedAltitude) -> Self {
+        self.altitude = altitude;
+        self
+    }
+
+    /// Sets how the vehicle passes the waypoint (`FlyBy` / `FlyOver`).
+    #[must_use]
+    pub const fn with_turn(mut self, turn: WaypointTurn) -> Self {
+        self.turn = turn;
+        self
+    }
+
+    /// Sets a mandatory turn direction (`Left` / `Right`) onto this leg.
+    #[must_use]
+    pub const fn with_turn_direction(mut self, direction: WaypointTurnDirection) -> Self {
+        self.turn_direction = Some(direction);
+        self
+    }
+
+    /// Sets the waypoint identifier string.
+    #[must_use]
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+
+    /// Sets the leg path ending at this waypoint.
+    #[must_use]
+    pub const fn with_path(mut self, path: PlannedPath) -> Self {
+        self.path = Some(path);
+        self
+    }
+
+    /// Sets a speed constraint on the leg ending at this waypoint, m/s.
+    #[must_use]
+    pub const fn with_max_speed_mps(mut self, max_speed_mps: f64) -> Self {
+        self.max_speed_mps = Some(max_speed_mps);
+        self
+    }
+
+    /// Sets a vertical gradient on the leg ending at this waypoint.
+    #[must_use]
+    pub const fn with_gradient(mut self, gradient: f64) -> Self {
+        self.gradient = Some(gradient);
+        self
+    }
+
+    /// Sets the flight-phase [`LegRole`] of this leg.
+    #[must_use]
+    pub const fn with_role(mut self, role: LegRole) -> Self {
+        self.role = Some(role);
+        self
+    }
+
+    /// Sets a procedure-published RNP value in nautical miles on this leg.
+    #[must_use]
+    pub const fn with_rnp_nm(mut self, rnp_nm: f64) -> Self {
+        self.rnp_nm = Some(rnp_nm);
+        self
     }
 }
 
 /// A list of waypoints in fly order and the distance at which each one
-/// captures. A vehicle that can stop completes the plan at the last
-/// waypoint, inside the arrival radius; a vehicle that cannot stop
-/// completes it when the last waypoint sequences.
+/// captures.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WaypointPlan {
     /// The waypoints in fly order.
@@ -149,9 +228,8 @@ pub struct WaypointPlan {
     /// derives it from the mission's cruise speed with
     /// [`capture_radius_for`] and the mission's capture time.
     pub capture_radius_m: Option<f64>,
-    /// The distance to the last waypoint, horizontally and, for an
-    /// aircraft, vertically, at which a vehicle that can stop completes
-    /// the plan, metres.
+    /// The distance to the last waypoint at which a vehicle that can stop
+    /// completes the plan, metres.
     pub arrival_radius_m: f64,
 }
 
@@ -168,20 +246,23 @@ impl WaypointPlan {
     }
 
     /// The content digest of the plan: every value of every waypoint and
-    /// the capture radius.
+    /// the capture and arrival radii.
     #[must_use]
     pub fn digest(&self) -> Digest {
         let mut hasher = Sha256::new();
         hasher.update(WAYPOINT_LIST_DIGEST_DOMAIN);
         hasher.update((self.waypoints.len() as u64).to_le_bytes());
         for waypoint in &self.waypoints {
-            for value in [
-                waypoint.latitude_deg,
-                waypoint.longitude_deg,
-                waypoint.altitude_m,
-            ] {
+            for value in [waypoint.latitude_deg, waypoint.longitude_deg] {
                 hasher.update(value.to_le_bytes());
             }
+            waypoint.altitude.hash(&mut hasher);
+            PlannedPath::hash(waypoint.path.as_ref(), &mut hasher);
+            legs::hash_turn_direction(waypoint.turn_direction, &mut hasher);
+            legs::hash_optional(waypoint.max_speed_mps, &mut hasher);
+            legs::hash_optional(waypoint.gradient, &mut hasher);
+            legs::hash_role(waypoint.role, &mut hasher);
+            legs::hash_optional(waypoint.rnp_nm, &mut hasher);
             hasher.update([match waypoint.turn {
                 WaypointTurn::FlyBy => 1,
                 WaypointTurn::FlyOver => 2,
@@ -190,13 +271,7 @@ impl WaypointPlan {
             hasher.update((name.len() as u64).to_le_bytes());
             hasher.update(name.as_bytes());
         }
-        match self.capture_radius_m {
-            Some(radius) => {
-                hasher.update([1]);
-                hasher.update(radius.to_le_bytes());
-            }
-            None => hasher.update([0]),
-        }
+        legs::hash_optional(self.capture_radius_m, &mut hasher);
         hasher.update(self.arrival_radius_m.to_le_bytes());
         Digest::from_bytes(hasher.finalize().into())
     }

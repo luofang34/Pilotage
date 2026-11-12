@@ -43,6 +43,8 @@ impl UplinkPolicy {
             return None;
         }
         self.airborne = true;
+        self.hold_started = None;
+        self.last_hold = None;
         self.heading = HeadingState {
             heading_rad: yaw_rad,
             valid: yaw_rad.is_finite(),
@@ -69,6 +71,8 @@ impl UplinkPolicy {
         // A heading and altitude is a demand to fly, so it opens the
         // stream that the motors-idle gate keeps closed for a multirotor.
         self.airborne = true;
+        self.hold_started = None;
+        self.last_hold = None;
         self.heading = HeadingState {
             heading_rad: demand.heading_rad,
             valid: true,

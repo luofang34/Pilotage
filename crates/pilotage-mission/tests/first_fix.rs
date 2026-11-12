@@ -16,7 +16,7 @@ use navigate_geodesy::wgs84::tangent_plane;
 use navigate_route::SequenceReason;
 use pilotage_mission::{
     ExecutionTarget, MissionConfig, MissionEngine, MissionEvent, OwnshipSample, OwnshipSource,
-    PlannedWaypoint, TruthRole, WaypointPlan, true_airspeed_for,
+    PlannedWaypoint, TruthRole, WaypointPlan, WaypointTurn, true_airspeed_for,
 };
 use pilotage_protocol::{ControlAction, ControlIntent, VehicleClass};
 
@@ -54,18 +54,23 @@ fn config(climb_m: f64) -> MissionConfig {
     config
 }
 
-fn plan(points: &[[f64; 2]], climb_m: f64) -> WaypointPlan {
+fn plan(points: &[[f64; 2]], climb_m: f64, second_turn: WaypointTurn) -> WaypointPlan {
     let plane = tangent_plane(anchor()).expect("anchor is plausible");
     WaypointPlan::new(
         points
             .iter()
-            .map(|[north, east]| {
+            .enumerate()
+            .map(|(idx, [north, east])| {
                 let p = plane.from_ned(&NedOffset::new(*north, *east, 0.0));
-                PlannedWaypoint::new(
+                let mut wp = PlannedWaypoint::new(
                     p.latitude_rad.to_degrees(),
                     p.longitude_rad.to_degrees(),
                     ALTITUDE_M + climb_m,
-                )
+                );
+                if idx == 1 {
+                    wp = wp.with_turn(second_turn);
+                }
+                wp
             })
             .collect(),
     )
@@ -137,6 +142,8 @@ struct Start {
     /// The north position from which the engine gets a solution; none
     /// before, as a navigator that has not yet started.
     solved_from_north_m: f64,
+    /// Turn type on the second fix.
+    second_turn: WaypointTurn,
 }
 
 impl Start {
@@ -147,15 +154,18 @@ impl Start {
             at,
             climb_m: CLIMB_M,
             solved_from_north_m: f64::NEG_INFINITY,
+            second_turn: WaypointTurn::FlyBy,
         }
     }
 }
 
 /// Flies the plan from `start` for at most `ticks`.
 fn fly_from(start: &Start, ticks: usize) -> Flight {
-    let (mut engine, _) =
-        MissionEngine::from_waypoints(&plan(&start.points, start.climb_m), config(start.climb_m))
-            .expect("builds");
+    let (mut engine, _) = MissionEngine::from_waypoints(
+        &plan(&start.points, start.climb_m, start.second_turn),
+        config(start.climb_m),
+    )
+    .expect("builds");
     let mut aircraft = Aircraft {
         ned: [start.at[0], start.at[1], 0.0],
         course_rad: 0.0,
@@ -292,14 +302,45 @@ fn starting_300_m_past_the_first_fix_it_is_passed_at_the_start() {
 }
 
 #[test]
-fn a_fix_missed_far_to_the_side_is_sequenced_on_passing_abeam() {
-    // 2 km east of the first leg, 500 m short of the second fix: the first
-    // fix is passed at the start, and the 500 m left cannot close the
-    // offset at the intercept a fixed wing flies, even climbing along the
-    // route, so the second fix is passed wide: wider than the turn ahead
-    // of it (about 900 m at this speed), inside which it would be
-    // anticipated instead.
+fn a_fly_by_fix_missed_far_to_the_side_anticipates_on_its_tangent_line() {
+    // 2 km east of the first leg, 500 m short of the second fix on a 90 deg
+    // fly-by corner (within the 121 deg fly-by limit): the line abeam DTA
+    // (~900 m) spans across track (NAV-TT-003), so the second fix sequences
+    // as Anticipated without turning back toward the missed fix.
     let flight = fly_from(&Start::at([1_500.0, 2_000.0]), 20_000);
+    assert_flies_through(&flight);
+    assert_eq!(
+        flight.advances.get(1),
+        Some(&(2, SequenceReason::Anticipated)),
+        "90 deg fly-by corner anticipates on the DTA line: {:?}",
+        flight.advances
+    );
+    let [fix_north, fix_east] = POINTS[1];
+    let closest = flight
+        .track
+        .get(..flight.held_at.unwrap_or(0))
+        .unwrap_or_default()
+        .iter()
+        .map(|p| (p[0] - fix_north).hypot(p[1] - fix_east))
+        .fold(f64::INFINITY, f64::min);
+    assert!(
+        closest > 1_000.0,
+        "the aircraft came back to {closest:.0} m of the fix it passed wide"
+    );
+}
+
+#[test]
+fn a_fix_missed_far_to_the_side_is_sequenced_on_passing_abeam() {
+    // A fly-over fix (NAV-TT-004) has no turn anticipation, so 2 km east and
+    // 500 m short of the second fix cannot close the offset and sequences on
+    // crossing the perpendicular through the fix (NAV-TT-006).
+    let flight = fly_from(
+        &Start {
+            second_turn: WaypointTurn::FlyOver,
+            ..Start::at([1_500.0, 2_000.0])
+        },
+        20_000,
+    );
     assert_flies_through(&flight);
     let second = flight.advances.get(1);
     let Some((2, SequenceReason::Passed { cross_track_m })) = second else {
@@ -310,9 +351,6 @@ fn a_fix_missed_far_to_the_side_is_sequenced_on_passing_abeam() {
         "wide of it: {:?}",
         flight.advances
     );
-    // No turn back for the missed fix: from abeam it to the hold, the
-    // aircraft stays well clear of it while it turns onto the next leg,
-    // where flying back would bring it over it.
     let [fix_north, fix_east] = POINTS[1];
     let closest = flight
         .track

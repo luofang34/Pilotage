@@ -28,6 +28,9 @@ const ARM_QUIET: Duration = Duration::from_millis(150);
 /// How often a latched hold is repeated: well inside the FC's 500 ms
 /// command timeout.
 const HOLD_KEEPALIVE: Duration = Duration::from_millis(100);
+/// Maximum straight heading-hold duration on a fixed-wing link-loss latch
+/// before transitioning to a constant-bank/attitude orbit.
+pub const HEADING_HOLD_BOUND: Duration = Duration::from_secs(60);
 
 /// The heading setpoint and whether a measurement seeded it.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -58,6 +61,10 @@ pub struct UplinkPolicy {
     hold_pos_ned: Option<[f32; 3]>,
     // When the link-loss hold last went out.
     last_hold: Option<Duration>,
+    // When the current link-loss hold sequence started.
+    hold_started: Option<Duration>,
+    // Coordinated constant-bank orbit rate (rad/s) for fixed-wing link loss.
+    fixed_wing_orbit_rps: Option<f32>,
     // The airspeed command last sent and when. An arm or a reset forgets
     // it: the flight controller may then hold another airspeed.
     airspeed_sent: Option<(f32, Duration)>,
@@ -82,6 +89,8 @@ impl UplinkPolicy {
             airborne: false,
             hold_pos_ned: None,
             last_hold: None,
+            hold_started: None,
+            fixed_wing_orbit_rps: None,
             airspeed_sent: None,
             feel: feel::UplinkFeel::new(profile),
             system_id: 1,
@@ -93,6 +102,15 @@ impl UplinkPolicy {
     pub fn set_target(&mut self, system_id: u8, component_id: u8) {
         self.system_id = system_id;
         self.component_id = component_id;
+    }
+
+    /// Configures the coordinated orbit turn rate (`rad/s`) entered after
+    /// [`HEADING_HOLD_BOUND`] on a fixed-wing link-loss latch so the aircraft
+    /// never flies straight indefinitely.
+    pub fn set_fixed_wing_orbit_rate(&mut self, rate_rps: f32) {
+        if rate_rps.is_finite() && rate_rps != 0.0 {
+            self.fixed_wing_orbit_rps = Some(rate_rps);
+        }
     }
 
     /// The MAVLink system and component that the frames address.
@@ -174,10 +192,20 @@ impl UplinkPolicy {
         frame.to_vec()
     }
 
-    /// A zero-velocity setpoint that holds the current heading: the
-    /// link-loss neutralize action. The flight controller's velocity mode
-    /// brakes to a hover on zero demand.
+    /// A zero-velocity setpoint that holds the current heading (and on a
+    /// fixed wing transitions after [`HEADING_HOLD_BOUND`] into a constant-bank
+    /// coordinated orbit): the link-loss neutralize action.
     pub fn neutral(&mut self, now: Duration) -> Vec<u8> {
+        if let Some(rate_rps) = self.fixed_wing_orbit_rps {
+            let started = *self.hold_started.get_or_insert(now);
+            let orbit_start = started.saturating_add(HEADING_HOLD_BOUND);
+            if now >= orbit_start {
+                let prev = self.last_hold.unwrap_or(now).max(orbit_start);
+                let dt_s = now.saturating_sub(prev).as_secs_f32();
+                let next = self.heading.heading_rad + rate_rps * dt_s;
+                self.heading.heading_rad = next.sin().atan2(next.cos());
+            }
+        }
         self.last_hold = Some(now);
         self.velocity_frame(now, [0.0; 3])
     }
@@ -216,6 +244,8 @@ impl UplinkPolicy {
     fn reset_temporal_state(&mut self) {
         self.last_frame = None;
         self.hold_pos_ned = None;
+        self.last_hold = None;
+        self.hold_started = None;
         self.feel.reset();
     }
 

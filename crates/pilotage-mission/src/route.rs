@@ -5,14 +5,17 @@
 //! waypoint slice (Navigate ADR-0015). The mission engine lives for a
 //! whole flight and is moved between owners, so it cannot also hold a
 //! borrow of its own storage. This type owns the waypoints and keeps the
-//! two values that a `PlanExecution` changes: the active leg index and
-//! the completion flag. Each operation builds the borrowed views over the
-//! owned slice, runs, and keeps the new progress.
+//! portable [`ExecutionState`] that `PlanExecution` updates, including
+//! active hold circuit progress. Each operation builds the borrowed views
+//! over the owned slice, runs, and keeps the new progress.
 
-use navigate_contract::{FlightPlan, GeodeticPosition, Ident, PlanRole, Waypoint};
-use navigate_route::{ExecutionConfig, Leg, PlanExecution, SequenceEvent};
+use navigate_contract::{FlightPlan, GeodeticPosition, Ident, LegPath, PlanRole, Waypoint};
+use navigate_route::{
+    ExecutionConfig, ExecutionState, HoldStatus, Leg, PlanExecution, SequenceEvent,
+};
 
 use crate::body;
+use crate::engine::{FlightPhase, LegRole, PhaseMachine};
 use crate::error::MissionBuildError;
 
 #[cfg(test)]
@@ -35,9 +38,10 @@ pub(crate) struct MissionRoute {
     id: Ident,
     role: PlanRole,
     waypoints: Vec<Waypoint>,
+    roles: Vec<Option<LegRole>>,
+    rnp_nm: Vec<Option<f64>>,
     config: ExecutionConfig,
-    active_index: usize,
-    complete: bool,
+    state: ExecutionState,
     end: PlanEnd,
     arrived: bool,
     /// Whether a first waypoint the vehicle is past is passed rather
@@ -48,9 +52,8 @@ pub(crate) struct MissionRoute {
 impl MissionRoute {
     /// Validates and activates the plan. `name` is the Navigate plan
     /// identifier; the Pilotage plan identifier in the mission document
-    /// is separate. The
-    /// plan is on [`body::ELLIPSOID`], and fly-by turns use
-    /// [`body::SURFACE_GRAVITY_MPS2`].
+    /// is separate. The plan is on [`body::ELLIPSOID`], and fly-by and
+    /// hold turns use [`body::SURFACE_GRAVITY_MPS2`].
     ///
     /// # Errors
     ///
@@ -66,19 +69,72 @@ impl MissionRoute {
             ident: name.to_owned(),
             source,
         })?;
-        let route = Self {
+        let config = config.with_surface_gravity_mps2(body::SURFACE_GRAVITY_MPS2);
+        let state = {
+            let plan = FlightPlan::new(id, role, body::ELLIPSOID, &waypoints);
+            PlanExecution::new(plan, config)?.state()
+        };
+        let count = waypoints.len();
+        Ok(Self {
             id,
             role,
             waypoints,
-            config: config.with_surface_gravity_mps2(body::SURFACE_GRAVITY_MPS2),
-            active_index: 0,
-            complete: false,
+            roles: vec![None; count],
+            rnp_nm: vec![None; count],
+            config,
+            state,
             end: PlanEnd::Sequenced,
             arrived: false,
             pass_first_behind: false,
+        })
+    }
+
+    /// Attaches per-leg procedure roles and optional RNP overrides.
+    pub(crate) fn with_leg_metadata(
+        mut self,
+        roles: Vec<Option<LegRole>>,
+        rnp_nm: Vec<Option<f64>>,
+    ) -> Self {
+        self.roles = roles;
+        self.rnp_nm = rnp_nm;
+        self
+    }
+
+    /// Evaluates the operational [`FlightPhase`] at the active leg.
+    pub(crate) fn flight_phase(&self) -> FlightPhase {
+        let index = if self.state.is_complete() {
+            self.waypoints.len().saturating_sub(1)
+        } else {
+            self.state.active_index()
         };
-        PlanExecution::new(route.plan(), route.config)?;
-        Ok(route)
+        PhaseMachine::evaluate(&self.roles, index)
+    }
+
+    /// Procedure-published RNP override on the active leg, in nautical
+    /// miles, when one was declared.
+    pub(crate) fn active_rnp_nm(&self) -> Option<f64> {
+        let index = if self.state.is_complete() {
+            self.waypoints.len().saturating_sub(1)
+        } else {
+            self.state.active_index()
+        };
+        self.rnp_nm.get(index).copied().flatten()
+    }
+
+    /// Observable progress when the active leg is an in-route hold.
+    pub(crate) const fn hold_status(&self) -> Option<HoldStatus> {
+        self.state.hold_status()
+    }
+
+    /// Arms manual exit on an active `HM` (`HoldManual`) leg; returns
+    /// `true` when the active leg is `HoldManual`.
+    pub(crate) fn exit_hold(&mut self) -> bool {
+        let Some(mut execution) = self.execution() else {
+            return false;
+        };
+        let armed = execution.exit_hold();
+        self.state = execution.state();
+        armed
     }
 
     /// Sets how the plan ends after its last waypoint sequences.
@@ -96,28 +152,24 @@ impl MissionRoute {
 
     /// Passes the first waypoint once the vehicle is at or beyond the
     /// perpendicular through it on the first leg, as an FMS sequences the
-    /// initial fix of a plan it starts on or past. The first leg is flown
-    /// direct to the first waypoint, which has no inbound course, so
-    /// Navigate ends it only by capture: a vehicle that climbed out past
-    /// the first waypoint, however far along the first leg and even past
-    /// the second waypoint, would otherwise turn back for it. Judged on
-    /// every position while the first waypoint is active; a vehicle short
-    /// of the perpendicular flies to the first waypoint and captures it.
-    /// Once the first leg is active, Navigate passes each later fix the
-    /// vehicle is beyond (NAV-TT-006), one per position. A first waypoint
-    /// marked fly-over is passed the same way: a plan never pulls the
-    /// vehicle back to a start it is on or past, and one short of it still
-    /// flies over it.
+    /// initial fix of a plan it starts on or past. Initial hold legs are
+    /// never skipped.
     ///
     /// Returns the index of the leg made active and the cross-track
     /// distance from the first leg, metres, positive right of it.
     pub(crate) fn pass_start(&mut self, position: &GeodeticPosition) -> Option<(usize, f64)> {
-        if !self.pass_first_behind || self.active_index != 0 || self.complete {
+        if !self.pass_first_behind || self.state.active_index() != 0 || self.state.is_complete() {
             return None;
         }
         let [first, second, ..] = self.waypoints.as_slice() else {
             return None;
         };
+        if !matches!(
+            first.path,
+            None | Some(LegPath::InitialFix | LegPath::DirectToFix)
+        ) {
+            return None;
+        }
         // At or beyond the perpendicular through the first waypoint.
         navigate_geodesy::along_track_m(position, &first.position, &second.position, body::GEODESY)
             .ok()
@@ -129,14 +181,16 @@ impl MissionRoute {
             body::GEODESY,
         )
         .ok()?;
-        self.active_index = 1;
+        self.state = PlanExecution::resume(self.plan(), self.config, 1, false)
+            .ok()?
+            .state();
         Some((1, cross_track_m))
     }
 
     /// Whether the last waypoint sequenced and the vehicle still flies on
     /// to arrive at it.
     pub(crate) fn approaching(&self) -> bool {
-        self.complete && matches!(self.end, PlanEnd::Arrive { .. }) && !self.arrived
+        self.state.is_complete() && matches!(self.end, PlanEnd::Arrive { .. }) && !self.arrived
     }
 
     /// The last waypoint.
@@ -166,8 +220,9 @@ impl MissionRoute {
             return false;
         };
         let vertical_m = (position.altitude_m - last.position.altitude_m).abs();
-        self.arrived =
-            self.complete && horizontal_m <= radius_m && (!vertical || vertical_m <= radius_m);
+        self.arrived = self.state.is_complete()
+            && horizontal_m <= radius_m
+            && (!vertical || vertical_m <= radius_m);
         self.arrived
     }
 
@@ -178,24 +233,56 @@ impl MissionRoute {
 
     /// The courses into and out of the waypoint the active leg flies to,
     /// radians clockwise from true north: the turn ahead. `None` with no
-    /// leg before it or after it.
+    /// leg before or after it, or when either leg is a hold.
     pub(crate) fn turn_ahead_courses(&self) -> Option<(f64, f64)> {
-        if self.complete {
+        if self.state.is_complete() {
             return None;
         }
-        let index = self.active_index;
-        let previous = self.waypoints.get(index.checked_sub(1)?)?;
+        let index = self.state.active_index();
         let turn = self.waypoints.get(index)?;
+        if turn.path.and_then(|p| p.hold()).is_some() {
+            return None;
+        }
         let next = self.waypoints.get(index.checked_add(1)?)?;
-        let back = navigate_geodesy::initial_bearing_rad(&turn.position, &previous.position);
-        let out = navigate_geodesy::initial_bearing_rad(&turn.position, &next.position);
-        Some((back + core::f64::consts::PI, out))
+        if next.path.and_then(|p| p.hold()).is_some() {
+            return None;
+        }
+        let into = match turn.path {
+            Some(
+                LegPath::CourseToFix { course_rad, .. }
+                | LegPath::CourseToAltitude { course_rad, .. },
+            ) => course_rad,
+            _ => {
+                let previous = self.waypoints.get(index.checked_sub(1)?)?;
+                navigate_geodesy::initial_bearing_rad(&turn.position, &previous.position)
+                    + core::f64::consts::PI
+            }
+        };
+        let out = match next.path {
+            Some(
+                LegPath::CourseToFix { course_rad, .. }
+                | LegPath::CourseToAltitude { course_rad, .. },
+            ) => course_rad,
+            _ => navigate_geodesy::initial_bearing_rad(&turn.position, &next.position),
+        };
+        Some((into, out))
     }
 
     /// The course of the last leg where it reaches the last waypoint,
     /// radians clockwise from true north; `None` for a plan of one
-    /// waypoint, or a last leg too short to have a course.
+    /// waypoint with no published course, or a last leg too short to have
+    /// a course.
     pub(crate) fn final_course_rad(&self) -> Option<f64> {
+        let last = self.waypoints.last()?;
+        if let Some(hold) = last.path.and_then(|p| p.hold()) {
+            return Some(hold.inbound_course_rad.rem_euclid(core::f64::consts::TAU));
+        }
+        if let Some(
+            LegPath::CourseToFix { course_rad, .. } | LegPath::CourseToAltitude { course_rad, .. },
+        ) = last.path
+        {
+            return Some(course_rad.rem_euclid(core::f64::consts::TAU));
+        }
         let [.., previous, last] = self.waypoints.as_slice() else {
             return None;
         };
@@ -219,16 +306,18 @@ impl MissionRoute {
     }
 
     /// Index of the waypoint that the active leg flies to.
-    pub(crate) fn active_index(&self) -> usize {
-        self.active_index
+    pub(crate) const fn active_index(&self) -> usize {
+        self.state.active_index()
     }
 
     /// The waypoints from the active one to the end; empty when complete.
     pub(crate) fn remaining_waypoints(&self) -> &[Waypoint] {
-        if self.complete {
+        if self.state.is_complete() {
             return &[];
         }
-        self.waypoints.get(self.active_index..).unwrap_or_default()
+        self.waypoints
+            .get(self.state.active_index()..)
+            .unwrap_or_default()
     }
 
     /// The leg being flown, or `None` when the plan is complete.
@@ -246,17 +335,15 @@ impl MissionRoute {
             return SequenceEvent::None;
         };
         let event = execution.advance(position, groundspeed_mps);
-        let (active_index, complete) = (execution.active_index(), execution.is_complete());
-        self.active_index = active_index;
-        self.complete = complete;
+        self.state = execution.state();
         event
     }
 
     /// A `PlanExecution` at the kept progress. `None` only if Navigate
     /// refuses to resume, which cannot occur: the plan and the config do
     /// not change after `activate`, and the kept progress is always a
-    /// state that a `PlanExecution` reported, never one this type makes.
+    /// state that a `PlanExecution` reported.
     fn execution(&self) -> Option<PlanExecution<'_>> {
-        PlanExecution::resume(self.plan(), self.config, self.active_index, self.complete).ok()
+        PlanExecution::resume_state(self.plan(), self.config, self.state).ok()
     }
 }

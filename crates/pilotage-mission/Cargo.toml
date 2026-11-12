@@ -20,6 +20,7 @@ chrono = { workspace = true }
 pilotage-mission-core = { path = "../pilotage-mission-core" }
 pilotage-geo = { workspace = true }
 pilotage-protocol = { workspace = true }
+pilotage-world = { workspace = true }
 prost = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }

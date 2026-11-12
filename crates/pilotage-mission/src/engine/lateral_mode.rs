@@ -5,21 +5,21 @@
 //! the mission say what is demanded ([`Demand`]), the navigation source
 //! says when there is no position to fly it on, and the vehicle's
 //! capability says how that loss is answered ([`LossResponse`]). The
-//! machine reads none of them itself, so no lateral behaviour is implied
-//! by another machine's state.
+//! machine receives [`LateralStage`] facts rather than reading another
+//! machine's state directly.
 //!
 //! A vehicle that cannot stop never flies a straight line without end on
-//! a lost position: its heading hold is bounded by a timer, and when the
-//! timer runs out it flies a racetrack by time.
-//!
-//! Each tick steps the machine on the plan's demand and flies the mode it
-//! gives ([`MissionEngine::intent_for_state`]).
+//! a lost position: its heading hold is bounded by a 60-second timer, and
+//! when the timer runs out it flies a timed constant-bank/attitude orbit
+//! racetrack, retaining the last wind estimate and annunciating wind
+//! staleness past 10 minutes without discarding it.
 
-use navigate_contract::{GeodeticPosition, MonotonicNanos, NavigationSolution};
+use navigate_contract::{GeodeticPosition, LateralReference, MonotonicNanos, NavigationSolution};
 use pilotage_protocol::ControlIntent;
 
+use super::lifecycle::LateralStage;
 use super::tick::overflown;
-use super::{MissionEngine, MissionEvent, MissionState};
+use super::{MissionEngine, MissionEvent};
 
 use crate::holding_pattern::TimedCircuit;
 
@@ -41,18 +41,16 @@ pub enum LateralMode {
     PositionHold,
     /// Direct to a fix from the present position.
     DirectTo,
-    /// Along the track of a leg to its fix.
+    /// Along the track or published course of a leg.
     Track,
-    /// The holding pattern after the plan, flown on position.
+    /// A holding pattern, flown on position.
     Pattern,
     /// The heading last commanded is held, with no position to fly on,
-    /// for a bounded time.
+    /// for a bounded time (60 seconds).
     HeadingHold,
-    /// A racetrack flown by heading and time, with no position to fly on.
+    /// A racetrack orbit flown by heading/bank and time, with no position
+    /// to fly on.
     TimedHold,
-    /// Straight and level on the present heading, with no position to fly
-    /// on and no heading command to fly a racetrack with.
-    Coast,
 }
 
 /// What the plan and the mission ask of the lateral mode.
@@ -64,9 +62,9 @@ pub(super) enum Demand {
     Position,
     /// Fly direct to a fix.
     DirectTo,
-    /// Fly a leg's track.
+    /// Fly a leg's track or course.
     Track,
-    /// Fly the holding pattern after the plan.
+    /// Fly a holding pattern on position.
     Pattern,
 }
 
@@ -80,12 +78,9 @@ pub(super) enum LossResponse {
     /// is sent nothing, and the flight controller's command-loss action
     /// takes over.
     Silent,
-    /// It cannot stop and is steered by heading: it holds its heading,
-    /// then flies a racetrack by time.
+    /// It cannot stop: it holds its heading for the bounded window, then
+    /// enters a timed orbit racetrack (never coasting straight forever).
     HoldHeading,
-    /// It cannot stop and is steered by velocity: it flies on straight
-    /// and level.
-    Coast,
 }
 
 /// What one tick asks of the lateral mode.
@@ -118,7 +113,7 @@ pub(super) enum LateralEffect {
 /// The mode after `event` in `mode`, and what to act on.
 pub(super) const fn next(mode: LateralMode, event: LateralEvent) -> (LateralMode, LateralEffect) {
     use LateralMode::{
-        Coast, DirectTo, HeadingHold, Off, Pattern, PositionHold, Standby, TimedHold, Track,
+        DirectTo, HeadingHold, Off, Pattern, PositionHold, Standby, TimedHold, Track,
     };
     let to = match (mode, event) {
         (_, LateralEvent::Disengaged | LateralEvent::Lost(LossResponse::Silent)) => Off,
@@ -128,7 +123,6 @@ pub(super) const fn next(mode: LateralMode, event: LateralEvent) -> (LateralMode
         (_, LateralEvent::Demand(Demand::Track)) => Track,
         (_, LateralEvent::Demand(Demand::Pattern)) => Pattern,
         (_, LateralEvent::Lost(LossResponse::HoldPosition)) => PositionHold,
-        (_, LateralEvent::Lost(LossResponse::Coast)) => Coast,
         // A pattern that loses its position goes on by time at once: it
         // already circles a fix.
         (Pattern | TimedHold, LateralEvent::Lost(LossResponse::HoldHeading)) => TimedHold,
@@ -185,17 +179,17 @@ impl MissionEngine {
         }
     }
 
-    /// The intent of a tick in `state`: steps the lateral machine on what
+    /// The intent of a tick in `stage`: steps the lateral machine on what
     /// the plan demands, runs the heading hold's timer, and flies the
     /// mode the machine gives.
-    pub(super) fn intent_for_state(
+    pub(super) fn intent_for_tick(
         &mut self,
-        state: MissionState,
+        stage: LateralStage,
         solution: Option<&NavigationSolution>,
         now: MonotonicNanos,
         events: &mut Vec<MissionEvent>,
     ) -> Option<ControlIntent> {
-        let event = self.lateral_event(state, solution, now);
+        let event = self.lateral_event(stage, solution, now);
         let (mut mode, mut effect) = next(self.modes.lateral.mode, event);
         if mode == LateralMode::HeadingHold {
             let since = *self.modes.lateral.held_since.get_or_insert(now);
@@ -218,60 +212,52 @@ impl MissionEngine {
         if effect == LateralEffect::Resumed {
             events.push(MissionEvent::LateralResumed { mode });
         }
-        self.fly_lateral(mode, event, state, solution, now, events)
+        self.fly_lateral(mode, event, stage, solution, now, events)
     }
 
-    /// What this tick asks of the lateral mode. The mission's phase is
-    /// read here once, to hand the machine its demand.
+    /// What this tick asks of the lateral mode from `stage`.
     fn lateral_event(
         &self,
-        state: MissionState,
+        stage: LateralStage,
         solution: Option<&NavigationSolution>,
         now: MonotonicNanos,
     ) -> LateralEvent {
         let by_heading = self.steers_by_heading();
         let can_stop = self.config.can_stop();
-        match state {
-            MissionState::Arming if self.arm_request_sent() => {
+        match stage {
+            LateralStage::Arming if self.arm_request_sent() => {
                 LateralEvent::Demand(Demand::Standby)
             }
             // Launched with no solution fit to fly.
-            MissionState::AwaitSolution
-                if by_heading && solution.is_none() && self.launched(now) =>
-            {
+            LateralStage::Idle if !can_stop && solution.is_none() && self.launched(now) => {
                 LateralEvent::Lost(LossResponse::HoldHeading)
             }
-            MissionState::Climb
-            | MissionState::Enroute
-            | MissionState::Complete
-            | MissionState::AfterPlan => {
+            LateralStage::Climb
+            | LateralStage::Route
+            | LateralStage::Complete
+            | LateralStage::AfterPlan => {
                 let Some(solution) = solution else {
-                    return LateralEvent::Lost(self.loss_response(state, now));
+                    return LateralEvent::Lost(self.loss_response(now));
                 };
-                let demand = match state {
-                    MissionState::Climb if can_stop => Some(Demand::Position),
-                    MissionState::Climb if by_heading && !self.flies_route() => None,
-                    // The tick that completes the plan stops a vehicle that
-                    // can stop; one that cannot flies its pattern from then on.
-                    MissionState::Complete => Some(Demand::Position),
-                    MissionState::AfterPlan => Some(Demand::Pattern),
+                let demand = match stage {
+                    LateralStage::Climb if can_stop => Some(Demand::Position),
+                    LateralStage::Climb if by_heading && !self.flies_route() => None,
+                    LateralStage::Complete => Some(Demand::Position),
+                    LateralStage::AfterPlan => Some(Demand::Pattern),
                     _ => self.route_demand(&solution.position),
                 };
                 demand.map_or(LateralEvent::Disengaged, LateralEvent::Demand)
             }
-            MissionState::AwaitSolution
-            | MissionState::Arming
-            | MissionState::Held
-            | MissionState::Failed => LateralEvent::Disengaged,
+            LateralStage::Idle | LateralStage::Arming | LateralStage::Disengaged => {
+                LateralEvent::Disengaged
+            }
         }
     }
 
     /// How this vehicle answers a demand it has no position to fly on.
-    fn loss_response(&self, state: MissionState, now: MonotonicNanos) -> LossResponse {
-        if self.steers_by_heading() {
+    fn loss_response(&self, now: MonotonicNanos) -> LossResponse {
+        if !self.config.can_stop() {
             LossResponse::HoldHeading
-        } else if state == MissionState::AfterPlan {
-            LossResponse::Coast
         } else if self.fc_position_valid(now) {
             LossResponse::HoldPosition
         } else {
@@ -279,12 +265,7 @@ impl MissionEngine {
         }
     }
 
-    /// What the plan demands of a vehicle at `position`: nothing while
-    /// its path is not flown; after its last waypoint, the stop of a
-    /// vehicle that can stop and the holding pattern of one that cannot;
-    /// direct to the last waypoint a stopping vehicle flies on to, to a
-    /// first fix with no leg behind it, and back to a fix flown past; and
-    /// otherwise the active leg's track.
+    /// What the plan demands of a vehicle at `position`.
     fn route_demand(&self, position: &GeodeticPosition) -> Option<Demand> {
         if !self.flies_route() {
             return None;
@@ -300,8 +281,21 @@ impl MissionEngine {
             return Some(Demand::DirectTo);
         }
         let leg = self.route.active_leg()?;
-        Some(match leg.from {
-            Some(from) if !overflown(position, &from.position, &leg.to.position) => Demand::Track,
+        if leg.path.hold().is_some()
+            && self
+                .route
+                .hold_status()
+                .is_some_and(|status| status.stage != navigate_route::HoldStage::ToFix)
+        {
+            return Some(Demand::Pattern);
+        }
+        Some(match leg.lateral_reference() {
+            LateralReference::Track { from } if !overflown(position, &from, &leg.to.position) => {
+                Demand::Track
+            }
+            LateralReference::Course { .. } | LateralReference::DisplacedCourse { .. } => {
+                Demand::Track
+            }
             _ => Demand::DirectTo,
         })
     }

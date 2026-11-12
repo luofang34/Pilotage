@@ -31,6 +31,8 @@ function snapshot(overrides = {}, ageMs = 40) {
       toFrom: 1,
       positionSource: 1,
       positionIntegrity: 1,
+      flightPhase: 2,
+      rnpM: 1852,
       ...overrides,
     },
     ageMs,
@@ -187,5 +189,37 @@ function testTheLaneNamesThePositionItRestsOn() {
 }
 testTheLaneNamesThePositionItRestsOn();
 console.log("ok - testTheLaneNamesThePositionItRestsOn");
+
+function testFlightPhaseAndRnpDriveScaleAndCdiSensitivity() {
+  // Enroute (1): scale 0 (ENR), ±200 m full scale (±100 m/dot).
+  const enr = navDisplayState(snapshot({ flightPhase: 1, rnpM: 3704, lateralDeviationM: 100 }));
+  assert.equal(enr.scale, 0, "enroute announces ENR");
+  assert.equal(enr.cdiDots, -1, "100 m is one dot enroute");
+
+  // Terminal (2) and Missed Approach (4): scale 1 (TERM), ±50 m full scale (±25 m/dot).
+  const term = navDisplayState(snapshot({ flightPhase: 2, rnpM: 1852, lateralDeviationM: 25 }));
+  assert.equal(term.scale, 1, "terminal announces TERM");
+  assert.equal(term.cdiDots, -1, "25 m is one dot terminal");
+  const missed = navDisplayState(snapshot({ flightPhase: 4, rnpM: 1852, lateralDeviationM: 25 }));
+  assert.equal(missed.scale, 1, "missed approach announces TERM");
+  assert.equal(missed.cdiDots, -1, "25 m is one dot on missed approach");
+
+  // Approach (3): scale 2 (APR), ±20 m full scale (±10 m/dot).
+  const apr = navDisplayState(snapshot({ flightPhase: 3, rnpM: 555.6, lateralDeviationM: 10 }));
+  assert.equal(apr.scale, 2, "approach announces APR");
+  assert.equal(apr.cdiDots, -1, "10 m is one dot on approach");
+
+  // Procedure-specified tighter RNP narrows full-scale deflection.
+  const tight = navDisplayState(snapshot({ flightPhase: 2, rnpM: 20, lateralDeviationM: 20 }));
+  assert.equal(tight.scale, 1);
+  assert.equal(tight.cdiDots, -2, "tighter RNP narrows full-scale deflection to ±20 m");
+
+  // Unstated (0) or unknown flight phase removes the guidance display.
+  assert.equal(navDisplayState(snapshot({ flightPhase: 0 })), null);
+  assert.equal(navDisplayState(snapshot({ flightPhase: 9 })), null);
+  assert.equal(navDisplayState(snapshot({ flightPhase: undefined })), null);
+}
+testFlightPhaseAndRnpDriveScaleAndCdiSensitivity();
+console.log("ok - testFlightPhaseAndRnpDriveScaleAndCdiSensitivity");
 
 console.log("\nall nav display profile checks passed");

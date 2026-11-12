@@ -123,9 +123,10 @@ async fn a_waypoint_list_flies_to_each_waypoint_and_completes() {
     );
     // The simulated vehicle reports its height on the ellipsoid or above
     // its launch point; the waypoint altitude is on the ellipsoid.
+    let last_alt_m = last.altitude.reference_m();
     let expected_m = match fix.vertical_datum {
-        1 => last.altitude_m,
-        6 => last.altitude_m - LAUNCH.alt_m,
+        1 => last_alt_m,
+        6 => last_alt_m - LAUNCH.alt_m,
         other => panic!("an unexpected vertical datum {other}"),
     };
     assert!(

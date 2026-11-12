@@ -4,21 +4,17 @@ use navigate_contract::{MonotonicNanos, NavigationSolution};
 use pilotage_mission_core::FlightAction as CoreFlightAction;
 use pilotage_protocol::ControlIntent;
 
+use super::super::lifecycle::LateralStage;
 use super::{LateralEvent, LateralMode};
-use crate::engine::{MissionEngine, MissionEvent, MissionState};
+use crate::engine::{MissionEngine, MissionEvent};
 
 impl MissionEngine {
-    /// The intent of `mode`, entered on `event`, in `state`.
-    ///
-    /// The mission's phase still chooses within two modes, because it is
-    /// what sets the vertical part of their intent: a vehicle that stays
-    /// where it is climbs in its climb and stops after its plan, and a
-    /// route flown in the climb is flown at the climb's target altitude.
+    /// The intent of `mode`, entered on `event`, in `stage`.
     pub(super) fn fly_lateral(
         &mut self,
         mode: LateralMode,
         event: LateralEvent,
-        state: MissionState,
+        stage: LateralStage,
         solution: Option<&NavigationSolution>,
         now: MonotonicNanos,
         events: &mut Vec<MissionEvent>,
@@ -29,14 +25,14 @@ impl MissionEngine {
             LateralMode::Standby => self.standby_intent(solution),
             LateralMode::PositionHold => match event {
                 LateralEvent::Lost(_) => self.hold_position(now, events),
-                _ if state == MissionState::Climb => self.climb_intent(solution),
+                _ if stage == LateralStage::Climb => self.climb_intent(solution),
                 _ => self.end_of_plan_intent(solution, now, events),
             },
-            LateralMode::Pattern if state == MissionState::AfterPlan => {
+            LateralMode::Pattern if stage == LateralStage::AfterPlan => {
                 self.end_of_plan_intent(solution, now, events)
             }
             LateralMode::DirectTo | LateralMode::Track | LateralMode::Pattern => {
-                self.route_intent(state, solution, now, events)
+                self.route_intent(stage, solution, now, events)
             }
             LateralMode::HeadingHold => self.hold_heading(cruise_altitude_m, events),
             // The pattern flown goes on by time; with none, a racetrack
@@ -46,14 +42,10 @@ impl MissionEngine {
                 .timed_holding_intent(now, events)
                 .or_else(|| self.racetrack_intent(now, events))
                 .or_else(|| self.hold_heading(cruise_altitude_m, events)),
-            LateralMode::Coast => self.end_of_plan_intent(None, now, events),
         }
     }
 
-    /// The intent from the arm request until flight: for a vehicle
-    /// steered by velocity, the climb that follows the arm or the hold of
-    /// where it is; for one steered by heading, its present heading at
-    /// the cruise altitude, or at its own altitude with no climb to fly.
+    /// The intent from the arm request until flight.
     fn standby_intent(&mut self, solution: Option<&NavigationSolution>) -> Option<ControlIntent> {
         if !self.steers_by_heading() {
             return self.arming_intent(solution);
@@ -66,18 +58,15 @@ impl MissionEngine {
         self.steer_level(altitude_m)
     }
 
-    /// The intent of the route: the plan's guidance, flown in the climb
-    /// of a vehicle that cannot stop with the climb as its vertical part.
-    /// A vehicle steered by heading flies the route at the climb's target
-    /// altitude, and on its present heading while there is no guidance.
+    /// The intent of the route.
     fn route_intent(
         &mut self,
-        state: MissionState,
+        stage: LateralStage,
         solution: Option<&NavigationSolution>,
         now: MonotonicNanos,
         events: &mut Vec<MissionEvent>,
     ) -> Option<ControlIntent> {
-        if state != MissionState::Climb {
+        if stage != LateralStage::Climb {
             return self.follow_plan_intent(solution, now, events);
         }
         if !self.steers_by_heading() {

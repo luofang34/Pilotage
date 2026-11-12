@@ -458,8 +458,15 @@ export class NavGuidanceTracker {
     // Uninterpretable guidance values poison the course, which the core
     // refuses as malformed guidance — never a partial display.
     const counted = ["legIndex", "waypointCount", "solutionQuality", "sequencing", "toFrom"];
+    const optionalCodes = ["positionSource", "positionIntegrity", "flightPhase"];
     const wellShaped =
       counted.every((key) => Number.isInteger(navGuidance[key]) && navGuidance[key] >= 0) &&
+      optionalCodes.every(
+        (key) =>
+          navGuidance[key] === undefined ||
+          (Number.isInteger(navGuidance[key]) && navGuidance[key] >= 0),
+      ) &&
+      (navGuidance.rnpM === undefined || typeof navGuidance.rnpM === "number") &&
       typeof navGuidance.toIdent === "string" &&
       typeof navGuidance.fromIdent === "string" &&
       [
@@ -476,7 +483,15 @@ export class NavGuidanceTracker {
       lateralDeviationM: wellShaped ? navGuidance.lateralDeviationM : NaN,
       verticalDeviationM: wellShaped ? navGuidance.verticalDeviationM : NaN,
       distanceToWaypointM: wellShaped ? navGuidance.distanceToWaypointM : NaN,
-      ...Object.fromEntries([...counted, "positionSource", "positionIntegrity"].map((key) => [key, wellShaped && navGuidance[key] >= 0 && Number.isInteger(navGuidance[key]) ? navGuidance[key] : 0])),
+      rnpM: wellShaped && typeof navGuidance.rnpM === "number" ? navGuidance.rnpM : NaN,
+      ...Object.fromEntries(
+        [...counted, ...optionalCodes].map((key) => [
+          key,
+          wellShaped && navGuidance[key] >= 0 && Number.isInteger(navGuidance[key])
+            ? navGuidance[key]
+            : 0,
+        ]),
+      ),
     };
   }
 }

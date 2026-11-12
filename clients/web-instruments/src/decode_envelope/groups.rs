@@ -201,6 +201,8 @@ pub(super) struct NavGuidance {
     to_from: u32,
     position_source: u32,
     position_integrity: u32,
+    flight_phase: u32,
+    rnp_m: f32,
     stamp: Stamp,
 }
 
@@ -289,6 +291,8 @@ pub(super) fn nav_guidance_message(state: wire::NavGuidanceState) -> Option<NavG
         to_from: state.to_from,
         position_source: state.position_source,
         position_integrity: state.position_integrity,
+        flight_phase: state.flight_phase,
+        rnp_m: state.rnp_m,
         stamp: stamp_message(stamp),
     })
 }

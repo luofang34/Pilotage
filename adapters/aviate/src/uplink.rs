@@ -221,6 +221,12 @@ impl FlightUplink {
         self.policy.set_target(system_id, component_id);
     }
 
+    /// Configures the coordinated orbit turn rate (`rad/s`) entered after
+    /// 60 seconds on a fixed-wing link-loss latch.
+    pub fn set_fixed_wing_orbit_rate(&mut self, rate_rps: f32) {
+        self.policy.set_fixed_wing_orbit_rate(rate_rps);
+    }
+
     /// Sends one frame. A refused send counts, and the count is logged
     /// on the first refusal and on every hundredth.
     fn send(&mut self, frame: &[u8]) {

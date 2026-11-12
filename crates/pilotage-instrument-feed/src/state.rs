@@ -8,11 +8,11 @@ use indicate_instrument_state::{
 };
 use pilotage_client_session::telemetry::{self, EstimatorValidity};
 use pilotage_instrument_runtime::feeder::{
-    Ingress, IngressParams, NavGuidance, Turn, nav_display_state,
+    Ingress, IngressParams, NavGuidance, Turn, nav_display_state_with_rnp,
 };
 use pilotage_protocol::wire;
 
-use crate::sample::avionics_sample;
+use crate::sample::{avionics_sample, nav_guidance_sample};
 
 /// Construction parameters, forwarded to the shared ingress.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +27,7 @@ pub struct FeedParams {
 /// turn derivation, and the navigation-guidance lane, assembled into the
 /// state frame exactly the way the browser viewer assembles them.
 pub struct InstrumentFeed {
+    vehicle_id: u64,
     ingress: Ingress,
     turn: Turn,
     nav: NavGuidance,
@@ -37,6 +38,7 @@ impl InstrumentFeed {
     #[must_use]
     pub fn new(params: &FeedParams) -> Self {
         Self {
+            vehicle_id: params.vehicle_id,
             ingress: Ingress::new(&IngressParams {
                 vehicle_id: params.vehicle_id,
                 source_id: None,
@@ -58,12 +60,27 @@ impl InstrumentFeed {
     /// changed. Publications for other vehicles are the ingress's own
     /// refusal to make, not this function's.
     pub fn ingest(&mut self, sample: &wire::TelemetrySample, now_ms: f64) -> bool {
-        let Some(avionics) = sample.avionics.as_ref() else {
-            return false;
-        };
         let vehicle_id = sample.vehicle.as_ref().map_or(0, |v| v.value);
-        self.ingress
-            .ingest(&avionics_sample(vehicle_id, avionics), now_ms)
+        let nav_admitted = if vehicle_id == self.vehicle_id {
+            if let Some((lane, phase, rnp_m)) =
+                sample.nav_guidance.as_deref().and_then(nav_guidance_sample)
+            {
+                let before = self.nav.diagnostics().0.accepted;
+                let _ = self
+                    .nav
+                    .observe_with_phase_rnp(Some(&lane), phase, rnp_m, now_ms);
+                self.nav.diagnostics().0.accepted != before
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        let avionics_admitted = sample.avionics.as_ref().is_some_and(|avionics| {
+            self.ingress
+                .ingest(&avionics_sample(vehicle_id, avionics), now_ms)
+        });
+        avionics_admitted || nav_admitted
     }
 
     /// Assembles and encodes the current state frame against the caller's
@@ -113,27 +130,16 @@ impl InstrumentFeed {
                 pos_ned_m: group.pos_ned,
                 vel_ned_mps: group.vel_ned,
             }),
-            nav: nav_display_state(self.nav.snapshot(now_ms).as_ref()).unwrap_or_default(),
+            nav: nav_display_state_with_rnp(
+                self.nav.snapshot(now_ms).as_ref(),
+                self.nav.last_rnp_m(),
+            )
+            .unwrap_or_default(),
             heading: heading.map_or_else(Stamped::default, |h| Stamped {
                 data: Some(h.data),
                 age_ms: h.age_ms,
             }),
-            dynamics: dynamics.map_or_else(Stamped::default, |declaration| Stamped {
-                data: Some(indicate_instrument_state::DynSample {
-                    turn: Some(indicate_instrument_state::TurnSample {
-                        #[allow(clippy::cast_possible_truncation)]
-                        rate_rps: declaration.turn_rps as f32,
-                        basis: indicate_instrument_state::TurnBasis::from_u8(
-                            declaration.turn_basis,
-                        ),
-                    }),
-                    lateral_mps2: None,
-                    // The trend is a rate that a source measures. No
-                    // lane of this feed measures it, so it stays absent.
-                    ias_trend_mps2: None,
-                }),
-                age_ms: to_age_ms(declaration.age_ms),
-            }),
+            dynamics: stamped_dynamics(dynamics),
             quality: quality_from_code(snapshot.quality),
             valid: ValidFlags {
                 attitude: attitude_valid,
@@ -162,6 +168,25 @@ impl InstrumentFeed {
             ..AircraftState::default()
         }
     }
+}
+
+fn stamped_dynamics(
+    dynamics: Option<indicate_instrument_feeder::turn::TurnDeclaration>,
+) -> Stamped<indicate_instrument_state::DynSample> {
+    dynamics.map_or_else(Stamped::default, |declaration| Stamped {
+        data: Some(indicate_instrument_state::DynSample {
+            turn: Some(indicate_instrument_state::TurnSample {
+                #[allow(clippy::cast_possible_truncation)]
+                rate_rps: declaration.turn_rps as f32,
+                basis: indicate_instrument_state::TurnBasis::from_u8(declaration.turn_basis),
+            }),
+            lateral_mps2: None,
+            // The trend is a rate that a source measures. No
+            // lane of this feed measures it, so it stays absent.
+            ias_trend_mps2: None,
+        }),
+        age_ms: to_age_ms(declaration.age_ms),
+    })
 }
 
 /// One stamped state group from one admitted feeder group.

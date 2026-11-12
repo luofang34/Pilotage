@@ -312,8 +312,9 @@ impl OperationRun {
                 self.now.holding = false;
             }
             RunControl::Abort => self.abort_after = true,
-            // An answer for no question asked now is late; it changes nothing.
-            RunControl::Answer(_) => {}
+            // An answer for no question asked now is late; operations carry no
+            // flight-plan hold leg, so neither changes anything here.
+            RunControl::Answer(_) | RunControl::ExitHold => {}
         }
         self.publish();
     }

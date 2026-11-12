@@ -33,9 +33,6 @@ pub(super) struct OnboardNavigation {
     /// The solution flown by dead reckoning on the latest tick, if one
     /// was: fresh, beyond its limits, and flown all the same.
     pub(super) dead_reckoned: Option<NavigationSolution>,
-    /// The horizontal uncertainty of the dead reckoning last reported,
-    /// meters; `None` while none is reported.
-    pub(super) reported_dead_reckoning_m: Option<f64>,
 }
 
 impl OnboardNavigation {

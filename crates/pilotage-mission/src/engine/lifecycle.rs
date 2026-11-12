@@ -158,11 +158,75 @@ impl Lifecycle {
     }
 }
 
+/// What the lifecycle says to the vertical mode machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) enum VerticalStage {
+    /// No altitude is flown to (idle, suspended, or failed).
+    Disengaged,
+    /// The arm phase is active.
+    Arming,
+    /// The initial climb phase is active.
+    Climb,
+    /// The route's legs are active.
+    Route,
+    /// The plan is done (stopped or flying after the plan).
+    PostPlan,
+}
+
+/// What the lifecycle says to the lateral mode machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) enum LateralStage {
+    /// Suspended by an operator hold or failed.
+    Disengaged,
+    /// Waiting for the start of the first phase.
+    Idle,
+    /// The arm phase is active.
+    Arming,
+    /// The climb phase is active.
+    Climb,
+    /// The route's legs are active.
+    Route,
+    /// The plan is complete on a vehicle that can stop.
+    Complete,
+    /// Flying on after the plan on a vehicle that cannot stop.
+    AfterPlan,
+}
+
 impl Lifecycle {
     /// Whether the vehicle is in flight under the mission: in its climb,
     /// on its route, or flying on after its plan.
     pub(super) const fn in_flight(self) -> bool {
         matches!(self.stage, Stage::Climb | Stage::Route | Stage::AfterPlan)
+    }
+
+    /// The lifecycle fact handed to the vertical mode machine.
+    pub(super) const fn vertical_stage(self) -> VerticalStage {
+        if self.suspended {
+            return VerticalStage::Disengaged;
+        }
+        match self.stage {
+            Stage::Idle | Stage::Failed => VerticalStage::Disengaged,
+            Stage::Armed => VerticalStage::Arming,
+            Stage::Climb => VerticalStage::Climb,
+            Stage::Route => VerticalStage::Route,
+            Stage::Complete | Stage::AfterPlan => VerticalStage::PostPlan,
+        }
+    }
+
+    /// The lifecycle fact handed to the lateral mode machine.
+    pub(super) const fn lateral_stage(self) -> LateralStage {
+        if self.suspended {
+            return LateralStage::Disengaged;
+        }
+        match self.stage {
+            Stage::Failed => LateralStage::Disengaged,
+            Stage::Idle => LateralStage::Idle,
+            Stage::Armed => LateralStage::Arming,
+            Stage::Climb => LateralStage::Climb,
+            Stage::Route => LateralStage::Route,
+            Stage::Complete => LateralStage::Complete,
+            Stage::AfterPlan => LateralStage::AfterPlan,
+        }
     }
 }
 

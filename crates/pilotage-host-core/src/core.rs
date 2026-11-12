@@ -133,11 +133,16 @@ impl HostCore {
         &mut self,
         plan: WaypointPlan,
     ) -> Result<WaypointPlanRecord, HostCoreError> {
-        let (_, record) = MissionEngine::from_waypoints(&plan, self.config.mission.clone())
-            .map_err(|source| HostCoreError::MissionBuild {
-                source: Box::new(source),
-            })?;
         let mut config = self.config.mission.clone();
+        config.magnetic_epoch = Some(pilotage_world::MagneticEpoch::from_unix_seconds(
+            self.config.magnetic_epoch_unix_s,
+        ));
+        let (_, record) =
+            MissionEngine::from_waypoints(&plan, config.clone()).map_err(|source| {
+                HostCoreError::MissionBuild {
+                    source: Box::new(source),
+                }
+            })?;
         // The engine holds the arm until the flight controller reports
         // itself ready, as the principal reads it from the telemetry.
         config.arm_when_vehicle_ready = true;
@@ -261,6 +266,12 @@ impl HostCore {
     /// run.
     pub fn abort_mission(&mut self) {
         self.run_control(RunControl::Abort);
+    }
+
+    /// Arms manual exit from an active `HM` (`HoldManual`) leg on the
+    /// flying mission.
+    pub fn exit_hold(&mut self) {
+        self.run_control(RunControl::ExitHold);
     }
 
     fn run_control(&mut self, control: RunControl) {

@@ -289,6 +289,8 @@ function sampleWithGroups({ truthRole, fcRole, gimbalRole, navRole }) {
         ...varintField(8, 2),
         ...varintField(9, 5),
         ...varintField(10, 1),
+        ...varintField(15, 3),
+        ...floatField(16, 555.6),
       ])),
     ]),
   ]);

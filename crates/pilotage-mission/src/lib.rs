@@ -41,15 +41,17 @@ pub use declared_start::{
     DeclaredStartError, SpeedReference,
 };
 pub use engine::{
+    APPROACH_RNP_NM, CifpProcedureKind, ENROUTE_RNP_NM, FlightPhase, HoldEntry, HoldStage,
+    HoldStatus, LegRole, M_PER_NM, PositionIntegrity, PositionKind, PositionSource,
+    ProcedureFixRole, SteeringIntegrity, SteeringSource, TERMINAL_RNP_NM,
+};
+pub use engine::{
     DeadReckoning, LaunchDetection, MissionAction, MissionCounters, MissionEngine, MissionEvent,
     MissionOutput, MissionState, NavGuidance, NavQuality, StartWithheldReason,
     VEHICLE_STATUS_MAX_AGE_NS, VehicleStatus,
 };
 pub use engine::{
     DisplayFix, DisplayWaypoint, LegDisplay, NavigationDisplay, ToFrom, WaypointProgress,
-};
-pub use engine::{
-    FlightPhase, PositionIntegrity, PositionKind, PositionSource, SteeringIntegrity, SteeringSource,
 };
 pub use engine::{LateralMode, LateralStatus, VerticalMode, VerticalStatus};
 pub use engine::{OnboardSolution, SourceIntegrity, SourceIntegrityState};
@@ -69,7 +71,8 @@ pub use pilotage_mission_core::executor;
 pub use provenance::{MissionPlanRecord, SnapshotProvenance, decode_snapshot};
 pub use survey::{SurveyError, SurveyPlan, SurveyPlanRecord, SurveyRequest, plan_survey};
 pub use waypoints::{
-    DEFAULT_ARRIVAL_RADIUS_M, DEFAULT_ROUTE_BANK_DEG, MIN_CAPTURE_RADIUS_M, PlannedWaypoint,
-    WaypointPlan, WaypointPlanRecord, WaypointTurn, capture_radius_for, indicated_airspeed_for,
-    true_airspeed_for, turn_radius_for,
+    DEFAULT_ARRIVAL_RADIUS_M, DEFAULT_ROUTE_BANK_DEG, MIN_CAPTURE_RADIUS_M, PlannedAltitude,
+    PlannedCourseReference, PlannedHold, PlannedHoldLength, PlannedPath, PlannedWaypoint,
+    WaypointPlan, WaypointPlanRecord, WaypointTurn, WaypointTurnDirection, capture_radius_for,
+    indicated_airspeed_for, true_airspeed_for, turn_radius_for,
 };

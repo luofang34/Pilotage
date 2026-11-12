@@ -621,11 +621,12 @@ check(
     // position (2) and an excluded sensor (3); a plan leg leaves all four at
     // the schema's zero, which the decoder reads as the sequencing default,
     // OFF, and no position or integrity.
-    const held = hold ? [[11, 1], [12, 2], [13, 2], [14, 3]] : [];
+    const held = hold ? [[11, 1], [12, 2], [13, 2], [14, 3], [15, 3]] : [];
     for (const [field, value] of [[8, 2], [9, 5], [10, 1], ...held]) {
       varint(out, (field << 3) | 0);
       varint(out, value);
     }
+    if (hold) f32Field(out, 16, 555.6); // rnp_m
     return out;
   }
   function decodeGuidanceOnly(guidanceBytes) {
@@ -655,6 +656,9 @@ check(
     holding?.positionSource === 2 && nav?.positionSource === 0);
   check("the position integrity decodes as stated, and as zero when unstated",
     holding?.positionIntegrity === 3 && nav?.positionIntegrity === 0);
+  check("the flight phase and RNP decode as stated, and as zero when unstated",
+    holding?.flightPhase === 3 && Math.abs(holding?.rnpM - 555.6) < 1e-2
+    && nav?.flightPhase === 0 && nav?.rnpM === 0);
   check("guidance stamp carries the navigation-solution role",
     nav?.stamp?.role === 6 && nav?.stamp?.clock === 3);
 

@@ -1,6 +1,9 @@
 //! Operational mission-document generation and flight-plan identity.
 
-use navigate_contract::{AltitudeConstraint, FlightPlan, PlanRole, TurnType, Waypoint};
+use navigate_contract::{
+    AltitudeConstraint, CourseReference, FlightPlan, HoldGeometry, HoldLegLength, LegPath,
+    PlanRole, TurnDirection, TurnType, Waypoint,
+};
 use pilotage_mission_core::{
     Digest, ExecutionPolicy, ExecutionTarget, FlightAction, FlightPlanReference, MissionAction,
     MissionCapability, MissionCondition, MissionDocument, MissionPhase, NavigationCondition,
@@ -44,7 +47,7 @@ pub(super) fn climb_capture_margin_m(config: &MissionConfig) -> f64 {
     }
 }
 
-const PLAN_DIGEST_DOMAIN: &[u8] = b"pilotage.flight-plan.v1\0";
+const PLAN_DIGEST_DOMAIN: &[u8] = b"pilotage.flight-plan.v2\0";
 /// Revision prefix of a mission built from a navdata route.
 pub(super) const ROUTE_REVISION_PREFIX: &str = "operational-route-v2";
 /// Revision prefix of a mission built from an area survey request.
@@ -323,8 +326,68 @@ fn hash_waypoint(hasher: &mut Sha256, waypoint: &Waypoint) -> Result<(), Mission
         other => return Err(unsupported("waypoint.turn", other)),
     };
     hasher.update([turn]);
+    hash_turn_direction(hasher, waypoint.turn_direction);
     hash_optional_f64(hasher, waypoint.max_speed_mps);
     hash_optional_f64(hasher, waypoint.gradient);
+    hash_path(hasher, waypoint.path)
+}
+
+fn hash_turn_direction(hasher: &mut Sha256, direction: Option<TurnDirection>) {
+    hasher.update([match direction {
+        None => 0,
+        Some(TurnDirection::Left) => 1,
+        Some(TurnDirection::Right) => 2,
+    }]);
+}
+
+fn hash_path(hasher: &mut Sha256, path: Option<LegPath>) -> Result<(), MissionBuildError> {
+    match path {
+        None => hasher.update([0]),
+        Some(LegPath::TrackToFix) => hasher.update([1]),
+        Some(LegPath::DirectToFix) => hasher.update([2]),
+        Some(LegPath::CourseToFix {
+            course_rad,
+            reference,
+        }) => {
+            hash_tagged_f64(hasher, 3, course_rad);
+            hash_reference(hasher, reference)?;
+        }
+        Some(LegPath::InitialFix) => hasher.update([4]),
+        Some(LegPath::CourseToAltitude {
+            course_rad,
+            reference,
+        }) => {
+            hash_tagged_f64(hasher, 5, course_rad);
+            hash_reference(hasher, reference)?;
+        }
+        Some(LegPath::HoldToAltitude { hold }) => hash_hold(hasher, 6, hold)?,
+        Some(LegPath::HoldToFix { hold }) => hash_hold(hasher, 7, hold)?,
+        Some(LegPath::HoldManual { hold }) => hash_hold(hasher, 8, hold)?,
+        Some(other) => return Err(unsupported("waypoint.path", other)),
+    }
+    Ok(())
+}
+
+fn hash_hold(hasher: &mut Sha256, tag: u8, hold: HoldGeometry) -> Result<(), MissionBuildError> {
+    hash_tagged_f64(hasher, tag, hold.inbound_course_rad);
+    hash_reference(hasher, hold.reference)?;
+    hash_turn_direction(hasher, Some(hold.turn));
+    match hold.leg {
+        HoldLegLength::Time { seconds } => hash_tagged_f64(hasher, 1, seconds),
+        HoldLegLength::Distance { meters } => hash_tagged_f64(hasher, 2, meters),
+    }
+    Ok(())
+}
+
+fn hash_reference(
+    hasher: &mut Sha256,
+    reference: CourseReference,
+) -> Result<(), MissionBuildError> {
+    hasher.update([match reference {
+        CourseReference::True => 1,
+        CourseReference::Magnetic => 2,
+        other => return Err(unsupported("waypoint.path.reference", other)),
+    }]);
     Ok(())
 }
 

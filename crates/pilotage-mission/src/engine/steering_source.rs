@@ -256,15 +256,6 @@ impl SteeringSource {
 }
 
 impl MissionEngine {
-    /// The flight phase of the active leg. It follows the roles of the
-    /// plan's legs, and a plan whose legs carry no terminal or approach
-    /// role is en route throughout. The plans this engine builds carry no
-    /// such role.
-    #[must_use]
-    pub const fn flight_phase(&self) -> FlightPhase {
-        FlightPhase::Enroute
-    }
-
     /// The position source steered on and its integrity, from the state
     /// the latest [`MissionEngine::tick`] that read the source left.
     #[must_use]

@@ -22,7 +22,7 @@ use crate::config::OwnshipSource;
 
 mod heading_bias;
 
-use super::{MissionEngine, MissionEvent, StartWithheldReason};
+use super::{MissionEngine, MissionEvent};
 
 /// How long the wind estimate takes to follow a change, seconds: long
 /// against a turn, in which the air-velocity model is least exact, short
@@ -52,8 +52,6 @@ pub(super) struct Steering {
     wind_heading: Option<(f64, MonotonicNanos)>,
     /// Since when the heading has been steady.
     wind_steady_since: Option<MonotonicNanos>,
-    /// Why the engine holds heading and altitude, while it does.
-    holding: Option<StartWithheldReason>,
     /// The indicated airspeed last commanded on the velocity path, m/s,
     /// which the wind estimate takes as the air speed it is flown at.
     indicated_mps: Option<f64>,
@@ -84,23 +82,10 @@ impl MissionEngine {
         now: MonotonicNanos,
         events: &mut Vec<MissionEvent>,
     ) -> Option<ControlIntent> {
-        self.end_hold();
         self.update_wind(solution, now);
         self.update_heading_bias(now);
         self.report_heading_bias(events);
-        let course = match setpoint {
-            GuidanceSetpoint::Velocity { velocity }
-                if velocity.north_mps.hypot(velocity.east_mps) > 0.0 =>
-            {
-                Some(velocity.east_mps.atan2(velocity.north_mps))
-            }
-            GuidanceSetpoint::DeviationTracking {
-                lateral_m,
-                course_rad,
-                ..
-            } => Some(course_rad + deviation_intercept(*lateral_m)),
-            _ => None,
-        };
+        let course = setpoint_course_rad(setpoint);
         let heading = match course {
             Some(course) => self.unbiased_heading(
                 self.wind_corrected_heading(course, solution.position.altitude_m),
@@ -111,19 +96,33 @@ impl MissionEngine {
         Some(self.heading_altitude(heading, altitude_m))
     }
 
+    /// Records the last guided heading and target altitude on a fixed wing
+    /// steered by velocity so a subsequent position loss holds that heading
+    /// for 60 s and then enters a timed racetrack orbit around it.
+    pub(super) fn record_guided_heading_altitude(
+        &mut self,
+        setpoint: &GuidanceSetpoint,
+        target_altitude_m: f64,
+        solution_altitude_m: f64,
+    ) {
+        let heading = setpoint_course_rad(setpoint)
+            .map(|course| self.wind_corrected_heading(course, solution_altitude_m))
+            .or(self.last_yaw_rad);
+        if let Some(heading) = heading {
+            let wrapped = heading.sin().atan2(heading.cos());
+            self.steering.last = Some((wrapped, target_altitude_m));
+        }
+    }
+
     /// The heading and altitude demand that climbs, or levels, at
     /// `altitude_m` on the present heading.
     pub(super) fn steer_level(&mut self, altitude_m: f64) -> Option<ControlIntent> {
-        self.end_hold();
         let heading = self.current_heading()?;
         Some(self.heading_altitude(heading, altitude_m))
     }
 
     /// The hold of the heading and altitude last commanded while no
     /// solution is fit to fly, announced once for each reason.
-    /// Before any command the present heading and the last known altitude
-    /// are held; with no heading known nothing can be held, and the event
-    /// still says why.
     pub(super) fn hold_heading(
         &mut self,
         fallback_altitude_m: f64,
@@ -133,25 +132,10 @@ impl MissionEngine {
         self.repeat_heading(fallback_altitude_m)
     }
 
-    /// Announces the hold of a vehicle with no solution fit to fly, once
-    /// for each reason in a row.
-    pub(super) fn announce_hold(&mut self, events: &mut Vec<MissionEvent>) {
-        let reason = self.solution_absence();
-        let changed = self
-            .steering
-            .holding
-            .is_none_or(|held| core::mem::discriminant(&held) != core::mem::discriminant(&reason));
-        self.steering.holding = Some(reason);
-        if changed {
-            events.push(MissionEvent::NavigationHold { reason });
-        }
-    }
-
     /// The position hold of a vehicle that can stop, in flight with no
     /// solution fit to fly: zero velocity, which its flight controller
     /// holds on its own estimate, and only while that estimate's position
-    /// is valid. Otherwise nothing, as before: a zero velocity on an
-    /// estimate with no position would drift.
+    /// is valid.
     pub(super) fn hold_position(
         &mut self,
         now: MonotonicNanos,
@@ -163,11 +147,6 @@ impl MissionEngine {
         self.announce_hold(events);
         self.last_yaw_rad?;
         Some(super::tick::outputs::zero_velocity_intent())
-    }
-
-    /// A solution is fit again: the hold ends.
-    fn end_hold(&mut self) {
-        self.steering.holding = None;
     }
 
     /// The heading to fly so the track over the ground is `course`: the
@@ -334,6 +313,22 @@ impl MissionEngine {
             reference: AltitudeReference::Ellipsoid,
             airspeed_mps: Some(self.commanded_cruise_mps() as f32),
         })
+    }
+}
+
+fn setpoint_course_rad(setpoint: &GuidanceSetpoint) -> Option<f64> {
+    match setpoint {
+        GuidanceSetpoint::Velocity { velocity }
+            if velocity.north_mps.hypot(velocity.east_mps) > 0.0 =>
+        {
+            Some(velocity.east_mps.atan2(velocity.north_mps))
+        }
+        GuidanceSetpoint::DeviationTracking {
+            lateral_m,
+            course_rad,
+            ..
+        } => Some(course_rad + deviation_intercept(*lateral_m)),
+        _ => None,
     }
 }
 
