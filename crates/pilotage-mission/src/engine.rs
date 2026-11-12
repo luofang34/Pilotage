@@ -7,6 +7,7 @@ mod document;
 mod holding_pattern;
 mod home;
 mod intercept;
+mod modes;
 mod nav_guidance;
 mod nav_source;
 mod navigation_display;
@@ -19,6 +20,7 @@ mod steering_source;
 mod tick;
 mod track_trim;
 mod vehicle_status;
+mod vertical_mode;
 mod waypoints;
 
 use core::mem::Discriminant;
@@ -92,9 +94,8 @@ pub struct MissionEngine {
     /// guidance view. A tick whose filter published nothing clears it, so
     /// [`MissionEngine::nav_guidance`] cannot serve stale geometry.
     last_solution: Option<NavigationSolution>,
-    /// The navigation source machine, and why the last tick published no
-    /// solution.
-    nav: nav_source::NavMode,
+    /// The state of the mode machines.
+    modes: modes::Modes,
     /// The latest known heading. `None` until a sample carries an
     /// attitude group: intents need the NED→body rotation, and guessing
     /// zero would silently rotate every command to due north.
@@ -303,7 +304,7 @@ impl MissionEngine {
             plan_complete: false,
             counters: MissionCounters::default(),
             last_solution: None,
-            nav: nav_source::NavMode::default(),
+            modes: modes::Modes::default(),
             last_yaw_rad: None,
             last_refusal: None,
             overflown_fix: None,

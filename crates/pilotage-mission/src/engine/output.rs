@@ -236,4 +236,8 @@ pub struct MissionCounters {
     /// Ticks under the onboard-navigation source on which the held
     /// solution was beyond its limits and flown by dead reckoning.
     pub onboard_dead_reckoned: u64,
+    /// Ticks in the climb on which the vertical mode machine and the
+    /// mission core disagreed on whether the climb's target is captured.
+    /// Any count is a defect.
+    pub vertical_mode_mismatch: u64,
 }
