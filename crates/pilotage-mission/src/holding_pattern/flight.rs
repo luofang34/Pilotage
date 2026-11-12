@@ -29,6 +29,16 @@ pub(crate) const REENTRY_GAP_S: f64 = 1.0;
 /// inbound time cannot drive the outbound leg to nothing or without end.
 const OUTBOUND_SHARE: (f64, f64) = (0.25, 3.0);
 
+/// How close to the fix, metres, a vehicle starting the pattern counts as
+/// over it: closer than this the direction to the fix says nothing.
+const AT_FIX_M: f64 = 1.0;
+
+/// The longest any part of the pattern but the flight to the fix lasts,
+/// in leg times: the longest outbound leg is three, and a turn one. A
+/// part that lasts longer is not ending as it should, and the vehicle
+/// enters again from where it is instead of flying it on without end.
+const MAX_PART_LEG_TIMES: f64 = 5.0;
+
 /// The path guidance follows on one step, in the frame.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Steer {
@@ -73,9 +83,11 @@ enum Phase {
     },
     FixTurn(Turn),
     Outbound {
+        /// When the outbound leg started.
+        since_s: f64,
         /// When and where along the inbound course the timer started:
         /// abeam the fix, or at once after the turn at the fix, which ends
-        /// abeam it.
+        /// abeam it, and at the latest one leg time into the leg.
         started: Option<(f64, f64)>,
     },
     OutboundTurn(Turn),
@@ -88,8 +100,6 @@ pub(crate) struct PatternFlight {
     leg_time_s: f64,
     /// The distance to a point far ahead on a straight leg, metres.
     far_m: f64,
-    /// The radius within which the vehicle counts as over the fix, metres.
-    capture_radius_m: f64,
     outbound_time_s: f64,
     phase: Phase,
     entry: Option<HoldingEntry>,
@@ -102,25 +112,24 @@ pub(crate) struct PatternFlight {
     /// The groundspeed of the last timed outbound leg, m/s.
     outbound_speed_mps: Option<f64>,
     last_step_s: Option<f64>,
+    /// When the part of the pattern flown now started.
+    phase_since_s: f64,
 }
 
 impl PatternFlight {
     /// The flight of a pattern with turns of `radius_m` and an inbound leg
     /// of `leg_time_s`, at `speed_mps` over the ground. The outbound leg
-    /// first lasts `outbound_time_s`. Within `capture_radius_m` of the fix
-    /// the vehicle counts as over it.
+    /// first lasts `outbound_time_s`.
     pub(crate) fn new(
         radius_m: f64,
         leg_time_s: f64,
         speed_mps: f64,
-        capture_radius_m: f64,
         outbound_time_s: f64,
     ) -> Self {
         Self {
             radius_m,
             leg_time_s,
             far_m: 3.0 * speed_mps * leg_time_s + 4.0 * radius_m,
-            capture_radius_m,
             outbound_time_s: clamp_outbound(outbound_time_s, leg_time_s),
             phase: Phase::ToFix { from: [0.0; 2] },
             entry: None,
@@ -129,15 +138,18 @@ impl PatternFlight {
             timed_inbound: false,
             outbound_speed_mps: None,
             last_step_s: None,
+            phase_since_s: 0.0,
         }
     }
 
     /// Starts the flight at `position` on `course` at `now_s`. A vehicle
-    /// within the capture radius of the fix enters at once; so does one
-    /// that `passed` the fix. Any other flies to the fix first.
+    /// that `passed` the fix enters at once. Any other flies to the fix
+    /// first and enters abeam it, however close it is: the entry turns
+    /// over the fix, not short of it.
     pub(crate) fn begin(&mut self, position: [f64; 2], course: f64, now_s: f64, passed: bool) {
         self.last_step_s = Some(now_s);
-        if passed || norm(position) <= self.capture_radius_m {
+        self.phase_since_s = now_s;
+        if passed || norm(position) <= AT_FIX_M {
             self.enter(position, course, now_s);
         } else {
             self.phase = Phase::ToFix { from: position };
@@ -158,7 +170,14 @@ impl PatternFlight {
             self.begin(position, course, now_s, false);
         }
         self.last_step_s = Some(now_s);
+        let part = core::mem::discriminant(&self.phase);
         self.advance(position, course, now_s);
+        let overdue = now_s - self.phase_since_s > MAX_PART_LEG_TIMES * self.leg_time_s;
+        if core::mem::discriminant(&self.phase) != part {
+            self.phase_since_s = now_s;
+        } else if overdue && !matches!(self.phase, Phase::ToFix { .. }) {
+            self.begin(position, course, now_s, false);
+        }
         self.steer(position)
     }
 
@@ -238,14 +257,17 @@ impl PatternFlight {
     fn advance(&mut self, position: [f64; 2], course: f64, now_s: f64) {
         match self.phase {
             Phase::ToFix { from } => {
+                // Over the fix is abeam it: the entry turns there, not a
+                // capture radius short of it.
                 let passed = position[0] * from[0] + position[1] * from[1] <= 0.0;
-                if passed || norm(position) <= self.capture_radius_m {
+                if passed {
                     self.enter(position, course, now_s);
                 }
             }
             Phase::DirectTurn(mut turn) => {
                 self.phase = if turn.advance(position) {
                     Phase::Outbound {
+                        since_s: now_s,
                         started: (position[0] <= 0.0).then_some((now_s, position[0])),
                     }
                 } else {
@@ -295,27 +317,40 @@ impl PatternFlight {
             Phase::FixTurn(mut turn) => {
                 self.phase = if turn.advance(position) {
                     Phase::Outbound {
+                        since_s: now_s,
                         started: Some((now_s, position[0])),
                     }
                 } else {
                     Phase::FixTurn(turn)
                 };
             }
-            Phase::Outbound { started } => self.fly_outbound(position, now_s, started),
+            Phase::Outbound { since_s, started } => {
+                self.fly_outbound(position, now_s, since_s, started);
+            }
         }
     }
 
     /// One step on the outbound leg, whose timer `started` at a time and a
     /// place: the timer starts abeam the fix, and the outbound turn starts
     /// when it runs out.
-    fn fly_outbound(&mut self, position: [f64; 2], now_s: f64, started: Option<(f64, f64)>) {
-        let started = started.or((position[0] <= 0.0).then_some((now_s, position[0])));
+    fn fly_outbound(
+        &mut self,
+        position: [f64; 2],
+        now_s: f64,
+        since_s: f64,
+        started: Option<(f64, f64)>,
+    ) {
+        // Abeam the fix, or one leg time into the leg when the aircraft is
+        // still not abeam: a timer that never starts is an outbound leg
+        // without end.
+        let due = position[0] <= 0.0 || now_s - since_s >= self.leg_time_s;
+        let started = started.or(due.then_some((now_s, position[0])));
         self.phase = match started {
             Some((started_s, start_x)) if now_s - started_s >= self.outbound_time_s => {
                 self.outbound_speed_mps = Some((start_x - position[0]) / (now_s - started_s));
                 Phase::OutboundTurn(Turn::new(position, PI, self.radius_m, true, 0.0))
             }
-            _ => Phase::Outbound { started },
+            _ => Phase::Outbound { since_s, started },
         };
     }
 

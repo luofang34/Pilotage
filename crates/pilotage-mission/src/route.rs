@@ -180,11 +180,6 @@ impl MissionRoute {
         self.arrived
     }
 
-    /// The radius within which a waypoint counts as reached, metres.
-    pub(crate) const fn capture_radius_m(&self) -> f64 {
-        self.config.capture_radius_m
-    }
-
     /// The course of the last leg where it reaches the last waypoint,
     /// radians clockwise from true north; `None` for a plan of one
     /// waypoint, or a last leg too short to have a course.
