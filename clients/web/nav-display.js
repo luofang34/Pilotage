@@ -30,9 +30,12 @@ export function navDisplayState(snapshot) {
   if (bindings === null) return null;
   if (!snapshot || !snapshot.navGuidance || !Number.isFinite(snapshot.ageMs)) return null;
   const g = snapshot.navGuidance;
-  // A quality outside the schema's non-negative integer coding removes
-  // the display before any coercion could make it look presentable.
-  if (!Number.isInteger(g.solutionQuality) || g.solutionQuality < 0) return null;
+  // A quality, sequencing or TO/FROM outside the schema's non-negative
+  // integer coding removes the display before any coercion could make it
+  // look presentable.
+  for (const code of [g.solutionQuality, g.sequencing, g.toFrom]) {
+    if (!Number.isInteger(code) || code < 0) return null;
+  }
   const marshalled = {
     navGuidance: {
       toIdent: typeof g.toIdent === "string" ? g.toIdent : "",
@@ -44,6 +47,8 @@ export function navDisplayState(snapshot) {
       legIndex: g.legIndex >>> 0,
       waypointCount: g.waypointCount >>> 0,
       solutionQuality: g.solutionQuality >>> 0,
+      sequencing: g.sequencing >>> 0,
+      toFrom: g.toFrom >>> 0,
     },
     ageMs: snapshot.ageMs,
   };

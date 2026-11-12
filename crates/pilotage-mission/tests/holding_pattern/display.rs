@@ -48,6 +48,12 @@ fn the_navigation_display_shows_the_plan_and_the_leg_flown() {
         "{leg:?}"
     );
     assert_eq!(leg.to_from, ToFrom::To);
+    assert!(
+        mid.guidance
+            .as_ref()
+            .is_some_and(|guidance| !guidance.holding && guidance.to_from == Some(ToFrom::To)),
+        "a plan leg is sequenced, not held, toward its waypoint"
+    );
     assert_eq!(mid.display.active_waypoint, Some(1));
     let progress: Vec<WaypointProgress> =
         mid.display.waypoints.iter().map(|w| w.progress).collect();
@@ -88,6 +94,16 @@ fn in_the_holding_pattern_the_leg_is_the_inbound_course_to_the_fix() {
         );
         let leg = display.leg.as_ref().expect("leg guidance in the pattern");
         assert_eq!(leg.to.ident, "WP2");
+        // The published guidance is the same inbound leg, marked a hold.
+        let guidance = sample.guidance.as_ref().expect("guidance in the pattern");
+        assert!(guidance.holding, "{guidance:?}");
+        assert_eq!(guidance.to_ident, "WP2");
+        assert_eq!(guidance.course_rad, status.pattern.inbound_course_rad);
+        assert_eq!(
+            guidance.to_from,
+            Some(leg.to_from),
+            "the flag flips with the display's"
+        );
         assert_eq!(leg.from, None);
         assert_eq!(leg.desired_track_rad, status.pattern.inbound_course_rad);
         // Right of the northbound inbound course is east; the fix is
