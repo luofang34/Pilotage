@@ -12,6 +12,7 @@ mod output;
 mod ownship;
 mod steering;
 mod tick;
+mod track_trim;
 mod vehicle_status;
 mod waypoints;
 
@@ -109,6 +110,9 @@ pub struct MissionEngine {
     /// The holding pattern flown once the plan is complete, for a vehicle
     /// that cannot stop.
     holding_pattern: Option<holding_pattern::ActivePattern>,
+    /// The course trim of the straight track flown, for a vehicle that
+    /// cannot stop.
+    track_trim: track_trim::TrackTrim,
 }
 
 impl MissionEngine {
@@ -298,6 +302,7 @@ impl MissionEngine {
             truth_sampled: false,
             steering: steering::Steering::default(),
             holding_pattern: None,
+            track_trim: track_trim::TrackTrim::default(),
         })
     }
 
