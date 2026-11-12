@@ -125,6 +125,10 @@ pub struct MissionTask {
     stopping: Option<u8>,
     /// The flight controller's reports during this run.
     flight: flight_watch::FlightWatch,
+    /// The principal asks for the motion scope by a transfer from the
+    /// principal that holds it, which keeps the vehicle commanded through
+    /// the handover, instead of by a lease.
+    takes_over: bool,
 }
 
 impl MissionTask {
@@ -166,6 +170,7 @@ impl MissionTask {
             operator_hold: false,
             stopping: None,
             flight: flight_watch::FlightWatch::default(),
+            takes_over: false,
         }
     }
 
@@ -224,8 +229,10 @@ impl MissionTask {
         self.log_events(&output.events);
         self.events.extend(output.events.iter().cloned());
         let progress = self.mission.as_ref().map(MissionEngine::plan_progress);
+        let navigation = self.mission.as_ref().map(MissionEngine::navigation_display);
         self.update(|status| {
             status.mission_state = Some(output.state);
+            status.navigation = navigation;
             if let Some((target, complete)) = progress {
                 status.target_waypoint = Some(target);
                 status.plan_complete = complete;
@@ -326,6 +333,14 @@ impl MissionTask {
         let (Some(session), Some(generation)) = (self.session, self.generation) else {
             return true;
         };
+        // A vehicle that reports itself armed, such as one a plan loaded in
+        // flight takes over, is not armed again: an arm command resets the
+        // uplink's post-arm gates and stops its setpoints for a while.
+        if action.action == pilotage_protocol::ControlAction::Arm && self.flight.armed() {
+            info!("the vehicle reports itself armed; the arm is answered without a command");
+            self.settle_arm(action.action_id, arm_receipt::ArmVerdict::Armed);
+            return true;
+        }
         self.next_action_id = self.next_action_id.wrapping_add(1);
         if self.next_action_id == 0 {
             // The wire reserves zero for "no correlation"; skip it on wrap.

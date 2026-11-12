@@ -4,12 +4,16 @@
 //! for each waypoint, and the turn at each one. A kinematic truth model
 //! flies the engine's own intents until the plan completes.
 
+use core::f64::consts::PI;
 use navigate_contract::{ClockDomainId, GeodeticPosition, MonotonicNanos};
 use navigate_geodesy::wgs84::tangent_plane;
 use navigate_route::SequenceReason;
+
+use pilotage_mission::holding_pattern::STANDARD_RATE_RPS;
 use pilotage_mission::{
-    ExecutionTarget, MissionBuildError, MissionConfig, MissionEngine, MissionEvent, MissionState,
-    OwnshipSample, OwnshipSource, PlannedWaypoint, TruthRole, WaypointPlan, WaypointTurn,
+    ExecutionTarget, HoldingEntry, HoldingPattern, HoldingTurn, MissionBuildError, MissionConfig,
+    MissionEngine, MissionEvent, MissionState, OwnshipSample, OwnshipSource, PlannedWaypoint,
+    TruthRole, WaypointPlan, WaypointTurn, true_airspeed_for,
 };
 use pilotage_protocol::{ControlAction, ControlIntent, VehicleClass};
 
@@ -98,7 +102,9 @@ fn fly(engine: &mut MissionEngine, ticks_after_complete: usize) -> Flight {
                         .captured
                         .push((*to_index, *reason, ANCHOR_ALT_M - ned[2]));
                 }
-                MissionEvent::LastWaypointSequenced { .. } | MissionEvent::OrbitStarted { .. } => {
+                MissionEvent::LastWaypointSequenced { .. }
+                | MissionEvent::HoldingPatternStarted { .. }
+                | MissionEvent::HoldingPatternEntered { .. } => {
                     flight.end_events.push(event.clone());
                 }
                 _ => {}
@@ -177,14 +183,69 @@ fn a_waypoint_list_flies_each_waypoint_at_its_own_altitude() {
     assert!(*speed_mps < 1e-6, "{speed_mps} m/s after completion");
 }
 
+/// The offset of an anchor-plane NED position from the last waypoint in
+/// the frame of a pattern on the plan's final course, due south: along
+/// the inbound course, and toward the holding side of `turn`.
+fn in_pattern(plan: &WaypointPlan, ned: [f64; 3], turn: HoldingTurn) -> [f64; 2] {
+    let plane = tangent_plane(anchor()).expect("anchor is plausible");
+    let last = plan.waypoints.last().expect("a last waypoint");
+    let fix = plane.to_ned(&GeodeticPosition::new(
+        last.latitude_deg.to_radians(),
+        last.longitude_deg.to_radians(),
+        last.altitude_m,
+    ));
+    // Right of a southbound course is west.
+    let right = -(ned[1] - fix.east_m);
+    let side = match turn {
+        HoldingTurn::Right => right,
+        HoldingTurn::Left => -right,
+    };
+    [-(ned[0] - fix.north_m), side]
+}
+
+/// The greatest reach of the positions after the first `skip` ticks past
+/// the racetrack of `pattern` at 6 m/s, metres.
+fn reach_outside(
+    plan: &WaypointPlan,
+    flight: &Flight,
+    pattern: &HoldingPattern,
+    skip: usize,
+) -> f64 {
+    let radius = pattern.turn_radius_m;
+    let length = 6.0 * pattern.leg_time_s;
+    flight
+        .after
+        .iter()
+        .skip(skip)
+        .map(|(ned, _)| {
+            let [x, y] = in_pattern(plan, *ned, pattern.turn);
+            (-length - radius - x)
+                .max(x - radius)
+                .max(-y)
+                .max(y - 2.0 * radius)
+        })
+        .fold(f64::NEG_INFINITY, f64::max)
+}
+
+fn started_pattern(flight: &Flight) -> HoldingPattern {
+    flight
+        .end_events
+        .iter()
+        .find_map(|event| match event {
+            MissionEvent::HoldingPatternStarted { pattern } => Some(pattern.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no holding pattern: {:?}", flight.end_events))
+}
+
 #[test]
-fn a_fixed_wing_orbits_the_last_waypoint_after_the_plan() {
+fn a_fixed_wing_holds_at_the_last_waypoint_on_the_final_course_after_the_plan() {
     let mut plan = plan();
     plan.capture_radius_m = None;
     let mut config = config();
     config.vehicle_class = VehicleClass::FixedWing;
     let (mut engine, record) = MissionEngine::from_waypoints(&plan, config).expect("builds");
-    let flight = fly(&mut engine, 1_200);
+    let flight = fly(&mut engine, 6_000);
     // The plan completes when the last waypoint sequences: the aircraft
     // cannot stop at it.
     let completed_at = flight.completed_at.expect("the plan completes");
@@ -193,61 +254,72 @@ fn a_fixed_wing_orbits_the_last_waypoint_after_the_plan() {
         horizontal_m <= record.capture_radius_m + 0.5,
         "{horizontal_m} m"
     );
-    let [
-        MissionEvent::LastWaypointSequenced { distance_m, .. },
-        MissionEvent::OrbitStarted {
-            radius_m,
-            altitude_m,
-        },
-    ] = flight.end_events.as_slice()
+    let Some(MissionEvent::LastWaypointSequenced { distance_m, .. }) = flight.end_events.first()
     else {
         panic!("{:?}", flight.end_events);
     };
     assert!((distance_m - horizontal_m).abs() < 0.5, "{distance_m} m");
+    // The pattern: at the last waypoint and its altitude, inbound on the
+    // final leg's course, right turns, one-minute legs, standard rate.
+    let pattern = started_pattern(&flight);
     let last = plan.waypoints.last().expect("a last waypoint");
-    assert_eq!(*altitude_m, last.altitude_m);
-    // 6 m/s at a 25° bank turns on 7.9 m, inside the 12 m capture radius,
-    // so the orbit takes the capture radius.
-    assert_eq!(*radius_m, record.capture_radius_m);
-    // After a settling turn, the aircraft keeps its speed and stays on
-    // the orbit around the last waypoint.
-    // The kinematic vehicle flies the commanded speed over the ground,
-    // where a fixed wing flies it as indicated airspeed and goes faster in
-    // the thinner air. The engine reads the difference as a light headwind
-    // and asks a little less, so the speed settles a few percent under 6.
-    let settled = flight.after.get(400..).expect("40 s of orbit");
-    for (ned, speed_mps) in settled {
-        let (distance_m, vertical_m) = from_last_waypoint(&plan, *ned);
-        assert!(*speed_mps > 5.7, "{speed_mps} m/s in the orbit");
-        assert!(
-            (distance_m - radius_m).abs() < 0.1 * radius_m,
-            "{distance_m} m from the centre of a {radius_m} m orbit"
-        );
-        assert!(vertical_m < 1.0, "{vertical_m} m off the orbit altitude");
+    assert_eq!(pattern.fix_ident, "WP3");
+    assert_eq!(pattern.fix.altitude_m, last.altitude_m);
+    assert!(
+        (pattern.inbound_course_rad - PI).abs() < 1e-3,
+        "{}",
+        pattern.inbound_course_rad
+    );
+    assert_eq!(pattern.turn, HoldingTurn::Right);
+    assert_eq!(pattern.leg_time_s, 60.0);
+    let airspeed = true_airspeed_for(6.0, last.altitude_m);
+    assert!((pattern.turn_radius_m - airspeed / STANDARD_RATE_RPS).abs() < 1e-6);
+    // Arriving on the inbound course is a direct entry.
+    assert!(
+        flight
+            .end_events
+            .contains(&MissionEvent::HoldingPatternEntered {
+                entry: HoldingEntry::Direct
+            }),
+        "{:?}",
+        flight.end_events
+    );
+    // The aircraft keeps its speed and its altitude, and flies the
+    // racetrack on the holding side. The kinematic vehicle flies the
+    // commanded speed over the ground, where a fixed wing flies it as
+    // indicated airspeed and goes faster in the thinner air. The engine
+    // reads the difference as a light headwind and asks a little less, so
+    // the speed settles a few percent under 6.
+    for (ned, speed_mps) in &flight.after {
+        let (_, vertical_m) = from_last_waypoint(&plan, *ned);
+        assert!(*speed_mps > 5.7, "{speed_mps} m/s in the pattern");
+        assert!(vertical_m < 1.0, "{vertical_m} m off the holding altitude");
     }
+    let reach = reach_outside(&plan, &flight, &pattern, 0);
+    assert!(reach < 0.15 * pattern.turn_radius_m, "{reach} m outside");
+    let status = engine.holding_pattern().expect("a holding pattern");
+    assert!(status.circuits >= 1, "{status:?}");
 }
 
 #[test]
-fn a_configured_orbit_overrides_the_default() {
+fn a_configured_holding_pattern_overrides_the_default() {
     let mut plan = plan();
     plan.capture_radius_m = None;
     let mut config = config();
     config.vehicle_class = VehicleClass::FixedWing;
-    config.terminal_orbit.radius_m = Some(30.0);
-    config.terminal_orbit.altitude_m = Some(ANCHOR_ALT_M + 25.0);
+    config.terminal_holding_pattern.altitude_m = Some(ANCHOR_ALT_M + 25.0);
+    config.terminal_holding_pattern.turn = HoldingTurn::Left;
+    config.terminal_holding_pattern.leg_time_s = Some(30.0);
     let (mut engine, _) = MissionEngine::from_waypoints(&plan, config).expect("builds");
-    let flight = fly(&mut engine, 1_600);
-    assert!(
-        flight.end_events.contains(&MissionEvent::OrbitStarted {
-            radius_m: 30.0,
-            altitude_m: ANCHOR_ALT_M + 25.0,
-        }),
-        "{:?}",
-        flight.end_events
-    );
+    let flight = fly(&mut engine, 6_000);
+    let pattern = started_pattern(&flight);
+    assert_eq!(pattern.fix.altitude_m, ANCHOR_ALT_M + 25.0);
+    assert_eq!(pattern.turn, HoldingTurn::Left);
+    assert_eq!(pattern.leg_time_s, 30.0);
+    // The climb to the holding altitude at 6 m/s takes the first turn.
+    let reach = reach_outside(&plan, &flight, &pattern, 1_200);
+    assert!(reach < 0.15 * pattern.turn_radius_m, "{reach} m outside");
     let (ned, _) = flight.after.last().expect("ticks after completion");
-    let (distance_m, _) = from_last_waypoint(&plan, *ned);
-    assert!((distance_m - 30.0).abs() < 3.0, "{distance_m} m");
     assert!(
         (-ned[2] - 25.0).abs() < 1.0,
         "{} m above the anchor",
@@ -325,7 +397,7 @@ fn the_capture_radius_follows_the_vehicle_unless_the_plan_sets_one() {
     assert_eq!(record.capture_radius_m, 4.0);
     // A slow vehicle keeps the minimum radius.
     assert_eq!(pilotage_mission::capture_radius_for(0.5, 2.0), 2.0);
-    // The orbit radius: v² / (g tan φ), never below its floor.
+    // The turn radius: v² / (g tan φ), never below its floor.
     let turn_m = pilotage_mission::turn_radius_for(10.0, 45.0, 2.0);
     assert!((turn_m - 100.0 / 9.806_65).abs() < 1e-6, "{turn_m}");
     assert_eq!(pilotage_mission::turn_radius_for(50.0, 90.0, 110.0), 110.0);

@@ -6,7 +6,7 @@
 use pilotage_mission::{MissionEngine, MissionLimits, MissionState};
 use pilotage_protocol::{
     ControlAction, ControlActionResult, FrameRejected, LeaseRequest, LeaseResponse,
-    ProfileActivation, ScopeId, ServerWelcome, wire,
+    ProfileActivation, ScopeId, ScopeTransferRequest, ServerWelcome, wire,
 };
 use pilotage_session::DomainEnvelope;
 use prost::Message;
@@ -187,13 +187,16 @@ impl MissionTask {
         self.request_lease()
     }
 
-    /// Asks for the motion lease.
+    /// Asks for the motion lease, or for a transfer of the scope from its
+    /// holder when this principal takes over from one.
     pub(super) fn request_lease(&mut self) -> bool {
-        let lease = DomainEnvelope::Lease(LeaseRequest {
-            vehicle: HOST_VEHICLE,
-            scope: ScopeId::new(MISSION_SCOPE),
-        });
-        self.send_message(lease)
+        let (vehicle, scope) = (HOST_VEHICLE, ScopeId::new(MISSION_SCOPE));
+        let request = if self.takes_over {
+            DomainEnvelope::TransferRequest(ScopeTransferRequest { vehicle, scope })
+        } else {
+            DomainEnvelope::Lease(LeaseRequest { vehicle, scope })
+        };
+        self.send_message(request)
     }
 
     /// Holds a real vehicle's mission until its pilot has launched it: the

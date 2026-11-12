@@ -78,6 +78,9 @@ pub struct AutomationStatus {
     pub target_waypoint: Option<usize>,
     /// The plan's last waypoint is captured.
     pub plan_complete: bool,
+    /// What a navigation display shows of the mission, once the engine is
+    /// built.
+    pub navigation: Option<pilotage_mission::NavigationDisplay>,
     /// An operator's hold keeps the vehicle stopped in place.
     pub operator_held: bool,
     /// An abort stopped the vehicle, released the lease and ended the run.

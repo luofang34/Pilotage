@@ -2,7 +2,7 @@
 //! where it stands.
 
 use navigate_contract::{MonotonicNanos, NavigationSolution};
-use pilotage_mission::{MissionEvent, MissionState};
+use pilotage_mission::{MissionEvent, MissionState, NavigationDisplay};
 
 /// When the host calls [`crate::HostCore::tick`] next, nanoseconds since
 /// the core's origin. A host may call earlier; it should not call later.
@@ -27,6 +27,15 @@ pub enum HostEvent {
     ArmRefused,
     /// The session engine refused an intent frame of the mission.
     FrameRejected,
+    /// A plan loaded while another one flew took over the motion scope;
+    /// the core flies it from now on.
+    NewPlanFlying,
+    /// A plan loaded while another one flew did not take over the motion
+    /// scope, for this reason; the flown plan goes on.
+    NewPlanRefused {
+        /// Why the new plan did not take over.
+        reason: &'static str,
+    },
 }
 
 /// Where the core stands after its last call.
@@ -41,6 +50,11 @@ pub struct HostStatus {
     pub armed: bool,
     /// Whether the plan's last waypoint is done.
     pub plan_complete: bool,
+    /// What a navigation display shows of the mission, once its engine is
+    /// built: the plan's waypoints with their progress, the guidance of
+    /// the leg flown now, and the holding pattern a vehicle that cannot
+    /// stop flies after its plan. A part with nothing to show is absent.
+    pub navigation: Option<NavigationDisplay>,
     /// Intent frames the mission submitted to the session engine.
     pub frames_sent: u64,
     /// Frames the session engine refused.

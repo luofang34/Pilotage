@@ -17,6 +17,7 @@ pub mod declared_start;
 pub mod engine;
 pub mod error;
 pub mod fixture;
+pub mod holding_pattern;
 pub mod lane;
 pub mod ownship;
 pub mod policy;
@@ -32,10 +33,13 @@ pub use body_frame::{
     project_cartesian_velocity_body, project_cartesian_velocity_ned, project_entry_bank_ned,
     project_guidance_setpoint, project_ned_velocity, project_thrust_vector_ned,
 };
-pub use config::{MissionConfig, MissionLimits, OwnshipSource, TerminalOrbit};
+pub use config::{MissionConfig, MissionLimits, OwnshipSource, TerminalHoldingPattern};
 pub use declared_start::{
     DeclaredHeading, DeclaredHeight, DeclaredPosition, DeclaredSpeed, DeclaredStart,
     DeclaredStartError, SpeedReference,
+};
+pub use engine::{
+    DisplayFix, DisplayWaypoint, LegDisplay, NavigationDisplay, ToFrom, WaypointProgress,
 };
 pub use engine::{
     LaunchDetection, MissionAction, MissionCounters, MissionEngine, MissionEvent, MissionOutput,
@@ -43,6 +47,9 @@ pub use engine::{
     VehicleStatus,
 };
 pub use error::MissionBuildError;
+pub use holding_pattern::{
+    HoldingEntry, HoldingLeg, HoldingPattern, HoldingPatternStatus, HoldingTurn,
+};
 pub use lane::{
     Approvable, ApprovalTarget, FrameAssessment, FrameTicket, HOST_ISSUER, IntentContext, Lane,
     LaneConfig, LaneEffect, LaneReply, OperationAnswer, PlannedOperation, Reconciled, Requester,
@@ -55,7 +62,7 @@ pub use pilotage_mission_core::executor;
 pub use provenance::{MissionPlanRecord, SnapshotProvenance, decode_snapshot};
 pub use survey::{SurveyError, SurveyPlan, SurveyPlanRecord, SurveyRequest, plan_survey};
 pub use waypoints::{
-    DEFAULT_ARRIVAL_RADIUS_M, DEFAULT_ORBIT_BANK_DEG, MIN_CAPTURE_RADIUS_M, PlannedWaypoint,
+    DEFAULT_ARRIVAL_RADIUS_M, DEFAULT_ROUTE_BANK_DEG, MIN_CAPTURE_RADIUS_M, PlannedWaypoint,
     WaypointPlan, WaypointPlanRecord, WaypointTurn, capture_radius_for, indicated_airspeed_for,
     true_airspeed_for, turn_radius_for,
 };

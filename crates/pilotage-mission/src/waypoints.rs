@@ -17,9 +17,9 @@ pub const DEFAULT_ARRIVAL_RADIUS_M: f64 = 1.0;
 
 /// The bank angle a vehicle turns at on a route unless its configuration
 /// names another, degrees: a moderate coordinated turn. It sizes the turn
-/// ahead of a fly-by waypoint and the orbit after a plan for a vehicle
-/// that cannot stop.
-pub const DEFAULT_ORBIT_BANK_DEG: f64 = 25.0;
+/// ahead of a fly-by waypoint, and it limits the bank of the holding
+/// pattern after a plan for a vehicle that cannot stop.
+pub const DEFAULT_ROUTE_BANK_DEG: f64 = 25.0;
 
 /// The capture radius for a vehicle at `speed_mps`: the distance it
 /// flies in `capture_time_s`, and at least [`MIN_CAPTURE_RADIUS_M`]. The

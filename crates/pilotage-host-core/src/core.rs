@@ -1,5 +1,7 @@
 //! The core and its calls.
 
+mod handover;
+
 use std::time::Duration;
 
 use navigate_contract::{GeodeticPosition, MonotonicNanos, NavigationSolution};
@@ -33,7 +35,10 @@ pub struct HostCore {
     origin: Instant,
     last_now: MonotonicNanos,
     actor: EngineActor<AviateAdapter>,
-    principal: Option<MissionTask>,
+    principal: Option<Box<MissionTask>>,
+    /// A principal over a plan loaded while `principal` flew, until it
+    /// takes the motion scope over or gives up.
+    incoming: Option<handover::Incoming>,
     next_engine_tick: u64,
     next_mission_tick: u64,
     status: HostStatus,
@@ -97,6 +102,7 @@ impl HostCore {
             last_now: MonotonicNanos::from_nanos(0),
             actor,
             principal: None,
+            incoming: None,
             next_engine_tick: 0,
             next_mission_tick: 0,
             status: HostStatus::default(),
@@ -109,6 +115,13 @@ impl HostCore {
     /// Loads a waypoint plan as the mission to fly. The mission starts
     /// with the next tick: it opens its session, arms the vehicle, climbs,
     /// and flies the plan.
+    ///
+    /// While another plan holds the motion scope, the new plan takes the
+    /// scope over by a transfer, and the flown plan keeps commanding the
+    /// vehicle until the transfer commits: the flight controller is never
+    /// left without a setpoint. [`HostEvent::NewPlanFlying`] says when the
+    /// new plan flies; [`HostEvent::NewPlanRefused`] says when it did not
+    /// take over and the flown plan goes on.
     ///
     /// # Errors
     ///
@@ -126,12 +139,8 @@ impl HostCore {
         // The engine holds the arm until the flight controller reports
         // itself ready, as the principal reads it from the telemetry.
         config.arm_when_vehicle_ready = true;
-        let mut principal = MissionTask::new(MissionPlan::waypoints(plan, config), false);
-        principal.set_now(self.last_now.as_nanos());
-        principal.start();
-        self.principal = Some(principal);
-        self.next_mission_tick = self.last_now.as_nanos();
-        self.exchange();
+        let principal = MissionTask::new(MissionPlan::waypoints(plan, config), false);
+        self.begin_principal(Box::new(principal));
         Ok(record)
     }
 
@@ -162,6 +171,9 @@ impl HostCore {
                 self.set_times(self.next_mission_tick);
                 if let Some(principal) = self.principal.as_mut() {
                     principal.on_tick();
+                }
+                if let Some(incoming) = self.incoming.as_mut() {
+                    incoming.task.on_tick();
                 }
                 self.next_mission_tick = self.next_mission_tick.saturating_add(nanos(MISSION_TICK));
             }
@@ -215,8 +227,10 @@ impl HostCore {
     /// is on [`crate::MISSION_CLOCK`] when its age is to count from its
     /// own time.
     pub fn on_onboard_solution(&mut self, solution: &NavigationSolution, now: MonotonicNanos) {
-        if let Some(mission) = self.principal.as_mut().and_then(MissionTask::mission_mut) {
-            mission.on_onboard_solution(solution, now);
+        for principal in self.principals_mut() {
+            if let Some(mission) = principal.mission_mut() {
+                mission.on_onboard_solution(solution, now);
+            }
         }
     }
 
@@ -260,7 +274,7 @@ impl HostCore {
     pub fn navigator_initial_state(&self) -> Option<pilotage_mission::DeclaredStart> {
         self.principal
             .as_ref()
-            .and_then(MissionTask::mission)
+            .and_then(|principal| principal.mission())
             .and_then(MissionEngine::declared_start)
             .copied()
     }
@@ -282,6 +296,15 @@ impl HostCore {
         self.origin
     }
 
+    /// The principals the core steps: the flying one, and one over a
+    /// newly loaded plan while it takes over.
+    fn principals_mut(&mut self) -> impl Iterator<Item = &mut MissionTask> {
+        self.principal
+            .iter_mut()
+            .chain(self.incoming.iter_mut().map(|incoming| &mut incoming.task))
+            .map(|principal| &mut **principal)
+    }
+
     fn advance_to(&mut self, now: MonotonicNanos) -> Result<(), HostCoreError> {
         if now < self.last_now {
             return Err(HostCoreError::TimeWentBack {
@@ -298,41 +321,22 @@ impl HostCore {
         let now = Duration::from_nanos(now_ns);
         self.actor.set_now(now);
         self.actor.adapter_mut().set_now(self.origin + now);
-        if let Some(principal) = self.principal.as_mut() {
+        for principal in self.principals_mut() {
             principal.set_now(now_ns);
         }
     }
 
-    /// Moves the principal's commands to the engine and the engine's
-    /// replies to the principal until neither has more.
+    /// Moves the principals' commands to the engine and the engine's
+    /// replies to the principals until neither has more, then settles a
+    /// handover between them.
     fn exchange(&mut self) {
-        let Some(principal) = self.principal.as_mut() else {
-            return;
-        };
-        for _ in 0..MAX_EXCHANGES {
-            let commands = principal.take_outbox();
-            for command in commands {
-                self.actor.handle_command(command);
-            }
-            let replies = self.actor.take_messages(principal.client());
-            if replies.is_empty() && principal_idle(principal) {
-                break;
-            }
-            for reply in replies {
-                principal.on_connection_message(reply);
-            }
+        if let Some(principal) = self.principal.as_mut() {
+            exchange_with(&mut self.actor, &mut self.events, principal);
         }
-        for event in principal.take_events() {
-            // The engine's own answer to its arm: accepted only once the
-            // flight controller confirmed it (arm receipt), refused when
-            // the controller refused it or did not answer in time.
-            match event {
-                MissionEvent::ArmAccepted { .. } => self.events.push(HostEvent::ArmConfirmed),
-                MissionEvent::ArmRejected { .. } => self.events.push(HostEvent::ArmRefused),
-                _ => {}
-            }
-            self.events.push(HostEvent::Mission(event));
+        if let Some(incoming) = self.incoming.as_mut() {
+            exchange_with(&mut self.actor, &mut self.events, &mut incoming.task);
         }
+        self.settle_handover();
     }
 
     fn refresh_status(&mut self) {
@@ -347,6 +351,7 @@ impl HostCore {
             .and_then(MissionEngine::solution)
             .cloned();
         self.status.plan_complete = automation.plan_complete;
+        self.status.navigation = automation.navigation.clone();
         self.status.frames_sent = automation.frames_sent;
         self.status.frames_rejected = automation.frames_rejected;
         self.status.frame_digest = automation.frame_digest;
@@ -358,6 +363,39 @@ impl HostCore {
             self.counters_logged = true;
             principal.log_counters();
         }
+    }
+}
+
+/// Moves `principal`'s commands to the engine and the engine's replies to
+/// `principal` until neither has more, and its events to `events`.
+fn exchange_with(
+    actor: &mut EngineActor<AviateAdapter>,
+    events: &mut Vec<HostEvent>,
+    principal: &mut MissionTask,
+) {
+    for _ in 0..MAX_EXCHANGES {
+        let commands = principal.take_outbox();
+        for command in commands {
+            actor.handle_command(command);
+        }
+        let replies = actor.take_messages(principal.client());
+        if replies.is_empty() && principal_idle(principal) {
+            break;
+        }
+        for reply in replies {
+            principal.on_connection_message(reply);
+        }
+    }
+    for event in principal.take_events() {
+        // The engine's own answer to its arm: accepted only once the
+        // flight controller confirmed it (arm receipt), refused when the
+        // controller refused it or did not answer in time.
+        match event {
+            MissionEvent::ArmAccepted { .. } => events.push(HostEvent::ArmConfirmed),
+            MissionEvent::ArmRejected { .. } => events.push(HostEvent::ArmRefused),
+            _ => {}
+        }
+        events.push(HostEvent::Mission(event));
     }
 }
 

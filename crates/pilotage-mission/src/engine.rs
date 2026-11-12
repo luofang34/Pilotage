@@ -3,8 +3,10 @@
 //! or performs I/O.
 
 mod document;
+mod holding_pattern;
 mod home;
 mod nav_guidance;
+mod navigation_display;
 mod onboard;
 mod output;
 mod ownship;
@@ -32,6 +34,9 @@ use pilotage_mission_core::{
 };
 
 pub use nav_guidance::{NavGuidance, NavQuality};
+pub use navigation_display::{
+    DisplayFix, DisplayWaypoint, LegDisplay, NavigationDisplay, ToFrom, WaypointProgress,
+};
 pub use output::{MissionAction, MissionCounters, MissionEvent, MissionOutput, MissionState};
 pub use vehicle_status::{
     LaunchDetection, StartWithheldReason, VEHICLE_STATUS_MAX_AGE_NS, VehicleStatus,
@@ -101,6 +106,9 @@ pub struct MissionEngine {
     /// The heading and altitude steering of a fixed wing on the onboard
     /// navigator.
     steering: steering::Steering,
+    /// The holding pattern flown once the plan is complete, for a vehicle
+    /// that cannot stop.
+    holding_pattern: Option<holding_pattern::ActivePattern>,
 }
 
 impl MissionEngine {
@@ -289,6 +297,7 @@ impl MissionEngine {
             vehicle: vehicle_status::VehicleReadiness::default(),
             truth_sampled: false,
             steering: steering::Steering::default(),
+            holding_pattern: None,
         })
     }
 
