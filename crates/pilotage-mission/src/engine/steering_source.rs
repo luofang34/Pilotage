@@ -79,12 +79,29 @@ pub enum SteeringIntegrity {
 pub struct SteeringSource {
     /// Where the position comes from.
     pub source: PositionSource,
-    /// The sensor classes that contribute to the solution flown; `None`
-    /// while none is flown. A display names a sensor only when its class
-    /// is among them.
+    /// The sensor classes that contribute to the solution flown. `None`
+    /// while none is flown, and under [`PositionSource::SimulationTruth`],
+    /// whose position comes from no sensor. A display names a sensor only
+    /// when its class is among them.
     pub contributing: Option<SourceComposition>,
     /// The engine's judgment of the position.
     pub integrity: SteeringIntegrity,
+}
+
+impl SteeringSource {
+    /// A steering source from its parts.
+    #[must_use]
+    pub const fn new(
+        source: PositionSource,
+        contributing: Option<SourceComposition>,
+        integrity: SteeringIntegrity,
+    ) -> Self {
+        Self {
+            source,
+            contributing,
+            integrity,
+        }
+    }
 }
 
 impl MissionEngine {
@@ -132,7 +149,10 @@ impl MissionEngine {
         };
         SteeringSource {
             source,
-            contributing: Some(solution.integrity.contributing),
+            // The truth oracle is fused as a synthesized fix whose class
+            // is not a sensor the vehicle carries.
+            contributing: (source != PositionSource::SimulationTruth)
+                .then_some(solution.integrity.contributing),
             integrity,
         }
     }

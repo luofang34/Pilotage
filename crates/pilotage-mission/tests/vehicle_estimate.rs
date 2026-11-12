@@ -4,7 +4,9 @@
 //! vehicle on its own exported estimate, declared as such, without
 //! fusion, and refuses every other role.
 
-use navigate_contract::{ClockDomainId, DurationNanos, GeodeticPosition, MonotonicNanos};
+use navigate_contract::{
+    ClockDomainId, DurationNanos, GeodeticPosition, MonotonicNanos, SensorClass, SourceComposition,
+};
 use pilotage_mission::fixture::{self, GeoPointDegrees};
 use pilotage_mission::{
     ExecutionTarget, MissionConfig, MissionEngine, MissionEvent, MissionState, NavQuality,
@@ -213,6 +215,11 @@ fn a_stale_estimate_publishes_no_solution_and_commands_nothing() {
     assert!(output.intent.is_some(), "a sample inside the budget flies");
     let steering = engine.navigation_display().steering;
     assert_eq!(steering.source, PositionSource::VehicleEstimate);
+    assert_eq!(
+        steering.contributing,
+        Some(SourceComposition::of(SensorClass::FcState)),
+        "the flight controller's estimate, not a satellite fix"
+    );
     assert!(
         matches!(
             steering.integrity,
