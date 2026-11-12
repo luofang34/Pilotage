@@ -7,6 +7,7 @@ mod document;
 mod holding_pattern;
 mod home;
 mod intercept;
+mod lateral_mode;
 mod modes;
 mod nav_guidance;
 mod nav_source;
