@@ -176,11 +176,6 @@ impl MissionRoute {
         self.config.bank_limit_rad
     }
 
-    /// The radius within which a waypoint counts as reached, metres.
-    pub(crate) const fn capture_radius_m(&self) -> f64 {
-        self.config.capture_radius_m
-    }
-
     /// The courses into and out of the waypoint the active leg flies to,
     /// radians clockwise from true north: the turn ahead. `None` with no
     /// leg before it or after it.

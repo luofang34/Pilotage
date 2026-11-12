@@ -54,6 +54,10 @@ pub(super) struct HeadingBias {
     steady_since: Option<MonotonicNanos>,
     /// The bias last reported, radians; zero before any report.
     reported_rad: f64,
+    /// The heading last held, radians, and when.
+    previous_held: Option<(f64, MonotonicNanos)>,
+    /// Since when the held heading has been steady.
+    held_steady_since: Option<MonotonicNanos>,
 }
 
 impl MissionEngine {
@@ -99,11 +103,25 @@ impl MissionEngine {
         let (Some(held), Some((commanded, _))) = (self.last_yaw_rad, bias.previous_command) else {
             return;
         };
-        let settled = bias.steady_since.is_some_and(|since| {
-            now.elapsed_since(since)
-                .is_some_and(|elapsed| elapsed.as_nanos() as f64 * 1e-9 >= SETTLE_S)
-        });
-        if !settled {
+        // The held heading must be steady too: an aircraft still turning
+        // toward a steady command lags it by the turn it has to go, which
+        // is no bias.
+        let held_steady = bias
+            .previous_held
+            .is_some_and(|(previous, at)| steady(held, previous, at, now));
+        bias.previous_held = Some((held, now));
+        bias.held_steady_since = if held_steady {
+            bias.held_steady_since.or(Some(now))
+        } else {
+            None
+        };
+        let settled_since = |since: Option<MonotonicNanos>| {
+            since.is_some_and(|since| {
+                now.elapsed_since(since)
+                    .is_some_and(|elapsed| elapsed.as_nanos() as f64 * 1e-9 >= SETTLE_S)
+            })
+        };
+        if !(settled_since(bias.steady_since) && settled_since(bias.held_steady_since)) {
             return;
         }
         let sample = wrap(held - commanded);
@@ -126,12 +144,9 @@ impl MissionEngine {
     /// been steady.
     pub(super) fn record_heading_command(&mut self, heading: f64, now: MonotonicNanos) {
         let bias = &mut self.steering.heading_bias;
-        let steady = bias.previous_command.is_some_and(|(previous, at)| {
-            let dt_s = now
-                .elapsed_since(at)
-                .map_or(0.0, |elapsed| elapsed.as_nanos() as f64 * 1e-9);
-            dt_s > 0.0 && wrap(heading - previous).abs() <= STEADY_RATE_RPS * dt_s
-        });
+        let steady = bias
+            .previous_command
+            .is_some_and(|(previous, at)| steady(heading, previous, at, now));
         bias.steady_since = if steady {
             bias.steady_since.or(Some(now))
         } else {
@@ -139,6 +154,15 @@ impl MissionEngine {
         };
         bias.previous_command = Some((heading, now));
     }
+}
+
+/// Whether a heading went from `previous` at `at` to `heading` at `now` at
+/// no more than [`STEADY_RATE_RPS`].
+fn steady(heading: f64, previous: f64, at: MonotonicNanos, now: MonotonicNanos) -> bool {
+    let dt_s = now
+        .elapsed_since(at)
+        .map_or(0.0, |elapsed| elapsed.as_nanos() as f64 * 1e-9);
+    dt_s > 0.0 && wrap(heading - previous).abs() <= STEADY_RATE_RPS * dt_s
 }
 
 /// `angle` wrapped into `[-π, π]`.

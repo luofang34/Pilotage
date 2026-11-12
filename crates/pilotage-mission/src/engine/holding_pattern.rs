@@ -141,7 +141,6 @@ impl MissionEngine {
             pattern.turn_radius_m,
             leg_time_s,
             airspeed_mps,
-            self.route.capture_radius_m(),
             outbound_time_s,
         );
         let position = frame.point(&solution.position);
