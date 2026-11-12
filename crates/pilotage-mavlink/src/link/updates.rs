@@ -44,6 +44,22 @@ pub struct BaroUpdate {
     pub received_at: Instant,
 }
 
+/// The latest airspeed a flight controller measured. VFR_HUD carries no
+/// time of its own, so like the receiver fix it is ordered by a sequence of
+/// its own and stamped on the clock that received it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AirDataUpdate {
+    /// Indicated airspeed, m/s; `None` when the report states none, so a
+    /// lost probe never leaves its last value behind.
+    pub indicated_airspeed_mps: Option<f32>,
+    /// Wrapping publication sequence for this lane.
+    pub sequence: u32,
+    /// Nanoseconds from the link's start to when this report arrived.
+    pub received_since_start_ns: u64,
+    /// When this update was received.
+    pub received_at: Instant,
+}
+
 /// The simulator's ground-truth report, cached OUTSIDE the estimate
 /// measurement discipline: truth is an oracle for judging estimates,
 /// never an estimate itself, and it must not be able to influence the

@@ -53,6 +53,8 @@ fn wire_sample(sequence: u32, yaw_rad: f64) -> wire::TelemetrySample {
         magnetic_variation: None,
         magnetic_variation_stamp: None,
         reported_euler: None,
+        indicated_airspeed_mps: 0.0,
+        airspeed_stamp: None,
     };
     wire::TelemetrySample {
         flight_procedure: None,

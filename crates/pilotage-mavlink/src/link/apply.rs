@@ -227,6 +227,22 @@ fn apply_geomagnetic_reference(
     });
 }
 
+/// Caches the airspeed one VFR_HUD states, including its absence.
+fn apply_air_data(latest: &mut LinkState, indicated_airspeed_mps: Option<f32>, now: Instant) {
+    let sequence = latest
+        .air_data
+        .map_or(0, |update| update.sequence.wrapping_add(1));
+    let received_since_start_ns =
+        u64::try_from(now.saturating_duration_since(latest.started_at).as_nanos())
+            .unwrap_or(u64::MAX);
+    latest.air_data = Some(crate::link::AirDataUpdate {
+        indicated_airspeed_mps,
+        sequence,
+        received_since_start_ns,
+        received_at: now,
+    });
+}
+
 /// Applies one simulator ground-truth report: latches the projection
 /// origin on the first fix and projects geodetic truth into local NED.
 /// The flat-earth projection's error over a SITL flight is far below
@@ -334,6 +350,7 @@ fn apply_message(latest: &mut LinkState, message: FcMessage, now: Instant) {
         FcMessage::LandedState(state) => {
             super::flight_state::apply_landed_state(latest, state, now)
         }
+        FcMessage::VfrHud(hud) => apply_air_data(latest, hud.indicated_airspeed_mps, now),
         FcMessage::Camera(_)
         | FcMessage::InvalidAviateEstimatorStatus
         | FcMessage::GimbalManagerInformation(_)

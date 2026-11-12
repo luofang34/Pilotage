@@ -79,6 +79,7 @@ pub(super) fn dji_shaped(yaw: f32) -> AvionicsSample {
             stamp: estimate,
         }),
         baro: None,
+        airspeed: None,
         geodetic: Some(GeodeticFixSample {
             position,
             quality: PositionQuality {

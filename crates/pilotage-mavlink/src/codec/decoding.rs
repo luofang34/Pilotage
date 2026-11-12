@@ -7,6 +7,7 @@ use super::{
     HIL_STATE_QUATERNION_ID, LOCAL_POSITION_NED_ID, PARAM_VALUE_ID, SCALED_PRESSURE_ID,
     STATUS_TEXT_LEN, STATUSTEXT_ID,
 };
+use super::{FrameSource, ParseStats};
 
 pub(super) fn f32_at(payload: &[u8], off: usize) -> f32 {
     let mut bytes = [0_u8; 4];
@@ -219,6 +220,7 @@ pub(super) fn decode_known(msg_id: u32, payload: &[u8]) -> Option<FcMessage> {
         super::CAMERA_INFORMATION_ID | super::CAMERA_SETTINGS_ID => {
             super::camera::decode(msg_id, payload).map(FcMessage::Camera)
         }
+        super::VFR_HUD_ID => Some(FcMessage::VfrHud(super::VfrHud::decode(payload))),
         HEARTBEAT_ID => Some(decode_heartbeat(payload)),
         // Payload: five f32 variances @0..20, then flags u16 @20.
         EKF_STATUS_REPORT_ID => Some(FcMessage::EkfStatusReport {
@@ -274,5 +276,35 @@ pub(super) fn decode_known(msg_id: u32, payload: &[u8]) -> Option<FcMessage> {
         GIMBAL_DEVICE_ATTITUDE_STATUS_ID => Some(decode_gimbal_status(payload)),
         BATTERY_STATUS_ID => Some(decode_battery_status(payload)),
         _ => None,
+    }
+}
+
+fn frame_header(bytes: &[u8], at: usize) -> Option<(FrameSource, u32)> {
+    let header = bytes.get(at..at + 10)?;
+    let source = FrameSource {
+        frame_sequence: header[4],
+        system_id: header[5],
+        component_id: header[6],
+    };
+    let message_id =
+        u32::from(header[7]) | (u32::from(header[8]) << 8) | (u32::from(header[9]) << 16);
+    Some((source, message_id))
+}
+
+/// Counts and reports a private estimator-status frame that failed
+/// framing, so a broken status revokes authorization instead of vanishing.
+pub(super) fn record_invalid_private_status(
+    bytes: &[u8],
+    at: usize,
+    stats: &mut ParseStats,
+    out: &mut Vec<(FrameSource, FcMessage)>,
+) {
+    let Some((source, message_id)) = frame_header(bytes, at) else {
+        return;
+    };
+    if message_id == AVIATE_ESTIMATOR_STATUS_ID {
+        stats.invalid_estimator_status_frames =
+            stats.invalid_estimator_status_frames.wrapping_add(1);
+        out.push((source, FcMessage::InvalidAviateEstimatorStatus));
     }
 }

@@ -25,6 +25,7 @@ fn with_variation(variation: Option<MagneticVariationSample>) -> wire::AvionicsS
         attitude: None,
         kinematics: None,
         baro: None,
+        airspeed: None,
         geodetic: None,
         magnetic_variation: variation,
         estimator_status_stamp: None,

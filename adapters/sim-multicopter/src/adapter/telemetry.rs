@@ -169,6 +169,7 @@ impl SimMulticopterAdapter {
             }),
             kinematics: Some(self.kinematics_group(stamp)),
             baro: None,
+            airspeed: None,
             geodetic: Some(self.fix(stamp)?),
             magnetic_variation: None,
             estimator_status_stamp: Some(stamp),

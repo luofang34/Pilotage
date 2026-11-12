@@ -148,6 +148,15 @@ pub enum MissionEvent {
         /// Why no solution is fit to fly.
         reason: super::StartWithheldReason,
     },
+    /// The engine's estimate of the flight controller's heading bias moved
+    /// a degree or more from the value last reported: the heading the
+    /// flight controller holds is this far right of the true heading it is
+    /// commanded, and every command is turned against it. Near zero on a
+    /// healthy flight controller.
+    HeadingBiasEstimated {
+        /// The bias, radians, positive right.
+        bias_rad: f64,
+    },
     /// The vehicle passed the active fix outside its capture radius, and
     /// guidance now flies direct back to it. Emitted once per fix.
     FixOverflown {

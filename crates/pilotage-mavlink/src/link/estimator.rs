@@ -10,7 +10,10 @@ use super::LinkState;
 use super::measurement::next_estimator_status_stamp;
 
 /// The validity bits this dialect defines; unknown bits are masked off.
-pub const KNOWN_VALID_FLAGS: u32 = 0x0f;
+/// Bit0 attitude, bit1 rates, bit2 position, bit3 velocity, bit4 height
+/// above the local origin and vertical speed (a barometer gives them
+/// without a position fix), bit5 airspeed.
+pub const KNOWN_VALID_FLAGS: u32 = 0x3f;
 /// Canonical quality: fully usable.
 pub const QUALITY_GOOD: u32 = 0;
 /// Canonical quality: degraded but present.

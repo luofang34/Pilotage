@@ -26,6 +26,7 @@ fn sample(attitude: AvionicsAttitudeSample) -> AvionicsSample {
         attitude: Some(attitude),
         kinematics: None,
         baro: None,
+        airspeed: None,
         geodetic: None,
         magnetic_variation: None,
         estimator_status_stamp: Some(stamp()),

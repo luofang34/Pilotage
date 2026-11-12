@@ -114,3 +114,6 @@ fn a_report_that_states_no_position_is_not_null_island() {
     );
     assert_eq!(sample.valid_flags, 0b1101, "the local frame still arrives");
 }
+
+/// The height and the airspeed without a position fix.
+mod air_data;

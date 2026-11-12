@@ -152,6 +152,16 @@ impl MissionPlan {
         }
     }
 
+    /// This plan, with the engine holding the arm until the vehicle states
+    /// on its telemetry that it is ready to arm. For a host whose flight
+    /// controller states its readiness (`FcState.ready_to_arm`): one that
+    /// never states it would never arm.
+    #[must_use]
+    pub fn arming_when_vehicle_ready(mut self) -> Self {
+        self.config.arm_when_vehicle_ready = true;
+        self
+    }
+
     /// The mission config over this plan's route and anchor; limits are
     /// tightened by the caller from the advertised capabilities.
     #[must_use]

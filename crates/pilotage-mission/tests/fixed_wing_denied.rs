@@ -18,9 +18,13 @@ use navigate_geodesy::wgs84::tangent_plane;
 use pilotage_mission::{
     DeclaredHeading, DeclaredPosition, DeclaredStart, ExecutionTarget, LaunchDetection,
     MissionBuildError, MissionConfig, MissionEngine, MissionEvent, MissionState, OwnshipSource,
-    PlannedWaypoint, StartWithheldReason, VehicleStatus, WaypointPlan, true_airspeed_for,
+    PlannedWaypoint, StartWithheldReason, VehicleStatus, WaypointPlan,
 };
-use pilotage_protocol::{AltitudeReference, ControlAction, ControlIntent, VehicleClass};
+use pilotage_protocol::{ControlAction, ControlIntent, VehicleClass};
+
+#[path = "fixed_wing_denied/aircraft.rs"]
+mod aircraft;
+use aircraft::Aircraft;
 
 const CLOCK: ClockDomainId = ClockDomainId::new(7);
 const STEP_NANOS: u64 = 50_000_000;
@@ -76,58 +80,6 @@ fn plan() -> WaypointPlan {
     )
 }
 
-/// A fixed wing in a steady wind holding the heading, altitude, and
-/// indicated airspeed it is commanded, with Aviate's heading-to-bank law.
-struct Aircraft {
-    ned: [f64; 3],
-    heading_rad: f64,
-    bank_rad: f64,
-    indicated_mps: f64,
-}
-
-impl Aircraft {
-    fn ground_velocity(&self) -> [f64; 3] {
-        let airspeed = true_airspeed_for(self.indicated_mps, ALTITUDE_M - self.ned[2]);
-        [
-            airspeed * self.heading_rad.cos() + WIND_NED_MPS[0],
-            airspeed * self.heading_rad.sin() + WIND_NED_MPS[1],
-            0.0,
-        ]
-    }
-
-    fn fly(&mut self, intent: &ControlIntent) {
-        let ControlIntent::HeadingAltitude(demand) = intent else {
-            panic!("a fixed wing on the onboard navigator flies heading and altitude: {intent:?}");
-        };
-        assert_eq!(demand.reference, AltitudeReference::Ellipsoid);
-        if let Some(airspeed) = demand.airspeed_mps {
-            self.indicated_mps = f64::from(airspeed);
-        }
-        let airspeed = true_airspeed_for(self.indicated_mps, ALTITUDE_M - self.ned[2]);
-        let rate_per_tangent = GRAVITY_MPS2 / airspeed;
-        let wanted = f64::from(demand.heading_rad);
-        let error = (wanted - self.heading_rad)
-            .sin()
-            .atan2((wanted - self.heading_rad).cos());
-        let wanted_bank = (error / COURSE_TIME_CONSTANT_S / rate_per_tangent)
-            .atan()
-            .clamp(-ROUTE_BANK_RAD, ROUTE_BANK_RAD);
-        let roll_rate = ((wanted_bank - self.bank_rad) / ROLL_TIME_CONSTANT_S)
-            .clamp(-MAX_ROLL_RATE_RPS, MAX_ROLL_RATE_RPS);
-        self.bank_rad += roll_rate * STEP_S;
-        self.heading_rad += rate_per_tangent * self.bank_rad.tan() * STEP_S;
-        // The altitude loop: a climb or sink rate toward the demand.
-        let height_error = f64::from(demand.altitude_m) - (ALTITUDE_M - self.ned[2]);
-        self.ned[2] -= (height_error / 5.0).clamp(-5.0, 2.5) * STEP_S;
-    }
-
-    fn step(&mut self) {
-        let velocity = self.ground_velocity();
-        self.ned[0] += velocity[0] * STEP_S;
-        self.ned[1] += velocity[1] * STEP_S;
-    }
-}
-
 /// The onboard navigator's solution of the aircraft, with `sigma_m` of
 /// horizontal uncertainty.
 fn solve(
@@ -136,11 +88,23 @@ fn solve(
     sequence: u32,
     sigma_m: f64,
 ) -> NavigationSolution {
+    solve_offset(aircraft, now, sequence, sigma_m, [0.0; 3])
+}
+
+/// The navigator's solution placed `offset_ned_m` from the aircraft's
+/// true position, with its true velocity and heading.
+fn solve_offset(
+    aircraft: &Aircraft,
+    now: MonotonicNanos,
+    sequence: u32,
+    sigma_m: f64,
+    offset_ned_m: [f64; 3],
+) -> NavigationSolution {
     let plane = tangent_plane(anchor()).expect("anchor is plausible");
     let position = plane.from_ned(&NedOffset::new(
-        aircraft.ned[0],
-        aircraft.ned[1],
-        aircraft.ned[2],
+        aircraft.ned[0] + offset_ned_m[0],
+        aircraft.ned[1] + offset_ned_m[1],
+        aircraft.ned[2] + offset_ned_m[2],
     ));
     let velocity = aircraft.ground_velocity();
     let composition = SourceComposition::of(SensorClass::VisualLandmark);
@@ -179,25 +143,44 @@ struct Flight {
     /// The position, active state, and intent at each tick.
     track: Vec<([f64; 3], MissionState, Option<ControlIntent>)>,
     holds: Vec<StartWithheldReason>,
+    /// Each heading bias the engine reported, radians.
+    bias_reports: Vec<f64>,
 }
 
 fn fly(engine: &mut MissionEngine, ticks: usize, navigator: &Navigator) -> Flight {
+    fly_in(engine, ticks, navigator, WIND_NED_MPS, [0.0; 3], 0.0)
+}
+
+/// Flies `engine` in `wind`, the navigator's solutions placed
+/// `offset_ned_m` from the truth.
+fn fly_in(
+    engine: &mut MissionEngine,
+    ticks: usize,
+    navigator: &Navigator,
+    wind: [f64; 2],
+    offset_ned_m: [f64; 3],
+    heading_bias_rad: f64,
+) -> Flight {
     let mut aircraft = Aircraft {
         ned: [-1_500.0, 0.0, 0.0],
         heading_rad: 0.0,
         bank_rad: 0.0,
         indicated_mps: CRUISE_IAS_MPS,
+        wind,
+        heading_bias_rad,
     };
     let mut flight = Flight {
         track: Vec::new(),
         holds: Vec::new(),
+        bias_reports: Vec::new(),
     };
     let mut now = MonotonicNanos::from_nanos(1_000_000_000);
     for tick in 0..ticks {
         now = MonotonicNanos::from_nanos(now.as_nanos() + STEP_NANOS);
         if let Some(sigma_m) = navigator(tick) {
             let sequence = u32::try_from(tick).expect("a short flight");
-            engine.on_onboard_solution(&solve(&aircraft, now, sequence, sigma_m), now);
+            let solution = solve_offset(&aircraft, now, sequence, sigma_m, offset_ned_m);
+            engine.on_onboard_solution(&solution, now);
         }
         let output = engine.tick(now);
         if let Some(action) = output.action {
@@ -205,8 +188,12 @@ fn fly(engine: &mut MissionEngine, ticks: usize, navigator: &Navigator) -> Fligh
             engine.on_action_result(action.action_id, true);
         }
         for event in &output.events {
-            if let MissionEvent::NavigationHold { reason } = event {
-                flight.holds.push(*reason);
+            match event {
+                MissionEvent::NavigationHold { reason } => flight.holds.push(*reason),
+                MissionEvent::HeadingBiasEstimated { bias_rad } => {
+                    flight.bias_reports.push(*bias_rad);
+                }
+                _ => {}
             }
         }
         if let Some(intent) = output.intent.as_ref() {
@@ -321,6 +308,8 @@ fn a_launch_seen_by_airspeed_alone_gets_a_climb_on_its_heading_without_a_solutio
         heading_rad: 0.7,
         bank_rad: 0.0,
         indicated_mps: CRUISE_IAS_MPS,
+        wind: WIND_NED_MPS,
+        heading_bias_rad: 0.0,
     };
     let mut now = MonotonicNanos::from_nanos(1_000_000_000);
     let mut status = VehicleStatus::ready(true, now);
@@ -411,4 +400,65 @@ fn a_declared_start_is_handed_on_as_stated_and_an_unusable_one_refused() {
         MissionEngine::from_waypoints(&plan(), config),
         Err(MissionBuildError::DeclaredStart { source }) if source.field == "heading.sigma_rad"
     ));
+}
+
+/// The true track's offset from the second leg, due east at 6000 m north,
+/// over its second half: the least and the greatest north error, metres.
+fn second_leg_band(flight: &Flight) -> (f64, f64) {
+    flight
+        .track
+        .iter()
+        .filter(|(ned, state, _)| {
+            *state == MissionState::Enroute
+                && (4_000.0..5_500.0).contains(&ned[1])
+                && ned[0] > 5_000.0
+        })
+        .map(|(ned, _, _)| ned[0] - 6_000.0)
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(low, high), error| {
+            (low.min(error), high.max(error))
+        })
+}
+
+#[test]
+fn a_navigator_offset_moves_the_true_track_by_the_offset() {
+    // Still air; the crosswind; and a flight controller whose heading is
+    // 10 degrees off true, which alone held the track 148 m off the leg.
+    for (wind, heading_bias_rad) in [
+        ([0.0, 0.0], 0.0),
+        (WIND_NED_MPS, 0.0),
+        ([0.0, 0.0], 10.0_f64.to_radians()),
+        (WIND_NED_MPS, -10.0_f64.to_radians()),
+    ] {
+        let (mut engine, _) = MissionEngine::from_waypoints(&plan(), config()).expect("builds");
+        let flight = fly_in(
+            &mut engine,
+            7_000,
+            &|_| Some(5.0),
+            wind,
+            [30.0, 0.0, 0.0],
+            heading_bias_rad,
+        );
+        // The bias the engine absorbs is reported, to the degree; a
+        // flight controller on true north reports none.
+        let estimate = engine.heading_bias_rad().unwrap_or(0.0);
+        assert!(
+            (estimate - heading_bias_rad).abs() < 0.02,
+            "{estimate} rad estimated"
+        );
+        let reported = flight.bias_reports.last().copied().unwrap_or(0.0);
+        assert!(
+            (reported - heading_bias_rad).abs() < 0.03,
+            "{:?} reported for {heading_bias_rad}",
+            flight.bias_reports
+        );
+        if heading_bias_rad == 0.0 {
+            assert!(flight.bias_reports.is_empty(), "{:?}", flight.bias_reports);
+        }
+        let (low, high) = second_leg_band(&flight);
+        assert!(
+            (low + 30.0).abs() < 5.0 && (high + 30.0).abs() < 5.0,
+            "in wind {wind:?} with a heading bias of {heading_bias_rad:.3} rad the true \
+             track ran {low:.1} to {high:.1} m off the leg, not 30 m south of it"
+        );
+    }
 }

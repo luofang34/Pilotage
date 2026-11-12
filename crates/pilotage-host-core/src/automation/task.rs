@@ -12,6 +12,7 @@ mod nav_guidance;
 mod run_control;
 mod session_flow;
 mod stepping;
+mod vehicle_status;
 
 pub use run_control::RunControl;
 
@@ -385,6 +386,15 @@ impl MissionTask {
                     });
                 }
                 MissionEvent::MissionComplete => info!("mission complete"),
+                // The engine absorbs the bias in every heading it commands,
+                // so this is the one place a bad heading reference shows.
+                MissionEvent::HeadingBiasEstimated { bias_rad } => {
+                    warn!(
+                        bias_deg = bias_rad.to_degrees(),
+                        "the flight controller holds a heading this far right of the one \
+                         commanded; every command is turned against it"
+                    );
+                }
                 other => info!(event = ?other, "mission event"),
             }
         }

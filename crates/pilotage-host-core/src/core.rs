@@ -6,18 +6,15 @@ use std::time::Duration;
 
 use navigate_contract::{GeodeticPosition, MonotonicNanos, NavigationSolution};
 use pilotage_adapter_aviate::AviateAdapter;
-use pilotage_mission::{
-    MissionEngine, MissionEvent, VehicleStatus, WaypointPlan, WaypointPlanRecord,
-};
+use pilotage_mission::{MissionEngine, MissionEvent, WaypointPlan, WaypointPlanRecord};
 use pilotage_session::{SessionConfig, SessionEngine};
-use pilotage_timing::MonoTimestamp;
 use pilotage_timing::StalenessPolicy;
 use web_time::Instant;
 
 use crate::HOST_VEHICLE;
 use crate::automation::{MissionPlan, MissionTask, RunControl, TICK_INTERVAL as MISSION_TICK};
 use crate::config::HostCoreConfig;
-use crate::engine_actor::{EngineActor, TICK_INTERVAL, TelemetryTap};
+use crate::engine_actor::{EngineActor, TICK_INTERVAL};
 use crate::error::HostCoreError;
 use crate::output::{HostEvent, HostStatus, NextWake};
 
@@ -140,7 +137,7 @@ impl HostCore {
             })?;
         let mut config = self.config.mission.clone();
         // The engine holds the arm until the flight controller reports
-        // itself ready, from the reports `tick` hands it.
+        // itself ready, as the principal reads it from the telemetry.
         config.arm_when_vehicle_ready = true;
         let principal = MissionTask::new(MissionPlan::waypoints(plan, config), false);
         self.begin_principal(Box::new(principal));
@@ -168,9 +165,7 @@ impl HostCore {
                 !mission_due || (engine_due && self.next_engine_tick <= self.next_mission_tick);
             if engine_first {
                 self.set_times(self.next_engine_tick);
-                let mut readiness = Readiness::default();
-                self.actor.tick_with(&mut readiness);
-                self.report_status(&readiness, self.next_engine_tick);
+                self.actor.tick();
                 self.next_engine_tick = self.next_engine_tick.saturating_add(nanos(TICK_INTERVAL));
             } else {
                 self.set_times(self.next_mission_tick);
@@ -344,22 +339,6 @@ impl HostCore {
         self.settle_handover();
     }
 
-    /// Hands the mission engine the flight controller's status, received
-    /// at `now_ns` on the mission clock.
-    fn report_status(&mut self, readiness: &Readiness, now_ns: u64) {
-        let Some(ready_to_arm) = readiness.ready_to_arm else {
-            return;
-        };
-        let mut status = VehicleStatus::ready(ready_to_arm, MonotonicNanos::from_nanos(now_ns));
-        status.position_valid = readiness.position_valid;
-        status.height_above_origin_m = readiness.height_above_origin_m;
-        for principal in self.principals_mut() {
-            if let Some(mission) = principal.mission_mut() {
-                mission.on_vehicle_status(status);
-            }
-        }
-    }
-
     fn refresh_status(&mut self) {
         let Some(principal) = self.principal.as_ref() else {
             return;
@@ -384,48 +363,6 @@ impl HostCore {
             self.counters_logged = true;
             principal.log_counters();
         }
-    }
-}
-
-/// The estimate authorization bit of a valid position (bit 2 of
-/// `AvionicsSample::valid_flags`).
-const VALID_POSITION: u32 = 0b0100;
-
-/// The flight controller's status, as the adapter's last telemetry sample
-/// of a tick reports it: its readiness to arm, whether its estimate
-/// states a valid position, and its height above its local origin.
-#[derive(Debug, Default)]
-struct Readiness {
-    ready_to_arm: Option<bool>,
-    position_valid: Option<bool>,
-    height_above_origin_m: Option<f64>,
-}
-
-impl TelemetryTap for Readiness {
-    fn fill(&mut self, _sample: &mut pilotage_adapter_api::TelemetrySample) {}
-
-    fn record(&mut self, sample: &pilotage_adapter_api::TelemetrySample, _now: MonoTimestamp) {
-        if let Some(ready) = sample.fc_state.and_then(|state| state.ready_to_arm) {
-            self.ready_to_arm = Some(ready);
-        }
-        // The flags authorize only under an estimator status stamp. The
-        // group states no height bit of its own, so the local height is
-        // read under the position authorization.
-        let Some(avionics) = sample
-            .avionics
-            .as_ref()
-            .filter(|avionics| avionics.estimator_status_stamp.is_some())
-        else {
-            return;
-        };
-        let position_valid = avionics.valid_flags & VALID_POSITION != 0;
-        self.position_valid = Some(position_valid);
-        self.height_above_origin_m = avionics
-            .kinematics
-            .as_ref()
-            .filter(|_| position_valid)
-            .map(|kinematics| -f64::from(kinematics.pos_ned_m[2]))
-            .filter(|height| height.is_finite());
     }
 }
 

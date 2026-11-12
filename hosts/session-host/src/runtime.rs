@@ -249,7 +249,7 @@ async fn spawn_host_runtime(
     // route or store fails startup instead of a silent no-mission run.
     let mission = match options.mission.take() {
         Some(mission_options) => {
-            let plan = automation::prepare(&mission_options)?;
+            let plan = automation::prepare_for(&mission_options, adapter == AdapterKind::Aviate)?;
             Some(automation::spawn_mission_task(
                 &engine_tx,
                 start,
