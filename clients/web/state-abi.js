@@ -158,13 +158,9 @@ function groupEncoders() {
         f(view, off + 20, nav.ageMs);
         putIdent(view, off + 24, nav.toIdent);
         putIdent(view, off + 33, nav.fromIdent);
-        // An undeclared scale is unknown (255), which fails the nav
-        // group: a dot has no distance until the source declares it.
-        b(view, off + 42, nav.scale ?? 255);
-        // The receiver's facility and the sequencing state: undeclared is
-        // unknown (255), which fails the nav group rather than guessing.
-        b(view, off + 43, nav.facility ?? 255);
-        b(view, off + 44, nav.sequencing ?? 255);
+        // Scale, facility, sequencing: undeclared is unknown (255), which
+        // fails the nav group rather than guessing what the source meant.
+        [nav.scale, nav.facility, nav.sequencing].forEach((v, i) => b(view, off + 42 + i, v ?? 255));
         return 45;
       },
     ],
