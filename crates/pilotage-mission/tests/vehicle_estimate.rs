@@ -4,11 +4,14 @@
 //! vehicle on its own exported estimate, declared as such, without
 //! fusion, and refuses every other role.
 
-use navigate_contract::{ClockDomainId, DurationNanos, GeodeticPosition, MonotonicNanos};
+use navigate_contract::{
+    ClockDomainId, DurationNanos, GeodeticPosition, MonotonicNanos, SensorClass, SourceComposition,
+};
 use pilotage_mission::fixture::{self, GeoPointDegrees};
 use pilotage_mission::{
     ExecutionTarget, MissionConfig, MissionEngine, MissionEvent, MissionState, NavQuality,
-    OwnshipAltitude, OwnshipSample, OwnshipSource, TruthRole, decode_snapshot,
+    OwnshipAltitude, OwnshipSample, OwnshipSource, PositionSource, StartWithheldReason,
+    SteeringIntegrity, TruthRole, decode_snapshot,
 };
 use pilotage_protocol::{ControlAction, ControlIntent, ReferenceFrame};
 
@@ -210,6 +213,23 @@ fn a_stale_estimate_publishes_no_solution_and_commands_nothing() {
     let fresh = MonotonicNanos::from_nanos(now.as_nanos() + max_age.as_nanos() / 2);
     let output = engine.tick(fresh);
     assert!(output.intent.is_some(), "a sample inside the budget flies");
+    let steering = engine.navigation_display().steering;
+    assert_eq!(steering.source, PositionSource::VehicleEstimate);
+    assert_eq!(
+        steering.contributing,
+        Some(SourceComposition::of(SensorClass::FcState)),
+        "the flight controller's estimate, not a satellite fix"
+    );
+    assert!(
+        matches!(
+            steering.integrity,
+            SteeringIntegrity::WithinLimits {
+                quality: NavQuality::Degraded,
+                ..
+            }
+        ),
+        "{steering:?}"
+    );
     let stale = MonotonicNanos::from_nanos(now.as_nanos() + max_age.as_nanos() + 1);
     let stale_before = engine.counters().estimate_stale;
     let output = engine.tick(stale);
@@ -219,6 +239,12 @@ fn a_stale_estimate_publishes_no_solution_and_commands_nothing() {
     assert!(
         engine.nav_guidance().is_none(),
         "no solution, no guidance display"
+    );
+    assert_eq!(
+        engine.navigation_display().steering.integrity,
+        SteeringIntegrity::NoSolution {
+            reason: StartWithheldReason::NavigationStale
+        }
     );
 }
 
