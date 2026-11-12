@@ -27,6 +27,7 @@ pub(super) mod outputs;
 mod overflight;
 mod speed;
 mod terminal;
+mod wind_turn;
 
 use outputs::{failed_output, terminal_output};
 
@@ -381,6 +382,11 @@ impl MissionEngine {
             self.config.clock,
             &self.guidance,
         );
+        let guided = guided.map(|mut command| {
+            command.setpoint =
+                self.trimmed_setpoint(command.setpoint, &reference, &to.position, solution, now);
+            command
+        });
         match guided {
             Ok(command) if self.steers_by_heading() => {
                 self.last_refusal = None;
