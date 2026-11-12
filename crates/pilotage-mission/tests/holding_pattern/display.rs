@@ -70,7 +70,7 @@ fn in_the_holding_pattern_the_leg_is_the_inbound_course_to_the_fix() {
     let holding: Vec<&Sample> = run
         .samples
         .iter()
-        .filter(|s| s.state == MissionState::Complete)
+        .filter(|s| s.state == MissionState::AfterPlan)
         .collect();
     let mut seen = (false, false);
     for sample in holding {

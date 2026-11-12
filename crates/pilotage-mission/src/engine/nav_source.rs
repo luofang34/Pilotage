@@ -17,7 +17,7 @@ use navigate_contract::{DurationNanos, MonotonicNanos, NavigationSolution, Solut
 use crate::config::{BeyondLimits, OwnshipSource};
 
 use super::estimate::EstimateBudget;
-use super::{MissionEngine, MissionState, StartWithheldReason};
+use super::{MissionEngine, StartWithheldReason};
 
 #[cfg(test)]
 mod tests;
@@ -224,11 +224,8 @@ impl MissionEngine {
     /// What the configured source holds at `now`, with the refusal
     /// counted under the source's own counter.
     fn read_source(&mut self, now: MonotonicNanos) -> Reading {
-        // Flight is the mission's fact, handed to the machine as a guard.
-        let in_flight = matches!(
-            self.state(),
-            MissionState::Climb | MissionState::Enroute | MissionState::Complete
-        );
+        // Flight is the lifecycle's fact, handed to the machine as a guard.
+        let in_flight = self.lifecycle().in_flight();
         match self.config.ownship_source {
             OwnshipSource::OnboardNavigation {
                 max_age,

@@ -253,7 +253,7 @@ fn fly_from(
             }
         }
         flight.track.push((aircraft.ned, leg));
-        if output.state == MissionState::Complete {
+        if output.state == MissionState::AfterPlan {
             let completed = *flight.completed_at.get_or_insert(flight.track.len());
             if flight.track.len() >= completed + ticks_after_complete {
                 break;

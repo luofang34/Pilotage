@@ -199,7 +199,7 @@ fn each_lifecycle_reports_its_mission_state() {
         (on(Armed), MissionState::Arming),
         (on(Climb), MissionState::Climb),
         (on(Route), MissionState::Enroute),
-        (on(AfterPlan), MissionState::Complete),
+        (on(AfterPlan), MissionState::AfterPlan),
         (on(Complete), MissionState::Complete),
         (on(Failed), MissionState::Failed),
         (held(Idle), MissionState::Held),

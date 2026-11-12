@@ -11,6 +11,8 @@
 mod aircraft;
 #[path = "holding_pattern/display.rs"]
 mod display;
+#[path = "holding_pattern/human_hold.rs"]
+mod human_hold;
 #[path = "holding_pattern/no_solution.rs"]
 mod no_solution;
 
@@ -160,13 +162,13 @@ impl Run {
     fn fly_and_hold(&mut self, seconds: f64) {
         for _ in 0..20_000 {
             self.step(true);
-            if self.engine.state() == MissionState::Complete {
+            if self.engine.state() == MissionState::AfterPlan {
                 break;
             }
         }
         assert_eq!(
             self.engine.state(),
-            MissionState::Complete,
+            MissionState::AfterPlan,
             "the plan completes"
         );
         for _ in 0..(seconds / STEP_S) as usize {
@@ -287,7 +289,7 @@ fn assert_holds(run: &Run, wind_mps: f64, inbound_tolerance_s: f64, summary: &st
     let holding: Vec<&Sample> = run
         .samples
         .iter()
-        .filter(|s| s.state == MissionState::Complete)
+        .filter(|s| s.state == MissionState::AfterPlan)
         .collect();
     assert!(
         holding.iter().all(|s| s.commanded),
@@ -383,7 +385,7 @@ fn a_lost_solution_keeps_the_commands_coming_and_the_pattern_is_entered_again() 
     assert!(
         run.samples
             .iter()
-            .all(|s| s.state != MissionState::Complete || s.commanded)
+            .all(|s| s.state != MissionState::AfterPlan || s.commanded)
     );
     assert!(run.entries().len() >= 2, "entries {:?}", run.entries());
     let after: Vec<u32> = run

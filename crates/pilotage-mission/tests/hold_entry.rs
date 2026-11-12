@@ -110,7 +110,7 @@ fn fly(
             engine.on_action_result(action.action_id, true);
         }
         events.extend(output.events.iter().cloned());
-        if output.state == MissionState::Complete {
+        if output.state == MissionState::AfterPlan {
             let (north, east) = (aircraft.ned[0] - fix_n, aircraft.ned[1] - fix_e);
             let status = engine.holding_pattern();
             held.push(Held {

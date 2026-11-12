@@ -241,7 +241,10 @@ impl MissionEngine {
             {
                 LateralEvent::Lost(LossResponse::HoldHeading)
             }
-            MissionState::Climb | MissionState::Enroute | MissionState::Complete => {
+            MissionState::Climb
+            | MissionState::Enroute
+            | MissionState::Complete
+            | MissionState::AfterPlan => {
                 let Some(solution) = solution else {
                     return LateralEvent::Lost(self.loss_response(state, now));
                 };
@@ -250,8 +253,8 @@ impl MissionEngine {
                     MissionState::Climb if by_heading && !self.flies_route() => None,
                     // The tick that completes the plan stops a vehicle that
                     // can stop; one that cannot flies its pattern from then on.
-                    MissionState::Complete if can_stop => Some(Demand::Position),
-                    MissionState::Complete => Some(Demand::Pattern),
+                    MissionState::Complete => Some(Demand::Position),
+                    MissionState::AfterPlan => Some(Demand::Pattern),
                     _ => self.route_demand(&solution.position),
                 };
                 demand.map_or(LateralEvent::Disengaged, LateralEvent::Demand)
@@ -267,7 +270,7 @@ impl MissionEngine {
     fn loss_response(&self, state: MissionState, now: MonotonicNanos) -> LossResponse {
         if self.steers_by_heading() {
             LossResponse::HoldHeading
-        } else if state == MissionState::Complete {
+        } else if state == MissionState::AfterPlan {
             LossResponse::Coast
         } else if self.fc_position_valid(now) {
             LossResponse::HoldPosition
