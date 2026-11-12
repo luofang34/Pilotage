@@ -7,9 +7,10 @@ use indicate_instrument_feeder::fc_state::{FcCommand, FcReport, FcView};
 use indicate_instrument_feeder::nav_guidance::{Guidance, NavCounters, NavReject, NavSnapshot};
 use indicate_instrument_feeder::turn::TurnDeclaration;
 use indicate_instrument_state::{
-    IdentStr, NavData, NavFromTo, NavScale, NavSequencing, NavSource, PositionIntegrity,
-    PositionSource, Stamped,
+    IdentStr, NavData, NavFromTo, NavSequencing, NavSource, PositionIntegrity, PositionSource,
+    Stamped,
 };
+use pilotage_instrument_runtime::feeder::nav_scale_from_wire_phase;
 use serde::{Deserialize, Serialize};
 
 use super::JsStamp;
@@ -116,11 +117,10 @@ pub(in super::super) struct JsGuidanceSample {
     to_from: u32,
     position_source: u32,
     position_integrity: u32,
+    flight_phase: u32,
+    #[serde(default)]
+    rnp_m: f32,
 }
-
-/// The phase scale of every guidance sample. The wire's guidance carries
-/// none, so the lane states the terminal-area scale Pilotage flies to.
-const LANE_SCALE: NavScale = NavScale::Terminal;
 
 /// The sequencing state the wire codes as 0 sequencing its legs, 1
 /// holding, and 2 suspended; any other value is unknown, which removes
@@ -174,8 +174,9 @@ fn ident_or_invalid(text: &str) -> IdentStr {
 
 impl JsGuidanceSample {
     /// The lane input: a stamp (poisoned on shape faults so the tracker
-    /// counts an invalid stamp) plus the guidance values.
-    pub(in super::super) fn into_lane(self) -> (RawStamp, Guidance) {
+    /// counts an invalid stamp) plus the guidance values, wire flight phase,
+    /// and optional RNP in meters.
+    pub(in super::super) fn into_lane(self) -> ((RawStamp, Guidance), u8, Option<f32>) {
         let stamp = RawStamp::try_from(self.stamp).unwrap_or(RawStamp {
             role: 0,
             integrity: 0,
@@ -186,24 +187,33 @@ impl JsGuidanceSample {
             acquired_at_ns: 0,
             clock: 0,
         });
+        let phase_code = match self.flight_phase {
+            1..=4 => self.flight_phase as u8,
+            _ => 0,
+        };
+        let rnp_m = (self.rnp_m.is_finite() && self.rnp_m > 0.0).then_some(self.rnp_m);
         (
-            stamp,
-            Guidance {
-                scale: LANE_SCALE,
-                to_from: to_from_of(self.to_from),
-                sequencing: sequencing_of(self.sequencing),
-                to_ident: ident_or_invalid(&self.to_ident),
-                from_ident: ident_or_invalid(&self.from_ident),
-                course_rad: self.course_rad,
-                lateral_deviation_m: self.lateral_deviation_m,
-                vertical_deviation_m: self.vertical_deviation_m,
-                distance_to_waypoint_m: self.distance_to_waypoint_m,
-                leg_index: self.leg_index,
-                waypoint_count: self.waypoint_count,
-                solution_quality: self.solution_quality,
-                position_source: position_source_of(self.position_source),
-                position_integrity: position_integrity_of(self.position_integrity),
-            },
+            (
+                stamp,
+                Guidance {
+                    scale: nav_scale_from_wire_phase(self.flight_phase),
+                    to_from: to_from_of(self.to_from),
+                    sequencing: sequencing_of(self.sequencing),
+                    to_ident: ident_or_invalid(&self.to_ident),
+                    from_ident: ident_or_invalid(&self.from_ident),
+                    course_rad: self.course_rad,
+                    lateral_deviation_m: self.lateral_deviation_m,
+                    vertical_deviation_m: self.vertical_deviation_m,
+                    distance_to_waypoint_m: self.distance_to_waypoint_m,
+                    leg_index: self.leg_index,
+                    waypoint_count: self.waypoint_count,
+                    solution_quality: self.solution_quality,
+                    position_source: position_source_of(self.position_source),
+                    position_integrity: position_integrity_of(self.position_integrity),
+                },
+            ),
+            phase_code,
+            rnp_m,
         )
     }
 }
@@ -224,6 +234,8 @@ struct JsGuidanceOut {
     to_from: u8,
     position_source: u8,
     position_integrity: u8,
+    flight_phase: u8,
+    rnp_m: f32,
 }
 
 /// The guidance snapshot the script consumes.
@@ -234,8 +246,8 @@ pub(in super::super) struct JsNavSnapshot {
     age_ms: f64,
 }
 
-impl From<NavSnapshot> for JsNavSnapshot {
-    fn from(snapshot: NavSnapshot) -> Self {
+impl JsNavSnapshot {
+    pub(in super::super) fn new(snapshot: NavSnapshot, flight_phase: u8, rnp_m: f32) -> Self {
         let guidance = snapshot.guidance;
         Self {
             nav_guidance: JsGuidanceOut {
@@ -267,6 +279,8 @@ impl From<NavSnapshot> for JsNavSnapshot {
                     PositionIntegrity::SensorExcluded => 3,
                     PositionIntegrity::Unknown => 0,
                 },
+                flight_phase,
+                rnp_m,
             },
             age_ms: snapshot.age_ms,
         }
@@ -301,29 +315,37 @@ struct JsGuidanceIn {
     to_from: u32,
     position_source: u32,
     position_integrity: u32,
+    flight_phase: u32,
+    #[serde(default)]
+    rnp_m: f32,
 }
 
 impl JsNavSnapshotIn {
-    pub(in super::super) fn into_snapshot(self) -> NavSnapshot {
-        NavSnapshot {
-            guidance: Guidance {
-                scale: LANE_SCALE,
-                to_from: to_from_of(self.nav_guidance.to_from),
-                sequencing: sequencing_of(self.nav_guidance.sequencing),
-                to_ident: ident_or_invalid(&self.nav_guidance.to_ident),
-                from_ident: ident_or_invalid(&self.nav_guidance.from_ident),
-                course_rad: self.nav_guidance.course_rad,
-                lateral_deviation_m: self.nav_guidance.lateral_deviation_m,
-                vertical_deviation_m: self.nav_guidance.vertical_deviation_m,
-                distance_to_waypoint_m: self.nav_guidance.distance_to_waypoint_m,
-                leg_index: self.nav_guidance.leg_index,
-                waypoint_count: self.nav_guidance.waypoint_count,
-                solution_quality: self.nav_guidance.solution_quality,
-                position_source: position_source_of(self.nav_guidance.position_source),
-                position_integrity: position_integrity_of(self.nav_guidance.position_integrity),
+    pub(in super::super) fn into_snapshot_and_rnp(self) -> (NavSnapshot, Option<f32>) {
+        let rnp_m = (self.nav_guidance.rnp_m.is_finite() && self.nav_guidance.rnp_m > 0.0)
+            .then_some(self.nav_guidance.rnp_m);
+        (
+            NavSnapshot {
+                guidance: Guidance {
+                    scale: nav_scale_from_wire_phase(self.nav_guidance.flight_phase),
+                    to_from: to_from_of(self.nav_guidance.to_from),
+                    sequencing: sequencing_of(self.nav_guidance.sequencing),
+                    to_ident: ident_or_invalid(&self.nav_guidance.to_ident),
+                    from_ident: ident_or_invalid(&self.nav_guidance.from_ident),
+                    course_rad: self.nav_guidance.course_rad,
+                    lateral_deviation_m: self.nav_guidance.lateral_deviation_m,
+                    vertical_deviation_m: self.nav_guidance.vertical_deviation_m,
+                    distance_to_waypoint_m: self.nav_guidance.distance_to_waypoint_m,
+                    leg_index: self.nav_guidance.leg_index,
+                    waypoint_count: self.nav_guidance.waypoint_count,
+                    solution_quality: self.nav_guidance.solution_quality,
+                    position_source: position_source_of(self.nav_guidance.position_source),
+                    position_integrity: position_integrity_of(self.nav_guidance.position_integrity),
+                },
+                age_ms: self.age_ms,
             },
-            age_ms: self.age_ms,
-        }
+            rnp_m,
+        )
     }
 }
 

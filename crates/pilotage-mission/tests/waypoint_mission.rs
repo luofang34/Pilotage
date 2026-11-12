@@ -12,8 +12,8 @@ use navigate_route::SequenceReason;
 use pilotage_mission::holding_pattern::STANDARD_RATE_RPS;
 use pilotage_mission::{
     ExecutionTarget, HoldingEntry, HoldingPattern, HoldingTurn, MissionBuildError, MissionConfig,
-    MissionEngine, MissionEvent, MissionState, OwnshipSample, OwnshipSource, PlannedWaypoint,
-    TruthRole, WaypointPlan, WaypointTurn, true_airspeed_for,
+    MissionEngine, MissionEvent, MissionState, OwnshipSample, OwnshipSource, PlannedAltitude,
+    PlannedWaypoint, TruthRole, WaypointPlan, WaypointTurn, true_airspeed_for,
 };
 use pilotage_protocol::{ControlAction, ControlIntent, VehicleClass};
 
@@ -165,7 +165,7 @@ fn from_last_waypoint(plan: &WaypointPlan, ned: [f64; 3]) -> (f64, f64) {
     let target = plane.to_ned(&GeodeticPosition::new(
         last.latitude_deg.to_radians(),
         last.longitude_deg.to_radians(),
-        last.altitude_m,
+        last.altitude.reference_m(),
     ));
     (
         (ned[0] - target.north_m).hypot(ned[1] - target.east_m),
@@ -222,7 +222,7 @@ fn in_pattern(plan: &WaypointPlan, ned: [f64; 3], turn: HoldingTurn) -> [f64; 2]
     let fix = plane.to_ned(&GeodeticPosition::new(
         last.latitude_deg.to_radians(),
         last.longitude_deg.to_radians(),
-        last.altitude_m,
+        last.altitude.reference_m(),
     ));
     // Right of a southbound course is west.
     let right = -(ned[1] - fix.east_m);
@@ -295,7 +295,7 @@ fn a_fixed_wing_holds_at_the_last_waypoint_on_the_final_course_after_the_plan() 
     let pattern = started_pattern(&flight);
     let last = plan.waypoints.last().expect("a last waypoint");
     assert_eq!(pattern.fix_ident, "WP3");
-    assert_eq!(pattern.fix.altitude_m, last.altitude_m);
+    assert_eq!(pattern.fix.altitude_m, last.altitude.reference_m());
     assert!(
         (pattern.inbound_course_rad - PI).abs() < 1e-3,
         "{}",
@@ -303,7 +303,7 @@ fn a_fixed_wing_holds_at_the_last_waypoint_on_the_final_course_after_the_plan() 
     );
     assert_eq!(pattern.turn, HoldingTurn::Right);
     assert_eq!(pattern.leg_time_s, 60.0);
-    let airspeed = true_airspeed_for(6.0, last.altitude_m);
+    let airspeed = true_airspeed_for(6.0, last.altitude.reference_m());
     assert!((pattern.turn_radius_m - airspeed / STANDARD_RATE_RPS).abs() < 1e-6);
     // Arriving on the inbound course is a direct entry.
     assert!(
@@ -367,7 +367,7 @@ fn a_waypoint_list_is_refused_with_its_defect() {
     ));
 
     let mut not_a_number = plan();
-    not_a_number.waypoints[2].altitude_m = f64::NAN;
+    not_a_number.waypoints[2].altitude = PlannedAltitude::At(f64::NAN);
     assert!(matches!(
         MissionEngine::from_waypoints(&not_a_number, config()),
         Err(MissionBuildError::WaypointPosition { index: 2, .. })
@@ -385,7 +385,8 @@ fn a_waypoint_list_is_refused_with_its_defect() {
 fn a_changed_waypoint_changes_the_plan_identity() {
     let (_, first) = MissionEngine::from_waypoints(&plan(), config()).expect("builds");
     let mut moved = plan();
-    moved.waypoints[2].altitude_m += 1.0;
+    let shifted = moved.waypoints[2].altitude.reference_m() + 1.0;
+    moved.waypoints[2].altitude = PlannedAltitude::At(shifted);
     let (_, second) = MissionEngine::from_waypoints(&moved, config()).expect("builds");
     assert_ne!(first.digest, second.digest);
     assert_ne!(

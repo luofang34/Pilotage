@@ -1364,7 +1364,7 @@ dependencies = [
 [[package]]
 name = "indicate-alerts"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=9b234248858fe8b397ecf2a8a6f3f77e26a76b81#9b234248858fe8b397ecf2a8a6f3f77e26a76b81"
+source = "git+https://github.com/luofang34/Indicate.git?rev=c70fdefc6f89b935b6ce956d4478aff1a44d783c#c70fdefc6f89b935b6ce956d4478aff1a44d783c"
 dependencies = [
  "thiserror",
 ]
@@ -1372,7 +1372,7 @@ dependencies = [
 [[package]]
 name = "indicate-frames"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=9b234248858fe8b397ecf2a8a6f3f77e26a76b81#9b234248858fe8b397ecf2a8a6f3f77e26a76b81"
+source = "git+https://github.com/luofang34/Indicate.git?rev=c70fdefc6f89b935b6ce956d4478aff1a44d783c#c70fdefc6f89b935b6ce956d4478aff1a44d783c"
 dependencies = [
  "libm",
  "thiserror",
@@ -1381,7 +1381,7 @@ dependencies = [
 [[package]]
 name = "indicate-instrument-descriptor"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=9b234248858fe8b397ecf2a8a6f3f77e26a76b81#9b234248858fe8b397ecf2a8a6f3f77e26a76b81"
+source = "git+https://github.com/luofang34/Indicate.git?rev=c70fdefc6f89b935b6ce956d4478aff1a44d783c#c70fdefc6f89b935b6ce956d4478aff1a44d783c"
 dependencies = [
  "indicate-alerts",
  "indicate-frames",
@@ -1396,7 +1396,7 @@ dependencies = [
 [[package]]
 name = "indicate-instrument-feeder"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=9b234248858fe8b397ecf2a8a6f3f77e26a76b81#9b234248858fe8b397ecf2a8a6f3f77e26a76b81"
+source = "git+https://github.com/luofang34/Indicate.git?rev=c70fdefc6f89b935b6ce956d4478aff1a44d783c#c70fdefc6f89b935b6ce956d4478aff1a44d783c"
 dependencies = [
  "indicate-instrument-state",
 ]
@@ -1404,7 +1404,7 @@ dependencies = [
 [[package]]
 name = "indicate-instrument-glyphs"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=9b234248858fe8b397ecf2a8a6f3f77e26a76b81#9b234248858fe8b397ecf2a8a6f3f77e26a76b81"
+source = "git+https://github.com/luofang34/Indicate.git?rev=c70fdefc6f89b935b6ce956d4478aff1a44d783c#c70fdefc6f89b935b6ce956d4478aff1a44d783c"
 dependencies = [
  "indicate-sha256",
  "libm",
@@ -1414,7 +1414,7 @@ dependencies = [
 [[package]]
 name = "indicate-instrument-panels"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=9b234248858fe8b397ecf2a8a6f3f77e26a76b81#9b234248858fe8b397ecf2a8a6f3f77e26a76b81"
+source = "git+https://github.com/luofang34/Indicate.git?rev=c70fdefc6f89b935b6ce956d4478aff1a44d783c#c70fdefc6f89b935b6ce956d4478aff1a44d783c"
 dependencies = [
  "indicate-alerts",
  "indicate-instrument-descriptor",
@@ -1428,7 +1428,7 @@ dependencies = [
 [[package]]
 name = "indicate-instrument-registry"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=9b234248858fe8b397ecf2a8a6f3f77e26a76b81#9b234248858fe8b397ecf2a8a6f3f77e26a76b81"
+source = "git+https://github.com/luofang34/Indicate.git?rev=c70fdefc6f89b935b6ce956d4478aff1a44d783c#c70fdefc6f89b935b6ce956d4478aff1a44d783c"
 dependencies = [
  "indicate-instrument-descriptor",
  "indicate-instrument-scene",
@@ -1442,7 +1442,7 @@ dependencies = [
 [[package]]
 name = "indicate-instrument-scene"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=9b234248858fe8b397ecf2a8a6f3f77e26a76b81#9b234248858fe8b397ecf2a8a6f3f77e26a76b81"
+source = "git+https://github.com/luofang34/Indicate.git?rev=c70fdefc6f89b935b6ce956d4478aff1a44d783c#c70fdefc6f89b935b6ce956d4478aff1a44d783c"
 dependencies = [
  "indicate-frames",
  "libm",
@@ -1452,7 +1452,7 @@ dependencies = [
 [[package]]
 name = "indicate-instrument-state"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=9b234248858fe8b397ecf2a8a6f3f77e26a76b81#9b234248858fe8b397ecf2a8a6f3f77e26a76b81"
+source = "git+https://github.com/luofang34/Indicate.git?rev=c70fdefc6f89b935b6ce956d4478aff1a44d783c#c70fdefc6f89b935b6ce956d4478aff1a44d783c"
 dependencies = [
  "indicate-alerts",
  "indicate-frames",
@@ -1463,7 +1463,7 @@ dependencies = [
 [[package]]
 name = "indicate-instrument-symbology"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=9b234248858fe8b397ecf2a8a6f3f77e26a76b81#9b234248858fe8b397ecf2a8a6f3f77e26a76b81"
+source = "git+https://github.com/luofang34/Indicate.git?rev=c70fdefc6f89b935b6ce956d4478aff1a44d783c#c70fdefc6f89b935b6ce956d4478aff1a44d783c"
 dependencies = [
  "indicate-alerts",
  "indicate-instrument-scene",
@@ -1475,7 +1475,7 @@ dependencies = [
 [[package]]
 name = "indicate-intent"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=9b234248858fe8b397ecf2a8a6f3f77e26a76b81#9b234248858fe8b397ecf2a8a6f3f77e26a76b81"
+source = "git+https://github.com/luofang34/Indicate.git?rev=c70fdefc6f89b935b6ce956d4478aff1a44d783c#c70fdefc6f89b935b6ce956d4478aff1a44d783c"
 dependencies = [
  "indicate-alerts",
  "indicate-instrument-feeder",
@@ -1486,7 +1486,7 @@ dependencies = [
 [[package]]
 name = "indicate-interaction"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=9b234248858fe8b397ecf2a8a6f3f77e26a76b81#9b234248858fe8b397ecf2a8a6f3f77e26a76b81"
+source = "git+https://github.com/luofang34/Indicate.git?rev=c70fdefc6f89b935b6ce956d4478aff1a44d783c#c70fdefc6f89b935b6ce956d4478aff1a44d783c"
 dependencies = [
  "indicate-frames",
  "libm",
@@ -1496,7 +1496,7 @@ dependencies = [
 [[package]]
 name = "indicate-sha256"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=9b234248858fe8b397ecf2a8a6f3f77e26a76b81#9b234248858fe8b397ecf2a8a6f3f77e26a76b81"
+source = "git+https://github.com/luofang34/Indicate.git?rev=c70fdefc6f89b935b6ce956d4478aff1a44d783c#c70fdefc6f89b935b6ce956d4478aff1a44d783c"
 
 [[package]]
 name = "intent-pilot"
@@ -1764,7 +1764,7 @@ dependencies = [
 [[package]]
 name = "navigate-astrodynamics"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Navigate.git?rev=a34c85b7edf8de6979eacde0edab0d38a8e01d0c#a34c85b7edf8de6979eacde0edab0d38a8e01d0c"
+source = "git+https://github.com/luofang34/Navigate.git?rev=926442f7309679b9e148fdc4143215376cc8e9a4#926442f7309679b9e148fdc4143215376cc8e9a4"
 dependencies = [
  "nalgebra",
  "navigate-contract",
@@ -1775,7 +1775,7 @@ dependencies = [
 [[package]]
 name = "navigate-contract"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Navigate.git?rev=a34c85b7edf8de6979eacde0edab0d38a8e01d0c#a34c85b7edf8de6979eacde0edab0d38a8e01d0c"
+source = "git+https://github.com/luofang34/Navigate.git?rev=926442f7309679b9e148fdc4143215376cc8e9a4#926442f7309679b9e148fdc4143215376cc8e9a4"
 dependencies = [
  "thiserror",
 ]
@@ -1783,7 +1783,7 @@ dependencies = [
 [[package]]
 name = "navigate-fusion"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Navigate.git?rev=a34c85b7edf8de6979eacde0edab0d38a8e01d0c#a34c85b7edf8de6979eacde0edab0d38a8e01d0c"
+source = "git+https://github.com/luofang34/Navigate.git?rev=926442f7309679b9e148fdc4143215376cc8e9a4#926442f7309679b9e148fdc4143215376cc8e9a4"
 dependencies = [
  "nalgebra",
  "navigate-astrodynamics",
@@ -1795,7 +1795,7 @@ dependencies = [
 [[package]]
 name = "navigate-geodesy"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Navigate.git?rev=a34c85b7edf8de6979eacde0edab0d38a8e01d0c#a34c85b7edf8de6979eacde0edab0d38a8e01d0c"
+source = "git+https://github.com/luofang34/Navigate.git?rev=926442f7309679b9e148fdc4143215376cc8e9a4#926442f7309679b9e148fdc4143215376cc8e9a4"
 dependencies = [
  "navigate-contract",
  "thiserror",
@@ -1804,7 +1804,7 @@ dependencies = [
 [[package]]
 name = "navigate-guidance"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Navigate.git?rev=a34c85b7edf8de6979eacde0edab0d38a8e01d0c#a34c85b7edf8de6979eacde0edab0d38a8e01d0c"
+source = "git+https://github.com/luofang34/Navigate.git?rev=926442f7309679b9e148fdc4143215376cc8e9a4#926442f7309679b9e148fdc4143215376cc8e9a4"
 dependencies = [
  "nalgebra",
  "navigate-astrodynamics",
@@ -1818,7 +1818,7 @@ dependencies = [
 [[package]]
 name = "navigate-route"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Navigate.git?rev=a34c85b7edf8de6979eacde0edab0d38a8e01d0c#a34c85b7edf8de6979eacde0edab0d38a8e01d0c"
+source = "git+https://github.com/luofang34/Navigate.git?rev=926442f7309679b9e148fdc4143215376cc8e9a4#926442f7309679b9e148fdc4143215376cc8e9a4"
 dependencies = [
  "navigate-contract",
  "navigate-geodesy",
@@ -1828,7 +1828,7 @@ dependencies = [
 [[package]]
 name = "navigate-trajectory"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Navigate.git?rev=a34c85b7edf8de6979eacde0edab0d38a8e01d0c#a34c85b7edf8de6979eacde0edab0d38a8e01d0c"
+source = "git+https://github.com/luofang34/Navigate.git?rev=926442f7309679b9e148fdc4143215376cc8e9a4#926442f7309679b9e148fdc4143215376cc8e9a4"
 dependencies = [
  "nalgebra",
  "navigate-astrodynamics",
@@ -2452,6 +2452,7 @@ dependencies = [
  "pilotage-geo",
  "pilotage-mission-core",
  "pilotage-protocol",
+ "pilotage-world",
  "prost",
  "sha2 0.10.9",
  "thiserror",

@@ -4,6 +4,7 @@
 
 mod dead_reckoning;
 mod document;
+mod flight_phase;
 mod holding_pattern;
 mod home;
 mod intercept;
@@ -43,8 +44,14 @@ use pilotage_mission_core::{
 };
 
 pub use dead_reckoning::DeadReckoning;
+pub(crate) use flight_phase::PhaseMachine;
+pub use flight_phase::{
+    APPROACH_RNP_NM, CifpProcedureKind, ENROUTE_RNP_NM, LegRole, M_PER_NM, ProcedureFixRole,
+    TERMINAL_RNP_NM,
+};
 pub use lateral_mode::{LateralMode, LateralStatus};
 pub use nav_guidance::{NavGuidance, NavQuality};
+pub use navigate_route::{HoldEntry, HoldStage, HoldStatus};
 pub use navigation_display::{
     DisplayFix, DisplayWaypoint, LegDisplay, NavigationDisplay, ToFrom, WaypointProgress,
 };
@@ -130,6 +137,8 @@ pub struct MissionEngine {
     /// The course trim of the straight track flown, for a vehicle that
     /// cannot stop.
     track_trim: track_trim::TrackTrim,
+    /// Leg or hold segment whose mandatory initial turn has been satisfied.
+    turn_satisfied: Option<tick::turn_direction::TurnStageKey>,
 }
 
 impl MissionEngine {
@@ -321,6 +330,7 @@ impl MissionEngine {
             steering: steering::Steering::default(),
             holding_pattern: None,
             track_trim: track_trim::TrackTrim::default(),
+            turn_satisfied: None,
         })
     }
 
@@ -375,6 +385,18 @@ impl MissionEngine {
     #[must_use]
     pub const fn mission_document(&self) -> &MissionDocument {
         &self.document
+    }
+
+    /// Observable progress of an active in-route hold (`HA`, `HF`, `HM`).
+    #[must_use]
+    pub const fn hold_status(&self) -> Option<HoldStatus> {
+        self.route.hold_status()
+    }
+
+    /// Arms manual exit on an active `HM` (`HoldManual`) leg; returns
+    /// `true` when the active leg is `HoldManual`.
+    pub fn exit_hold(&mut self) -> bool {
+        self.route.exit_hold()
     }
 }
 

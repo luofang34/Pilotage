@@ -25,6 +25,8 @@ pub enum RunControl {
     Resume,
     /// Stop in place, release the lease and end the run.
     Abort,
+    /// Arm manual exit from an active `HM` (`HoldManual`) leg.
+    ExitHold,
     /// A person's answer to the operation that asked.
     Answer(pilotage_mission::OperationAnswer),
 }
@@ -51,6 +53,11 @@ impl MissionTask {
             }
             // A flight asks no person anything.
             RunControl::Answer(_) => {}
+            RunControl::ExitHold => {
+                if let Some(mission) = self.mission.as_mut() {
+                    mission.exit_hold();
+                }
+            }
             RunControl::Abort => {
                 self.operator_hold = true;
                 self.stopping.get_or_insert(ABORT_STOP_FRAMES);

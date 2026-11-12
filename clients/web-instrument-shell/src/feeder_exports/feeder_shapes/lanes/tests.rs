@@ -2,10 +2,10 @@
 
 use indicate_instrument_state::abi::v11::{CAPACITY, decode_state, encode_state};
 use indicate_instrument_state::{
-    AircraftState, NavFacility, NavFromTo, NavSequencing, NavSource, PositionIntegrity,
+    AircraftState, NavFacility, NavFromTo, NavScale, NavSequencing, NavSource, PositionIntegrity,
     PositionSource, validate_state,
 };
-use pilotage_instrument_runtime::feeder::nav_display_state;
+use pilotage_instrument_runtime::feeder::nav_display_state_with_rnp;
 
 use super::{JsGuidanceIn, JsNavSnapshotIn};
 
@@ -26,6 +26,8 @@ fn tracked_leg() -> JsNavSnapshotIn {
             to_from: 1,
             position_source: 1,
             position_integrity: 1,
+            flight_phase: 2,
+            rnp_m: 1_852.0,
         },
         age_ms: 120.0,
     }
@@ -47,7 +49,8 @@ fn a_hold_reaches_the_frame_as_hold_and_its_outbound_leg_as_from() {
 /// Feeds `guidance` through the lane and the feeder, encodes its nav group
 /// in a state frame, and checks what decodes.
 fn frame_is_valid(guidance: JsNavSnapshotIn, sequencing: NavSequencing, fromto: NavFromTo) {
-    let nav = nav_display_state(Some(&guidance.into_snapshot())).expect("a nav group");
+    let (snapshot, rnp_m) = guidance.into_snapshot_and_rnp();
+    let nav = nav_display_state_with_rnp(Some(&snapshot), rnp_m).expect("a nav group");
     let data = nav.data.expect("nav data");
     assert_eq!(
         data.facility,
@@ -83,7 +86,8 @@ fn position_on_the_frame(
     let mut guidance = tracked_leg();
     guidance.nav_guidance.position_source = position_source;
     guidance.nav_guidance.position_integrity = position_integrity;
-    let nav = nav_display_state(Some(&guidance.into_snapshot()))?;
+    let (snapshot, rnp_m) = guidance.into_snapshot_and_rnp();
+    let nav = nav_display_state_with_rnp(Some(&snapshot), rnp_m)?;
     let state = AircraftState {
         nav,
         ..AircraftState::default()
@@ -120,5 +124,40 @@ fn the_lane_names_the_position_it_rests_on() {
             expected,
             "position {position_source}, integrity {position_integrity}"
         );
+    }
+}
+
+#[test]
+fn flight_phase_switches_scale_and_tighter_rnp_narrows_deflection() {
+    let cases = [
+        (1, None, Some((NavScale::Enroute, 0.2_f32))),
+        (2, None, Some((NavScale::Terminal, 0.8_f32))),
+        (3, None, Some((NavScale::Approach, 2.0_f32))),
+        (4, None, Some((NavScale::Terminal, 0.8_f32))),
+        // Tighter procedure RNP (20 m) on terminal narrows ±50 m full-scale to ±20 m.
+        (2, Some(20.0_f32), Some((NavScale::Terminal, 2.0_f32))),
+        // Unstated or unknown flight phase removes the guidance display.
+        (0, None, None),
+        (5, None, None),
+    ];
+    for (flight_phase, rnp_override, expected) in cases {
+        let mut guidance = tracked_leg();
+        guidance.nav_guidance.lateral_deviation_m = -20.0;
+        guidance.nav_guidance.flight_phase = flight_phase;
+        guidance.nav_guidance.rnp_m = rnp_override.unwrap_or(f32::NAN);
+        let (snapshot, rnp_m) = guidance.into_snapshot_and_rnp();
+        let actual = nav_display_state_with_rnp(Some(&snapshot), rnp_m)
+            .and_then(|stamped| stamped.data)
+            .map(|data| (data.scale, data.cdi_dots));
+        match (actual, expected) {
+            (Some((scale, dots)), Some((expected_scale, expected_dots))) => {
+                assert_eq!(scale, expected_scale, "phase {flight_phase}");
+                assert!(
+                    (dots - expected_dots).abs() < 1e-4,
+                    "phase {flight_phase}, rnp {rnp_override:?}: got {dots}, expected {expected_dots}"
+                );
+            }
+            (other, expected) => assert_eq!(other, expected, "phase {flight_phase}"),
+        }
     }
 }

@@ -33,7 +33,7 @@
 use navigate_contract::{
     GeodeticPosition, GuidanceSetpoint, LateralReference, MonotonicNanos, NavigationSolution,
 };
-use navigate_geodesy::{cross_track_m, distance_m, initial_bearing_rad};
+use navigate_geodesy::{cross_track_from_course_m, cross_track_m, distance_m, initial_bearing_rad};
 
 use crate::body::GEODESY;
 
@@ -122,18 +122,34 @@ impl MissionEngine {
         now: MonotonicNanos,
     ) -> GuidanceSetpoint {
         let position = &solution.position;
-        let LateralReference::Track { from } = reference else {
-            return setpoint;
-        };
         if self.config.can_stop() || self.steers_by_heading() {
             return setpoint;
         }
-        let key = TrackKey {
-            to: *to,
-            course_rad: initial_bearing_rad(from, to),
+        let (anchor, course_rad, cross_m) = match reference {
+            LateralReference::Track { from } => {
+                let Ok(cross_m) = cross_track_m(position, from, to, GEODESY) else {
+                    return setpoint;
+                };
+                (*to, initial_bearing_rad(from, to), cross_m)
+            }
+            LateralReference::Course { course_rad } => (
+                *to,
+                *course_rad,
+                cross_track_from_course_m(position, to, *course_rad, GEODESY),
+            ),
+            LateralReference::DisplacedCourse { anchor, course_rad } => (
+                *anchor,
+                *course_rad,
+                cross_track_from_course_m(position, anchor, *course_rad, GEODESY),
+            ),
+            _ => return setpoint,
         };
-        let Ok(cross_m) = cross_track_m(position, from, to, GEODESY) else {
+        if !cross_m.is_finite() {
             return setpoint;
+        }
+        let key = TrackKey {
+            to: anchor,
+            course_rad,
         };
         let (sin, cos) = key.course_rad.sin_cos();
         let velocity = &solution.velocity;

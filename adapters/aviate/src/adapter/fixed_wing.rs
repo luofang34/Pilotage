@@ -115,6 +115,13 @@ impl AviateAdapter {
         let mut adapter = Self::embedded(vehicle, config, sequencing, incarnations, now)?;
         adapter.control_feel_profiles = None;
         adapter.fixed_wing.envelope = Some(envelope);
+        let bounds = envelope.envelope();
+        let ref_speed_mps = (0.5 * (bounds.min_airspeed_mps + bounds.max_airspeed_mps)).max(1.0);
+        let orbit_rps = (9.806_65_f64 * 22.0_f64.to_radians().tan() / ref_speed_mps)
+            .min(0.052_359_877_559_829_88) as f32;
+        if let Some(uplink) = adapter.uplink.as_mut() {
+            uplink.set_fixed_wing_orbit_rate(orbit_rps);
+        }
         Ok(adapter)
     }
 

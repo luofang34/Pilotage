@@ -51,8 +51,18 @@ impl MissionEngine {
 
     /// The greatest indicated airspeed of the pattern flown, m/s.
     pub(super) fn holding_speed_limit_mps(&self) -> Option<f64> {
-        let active = self.holding_pattern.as_ref()?;
-        Some(holding_speed_limit_mps(active.pattern.fix.altitude_m))
+        if let Some(active) = self.holding_pattern.as_ref() {
+            return Some(holding_speed_limit_mps(active.pattern.fix.altitude_m));
+        }
+        if self
+            .route
+            .hold_status()
+            .is_some_and(|status| status.stage != navigate_route::HoldStage::ToFix)
+        {
+            let leg = self.route.active_leg()?;
+            return Some(holding_speed_limit_mps(leg.to.position.altitude_m));
+        }
+        None
     }
 
     /// The guidance target of one step of the holding pattern: the lateral
@@ -106,7 +116,7 @@ impl MissionEngine {
         now: MonotonicNanos,
         events: &mut Vec<MissionEvent>,
     ) -> Option<ControlIntent> {
-        if !self.steers_by_heading() {
+        if self.config.can_stop() {
             return None;
         }
         let now_s = seconds(now);

@@ -17,7 +17,7 @@ use navigate_contract::{DurationNanos, MonotonicNanos, NavigationSolution, Solut
 use crate::config::{BeyondLimits, OwnshipSource};
 
 use super::estimate::EstimateBudget;
-use super::{MissionEngine, StartWithheldReason};
+use super::{MissionEngine, MissionEvent, StartWithheldReason};
 
 #[cfg(test)]
 mod tests;
@@ -165,7 +165,8 @@ pub(super) const fn next(state: NavState, event: NavEvent) -> (NavState, NavEffe
     (to, effect)
 }
 
-/// The machine's state, and why its latest tick gave no solution.
+/// The machine's state, its dead-reckoning and hold annunciations, and why
+/// its latest tick gave no solution.
 #[derive(Debug, Default)]
 pub(super) struct NavMode {
     /// The machine's state after the latest tick that read the source.
@@ -173,6 +174,11 @@ pub(super) struct NavMode {
     /// Why the latest tick published no solution; `None` while one is
     /// published or before any tick.
     pub(super) no_solution: Option<StartWithheldReason>,
+    /// The horizontal uncertainty of the dead reckoning last reported,
+    /// metres; `None` while none is reported.
+    pub(super) reported_dead_reckoning_m: Option<f64>,
+    /// Why the engine holds heading or position, while it does.
+    pub(super) holding: Option<StartWithheldReason>,
 }
 
 /// What the configured source holds at one tick.
@@ -187,14 +193,21 @@ struct Reading {
 
 impl MissionEngine {
     /// The solution steered on at `now`, or `None`: reads the configured
-    /// source once, steps the machine, and takes the held solution only
-    /// in a state that steers. Counts why a held value is not flown, and
-    /// keeps the reason for the display and the hold.
-    pub(super) fn judge_source(&mut self, now: MonotonicNanos) -> Option<NavigationSolution> {
+    /// source once, steps the machine, takes the held solution only in a
+    /// state that steers, and emits dead-reckoning / recovery annunciations
+    /// when `events` is supplied.
+    pub(super) fn judge_source(
+        &mut self,
+        now: MonotonicNanos,
+        events: Option<&mut Vec<MissionEvent>>,
+    ) -> Option<NavigationSolution> {
         let reading = self.read_source(now);
         let (state, _) = next(self.modes.nav.state, reading.event);
         self.modes.nav.state = state;
         let solution = reading.held.filter(|_| state.steers());
+        if state.steers() {
+            self.modes.nav.holding = None;
+        }
         self.onboard.dead_reckoned = solution.filter(|_| state == NavState::DeadReckoning);
         self.modes.nav.no_solution = match state {
             NavState::Fit | NavState::DeadReckoning => None,
@@ -210,7 +223,56 @@ impl MissionEngine {
                 })
             }
         };
+        if let Some(events) = events {
+            self.announce_dead_reckoning(solution.as_ref(), events);
+        }
         solution
+    }
+
+    /// Emits [`MissionEvent::DeadReckoning`] on entry and each doubling of
+    /// horizontal uncertainty, and [`MissionEvent::NavigationRecovered`]
+    /// when a solution within limits returns directly from dead reckoning.
+    fn announce_dead_reckoning(
+        &mut self,
+        solution: Option<&NavigationSolution>,
+        events: &mut Vec<MissionEvent>,
+    ) {
+        let reported = self.modes.nav.reported_dead_reckoning_m;
+        match (self.dead_reckoning(), reported) {
+            (Some(now), last) => {
+                let sigma = now.horizontal_1sigma_m;
+                if last.is_none_or(|last| sigma >= 2.0 * last) {
+                    self.modes.nav.reported_dead_reckoning_m = Some(sigma);
+                    events.push(MissionEvent::DeadReckoning {
+                        horizontal_1sigma_m: sigma,
+                        vertical_1sigma_m: now.vertical_1sigma_m,
+                    });
+                }
+            }
+            (None, Some(_)) => {
+                self.modes.nav.reported_dead_reckoning_m = None;
+                if let Some(sol) = solution {
+                    events.push(MissionEvent::NavigationRecovered {
+                        horizontal_1sigma_m: sol.integrity.horizontal_1sigma_m,
+                    });
+                }
+            }
+            (None, None) => {}
+        }
+    }
+
+    /// Announces the hold of a vehicle with no solution fit to fly, once
+    /// for each reason in a row.
+    pub(super) fn announce_hold(&mut self, events: &mut Vec<MissionEvent>) {
+        let reason = self.solution_absence();
+        let changed =
+            self.modes.nav.holding.is_none_or(|held| {
+                core::mem::discriminant(&held) != core::mem::discriminant(&reason)
+            });
+        self.modes.nav.holding = Some(reason);
+        if changed {
+            events.push(MissionEvent::NavigationHold { reason });
+        }
     }
 
     /// Why the latest tick gave no solution to steer on.

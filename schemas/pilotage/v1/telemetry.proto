@@ -516,6 +516,15 @@ message NavGuidanceState {
   // sensor the navigator excluded. 0 states none: a display that
   // annunciates position integrity removes the guidance.
   uint32 position_integrity = 14;
+  // Flight phase the source flies the active leg to: 1 enroute, 2 terminal
+  // (departures and arrivals), 3 approach, 4 missed approach. 0 states
+  // none: a display removes the guidance rather than guessing a scale.
+  uint32 flight_phase = 15;
+  // Required Navigation Performance (RNP) for the active leg, meters
+  // (e.g. 3704.0 for 2.0 NM enroute, 1852.0 for 1.0 NM terminal, 555.6
+  // for 0.3 NM approach, or tighter when procedure-specified). Zero or
+  // NaN states none.
+  float rnp_m = 16;
 }
 
 message PayloadAxisObservation {

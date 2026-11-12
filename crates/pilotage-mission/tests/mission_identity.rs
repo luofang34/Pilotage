@@ -26,7 +26,7 @@ const POINTS: [(&str, f64, f64); 3] = [
 ];
 
 /// The content digest of the demo route mission over [`POINTS`].
-const ROUTE_DIGEST: &str = "9259409faa70436761c24a2a2da46953cb0a7af7573a4071c1e0f8f015c6f03f";
+const ROUTE_DIGEST: &str = "069a5e6b77aa9f9ed3851713b4f5b99f173348c980307f51a5427759d2cf2f77";
 
 fn snapshot_blob() -> Vec<u8> {
     let points = POINTS

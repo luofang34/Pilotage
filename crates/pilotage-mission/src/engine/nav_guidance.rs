@@ -8,15 +8,15 @@
 //! Scaling deviations to instrument dots is display policy and happens
 //! past this boundary (ADR-0017).
 
-use navigate_contract::{AltitudeConstraint, GeodeticPosition, SolutionQuality};
-use navigate_geodesy::initial_bearing_rad;
-use navigate_geodesy::{cross_track_m, distance_m};
+use navigate_contract::{AltitudeConstraint, GeodeticPosition, LateralReference, SolutionQuality};
+use navigate_geodesy::{cross_track_from_course_m, cross_track_m, distance_m, initial_bearing_rad};
+use navigate_route::{HoldStage, HoldStatus, Leg};
 
 use crate::body::GEODESY;
-use navigate_route::Leg;
 
 use super::{
-    MissionEngine, MissionState, PositionIntegrity, PositionKind, SteeringIntegrity, ToFrom,
+    FlightPhase, MissionEngine, MissionState, PositionIntegrity, PositionKind, SteeringIntegrity,
+    ToFrom,
 };
 
 #[cfg(test)]
@@ -54,8 +54,8 @@ impl From<SolutionQuality> for NavQuality {
 pub struct NavGuidance {
     /// Identifier of the waypoint being flown toward.
     pub to_ident: String,
-    /// Identifier of the leg's origin fix; `None` on a direct-to leg,
-    /// which is flown from the present position.
+    /// Identifier of the leg's origin fix; `None` on a direct-to leg or
+    /// holding circuit, which has no upstream fix.
     pub from_ident: Option<String>,
     /// Desired track, radians clockwise from true north in `[0, 2π)`. On
     /// a direct-to leg this is the live bearing to the waypoint.
@@ -84,9 +84,9 @@ pub struct NavGuidance {
     /// the vehicle along the desired course; `None` while no lateral
     /// course is tracked, which removes the deviation bar.
     pub to_from: Option<ToFrom>,
-    /// The vehicle flies the holding pattern at the plan's end instead of
-    /// sequencing its legs: the geometry is the inbound leg to the holding
-    /// fix, whose TO/FROM flips every circuit.
+    /// The vehicle flies a holding pattern instead of sequencing legs:
+    /// the geometry is the inbound leg to the holding fix, whose TO/FROM
+    /// flips every circuit.
     pub holding: bool,
     /// The kind of position this geometry rests on; `None` when the
     /// engine cannot name one, which removes the display.
@@ -94,26 +94,31 @@ pub struct NavGuidance {
     /// The engine's judgment of that position; `None` when it has none an
     /// instrument can present, which removes the display.
     pub position_integrity: Option<PositionIntegrity>,
+    /// Flight phase of the active leg (`Enroute`, `Terminal`, `Approach`,
+    /// or `Missed`).
+    pub phase: FlightPhase,
+    /// Effective Required Navigation Performance of the active leg, metres.
+    pub rnp_m: f64,
 }
 
 impl MissionEngine {
     /// The guidance the executor is flying, or `None` when it is flying
     /// nothing: before a first solution, while arming, and once the plan
-    /// is complete with no holding pattern flown after it. In the holding
-    /// pattern it is the inbound leg to the holding fix. The geometry comes from the solution and active leg
-    /// the latest [`MissionEngine::tick`] left behind, so this reads
-    /// state and never re-runs fusion or sequencing.
-    ///
-    /// A tick whose filter published nothing clears the solution, so
-    /// guidance disappears with it instead of aging silently on a
-    /// display.
+    /// is complete with no holding pattern flown after it. In a holding
+    /// pattern it is the inbound leg to the holding fix. The geometry
+    /// comes from the solution and active leg the latest
+    /// [`MissionEngine::tick`] left behind, so this reads state and never
+    /// re-runs fusion or sequencing.
     #[must_use]
     pub fn nav_guidance(&self) -> Option<NavGuidance> {
         let solution = self.last_solution.as_ref()?;
+        let phase = self.flight_phase();
+        let rnp_m = self.rnp_m();
         match self.state() {
             MissionState::AfterPlan => {
                 let leg = self.holding_pattern_leg(solution)?;
                 let waypoint_count = self.route.waypoints().len();
+                let steering = self.steering_source();
                 Some(NavGuidance {
                     to_ident: leg.to.ident,
                     from_ident: None,
@@ -123,11 +128,13 @@ impl MissionEngine {
                     distance_to_waypoint_m: leg.distance_to_go_m,
                     leg_index: u32::try_from(waypoint_count.saturating_sub(1)).unwrap_or(u32::MAX),
                     waypoint_count: u32::try_from(waypoint_count).unwrap_or(u32::MAX),
-                    integrity: self.steering_source().integrity,
+                    integrity: steering.integrity,
                     to_from: Some(leg.to_from),
                     holding: true,
-                    position: self.steering_source().position_kind(),
-                    position_integrity: self.steering_source().position_integrity(),
+                    position: steering.position_kind(),
+                    position_integrity: steering.position_integrity(),
+                    phase,
+                    rnp_m,
                 })
             }
             MissionState::AwaitSolution
@@ -137,13 +144,16 @@ impl MissionEngine {
             | MissionState::Failed => None,
             MissionState::Climb | MissionState::Enroute => {
                 let leg = self.route.active_leg()?;
+                let steering = self.steering_source();
                 let mut guidance = leg_guidance(
                     &solution.position,
                     &leg,
+                    self.route.hold_status(),
                     self.route.waypoints().len(),
-                    self.steering_source().integrity,
+                    steering.integrity,
+                    phase,
+                    rnp_m,
                 );
-                let steering = self.steering_source();
                 guidance.position = steering.position_kind();
                 guidance.position_integrity = steering.position_integrity();
                 Some(guidance)
@@ -153,28 +163,22 @@ impl MissionEngine {
 }
 
 /// The plan-relative geometry of one active leg from `position`.
-///
-/// The track runs from the leg's origin fix to its destination; a
-/// direct-to leg has no origin fix, so its course is the live bearing to
-/// the waypoint and no cross-track deviation exists to report.
 fn leg_guidance(
     position: &GeodeticPosition,
     leg: &Leg<'_>,
+    hold_status: Option<HoldStatus>,
     waypoint_count: usize,
     integrity: SteeringIntegrity,
+    phase: FlightPhase,
+    rnp_m: f64,
 ) -> NavGuidance {
     let to = leg.to;
-    let course_rad = leg.from.map_or_else(
-        || initial_bearing_rad(position, &to.position),
-        |from| initial_bearing_rad(&from.position, &to.position),
-    );
-    let lateral_deviation_m = leg
-        .from
-        .and_then(|from| cross_track_m(position, &from.position, &to.position, GEODESY).ok());
+    let (from_ident, course_rad, lateral_deviation_m, holding) =
+        leg_lateral_geometry(position, leg, hold_status);
     let distance_to_waypoint_m = distance_m(position, &to.position, GEODESY);
     NavGuidance {
         to_ident: to.ident.as_str().to_owned(),
-        from_ident: leg.from.map(|from| from.ident.as_str().to_owned()),
+        from_ident,
         course_rad,
         lateral_deviation_m,
         vertical_deviation_m: profile_deviation_m(position.altitude_m, to.altitude.as_ref()),
@@ -190,25 +194,85 @@ fn leg_guidance(
         leg_index: u32::try_from(leg.index).unwrap_or(u32::MAX),
         waypoint_count: u32::try_from(waypoint_count).unwrap_or(u32::MAX),
         integrity,
-        holding: false,
+        holding,
         position: None,
         position_integrity: None,
+        phase,
+        rnp_m,
+    }
+}
+
+fn leg_lateral_geometry(
+    position: &GeodeticPosition,
+    leg: &Leg<'_>,
+    hold_status: Option<HoldStatus>,
+) -> (Option<String>, f64, Option<f64>, bool) {
+    let to = leg.to;
+    let in_hold_circuit = hold_status.is_some_and(|status| status.stage != HoldStage::ToFix);
+    match (in_hold_circuit, leg.path.hold()) {
+        (true, Some(hold)) => (
+            None,
+            hold.inbound_course_rad,
+            Some(cross_track_from_course_m(
+                position,
+                &to.position,
+                hold.inbound_course_rad,
+                GEODESY,
+            )),
+            true,
+        ),
+        _ => match leg.lateral_reference() {
+            LateralReference::Track { from } => (
+                leg.from.map(|fix| fix.ident.as_str().to_owned()),
+                initial_bearing_rad(&from, &to.position),
+                cross_track_m(position, &from, &to.position, GEODESY).ok(),
+                false,
+            ),
+            LateralReference::Course { course_rad } => (
+                leg.from.map(|fix| fix.ident.as_str().to_owned()),
+                course_rad,
+                Some(cross_track_from_course_m(
+                    position,
+                    &to.position,
+                    course_rad,
+                    GEODESY,
+                )),
+                false,
+            ),
+            LateralReference::DisplacedCourse { anchor, course_rad } => (
+                None,
+                course_rad,
+                Some(cross_track_from_course_m(
+                    position, &anchor, course_rad, GEODESY,
+                )),
+                false,
+            ),
+            _ => (
+                None,
+                initial_bearing_rad(position, &to.position),
+                None,
+                false,
+            ),
+        },
     }
 }
 
 /// Signed deviation from a waypoint's altitude constraint, positive above
 /// the profile — the sign convention guidance itself derives.
-///
-/// An `At` constraint reports the signed deviation both ways; the
-/// one-sided forms report only their violation direction and zero while
-/// satisfied. A waypoint with no constraint — or one wearing a constraint
-/// this vocabulary cannot read — has no profile to deviate from and
-/// reports nothing rather than an invented zero.
 fn profile_deviation_m(altitude_m: f64, constraint: Option<&AltitudeConstraint>) -> Option<f64> {
     match constraint? {
         AltitudeConstraint::At(target_m) => Some(altitude_m - target_m),
         AltitudeConstraint::AtOrAbove(floor_m) => Some((altitude_m - floor_m).min(0.0)),
         AltitudeConstraint::AtOrBelow(ceiling_m) => Some((altitude_m - ceiling_m).max(0.0)),
+        AltitudeConstraint::Window { lower_m, upper_m } => {
+            if altitude_m < *lower_m {
+                Some(altitude_m - lower_m)
+            } else if altitude_m > *upper_m {
+                Some(altitude_m - upper_m)
+            } else {
+                Some(0.0)
+            }
+        }
         _ => None,
     }
 }

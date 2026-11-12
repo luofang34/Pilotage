@@ -120,4 +120,23 @@ pub enum MissionBuildError {
         #[source]
         source: crate::DeclaredStartError,
     },
+    /// A planned waypoint declares an implausible RNP value (`<= 0` or
+    /// non-finite).
+    #[error("waypoint {index} declares an invalid RNP {rnp_nm} NM (must be finite and > 0)")]
+    WaypointRnp {
+        /// The waypoint's index in fly order.
+        index: usize,
+        /// The rejected RNP value, nautical miles.
+        rnp_nm: f64,
+    },
+    /// Evaluating WMM2025 magnetic variation for a magnetic course at a
+    /// waypoint failed.
+    #[error("waypoint {index} magnetic variation failed: {source}")]
+    MagneticField {
+        /// The waypoint's index in fly order.
+        index: usize,
+        /// Underlying geomagnetic model error.
+        #[source]
+        source: Box<pilotage_world::WorldError>,
+    },
 }

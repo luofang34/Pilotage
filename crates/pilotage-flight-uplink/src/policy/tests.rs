@@ -102,3 +102,35 @@ fn the_same_calls_give_the_same_bytes() {
     };
     assert_eq!(run(), run());
 }
+
+#[test]
+fn fixed_wing_link_loss_holds_heading_for_sixty_seconds_then_orbits() {
+    let mut policy = policy();
+    policy.set_fixed_wing_orbit_rate(0.05);
+    policy.arm(ms(0), 0.25);
+    policy.expire_quiet();
+    let _ = policy.fixed_wing_velocity_frame(ms(100), [30.0, 0.0, 0.0], 0.25);
+
+    // Link loss at t = 1_000 ms: holds 0.25 rad right up to t = 61_000 ms (60 s).
+    let _ = policy.neutral(ms(1_000));
+    for step_ms in (2_000..=61_000).step_by(1_000) {
+        let _ = policy.keep_holding(ms(step_ms));
+        assert!(
+            (policy.heading().heading_rad - 0.25).abs() < 1e-6,
+            "heading changed before 60 s at {step_ms} ms: {}",
+            policy.heading().heading_rad
+        );
+    }
+
+    // Past 60 s after link loss (t > 61_000 ms), heading advances at 0.05 rad/s in orbit.
+    let mut prev = policy.heading().heading_rad;
+    for step_ms in (62_000..=76_000).step_by(1_000) {
+        let _ = policy.keep_holding(ms(step_ms));
+        let cur = policy.heading().heading_rad;
+        assert!(
+            cur > prev + 0.04,
+            "expected orbit progression at {step_ms} ms: {prev} -> {cur}"
+        );
+        prev = cur;
+    }
+}

@@ -262,6 +262,10 @@ pub struct MissionConfig {
     /// it, a vehicle that holds its altitude itself captures the climb on
     /// the altitude its flight controller flies. Default none.
     pub fc_origin_height_m: Option<f64>,
+    /// Fixed geomagnetic epoch used to resolve magnetic (`P4`) courses to
+    /// true north at plan build via WMM2025. Default none (magnetic
+    /// courses are refused until an epoch is supplied).
+    pub magnetic_epoch: Option<pilotage_world::MagneticEpoch>,
 }
 
 impl MissionConfig {
@@ -331,6 +335,7 @@ impl MissionConfig {
             launch_detection: None,
             declared_start: None,
             fc_origin_height_m: None,
+            magnetic_epoch: None,
         }
     }
 }

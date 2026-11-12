@@ -864,6 +864,8 @@ function guidance(sequence, overrides = {}, stampOverrides = {}) {
     solutionQuality: 0,
     sequencing: 0,
     toFrom: 1,
+    flightPhase: 2,
+    rnpM: 1852,
     ...overrides,
     stamp: {
       sourceId: 0x0a1en,

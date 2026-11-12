@@ -38,6 +38,7 @@ fn request() -> SurveyRequest {
         .collect();
     let mut request = SurveyRequest::new(polygon);
     request.across_track_fov_rad = 1.5;
+    request.sidelap = 0.55;
     request
 }
 
@@ -51,23 +52,26 @@ fn config() -> MissionConfig {
     config
 }
 
-/// The first line's far end in the truth frame: north, east.
-fn first_line_end() -> [f64; 2] {
+/// The final survey line's far end (whose turn home exceeds the 121 deg
+/// fly-by boundary so it has no turn anticipation) in the truth frame:
+/// north, east, and its waypoint index.
+fn final_line_end() -> (usize, [f64; 2]) {
     let plane = tangent_plane(anchor()).expect("anchor is plausible");
     let plan = plan_survey(&request(), &anchor(), HEIGHT_M).expect("plans");
-    let end = plane.to_ned(&plan.waypoints[1].position);
-    [end.north_m, end.east_m]
+    let index = plan.waypoints.len() - 2;
+    let end = plane.to_ned(&plan.waypoints[index].position);
+    (index, [end.north_m, end.east_m])
 }
 
 #[test]
 fn a_line_end_passed_outside_the_capture_radius_sequences_as_passed() {
     let (mut engine, record) = MissionEngine::from_survey(&request(), config()).expect("builds");
-    let end = first_line_end();
+    let (target_index, end) = final_line_end();
     let (mut ned, mut velocity, mut yaw) = ([0.0_f64; 3], [0.0_f64; 3], 0.0_f64);
     let mut now = MonotonicNanos::from_nanos(1_000_000_000);
     let (mut gusted, mut farthest, mut completed) = (false, 0.0_f64, false);
     let mut reports = Vec::new();
-    for sequence in 0..40_000_u32 {
+    for sequence in 0..80_000_u32 {
         now = MonotonicNanos::from_nanos(now.as_nanos() + STEP_NANOS);
         let sample = OwnshipSample {
             ned,
@@ -92,8 +96,11 @@ fn a_line_end_passed_outside_the_capture_radius_sequences_as_passed() {
         for axis in 0..3 {
             ned[axis] += velocity[axis] * STEP_S;
         }
+        let on_final_line = engine
+            .nav_guidance()
+            .is_some_and(|g| g.leg_index as usize == target_index);
         let to_end = (ned[0] - end[0]).hypot(ned[1] - end[1]);
-        if !gusted && to_end < 2.0 * GUST_M {
+        if on_final_line && !gusted && to_end < 2.0 * GUST_M {
             // A gust across the line just before its end: the vehicle
             // arrives too far to the side to capture it.
             ned[1] -= GUST_M;

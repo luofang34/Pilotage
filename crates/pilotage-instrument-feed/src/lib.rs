@@ -19,5 +19,5 @@ mod state;
 #[cfg(test)]
 mod tests;
 
-pub use sample::{avionics_sample, raw_stamp};
+pub use sample::{avionics_sample, nav_guidance_sample, raw_stamp};
 pub use state::{FeedParams, InstrumentFeed};

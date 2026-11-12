@@ -317,3 +317,170 @@ fn the_leg_is_flown_again(flight: &mut Flight) {
         "and northbound along it"
     );
 }
+
+#[test]
+fn wind_estimate_is_retained_across_ten_minutes_of_timed_hold_and_only_annunciated_stale() {
+    let mut flight = Flight::new();
+    // Strong steady wind (8 m/s south, 10 m/s east): without wind retention,
+    // 700+ s of timed hold would drift > 8.9 km downwind!
+    flight.aircraft.wind = [-8.0, 10.0];
+    for _ in 0..1_200 {
+        let _ = flight.step(true);
+    }
+    let (_, held_s) = hold_the_heading(&mut flight);
+    assert!((held_s - BOUND_S).abs() <= 2.0 * STEP_S);
+
+    let farthest_m = fly_five_circuits(&mut flight);
+    assert!(
+        farthest_m <= RACETRACK_REACH_M + 1_500.0,
+        "retaining wind estimate kept orbit bounded ({farthest_m:.0} m), never drifting 9 km downwind"
+    );
+    let stale_events = flight
+        .events
+        .iter()
+        .filter(|e| matches!(e, MissionEvent::TimedHoldWindStale { age_s } if *age_s > 600.0))
+        .count();
+    assert_eq!(
+        stale_events, 1,
+        "wind staleness annunciated once after 10 min"
+    );
+    assert!(flight.engine.navigation_display().lateral.wind_stale);
+
+    // Fly two more circuits well past 10 min: wind correction remains active!
+    let post_stale_anchor = [flight.aircraft.ned[0], flight.aircraft.ned[1]];
+    for _ in 0..4_800 {
+        assert_eq!(flight.step(false), LateralMode::TimedHold);
+    }
+    let drift_after_stale_m = flight.distance_from(post_stale_anchor);
+    assert!(
+        drift_after_stale_m <= RACETRACK_REACH_M + 1_500.0,
+        "wind estimate was NOT discarded after 10 min staleness annunciation ({drift_after_stale_m:.0} m)"
+    );
+}
+
+fn build_velocity_steered_engine() -> MissionEngine {
+    let mut config = MissionConfig::new(String::new(), anchor(), CLOCK);
+    config.ownship_source = OwnshipSource::vehicle_estimate();
+    config.execution_target = ExecutionTarget::Simulator;
+    config.vehicle_class = VehicleClass::FixedWing;
+    config.cruise_height_m = 0.0;
+    config.cruise_mps = CRUISE_IAS_MPS;
+    config.limits.max_horizontal_mps = 65.0;
+    config.route_bank_deg = 22.0;
+
+    let plane = tangent_plane(anchor()).expect("anchor");
+    let plan = WaypointPlan::new(
+        [[0.0, 0.0], [60_000.0, 0.0]]
+            .iter()
+            .map(|[n, e]| {
+                let p = plane.from_ned(&NedOffset::new(*n, *e, 0.0));
+                PlannedWaypoint::new(
+                    p.latitude_rad.to_degrees(),
+                    p.longitude_rad.to_degrees(),
+                    ALTITUDE_M,
+                )
+            })
+            .collect(),
+    );
+    MissionEngine::from_waypoints(&plan, config)
+        .expect("builds")
+        .0
+}
+
+fn intent_course_rad(intent: pilotage_protocol::ControlIntent, course_rad: f64) -> f64 {
+    match intent {
+        pilotage_protocol::ControlIntent::HeadingAltitude(d) => f64::from(d.heading_rad),
+        pilotage_protocol::ControlIntent::Velocity(v) => {
+            let (sin, cos) = course_rad.sin_cos();
+            let vn = f64::from(v.vx) * cos - f64::from(v.vy) * sin;
+            let ve = f64::from(v.vx) * sin + f64::from(v.vy) * cos;
+            ve.atan2(vn)
+        }
+        other => panic!("unexpected intent: {other:?}"),
+    }
+}
+
+fn track_initial_leg(engine: &mut MissionEngine, ned: &mut [f64; 3], now_ns: &mut u64) {
+    let vel = [CRUISE_IAS_MPS, 0.0, 0.0];
+    for seq in 1..=200_u32 {
+        *now_ns = now_ns.wrapping_add(STEP_NANOS);
+        let now = MonotonicNanos::from_nanos(*now_ns);
+        let sample = pilotage_mission::OwnshipSample {
+            ned: *ned,
+            ned_velocity: vel,
+            yaw_rad: Some(0.0),
+            role: pilotage_mission::TruthRole::OperationalEstimate,
+            acquired_at: now,
+            sequence: seq,
+        };
+        engine.on_ownship(&sample, now);
+        let out = engine.tick(now);
+        if let Some(act) = out.action
+            && act.action == ControlAction::Arm
+        {
+            engine.on_action_result(act.action_id, true);
+        }
+        ned[0] += vel[0] * STEP_S;
+    }
+}
+
+#[test]
+fn velocity_steered_fixed_wing_holds_heading_sixty_seconds_then_orbits_never_coasting_straight() {
+    let mut engine = build_velocity_steered_engine();
+    let mut ned = [100.0_f64, 0.0, 0.0];
+    let mut course_rad = 0.0_f64;
+    let mut now_ns = 1_000_000_000_u64;
+
+    track_initial_leg(&mut engine, &mut ned, &mut now_ns);
+    assert_eq!(engine.navigation_display().lateral.mode, LateralMode::Track);
+
+    // 2. Lose position completely: verify 60 s HeadingHold -> TimedHold orbit!
+    let mut held_s = 0.0_f64;
+    let mut mode = LateralMode::Track;
+    while mode != LateralMode::TimedHold {
+        now_ns = now_ns.wrapping_add(STEP_NANOS);
+        let out = engine.tick(MonotonicNanos::from_nanos(now_ns));
+        assert!(out.intent.is_some(), "fixed wing always receives a command");
+        mode = engine.navigation_display().lateral.mode;
+        if mode == LateralMode::HeadingHold {
+            held_s += STEP_S;
+        }
+        ned[0] += CRUISE_IAS_MPS * course_rad.cos() * STEP_S;
+        ned[1] += CRUISE_IAS_MPS * course_rad.sin() * STEP_S;
+    }
+    assert!(
+        (held_s - BOUND_S).abs() <= 2.0 * STEP_S,
+        "held heading for {held_s:.2} s"
+    );
+
+    // 3. Follow commands in TimedHold and confirm continuous closed orbit!
+    let orbit_origin = [ned[0], ned[1]];
+    let mut turned = 0.0_f64;
+    let mut farthest_m = 0.0_f64;
+    for _ in 0..10_000 {
+        now_ns = now_ns.wrapping_add(STEP_NANOS);
+        let out = engine.tick(MonotonicNanos::from_nanos(now_ns));
+        assert_eq!(
+            engine.navigation_display().lateral.mode,
+            LateralMode::TimedHold
+        );
+        let next_course = intent_course_rad(out.intent.expect("command in TimedHold"), course_rad);
+        let d = (next_course - course_rad)
+            .sin()
+            .atan2((next_course - course_rad).cos());
+        turned += d;
+        course_rad = next_course;
+        ned[0] += CRUISE_IAS_MPS * course_rad.cos() * STEP_S;
+        ned[1] += CRUISE_IAS_MPS * course_rad.sin() * STEP_S;
+        farthest_m = farthest_m.max((ned[0] - orbit_origin[0]).hypot(ned[1] - orbit_origin[1]));
+    }
+    assert!(
+        turned.abs() > 2.0 * TAU,
+        "completed multiple orbits ({:.2} rad)",
+        turned
+    );
+    assert!(
+        farthest_m < RACETRACK_REACH_M,
+        "stayed bounded ({farthest_m:.0} m)"
+    );
+}

@@ -30,13 +30,16 @@ impl MissionEngine {
         reference: &LateralReference,
         to: &GeodeticPosition,
     ) -> GuidanceSetpoint {
-        let LateralReference::Track { from } = reference else {
-            return setpoint;
-        };
         if self.config.can_stop() {
             return setpoint;
         }
-        within_intercept(setpoint, initial_bearing_rad(from, to))
+        let track_rad = match reference {
+            LateralReference::Track { from } => initial_bearing_rad(from, to),
+            LateralReference::Course { course_rad }
+            | LateralReference::DisplacedCourse { course_rad, .. } => *course_rad,
+            _ => return setpoint,
+        };
+        within_intercept(setpoint, track_rad)
     }
 }
 

@@ -6,7 +6,9 @@
 //! semantic judgement runs in `indicate-instrument-feeder` behind the
 //! runtime's plain-Rust feeder state.
 
-use pilotage_instrument_runtime::feeder::{FcState, Ingress, IngressParams, NavGuidance, Turn};
+use pilotage_instrument_runtime::feeder::{
+    FcState, Ingress, IngressParams, NavGuidance, Turn, nav_display_state_with_rnp,
+};
 use wasm_bindgen::JsValue;
 use wasm_bindgen::prelude::wasm_bindgen;
 
@@ -182,8 +184,19 @@ impl FeederNavGuidance {
         let sample: Option<JsGuidanceSample> = serde_wasm_bindgen::from_value(sample)
             .map_err(|error| to_js_error("nav guidance", error))?;
         let converted = sample.map(JsGuidanceSample::into_lane);
-        match self.inner.observe(converted.as_ref(), now_ms) {
-            Some(snapshot) => serialize(&feeder_shapes::JsNavSnapshot::from(snapshot)),
+        let (lane, phase, rnp_m) = match converted.as_ref() {
+            Some((lane, phase, rnp_m)) => (Some(lane), *phase, *rnp_m),
+            None => (None, 0, None),
+        };
+        match self
+            .inner
+            .observe_with_phase_rnp(lane, phase, rnp_m, now_ms)
+        {
+            Some(snapshot) => serialize(&feeder_shapes::JsNavSnapshot::new(
+                snapshot,
+                self.inner.last_flight_phase(),
+                self.inner.last_rnp_m().unwrap_or(f32::NAN),
+            )),
             None => Ok(JsValue::NULL),
         }
     }
@@ -191,7 +204,11 @@ impl FeederNavGuidance {
     /// The current snapshot without feeding a sample.
     pub fn snapshot(&self, now_ms: f64) -> Result<JsValue, JsValue> {
         match self.inner.snapshot(now_ms) {
-            Some(snapshot) => serialize(&feeder_shapes::JsNavSnapshot::from(snapshot)),
+            Some(snapshot) => serialize(&feeder_shapes::JsNavSnapshot::new(
+                snapshot,
+                self.inner.last_flight_phase(),
+                self.inner.last_rnp_m().unwrap_or(f32::NAN),
+            )),
             None => Ok(JsValue::NULL),
         }
     }
@@ -209,8 +226,14 @@ impl FeederNavGuidance {
 pub fn feeder_nav_display_state(snapshot: JsValue) -> Result<JsValue, JsValue> {
     let snapshot: Option<feeder_shapes::JsNavSnapshotIn> = serde_wasm_bindgen::from_value(snapshot)
         .map_err(|error| to_js_error("nav snapshot", error))?;
-    let snapshot = snapshot.map(feeder_shapes::JsNavSnapshotIn::into_snapshot);
-    match pilotage_instrument_runtime::feeder::nav_display_state(snapshot.as_ref()) {
+    let (snapshot, rnp_m) = match snapshot {
+        Some(input) => {
+            let (snap, rnp_m) = input.into_snapshot_and_rnp();
+            (Some(snap), rnp_m)
+        }
+        None => (None, None),
+    };
+    match nav_display_state_with_rnp(snapshot.as_ref(), rnp_m) {
         Some(stamped) => serialize(&feeder_shapes::JsNavGroup::from(stamped)),
         None => Ok(JsValue::NULL),
     }

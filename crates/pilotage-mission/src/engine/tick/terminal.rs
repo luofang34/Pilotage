@@ -9,7 +9,7 @@
 
 use navigate_contract::{GeodeticPosition, MonotonicNanos, NavigationSolution};
 use navigate_route::SequenceReason;
-use pilotage_protocol::{ControlIntent, ReferenceFrame, VelocityIntent};
+use pilotage_protocol::ControlIntent;
 
 use super::super::{MissionEngine, MissionEvent, MissionOutput, MissionState};
 use super::outputs::zero_velocity_intent;
@@ -18,9 +18,14 @@ impl MissionEngine {
     /// The output of a tick of a vehicle flying on after its plan.
     pub(super) fn after_plan_output(&mut self, now: MonotonicNanos) -> MissionOutput {
         let mut events = core::mem::take(&mut self.hold_events);
-        let solution = self.publish_solution(now);
+        let solution = self.publish_solution(now, Some(&mut events));
         let state = MissionState::AfterPlan;
-        let intent = self.intent_for_state(state, solution.as_ref(), now, &mut events);
+        let intent = self.intent_for_tick(
+            self.lifecycle().lateral_stage(),
+            solution.as_ref(),
+            now,
+            &mut events,
+        );
         MissionOutput {
             intent,
             action: None,
@@ -46,25 +51,15 @@ impl MissionEngine {
         guided.or_else(|| self.holding_pattern_fallback())
     }
 
-    /// The command of a vehicle in its holding pattern when guidance gives
-    /// none: the heading and altitude last commanded for a fixed wing
-    /// steered by heading; for one steered by velocity, straight and level
-    /// on its present heading at the cruise airspeed.
+    /// The command of a fixed wing in its holding pattern when guidance
+    /// gives none on a fresh solution: the heading and altitude last
+    /// commanded (never infinite straight-line velocity coasting).
     fn holding_pattern_fallback(&mut self) -> Option<ControlIntent> {
-        if self.steers_by_heading() {
-            let cruise_altitude_m = self.config.anchor.altitude_m + self.config.cruise_height_m;
-            let altitude_m = self
-                .holding_pattern()
-                .map_or(cruise_altitude_m, |status| status.pattern.fix.altitude_m);
-            return self.repeat_heading(altitude_m);
-        }
-        Some(ControlIntent::Velocity(VelocityIntent {
-            frame: ReferenceFrame::BodyFrd,
-            vx: self.commanded_cruise_mps() as f32,
-            vy: 0.0,
-            vz: 0.0,
-            yaw_rate: 0.0,
-        }))
+        let cruise_altitude_m = self.config.anchor.altitude_m + self.config.cruise_height_m;
+        let altitude_m = self
+            .holding_pattern()
+            .map_or(cruise_altitude_m, |status| status.pattern.fix.altitude_m);
+        self.repeat_heading(altitude_m)
     }
 
     /// Records the sequence of the last waypoint. A vehicle that can stop

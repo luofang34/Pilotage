@@ -10,7 +10,8 @@
 //! or centered.
 
 use pilotage_mission::{
-    NavGuidance, NavQuality, PositionIntegrity, PositionKind, SteeringIntegrity, ToFrom,
+    FlightPhase, NavGuidance, NavQuality, PositionIntegrity, PositionKind, SteeringIntegrity,
+    ToFrom,
 };
 use pilotage_protocol::{SessionId, wire};
 
@@ -132,6 +133,28 @@ fn to_wire(guidance: &NavGuidance, stamp: wire::MeasurementStamp) -> wire::NavGu
         },
         position_source: position_to_wire(guidance.position),
         position_integrity: integrity_to_wire(guidance.position_integrity),
+        flight_phase: phase_to_wire(guidance.phase),
+        rnp_m: rnp_to_wire(guidance.rnp_m),
+    }
+}
+
+/// The wire's flight phase: 1 enroute, 2 terminal, 3 approach, 4 missed
+/// approach.
+const fn phase_to_wire(phase: FlightPhase) -> u32 {
+    match phase {
+        FlightPhase::Enroute => 1,
+        FlightPhase::Terminal => 2,
+        FlightPhase::Approach => 3,
+        FlightPhase::Missed => 4,
+        _ => 0,
+    }
+}
+
+fn rnp_to_wire(rnp_m: f64) -> f32 {
+    if rnp_m.is_finite() && rnp_m > 0.0 {
+        rnp_m as f32
+    } else {
+        f32::NAN
     }
 }
 

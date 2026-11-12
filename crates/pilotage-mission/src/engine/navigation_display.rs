@@ -44,6 +44,8 @@ pub struct NavigationDisplay {
     /// The flight phase of the active leg, which sets the scale of the
     /// lateral deviation.
     pub phase: FlightPhase,
+    /// Effective Required Navigation Performance of the active leg, metres.
+    pub rnp_m: f64,
     /// The position source the plan is steered on and the engine's
     /// judgment of it, present with or without a leg: a display names its
     /// source from this.
@@ -154,6 +156,7 @@ impl MissionEngine {
             holding_pattern: self.holding_pattern(),
             dead_reckoning: self.dead_reckoning(),
             phase: self.flight_phase(),
+            rnp_m: self.rnp_m(),
             steering: self.steering_source(),
             vertical: self.vertical_status(),
             lateral: self.lateral_status(),

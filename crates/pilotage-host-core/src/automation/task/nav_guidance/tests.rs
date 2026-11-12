@@ -1,7 +1,7 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use pilotage_mission::{
-    NavGuidance, NavQuality, PositionIntegrity, PositionKind, StartWithheldReason,
+    FlightPhase, NavGuidance, NavQuality, PositionIntegrity, PositionKind, StartWithheldReason,
     SteeringIntegrity, ToFrom,
 };
 use pilotage_protocol::{SessionId, wire};
@@ -26,6 +26,8 @@ fn guidance() -> NavGuidance {
         holding: false,
         position: Some(PositionKind::Satellite),
         position_integrity: Some(PositionIntegrity::Normal),
+        phase: FlightPhase::Terminal,
+        rnp_m: 1_852.0,
     }
 }
 
@@ -242,4 +244,25 @@ fn dead_reckoning_travels_as_degraded_so_a_receiver_keeps_the_guidance() {
         1,
         "the navigator grades it unusable; the vehicle flies it"
     );
+}
+
+#[test]
+fn the_flight_phase_and_rnp_travel_as_their_codes_and_meters() {
+    let mut publisher = NavGuidancePublisher::for_session(SessionId::new(7));
+    let cases = [
+        (FlightPhase::Enroute, 3_704.0, 1, 3_704.0_f32),
+        (FlightPhase::Terminal, 1_852.0, 2, 1_852.0_f32),
+        (FlightPhase::Approach, 555.6, 3, 555.6_f32),
+        (FlightPhase::Missed, 1_852.0, 4, 1_852.0_f32),
+    ];
+    for (phase, rnp_m, expected_code, expected_rnp_m) in cases {
+        let g = NavGuidance {
+            phase,
+            rnp_m,
+            ..guidance()
+        };
+        let state = sample(publisher.publication(Some(&g), 0));
+        assert_eq!(state.flight_phase, expected_code, "{phase:?}");
+        assert!((state.rnp_m - expected_rnp_m).abs() < 1e-3, "{phase:?}");
+    }
 }

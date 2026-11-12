@@ -30,10 +30,17 @@ export function navDisplayState(snapshot) {
   if (bindings === null) return null;
   if (!snapshot || !snapshot.navGuidance || !Number.isFinite(snapshot.ageMs)) return null;
   const g = snapshot.navGuidance;
-  // A quality, sequencing, TO/FROM, position source or integrity outside the
-  // schema's non-negative integer coding removes the display before any
-  // coercion could make it look presentable.
-  const codes = [g.solutionQuality, g.sequencing, g.toFrom, g.positionSource, g.positionIntegrity];
+  // A quality, sequencing, TO/FROM, position source, integrity or flight phase
+  // outside the schema's non-negative integer coding removes the display before
+  // any coercion could make it look presentable.
+  const codes = [
+    g.solutionQuality,
+    g.sequencing,
+    g.toFrom,
+    g.positionSource,
+    g.positionIntegrity,
+    g.flightPhase,
+  ];
   for (const code of codes) {
     if (!Number.isInteger(code) || code < 0) return null;
   }
@@ -52,6 +59,8 @@ export function navDisplayState(snapshot) {
       toFrom: g.toFrom >>> 0,
       positionSource: g.positionSource >>> 0,
       positionIntegrity: g.positionIntegrity >>> 0,
+      flightPhase: g.flightPhase >>> 0,
+      rnpM: typeof g.rnpM === "number" ? g.rnpM : NaN,
     },
     ageMs: snapshot.ageMs,
   };
