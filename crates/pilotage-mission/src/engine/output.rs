@@ -191,9 +191,10 @@ pub enum MissionEvent {
         /// Its inbound leg time, seconds.
         leg_time_s: f64,
     },
-    /// The wind estimate is too old to correct the racetrack flown by
-    /// time, which is flown as in still air from now on.
-    TimedHoldWindDropped {
+    /// The wind estimate that corrects the racetrack flown by time is
+    /// older than the configured age. The racetrack keeps it; where the
+    /// racetrack lies over the ground is an assumption from now on.
+    TimedHoldWindStale {
         /// The estimate's age, seconds.
         age_s: f64,
     },

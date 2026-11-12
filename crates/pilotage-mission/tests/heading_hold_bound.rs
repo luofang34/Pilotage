@@ -155,7 +155,7 @@ impl Flight {
             self.engine.on_action_result(action.action_id, true);
         }
         self.events.extend(output.events);
-        let mode = self.engine.navigation_display().lateral;
+        let mode = self.engine.navigation_display().lateral.mode;
         if let Some(intent) = output.intent.as_ref() {
             self.aircraft.fly(intent);
         } else {
@@ -170,18 +170,10 @@ impl Flight {
     }
 }
 
-#[test]
-fn a_lost_solution_on_a_leg_is_a_bounded_heading_hold_then_a_racetrack_then_the_leg_again() {
-    let mut flight = Flight::new();
-    // On the leg, tracking north.
-    let mut mode = LateralMode::Off;
-    for _ in 0..1_200 {
-        mode = flight.step(true);
-    }
-    assert_eq!(mode, LateralMode::Track);
-
-    // The navigator stops solving. Once its last solution is too old the
-    // heading last commanded is held, for the bound and no longer.
+/// Flies with the navigator silent until the heading hold ends. Returns
+/// the heading held and for how long it was, seconds.
+fn hold_the_heading(flight: &mut Flight) -> (f64, f64) {
+    let mut mode = LateralMode::Track;
     while mode != LateralMode::HeadingHold {
         mode = flight.step(false);
     }
@@ -196,31 +188,12 @@ fn a_lost_solution_on_a_leg_is_a_bounded_heading_hold_then_a_racetrack_then_the_
         held_s += STEP_S;
     }
     assert_eq!(mode, LateralMode::TimedHold);
-    assert!(
-        (held_s - BOUND_S).abs() <= 2.0 * STEP_S,
-        "the heading was held for {held_s:.2} s"
-    );
-    let started: Vec<_> = flight
-        .events
-        .iter()
-        .filter_map(|event| match event {
-            MissionEvent::TimedHoldStarted {
-                inbound_course_rad,
-                leg_time_s,
-            } => Some((*inbound_course_rad, *leg_time_s)),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(started.len(), 1, "the racetrack is announced once");
-    let (inbound, leg_time_s) = started[0];
-    let off = inbound - held_heading;
-    assert!(
-        off.sin().atan2(off.cos()).abs() < 0.02,
-        "inbound on the heading held"
-    );
-    assert!((leg_time_s - 60.0).abs() < 1e-9, "the standard leg time");
+    (held_heading, held_s)
+}
 
-    // Five circuits by heading and time, all near where the bound ran out.
+/// Flies five circuits of the racetrack with the navigator silent.
+/// Returns how far the aircraft went from where it began them, metres.
+fn fly_five_circuits(flight: &mut Flight) -> f64 {
     let expiry = [flight.aircraft.ned[0], flight.aircraft.ned[1]];
     let (mut turned, mut heading, mut farthest_m) = (0.0, flight.aircraft.heading_rad, 0.0_f64);
     let mut lost_s = 0.0;
@@ -237,6 +210,52 @@ fn a_lost_solution_on_a_leg_is_a_bounded_heading_hold_then_a_racetrack_then_the_
         "turned {:.1} times in {lost_s:.0} s",
         turned / TAU
     );
+    farthest_m
+}
+
+/// The racetracks announced: each inbound course and leg time.
+fn racetracks_started(flight: &Flight) -> Vec<(f64, f64)> {
+    flight
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            MissionEvent::TimedHoldStarted {
+                inbound_course_rad,
+                leg_time_s,
+            } => Some((*inbound_course_rad, *leg_time_s)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_lost_solution_on_a_leg_is_a_bounded_heading_hold_then_a_racetrack() {
+    let mut flight = Flight::new();
+    let mut mode = LateralMode::Off;
+    for _ in 0..1_200 {
+        mode = flight.step(true);
+    }
+    assert_eq!(mode, LateralMode::Track, "on the leg, tracking north");
+
+    // The navigator stops solving. Once its last solution is too old the
+    // heading last commanded is held, for the bound and no longer.
+    let (held_heading, held_s) = hold_the_heading(&mut flight);
+    assert!(
+        (held_s - BOUND_S).abs() <= 2.0 * STEP_S,
+        "the heading was held for {held_s:.2} s"
+    );
+    let started = racetracks_started(&flight);
+    assert_eq!(started.len(), 1, "the racetrack is announced once");
+    let (inbound, leg_time_s) = started[0];
+    let off = inbound - held_heading;
+    assert!(
+        off.sin().atan2(off.cos()).abs() < 0.02,
+        "inbound on the heading held"
+    );
+    assert!((leg_time_s - 60.0).abs() < 1e-9, "the standard leg time");
+
+    // Five circuits by heading and time, all near where the bound ran out.
+    let farthest_m = fly_five_circuits(&mut flight);
     assert!(
         farthest_m <= RACETRACK_REACH_M,
         "{farthest_m:.0} m from where the bound ran out"
@@ -245,9 +264,24 @@ fn a_lost_solution_on_a_leg_is_a_bounded_heading_hold_then_a_racetrack_then_the_
         (flight.aircraft.ned[2]).abs() < 20.0,
         "the altitude is held through it"
     );
+    // Five circuits outlast the wind estimate's age: the racetrack keeps
+    // the estimate, and says once that it rests on an old one.
+    let stale = flight
+        .events
+        .iter()
+        .filter(
+            |event| matches!(event, MissionEvent::TimedHoldWindStale { age_s } if *age_s > 600.0),
+        )
+        .count();
+    assert_eq!(stale, 1, "the stale wind is announced once");
+    assert!(flight.engine.navigation_display().lateral.wind_stale);
 
-    // The solution comes back: the leg is flown again, and said so.
-    mode = flight.step(true);
+    the_leg_is_flown_again(&mut flight);
+}
+
+/// The solution comes back: the leg is flown again, and said so.
+fn the_leg_is_flown_again(flight: &mut Flight) {
+    let mut mode = flight.step(true);
     for _ in 0..20 {
         mode = flight.step(true);
     }
@@ -263,6 +297,10 @@ fn a_lost_solution_on_a_leg_is_a_bounded_heading_hold_then_a_racetrack_then_the_
             }
         )),
         "the recovery names the mode resumed"
+    );
+    assert!(
+        !flight.engine.navigation_display().lateral.wind_stale,
+        "a racetrack no longer flown rests on no wind"
     );
     let north_at_recovery = flight.aircraft.ned[0];
     for _ in 0..6_000 {

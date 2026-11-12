@@ -12,7 +12,8 @@
 //!
 //! When the navigator has no solution fit to fly, the engine never goes
 //! silent: silence is the flight controller's command-loss descent. It
-//! holds the heading and altitude it last commanded, and says why.
+//! holds the heading and altitude it last commanded, and says why, for a
+//! bounded time; then it flies a racetrack by heading and time.
 
 use navigate_contract::{GuidanceSetpoint, MonotonicNanos, NavigationSolution};
 use pilotage_protocol::{AltitudeReference, ControlIntent, HeadingAltitudeIntent};

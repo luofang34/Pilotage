@@ -150,6 +150,17 @@ pub(super) const fn next(mode: LateralMode, event: LateralEvent) -> (LateralMode
     (to, effect)
 }
 
+/// The lateral mode as a display reads it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct LateralStatus {
+    /// The mode flown.
+    pub mode: LateralMode,
+    /// A racetrack flown by time is corrected with a wind estimate older
+    /// than the configured age: where it lies over the ground is an
+    /// assumption.
+    pub wind_stale: bool,
+}
+
 /// The machine's mode with what its holds keep between ticks.
 #[derive(Debug, Default)]
 pub(super) struct Lateral {
@@ -159,16 +170,19 @@ pub(super) struct Lateral {
     held_since: Option<MonotonicNanos>,
     /// The racetrack flown by time with no pattern to take it from.
     pub(super) racetrack: Option<TimedCircuit>,
-    /// Whether the racetrack's wind was announced as too old.
-    pub(super) wind_dropped: bool,
+    /// Whether the racetrack's wind estimate is stale.
+    pub(super) wind_stale: bool,
 }
 
 impl MissionEngine {
     /// The lateral mode flown, from the state the latest
     /// [`MissionEngine::tick`] left.
     #[must_use]
-    pub const fn lateral_mode(&self) -> LateralMode {
-        self.modes.lateral.mode
+    pub const fn lateral_status(&self) -> LateralStatus {
+        LateralStatus {
+            mode: self.modes.lateral.mode,
+            wind_stale: self.modes.lateral.wind_stale,
+        }
     }
 
     /// The intent of a tick in `state`: steps the lateral machine on what
@@ -198,7 +212,7 @@ impl MissionEngine {
         }
         if mode != LateralMode::TimedHold {
             self.modes.lateral.racetrack = None;
-            self.modes.lateral.wind_dropped = false;
+            self.modes.lateral.wind_stale = false;
         }
         self.modes.lateral.mode = mode;
         if effect == LateralEffect::Resumed {

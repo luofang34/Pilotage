@@ -193,23 +193,23 @@ impl MissionEngine {
     }
 
     /// The wind a racetrack flown by time is corrected for, north and
-    /// east m/s: the last estimate while it is no older than the
-    /// configured age, and still air once it is, announced once.
+    /// east m/s: the last estimate, however old, because still air would
+    /// let the racetrack drift by the whole wind. Past the configured age
+    /// the estimate is reported as stale, once.
     fn timed_hold_wind(&mut self, now: MonotonicNanos, events: &mut Vec<MissionEvent>) -> [f64; 2] {
         let Some((wind, at)) = self.wind_estimate_stamped() else {
             return [0.0, 0.0];
         };
         let age_ns = now.elapsed_since(at).map_or(0, |age| age.as_nanos());
-        if age_ns <= self.config.timed_hold_wind_max_age.as_nanos() {
-            return wind;
-        }
-        if !self.modes.lateral.wind_dropped {
-            self.modes.lateral.wind_dropped = true;
-            events.push(MissionEvent::TimedHoldWindDropped {
+        if age_ns > self.config.timed_hold_wind_stale_age.as_nanos()
+            && !self.modes.lateral.wind_stale
+        {
+            self.modes.lateral.wind_stale = true;
+            events.push(MissionEvent::TimedHoldWindStale {
                 age_s: age_ns as f64 * 1e-9,
             });
         }
-        [0.0, 0.0]
+        wind
     }
 
     /// The pattern at the last waypoint for a vehicle at `solution` on

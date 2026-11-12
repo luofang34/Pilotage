@@ -222,10 +222,12 @@ pub struct MissionConfig {
     /// position to fly on before it flies a racetrack by time instead.
     /// Default 60 s, one standard holding leg.
     pub heading_hold_bound: DurationNanos,
-    /// The age past which a wind estimate no longer corrects a racetrack
-    /// flown by time: older than this it is flown as in still air.
+    /// The age past which the wind estimate that corrects a racetrack
+    /// flown by time is reported as stale. The racetrack keeps the
+    /// estimate, since flying it as in still air would drift by the whole
+    /// wind; the report says its position rests on an old one.
     /// Default 600 s.
-    pub timed_hold_wind_max_age: DurationNanos,
+    pub timed_hold_wind_stale_age: DurationNanos,
     /// The bank angle the mission plans its turns at, degrees. With the
     /// speed over the ground it sizes the turn ahead of a fly-by waypoint.
     /// It also limits the bank of the holding pattern after the plan.
@@ -323,7 +325,7 @@ impl MissionConfig {
             capture_time_s: 2.0,
             terminal_holding_pattern: TerminalHoldingPattern::default(),
             heading_hold_bound: DurationNanos::from_millis(60_000),
-            timed_hold_wind_max_age: DurationNanos::from_millis(600_000),
+            timed_hold_wind_stale_age: DurationNanos::from_millis(600_000),
             route_bank_deg: crate::DEFAULT_ROUTE_BANK_DEG,
             arm_when_vehicle_ready: false,
             launch_detection: None,
