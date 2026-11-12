@@ -37,6 +37,9 @@ function testEveryQuantityMapsIntoTheInstrumentVocabulary() {
   const nav = navDisplayState(snapshot({ lateralDeviationM: 50, verticalDeviationM: -16 }));
   assert.equal(nav.source, 1, "GPS/FMS course, drawn magenta");
   assert.equal(nav.fromto, 1, "flying toward the active waypoint");
+  // Undeclared, either would be unknown and fail the whole nav group.
+  assert.equal(nav.facility, 0, "the GPS lane is tuned to no facility");
+  assert.equal(nav.sequencing, 0, "the GPS lane is sequencing its legs");
   assert.equal(nav.courseRad, 1.25, "course passes through in radians");
   assert.equal(nav.courseReference, 1, "true north, the reference the wire declares");
   assert.equal(nav.scale, 1, "the terminal scale, which the feeder declares");

@@ -1,14 +1,14 @@
 //! The climb: the vertical demand toward the climb's target, and what is
 //! streamed from the arm request until the climb begins.
 
-use navigate_contract::NavigationSolution;
+use navigate_contract::{MonotonicNanos, NavigationSolution};
 use pilotage_mission_core::FlightAction as CoreFlightAction;
 use pilotage_protocol::{ControlIntent, ReferenceFrame, VelocityIntent};
 
 use crate::body_frame::clamp_symmetric;
 
-use super::super::MissionEngine;
-use super::super::document::CLIMB_CAPTURE_MARGIN_M;
+use super::super::document::{CLIMB_CAPTURE_MARGIN_M, climb_capture_margin_m};
+use super::super::{MissionEngine, MissionState};
 use super::outputs;
 
 impl MissionEngine {
@@ -43,15 +43,50 @@ impl MissionEngine {
         Some(outputs::zero_velocity_intent())
     }
 
-    pub(super) fn climb_is_captured(&self, solution: Option<&NavigationSolution>) -> bool {
-        let Some(solution) = solution else {
-            return false;
-        };
+    /// Whether the climb is captured at `now`, by the altitude the core
+    /// judges it on ([`Self::observed_altitude_m`]).
+    pub(super) fn climb_is_captured(
+        &self,
+        solution: Option<&NavigationSolution>,
+        now: MonotonicNanos,
+    ) -> bool {
         let Some(CoreFlightAction::Climb { target_altitude_m }) = self.active_action.as_ref()
         else {
             return false;
         };
-        solution.position.altitude_m >= *target_altitude_m - CLIMB_CAPTURE_MARGIN_M
+        self.observed_altitude_m(solution, now)
+            .is_some_and(|altitude_m| {
+                altitude_m >= *target_altitude_m - climb_capture_margin_m(&self.config)
+            })
+    }
+
+    /// The altitude the mission core judges the phases by at `now`: the
+    /// solution's, except in the climb of a vehicle that holds its
+    /// altitude itself. That vehicle's flight controller climbs to the
+    /// commanded altitude on its own air data, so the climb is judged by
+    /// its altitude (its height on the origin datum the commands are
+    /// turned by) while a fresh one is known, and otherwise by the
+    /// solution's, credited with twice its vertical uncertainty past the
+    /// capture window so a navigator's honest vertical error cannot keep
+    /// the mission in the climb.
+    pub(super) fn observed_altitude_m(
+        &self,
+        solution: Option<&NavigationSolution>,
+        now: MonotonicNanos,
+    ) -> Option<f64> {
+        let solution_altitude_m = solution.map(|value| value.position.altitude_m);
+        if self.config.can_stop() || self.state() != MissionState::Climb {
+            return solution_altitude_m;
+        }
+        if let (Some(origin_m), Some(height_m)) =
+            (self.config.fc_origin_height_m, self.fc_height_m(now))
+        {
+            return Some(origin_m + height_m);
+        }
+        let solution = solution?;
+        let window_m = climb_capture_margin_m(&self.config);
+        let excess_m = (2.0 * solution.integrity.vertical_1sigma_m - window_m).max(0.0);
+        Some(solution.position.altitude_m + excess_m)
     }
 }
 

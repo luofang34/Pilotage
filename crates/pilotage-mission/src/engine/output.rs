@@ -157,6 +157,22 @@ pub enum MissionEvent {
         /// The bias, radians, positive right.
         bias_rad: f64,
     },
+    /// The plan goes on by dead reckoning: in flight, the onboard solution
+    /// is beyond its limits (graded unusable, or with a horizontal
+    /// uncertainty above the limit) and is flown all the same under
+    /// [`crate::BeyondLimits::DeadReckon`]. Emitted when the dead
+    /// reckoning begins and each time its horizontal uncertainty doubles.
+    DeadReckoning {
+        /// The 1-sigma horizontal uncertainty flown on, meters.
+        horizontal_1sigma_m: f64,
+        /// The 1-sigma vertical uncertainty flown on, meters.
+        vertical_1sigma_m: f64,
+    },
+    /// A solution within its limits is flown again after dead reckoning.
+    NavigationRecovered {
+        /// The 1-sigma horizontal uncertainty of that solution, meters.
+        horizontal_1sigma_m: f64,
+    },
     /// The vehicle passed the active fix outside its capture radius, and
     /// guidance now flies direct back to it. Emitted once per fix.
     FixOverflown {
@@ -217,4 +233,7 @@ pub struct MissionCounters {
     /// solution was graded unusable or had a horizontal uncertainty above
     /// the configured limit, so no solution was published.
     pub onboard_unfit: u64,
+    /// Ticks under the onboard-navigation source on which the held
+    /// solution was beyond its limits and flown by dead reckoning.
+    pub onboard_dead_reckoned: u64,
 }

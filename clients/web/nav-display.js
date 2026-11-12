@@ -49,20 +49,8 @@ export function navDisplayState(snapshot) {
   };
   const out = bindings.feeder_nav_display_state(marshalled);
   if (out === null || out === undefined) return null;
-  return {
-    source: out.source,
-    fromto: out.fromto,
-    courseRad: out.courseRad,
-    courseReference: out.courseReference,
-    // The feeder declares the scale the dots are on. The panel fails the
-    // nav group when no scale arrives.
-    scale: out.scale,
-    cdiDots: out.cdiDots,
-    // The instrument model codes "no vertical sample" as NaN.
-    vdevDots: out.vdevDots ?? NaN,
-    distNm: out.distNm,
-    toIdent: out.toIdent,
-    fromIdent: out.fromIdent,
-    ageMs: out.ageMs,
-  };
+  // The feeder already speaks the instrument model's vocabulary, the
+  // scale, facility and sequencing included; the model codes "no vertical
+  // sample" as NaN where the feeder has none.
+  return { ...out, vdevDots: out.vdevDots ?? NaN };
 }
