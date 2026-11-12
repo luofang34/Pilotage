@@ -19,7 +19,9 @@ use crate::body_frame::{project_guidance_setpoint, project_ned_velocity};
 use crate::policy::OPERATIONAL_WALL_DEADLINE_NS;
 
 use super::document::ARM_PHASE_ID;
-use super::{MissionAction, MissionEngine, MissionEvent, MissionOutput, MissionState};
+use super::{
+    MissionAction, MissionEngine, MissionEvent, MissionOutput, MissionState, VerticalMode,
+};
 
 mod climb;
 mod directives;
@@ -62,7 +64,8 @@ impl MissionEngine {
         let mut action = self.apply_core_output(&core_output, &mut events);
         let mut state = self.state();
         self.compare_vertical(before, state);
-        if state == MissionState::Climb && self.climb_is_captured(solution.as_ref(), now) {
+        self.step_vertical(state, solution.as_ref(), now);
+        if state == MissionState::Climb && self.vertical_mode() == VerticalMode::Hold {
             let Some(extra_action) = self.continue_core(now, solution.as_ref(), &mut events) else {
                 return failed_output(events);
             };
@@ -93,6 +96,8 @@ impl MissionEngine {
             Some(arm) => self.gate_arm(arm, now, &mut events),
             None => self.release_held_arm(now, &mut events),
         };
+        // The arm request above may have set the first target.
+        self.step_vertical(state, solution.as_ref(), now);
         let intent = self.intent_for_state(state, solution.as_ref(), now, &mut events);
         MissionOutput {
             intent,

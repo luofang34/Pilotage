@@ -13,7 +13,9 @@ use navigate_geodesy::{distance_m, initial_bearing_rad};
 use crate::body::GEODESY;
 use crate::holding_pattern::HoldingPatternStatus;
 
-use super::{FlightPhase, MissionEngine, MissionState, NavGuidance, SteeringSource};
+use super::{
+    FlightPhase, MissionEngine, MissionState, NavGuidance, SteeringSource, VerticalStatus,
+};
 
 /// The groundspeed below which no time to go is given, m/s.
 const MIN_TIME_TO_GO_SPEED_MPS: f64 = 1.0;
@@ -45,6 +47,10 @@ pub struct NavigationDisplay {
     /// judgment of it, present with or without a leg: a display names its
     /// source from this.
     pub steering: SteeringSource,
+    /// The vertical mode and the altitude it flies to, so a display
+    /// annunciates a climb, a descent, or a held altitude from what the
+    /// engine says.
+    pub vertical: VerticalStatus,
 }
 
 /// One waypoint of the plan.
@@ -144,6 +150,7 @@ impl MissionEngine {
             dead_reckoning: self.dead_reckoning(),
             phase: self.flight_phase(),
             steering: self.steering_source(),
+            vertical: self.vertical_status(),
         }
     }
 
