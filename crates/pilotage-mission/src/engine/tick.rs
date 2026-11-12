@@ -53,12 +53,15 @@ impl MissionEngine {
         if matches!(self.state(), MissionState::Climb | MissionState::Enroute) {
             plan_advanced = self.advance_active_plan(solution.as_ref(), &mut events);
         }
+        let before = self.state();
+        self.step_vertical(before, solution.as_ref(), now);
         let observation = self.core_observation(solution.as_ref(), now);
         let Some(core_output) = self.tick_core(now, observation, &mut events) else {
             return failed_output(events);
         };
         let mut action = self.apply_core_output(&core_output, &mut events);
         let mut state = self.state();
+        self.compare_vertical(before, state);
         if state == MissionState::Climb && self.climb_is_captured(solution.as_ref(), now) {
             let Some(extra_action) = self.continue_core(now, solution.as_ref(), &mut events) else {
                 return failed_output(events);

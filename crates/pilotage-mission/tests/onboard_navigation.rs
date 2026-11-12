@@ -225,6 +225,7 @@ fn the_vehicle_flies_where_the_navigator_says_it_is() {
     assert_eq!(engine.counters().onboard_refused, 0);
     assert_eq!(engine.counters().onboard_stale, 0);
     assert_eq!(engine.counters().onboard_unfit, 0);
+    assert_eq!(engine.counters().vertical_mode_mismatch, 0);
 }
 
 #[test]

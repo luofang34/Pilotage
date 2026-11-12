@@ -92,7 +92,7 @@ impl MissionEngine {
     /// solution's, credited with twice its vertical uncertainty past the
     /// capture window so a navigator's honest vertical error cannot keep
     /// the mission in the climb.
-    pub(super) fn observed_altitude_m(
+    pub(in crate::engine) fn observed_altitude_m(
         &self,
         solution: Option<&NavigationSolution>,
         now: MonotonicNanos,

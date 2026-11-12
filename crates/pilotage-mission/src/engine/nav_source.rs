@@ -192,11 +192,11 @@ impl MissionEngine {
     /// keeps the reason for the display and the hold.
     pub(super) fn judge_source(&mut self, now: MonotonicNanos) -> Option<NavigationSolution> {
         let reading = self.read_source(now);
-        let (state, _) = next(self.nav.state, reading.event);
-        self.nav.state = state;
+        let (state, _) = next(self.modes.nav.state, reading.event);
+        self.modes.nav.state = state;
         let solution = reading.held.filter(|_| state.steers());
         self.onboard.dead_reckoned = solution.filter(|_| state == NavState::DeadReckoning);
-        self.nav.no_solution = match state {
+        self.modes.nav.no_solution = match state {
             NavState::Fit | NavState::DeadReckoning => None,
             NavState::NotStarted => Some(StartWithheldReason::NavigationNotStarted),
             NavState::Lost(Loss::Stale) => Some(StartWithheldReason::NavigationStale),
@@ -215,7 +215,8 @@ impl MissionEngine {
 
     /// Why the latest tick gave no solution to steer on.
     pub(super) fn solution_absence(&self) -> StartWithheldReason {
-        self.nav
+        self.modes
+            .nav
             .no_solution
             .unwrap_or(StartWithheldReason::NavigationNotStarted)
     }
