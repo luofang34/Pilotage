@@ -1,7 +1,7 @@
 //! The feed: lanes in, one encoded state frame out.
 
 use indicate_instrument_feeder::avionics::{GroupSnapshot, IngressSnapshot};
-use indicate_instrument_state::abi::v10::encode_state;
+use indicate_instrument_state::abi::v11::encode_state;
 use indicate_instrument_state::{
     AircraftState, Attitude, EstimateQuality, HeadingReference, HeadingSample, Kinematics,
     SnapshotCoherence, SnapshotMeta, Stamped, ValidFlags,
@@ -78,7 +78,7 @@ impl InstrumentFeed {
         &mut self,
         now_ms: f64,
         buf: &mut [u8],
-    ) -> Result<usize, indicate_instrument_state::abi::v10::AbiError> {
+    ) -> Result<usize, indicate_instrument_state::abi::v11::AbiError> {
         let snapshot = self.ingress.snapshot(now_ms);
         let state = self.assemble(&snapshot, now_ms);
         encode_state(&state, buf)

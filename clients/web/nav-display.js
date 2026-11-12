@@ -30,10 +30,11 @@ export function navDisplayState(snapshot) {
   if (bindings === null) return null;
   if (!snapshot || !snapshot.navGuidance || !Number.isFinite(snapshot.ageMs)) return null;
   const g = snapshot.navGuidance;
-  // A quality, sequencing or TO/FROM outside the schema's non-negative
-  // integer coding removes the display before any coercion could make it
-  // look presentable.
-  for (const code of [g.solutionQuality, g.sequencing, g.toFrom]) {
+  // A quality, sequencing, TO/FROM, position source or integrity outside the
+  // schema's non-negative integer coding removes the display before any
+  // coercion could make it look presentable.
+  const codes = [g.solutionQuality, g.sequencing, g.toFrom, g.positionSource, g.positionIntegrity];
+  for (const code of codes) {
     if (!Number.isInteger(code) || code < 0) return null;
   }
   const marshalled = {
@@ -49,13 +50,16 @@ export function navDisplayState(snapshot) {
       solutionQuality: g.solutionQuality >>> 0,
       sequencing: g.sequencing >>> 0,
       toFrom: g.toFrom >>> 0,
+      positionSource: g.positionSource >>> 0,
+      positionIntegrity: g.positionIntegrity >>> 0,
     },
     ageMs: snapshot.ageMs,
   };
   const out = bindings.feeder_nav_display_state(marshalled);
   if (out === null || out === undefined) return null;
   // The feeder already speaks the instrument model's vocabulary, the
-  // scale, facility and sequencing included; the model codes "no vertical
-  // sample" as NaN where the feeder has none.
+  // scale, facility, sequencing, position source and position integrity
+  // included; the model codes "no vertical sample" as NaN where the feeder
+  // has none.
   return { ...out, vdevDots: out.vdevDots ?? NaN };
 }

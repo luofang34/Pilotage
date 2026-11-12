@@ -10,8 +10,8 @@ use navigate_contract::{
 use pilotage_mission::fixture::{self, GeoPointDegrees};
 use pilotage_mission::{
     ExecutionTarget, MissionConfig, MissionEngine, MissionEvent, MissionState, NavQuality,
-    OwnshipAltitude, OwnshipSample, OwnshipSource, PositionSource, StartWithheldReason,
-    SteeringIntegrity, TruthRole, decode_snapshot,
+    OwnshipAltitude, OwnshipSample, OwnshipSource, PositionKind, PositionSource,
+    StartWithheldReason, SteeringIntegrity, TruthRole, decode_snapshot,
 };
 use pilotage_protocol::{ControlAction, ControlIntent, ReferenceFrame};
 
@@ -162,6 +162,7 @@ fn the_estimate_flies_the_route_to_completion_as_a_degraded_solution() {
         let output = step(&mut engine, &mut estimate, &mut now, &mut events);
         if let Some(guidance) = engine.nav_guidance() {
             assert_eq!(guidance.integrity.quality(), Some(NavQuality::Degraded));
+            assert_eq!(guidance.position, Some(PositionKind::Blended));
             guidance_seen = true;
         }
         if output.state == MissionState::Complete {

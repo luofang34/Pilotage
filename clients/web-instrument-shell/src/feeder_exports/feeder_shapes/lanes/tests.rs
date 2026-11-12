@@ -1,8 +1,9 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use indicate_instrument_state::abi::v10::{CAPACITY, decode_state, encode_state};
+use indicate_instrument_state::abi::v11::{CAPACITY, decode_state, encode_state};
 use indicate_instrument_state::{
-    AircraftState, NavFacility, NavFromTo, NavSequencing, validate_state,
+    AircraftState, NavFacility, NavFromTo, NavSequencing, NavSource, PositionIntegrity,
+    PositionSource, validate_state,
 };
 use pilotage_instrument_runtime::feeder::nav_display_state;
 
@@ -23,13 +24,15 @@ fn tracked_leg() -> JsNavSnapshotIn {
             solution_quality: 0,
             sequencing: 0,
             to_from: 1,
+            position_source: 1,
+            position_integrity: 1,
         },
         age_ms: 120.0,
     }
 }
 
 #[test]
-fn the_gps_lane_declares_its_facility_and_sequencing_and_its_frame_decodes_valid() {
+fn the_flight_plan_lane_declares_its_facility_and_sequencing_and_its_frame_decodes_valid() {
     frame_is_valid(tracked_leg(), NavSequencing::Sequencing, NavFromTo::To);
 }
 
@@ -42,15 +45,16 @@ fn a_hold_reaches_the_frame_as_hold_and_its_outbound_leg_as_from() {
 }
 
 /// Feeds `guidance` through the lane and the feeder, encodes its nav group
-/// in an ABI 10 frame, and checks what decodes.
+/// in a state frame, and checks what decodes.
 fn frame_is_valid(guidance: JsNavSnapshotIn, sequencing: NavSequencing, fromto: NavFromTo) {
     let nav = nav_display_state(Some(&guidance.into_snapshot())).expect("a nav group");
     let data = nav.data.expect("nav data");
     assert_eq!(
         data.facility,
         NavFacility::None,
-        "the GPS lane names no facility"
+        "the flight-plan lane names no facility"
     );
+    assert_eq!(data.source, NavSource::Fms);
     assert_eq!(data.sequencing, sequencing);
     assert_eq!(data.fromto, fromto);
     let state = AircraftState {
@@ -67,4 +71,54 @@ fn frame_is_valid(guidance: JsNavSnapshotIn, sequencing: NavSequencing, fromto: 
         None,
         "an Unknown facility or sequencing would fail the whole nav group"
     );
+}
+
+/// The position source and integrity that reach the frame for the wire's
+/// `position_source` and `position_integrity` codes, or `None` when the
+/// lane gives no nav group.
+fn position_on_the_frame(
+    position_source: u32,
+    position_integrity: u32,
+) -> Option<(PositionSource, PositionIntegrity)> {
+    let mut guidance = tracked_leg();
+    guidance.nav_guidance.position_source = position_source;
+    guidance.nav_guidance.position_integrity = position_integrity;
+    let nav = nav_display_state(Some(&guidance.into_snapshot()))?;
+    let state = AircraftState {
+        nav,
+        ..AircraftState::default()
+    };
+    let mut frame = vec![0_u8; CAPACITY];
+    let len = encode_state(&state, &mut frame).expect("encodes");
+    let report = decode_state(frame.get(..len).expect("the written frame")).expect("decodes");
+    assert_eq!(validate_state(&report.state).nav, None, "a valid nav group");
+    let data = report.state.nav.data?;
+    Some((data.position_source, data.position_integrity))
+}
+
+#[test]
+fn the_lane_names_the_position_it_rests_on() {
+    use PositionIntegrity::{Degraded, Normal, SensorExcluded};
+    let cases = [
+        (1, 1, Some((PositionSource::Gps, Normal))),
+        (2, 1, Some((PositionSource::Visual, Normal))),
+        (3, 2, Some((PositionSource::Inertial, Degraded))),
+        (3, 3, Some((PositionSource::Inertial, SensorExcluded))),
+        (2, 3, Some((PositionSource::Visual, SensorExcluded))),
+        (4, 2, Some((PositionSource::DeadReckoning, Degraded))),
+        (5, 1, Some((PositionSource::Blended, Normal))),
+        // No position or no integrity stated, or an unread code: the
+        // guidance is removed, never drawn on an unnamed position.
+        (0, 1, None),
+        (6, 1, None),
+        (1, 0, None),
+        (1, 4, None),
+    ];
+    for (position_source, position_integrity, expected) in cases {
+        assert_eq!(
+            position_on_the_frame(position_source, position_integrity),
+            expected,
+            "position {position_source}, integrity {position_integrity}"
+        );
+    }
 }

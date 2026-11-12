@@ -125,7 +125,7 @@ fn absence_of_avionics_feeds_nothing() {
         .expect("an empty frame still encodes");
     // Version byte, count byte, and whatever the always-present groups
     // (quality, validity, snapshot meta) occupy — but no attitude.
-    let report = indicate_instrument_state::abi::v10::decode_state(&buf[..len])
+    let report = indicate_instrument_state::abi::v11::decode_state(&buf[..len])
         .expect("the encoded frame decodes");
     assert!(
         report.state.attitude.data.is_none(),
@@ -155,7 +155,7 @@ fn stamp_skew_the_browser_accepts_does_not_flag_coherence() {
         .state_frame(120.0, &mut buf)
         .expect("the frame encodes");
     let report =
-        indicate_instrument_state::abi::v10::decode_state(&buf[..len]).expect("the frame decodes");
+        indicate_instrument_state::abi::v11::decode_state(&buf[..len]).expect("the frame decodes");
     assert_eq!(
         report.state.snapshot.coherence,
         indicate_instrument_state::SnapshotCoherence::Coherent,
@@ -175,7 +175,7 @@ fn the_heading_bug_carries_a_declared_reference() {
     let mut buf = vec![0_u8; Runtime::state_capacity()];
     let len = feed.state_frame(120.0, &mut buf).expect("frame encodes");
     let report =
-        indicate_instrument_state::abi::v10::decode_state(&buf[..len]).expect("frame decodes");
+        indicate_instrument_state::abi::v11::decode_state(&buf[..len]).expect("frame decodes");
     assert_eq!(
         report.state.selections.heading_bug_reference,
         indicate_instrument_state::HeadingReference::SimLocalTrue,
@@ -200,7 +200,7 @@ fn the_feed_and_the_shared_decoder_agree_on_validity_and_quality() {
             feed.ingest(&sample, 100.0);
             let mut buf = vec![0_u8; Runtime::state_capacity()];
             let len = feed.state_frame(116.0, &mut buf).expect("frame encodes");
-            let state = indicate_instrument_state::abi::v10::decode_state(&buf[..len])
+            let state = indicate_instrument_state::abi::v11::decode_state(&buf[..len])
                 .expect("frame decodes")
                 .state;
 

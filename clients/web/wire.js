@@ -1208,7 +1208,7 @@ function decodeNavGuidance(bytes) {
     verticalDeviationM: decodeFloat32(firstBytes(f, 6)),
     distanceToWaypointM: decodeFloat32(firstBytes(f, 7)),
     ...Object.fromEntries(
-      Object.entries({ legIndex: 8, waypointCount: 9, solutionQuality: 10, sequencing: 11, toFrom: 12 })
+      Object.entries({ legIndex: 8, waypointCount: 9, solutionQuality: 10, sequencing: 11, toFrom: 12, positionSource: 13, positionIntegrity: 14 })
         .map(([key, field]) => [key, firstVarint(f, field) ?? 0]),
     ),
     stamp,

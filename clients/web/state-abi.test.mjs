@@ -80,6 +80,8 @@ function fullState() {
       fromIdent: "KMRY",
       facility: 0,
       sequencing: 0,
+      positionSource: 0,
+      positionIntegrity: 0,
       ageMs: 80,
     },
     wind: { fromRad: 2.1, speedMps: 7.5, ageMs: 80 },
@@ -166,7 +168,8 @@ function dataGatewayState() {
   return {
     kinematics: { posNed: [-2500, 800, -1200], velNed: [61, -4, 1.5], ageMs: 120 },
     nav: {
-      source: 1,
+      // The flight-plan lane, flown on satellite position.
+      source: 4,
       scale: 1,
       fromto: 1,
       courseRad: 1.2,
@@ -177,6 +180,8 @@ function dataGatewayState() {
       fromIdent: "GATE-A",
       facility: 0,
       sequencing: 0,
+      positionSource: 1,
+      positionIntegrity: 0,
       ageMs: 150,
     },
     quality: 0,
@@ -210,19 +215,19 @@ function flightControllerState() {
   };
 }
 
-check("writer version is the pinned wire version", STATE_ABI_VERSION === 10);
+check("writer version is the pinned wire version", STATE_ABI_VERSION === 11);
 
 for (const [stem, build] of [
-  ["state-abi-v10.full", fullState],
-  ["state-abi-v10.data-gateway", dataGatewayState],
-  ["state-abi-v10.flight-controller", flightControllerState],
+  ["state-abi-v11.full", fullState],
+  ["state-abi-v11.data-gateway", dataGatewayState],
+  ["state-abi-v11.flight-controller", flightControllerState],
 ]) {
   check(`${stem} matches the committed golden frame byte for byte`, encodedHex(build()) === goldenHex(stem));
 }
 
 {
   // Presence is meaning: an empty state is exactly the two-byte header.
-  check("an empty state encodes the empty frame", encodedHex({}) === "0a00");
+  check("an empty state encodes the empty frame", encodedHex({}) === "0b00");
 }
 
 {
@@ -242,14 +247,14 @@ for (const [stem, build] of [
   // Canonicalization: a trust group whose quality, flags, and snapshot
   // all equal their fail-closed defaults encodes as absent — matching
   // the Rust encoder, so equal states produce equal bytes.
-  check("an all-default trust group encodes as absent", encodedHex({ valid: {} }) === "0a00");
+  check("an all-default trust group encodes as absent", encodedHex({ valid: {} }) === "0b00");
   check(
     "explicitly declared defaults still omit the trust group",
-    encodedHex({ quality: 255, valid: {}, snapshot: { coherence: 0, generation: 0 } }) === "0a00",
+    encodedHex({ quality: 255, valid: {}, snapshot: { coherence: 0, generation: 0 } }) === "0b00",
   );
   check(
     "one set flag makes the trust group present",
-    encodedHex({ valid: { attitude: true } }) !== "0a00",
+    encodedHex({ valid: { attitude: true } }) !== "0b00",
   );
 }
 
@@ -299,8 +304,8 @@ for (const [stem, build] of [
   );
   const nav = payload({ nav: { source: 1, ageMs: 10 } });
   check(
-    "a nav group with no declared scale, facility or sequencing writes 45 bytes and three unknowns",
-    nav.len === 45 && nav.bytes[42] === 0xff && nav.bytes[43] === 0xff && nav.bytes[44] === 0xff,
+    "a nav group with no declared scale, facility, sequencing or position writes 47 bytes and five unknowns",
+    nav.len === 47 && [42, 43, 44, 45, 46].every((offset) => nav.bytes[offset] === 0xff),
   );
   const dyn = payload({ dynamics: { turnBasis: 0, turnRps: 0.1, ageMs: 10 } });
   check(

@@ -21,7 +21,7 @@
 import { EQUIPMENT_ENCODERS, EQUIPMENT_PROBE_STATE } from "./state-abi-equipment.js";
 import { RECORD_ENCODERS, RECORD_PROBE_STATE } from "./state-abi-records.js";
 
-export const STATE_ABI_VERSION = 10;
+export const STATE_ABI_VERSION = 11;
 
 const TAG = Object.freeze({
   ATTITUDE: 0x01,
@@ -158,10 +158,10 @@ function groupEncoders() {
         f(view, off + 20, nav.ageMs);
         putIdent(view, off + 24, nav.toIdent);
         putIdent(view, off + 33, nav.fromIdent);
-        // Scale, facility, sequencing: undeclared is unknown (255), which
-        // fails the nav group rather than guessing what the source meant.
-        [nav.scale, nav.facility, nav.sequencing].forEach((v, i) => b(view, off + 42 + i, v ?? 255));
-        return 45;
+        // Undeclared is unknown (255), which fails the nav group rather than guessing.
+        const tail = [nav.scale, nav.facility, nav.sequencing, nav.positionSource, nav.positionIntegrity];
+        tail.forEach((v, i) => b(view, off + 42 + i, v ?? 255));
+        return 47;
       },
     ],
     [

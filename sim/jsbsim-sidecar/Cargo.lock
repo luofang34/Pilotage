@@ -190,7 +190,7 @@ dependencies = [
 [[package]]
 name = "indicate-frames"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=217b88b46b45005cb7f21c2ad5a23923d432b32b#217b88b46b45005cb7f21c2ad5a23923d432b32b"
+source = "git+https://github.com/luofang34/Indicate.git?rev=9b234248858fe8b397ecf2a8a6f3f77e26a76b81#9b234248858fe8b397ecf2a8a6f3f77e26a76b81"
 dependencies = [
  "libm",
  "thiserror",
