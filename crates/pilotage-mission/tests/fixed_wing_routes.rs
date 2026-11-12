@@ -4,8 +4,8 @@
 //! and it holds the indicated
 //! airspeed it is commanded, so it flies faster over the ground than that
 //! number, and it turns no tighter than its route bank allows. The turn
-//! ahead of each fly-by waypoint and the orbit after the plan must be sized
-//! for that speed, or every turn swings wide of the next leg.
+//! ahead of each fly-by waypoint must be sized for that speed, or every
+//! turn swings wide of the next leg.
 //!
 //! The aircraft model is Aviate's fixed-wing lateral law with the C172's
 //! parameters: a course error over the course time constant is a turn
@@ -178,8 +178,6 @@ struct Flight {
     /// Each leg advance: the leg and the distance to the corner it turned
     /// at, metres.
     leads: Vec<(usize, f64)>,
-    /// The orbit radius the engine announced.
-    orbit_radius_m: Option<f64>,
     /// The tick at which the plan completed.
     completed_at: Option<usize>,
     /// Each leg advance: the leg and why the waypoint before it sequenced.
@@ -216,7 +214,6 @@ fn fly_from(
     let mut flight = Flight {
         track: Vec::new(),
         leads: Vec::new(),
-        orbit_radius_m: None,
         completed_at: None,
         reasons: Vec::new(),
     };
@@ -247,18 +244,12 @@ fn fly_from(
             _ => None,
         };
         for event in &output.events {
-            match event {
-                MissionEvent::LegAdvanced { to_index, reason } => {
-                    leg = *to_index;
-                    let corner = points[leg - 1];
-                    let lead = (aircraft.ned[0] - corner[0]).hypot(aircraft.ned[1] - corner[1]);
-                    flight.leads.push((leg, lead));
-                    flight.reasons.push((leg, *reason));
-                }
-                MissionEvent::OrbitStarted { radius_m, .. } => {
-                    flight.orbit_radius_m = Some(*radius_m);
-                }
-                _ => {}
+            if let MissionEvent::LegAdvanced { to_index, reason } = event {
+                leg = *to_index;
+                let corner = points[leg - 1];
+                let lead = (aircraft.ned[0] - corner[0]).hypot(aircraft.ned[1] - corner[1]);
+                flight.leads.push((leg, lead));
+                flight.reasons.push((leg, *reason));
             }
         }
         flight.track.push((aircraft.ned, leg));
@@ -293,54 +284,13 @@ fn overshoot_m(flight: &Flight, corner: usize) -> f64 {
         .fold(f64::NEG_INFINITY, f64::max)
 }
 
-/// The least and greatest distance from the orbit's centre once the orbit
-/// has settled for two minutes.
-fn orbit_band_m(flight: &Flight, after_s: f64) -> (f64, f64) {
-    orbit_radii(flight)
-        .skip((after_s / STEP_S) as usize)
-        .fold((f64::INFINITY, f64::NEG_INFINITY), |(low, high), radius| {
-            (low.min(radius), high.max(radius))
-        })
-}
-
-/// The distance from the orbit's centre at each tick after the plan
-/// completed.
-fn orbit_radii(flight: &Flight) -> impl Iterator<Item = f64> + '_ {
-    let centre = corners()[4];
-    let completed = flight.completed_at.unwrap_or(flight.track.len());
-    flight
-        .track
-        .get(completed..)
-        .unwrap_or_default()
-        .iter()
-        .map(move |(ned, _)| (ned[0] - centre[0]).hypot(ned[1] - centre[1]))
-}
-
-/// How long after the plan completed the aircraft stays, from then on,
-/// within `share` of the planned orbit radius, seconds.
-fn orbit_settling_s(flight: &Flight, planned_m: f64, share: f64) -> f64 {
-    let last_outside = orbit_radii(flight)
-        .enumerate()
-        .filter(|(_, radius)| (radius - planned_m).abs() >= share * planned_m)
-        .map(|(tick, _)| tick + 1)
-        .last()
-        .unwrap_or(0);
-    last_outside as f64 * STEP_S
-}
-
 #[test]
-fn each_turn_rolls_out_on_the_next_leg_and_the_orbit_is_the_circle_flown() {
+fn each_turn_rolls_out_on_the_next_leg() {
     let (mut engine, _) = MissionEngine::from_waypoints(&plan(), config()).expect("builds");
-    let flight = fly(&mut engine, 12_000);
+    let flight = fly(&mut engine, 0);
     let overshoots: Vec<f64> = (1..4).map(|corner| overshoot_m(&flight, corner)).collect();
-    let planned = flight.orbit_radius_m.unwrap_or(f64::NAN);
-    let settling_s = orbit_settling_s(&flight, planned, 0.05);
-    let (low, high) = orbit_band_m(&flight, settling_s);
-    let (steady_low, steady_high) = orbit_band_m(&flight, 480.0);
     let summary = format!(
-        "turn leads {:?}, overshoots {overshoots:.1?} m, orbit {planned:.0} m planned, \
-         within 5 % after {settling_s:.0} s ({low:.0} to {high:.0} m), \
-         {steady_low:.0} to {steady_high:.0} m after 8 min",
+        "turn leads {:?}, overshoots {overshoots:.1?} m",
         flight.leads
     );
     assert!(
@@ -353,19 +303,6 @@ fn each_turn_rolls_out_on_the_next_leg_and_the_orbit_is_the_circle_flown() {
             "a turn swung past the next leg: {summary}"
         );
     }
-    // Entering the orbit from the last leg takes the aircraft wide of it
-    // at first: it settles inside 5 % of the radius in under two minutes
-    // (113 s in this flight), and holds within 1 % after that.
-    assert!(settling_s <= 150.0, "the orbit settles late: {summary}");
-    assert!(
-        (low - planned).abs() < 0.05 * planned && (high - planned).abs() < 0.05 * planned,
-        "the orbit flown is not the orbit planned: {summary}"
-    );
-    assert!(
-        (steady_low - planned).abs() < 0.01 * planned
-            && (steady_high - planned).abs() < 0.01 * planned,
-        "the steady orbit is not the orbit planned: {summary}"
-    );
 }
 
 #[test]

@@ -223,8 +223,10 @@ impl MissionTask {
         self.log_events(&output.events);
         self.events.extend(output.events.iter().cloned());
         let progress = self.mission.as_ref().map(MissionEngine::plan_progress);
+        let navigation = self.mission.as_ref().map(MissionEngine::navigation_display);
         self.update(|status| {
             status.mission_state = Some(output.state);
+            status.navigation = navigation;
             if let Some((target, complete)) = progress {
                 status.target_waypoint = Some(target);
                 status.plan_complete = complete;
