@@ -203,6 +203,7 @@ fn a_held_mission_commands_nothing_and_pauses_its_phase_clock() {
         count(&events, |e| matches!(e, MissionEvent::MissionComplete)),
         1
     );
+    assert_eq!(engine.counters().lifecycle_mismatch, 0);
 }
 
 #[test]
@@ -292,6 +293,7 @@ fn a_receipt_that_arrives_during_a_hold_is_taken_after_the_resume() {
         climbed,
         "the receipt taken during the hold lets the mission climb"
     );
+    assert_eq!(engine.counters().lifecycle_mismatch, 0);
 }
 
 #[test]

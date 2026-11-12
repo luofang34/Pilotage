@@ -4,6 +4,7 @@
 
 use navigate_contract::{DurationNanos, MonotonicNanos};
 
+use super::lifecycle::LifecycleEvent;
 use super::{MissionEngine, MissionEvent, MissionState};
 
 impl MissionEngine {
@@ -18,6 +19,7 @@ impl MissionEngine {
         }
         self.hold_started = Some(now);
         self.hold_events.push(MissionEvent::MissionHeld);
+        self.step_lifecycle(LifecycleEvent::Held);
     }
 
     /// Resumes a held mission from the active leg. The time held leaves
@@ -32,6 +34,7 @@ impl MissionEngine {
         self.hold_events.push(MissionEvent::MissionResumed {
             held_ns: held.as_nanos(),
         });
+        self.step_lifecycle(LifecycleEvent::Resumed);
         Some(held)
     }
 
