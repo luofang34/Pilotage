@@ -103,6 +103,7 @@ fn the_lane_names_the_position_it_rests_on() {
         (2, 0, Some((PositionSource::Visual, Normal))),
         (3, 1, Some((PositionSource::Inertial, Degraded))),
         (4, 1, Some((PositionSource::DeadReckoning, Degraded))),
+        (4, 0, Some((PositionSource::DeadReckoning, Normal))),
         (5, 0, Some((PositionSource::Blended, Normal))),
         // No position stated, an unread code, or an unusable solution:
         // the guidance is removed, never drawn on an unnamed position.

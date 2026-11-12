@@ -149,7 +149,7 @@ public final class VerifiedInstrumentRuntime {
 
 /// Verifies the runtime and Apple display identities before runtime creation.
 public enum AppleInstrumentCompatibilityGate {
-    public static let stateABI: UInt32 = 9
+    public static let stateABI: UInt32 = 11
     public static let registrySceneDigest =
         "c639c802936cc753bd8326fca34495fe16634c0a78313d4830bcd35616c588ba"
     public static let screenCompositionDigest =
