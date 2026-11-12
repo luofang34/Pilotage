@@ -9,9 +9,10 @@ use navigate_contract::{
 };
 
 use crate::holding_pattern::{
-    HoldingPattern, HoldingPatternStatus, PatternFlight, PatternFrame, Steer,
-    holding_speed_limit_mps, holding_turn_radius_m, standard_leg_time_s,
+    CircuitShape, HoldingPattern, HoldingPatternStatus, HoldingTurn, PatternFlight, PatternFrame,
+    Steer, TimedCircuit, holding_speed_limit_mps, holding_turn_radius_m, standard_leg_time_s,
 };
+use pilotage_protocol::ControlIntent;
 
 use super::{MissionEngine, MissionEvent};
 
@@ -27,6 +28,8 @@ pub(super) struct ActivePattern {
     flight: PatternFlight,
     /// The entry count last announced.
     announced_entries: u32,
+    /// The circuit flown by time while there is no solution fit to fly.
+    timed: Option<TimedCircuit>,
 }
 
 impl MissionEngine {
@@ -70,6 +73,7 @@ impl MissionEngine {
             self.holding_pattern = Some(active);
         }
         let active = self.holding_pattern.as_mut()?;
+        active.timed = None;
         let position = active.frame.point(&solution.position);
         let frame_course = active.frame.course(course);
         let steer = active.flight.step(position, frame_course, now_s);
@@ -88,6 +92,50 @@ impl MissionEngine {
         target.position = active.frame.position(to);
         target.altitude = Some(AltitudeConstraint::At(altitude_m));
         Some((reference, target))
+    }
+
+    /// The heading and altitude demand of the holding pattern flown by
+    /// time, while there is no solution fit to fly; `None` with no pattern
+    /// started or no heading to start the circuit from. The circuit takes
+    /// over from the part of the pattern flown when the solution went, and
+    /// the pattern is entered again from where the vehicle is when a
+    /// solution comes back.
+    pub(super) fn timed_holding_intent(
+        &mut self,
+        now: MonotonicNanos,
+        events: &mut Vec<MissionEvent>,
+    ) -> Option<ControlIntent> {
+        if !self.steers_by_heading() {
+            return None;
+        }
+        let now_s = seconds(now);
+        let wind = self.wind_estimate().unwrap_or([0.0, 0.0]);
+        let heading_now = self.current_heading()?;
+        let indicated_mps = self.commanded_cruise_mps();
+        let active = self.holding_pattern.as_mut()?;
+        let altitude_m = active.pattern.fix.altitude_m;
+        let timed = active.timed.get_or_insert_with(|| {
+            let shape = CircuitShape {
+                inbound_rad: active.pattern.inbound_course_rad,
+                right_turns: active.pattern.turn == HoldingTurn::Right,
+                airspeed_mps: crate::true_airspeed_for(indicated_mps, altitude_m),
+                turn_radius_m: active.pattern.turn_radius_m,
+                leg_time_s: active.pattern.leg_time_s,
+            };
+            TimedCircuit::take_over(
+                shape,
+                active.flight.leg(),
+                active.flight.part_elapsed_s(now_s),
+                active.flight.outbound_time_s(),
+                heading_now,
+                now_s,
+                wind,
+            )
+        });
+        let heading = timed.step(now_s, wind);
+        self.announce_hold(now, events);
+        let commanded = self.unbiased_heading(heading);
+        Some(self.heading_altitude(commanded, altitude_m))
     }
 
     /// The pattern at the last waypoint for a vehicle at `solution` on
@@ -154,6 +202,7 @@ impl MissionEngine {
             frame,
             flight,
             announced_entries: 0,
+            timed: None,
         })
     }
 

@@ -151,6 +151,13 @@ impl MissionEngine {
             MissionState::Climb | MissionState::Enroute | MissionState::Complete
         );
         if in_flight && solution.is_none() {
+            // In a holding pattern the racetrack goes on by time; anywhere
+            // else the heading last commanded holds.
+            if state == MissionState::Complete
+                && let Some(intent) = self.timed_holding_intent(now, events)
+            {
+                return Some(intent);
+            }
             return self.hold_heading(now, cruise_altitude_m, events);
         }
         // Launched with no solution fit to fly: climb on the present
@@ -366,7 +373,7 @@ impl MissionEngine {
     }
 
     /// The heading last commanded, or else the present one.
-    fn current_heading(&self) -> Option<f64> {
+    pub(super) fn current_heading(&self) -> Option<f64> {
         self.steering
             .last
             .map(|(heading, _)| heading)
@@ -375,7 +382,7 @@ impl MissionEngine {
 
     /// The intent for `heading` and `altitude_m` at the cruise airspeed,
     /// recorded as the last command.
-    fn heading_altitude(&mut self, heading: f64, altitude_m: f64) -> ControlIntent {
+    pub(super) fn heading_altitude(&mut self, heading: f64, altitude_m: f64) -> ControlIntent {
         let heading = heading.sin().atan2(heading.cos());
         self.steering.last = Some((heading, altitude_m));
         ControlIntent::HeadingAltitude(HeadingAltitudeIntent {
