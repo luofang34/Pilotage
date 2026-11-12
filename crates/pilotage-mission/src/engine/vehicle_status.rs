@@ -153,6 +153,14 @@ impl MissionEngine {
             .is_some_and(|status| status.position_valid == Some(true))
     }
 
+    /// The flight controller's height above its local origin in the
+    /// latest fresh vehicle status, metres.
+    pub(super) fn fc_height_m(&self, now: MonotonicNanos) -> Option<f64> {
+        self.fresh_status(now)?
+            .height_above_origin_m
+            .filter(|height| height.is_finite())
+    }
+
     /// The latest vehicle status no older than
     /// [`VEHICLE_STATUS_MAX_AGE_NS`] at `now`.
     fn fresh_status(&self, now: MonotonicNanos) -> Option<VehicleStatus> {
