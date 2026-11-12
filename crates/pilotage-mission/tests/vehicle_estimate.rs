@@ -161,7 +161,7 @@ fn the_estimate_flies_the_route_to_completion_as_a_degraded_solution() {
     for _ in 0..20_000 {
         let output = step(&mut engine, &mut estimate, &mut now, &mut events);
         if let Some(guidance) = engine.nav_guidance() {
-            assert_eq!(guidance.quality, NavQuality::Degraded);
+            assert_eq!(guidance.integrity.quality(), Some(NavQuality::Degraded));
             guidance_seen = true;
         }
         if output.state == MissionState::Complete {

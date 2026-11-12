@@ -266,6 +266,14 @@ fn a_navigator_without_a_position_aid_flies_every_leg_by_dead_reckoning() {
         ),
         "flown beyond its limits, with the navigator's own grade beside it: {steering:?}"
     );
+    let guidance = engine.nav_guidance();
+    assert!(
+        guidance.as_ref().is_some_and(|guidance| matches!(
+            guidance.integrity,
+            SteeringIntegrity::DeadReckoning { .. }
+        )),
+        "the guidance flown says it is flown by dead reckoning: {guidance:?}"
+    );
 }
 
 #[test]
