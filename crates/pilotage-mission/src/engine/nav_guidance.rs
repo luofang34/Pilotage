@@ -15,7 +15,9 @@ use navigate_geodesy::{cross_track_m, distance_m};
 use crate::body::GEODESY;
 use navigate_route::Leg;
 
-use super::{MissionEngine, MissionState, PositionIntegrity, PositionKind, ToFrom};
+use super::{
+    MissionEngine, MissionState, PositionIntegrity, PositionKind, SteeringIntegrity, ToFrom,
+};
 
 #[cfg(test)]
 mod tests;
@@ -27,8 +29,9 @@ pub enum NavQuality {
     Good,
     /// Usable with caution: bounds exceeded or sources degraded.
     Degraded,
-    /// Not usable for any navigation decision; consumers remove the
-    /// guidance display rather than annotating it.
+    /// Not usable for any navigation decision on the navigator's own
+    /// grade. Whether it is flown all the same is the engine's judgment
+    /// ([`super::SteeringIntegrity`]), which a display follows.
     Unusable,
 }
 
@@ -73,8 +76,10 @@ pub struct NavGuidance {
     pub leg_index: u32,
     /// Waypoints in the plan being flown.
     pub waypoint_count: u32,
-    /// Quality of the solution this geometry rests on.
-    pub quality: NavQuality,
+    /// The engine's judgment of the solution this geometry rests on. A
+    /// display keeps the guidance while a solution is flown, within its
+    /// limits or by dead reckoning.
+    pub integrity: SteeringIntegrity,
     /// Whether the active waypoint is ahead of (`To`) or behind (`From`)
     /// the vehicle along the desired course; `None` while no lateral
     /// course is tracked, which removes the deviation bar.
@@ -118,7 +123,7 @@ impl MissionEngine {
                     distance_to_waypoint_m: leg.distance_to_go_m,
                     leg_index: u32::try_from(waypoint_count.saturating_sub(1)).unwrap_or(u32::MAX),
                     waypoint_count: u32::try_from(waypoint_count).unwrap_or(u32::MAX),
-                    quality: leg.quality,
+                    integrity: self.steering_source().integrity,
                     to_from: Some(leg.to_from),
                     holding: true,
                     position: self.steering_source().position_kind(),
@@ -135,7 +140,7 @@ impl MissionEngine {
                     &solution.position,
                     &leg,
                     self.route.waypoints().len(),
-                    solution.integrity.quality.into(),
+                    self.steering_source().integrity,
                 );
                 let steering = self.steering_source();
                 guidance.position = steering.position_kind();
@@ -155,7 +160,7 @@ fn leg_guidance(
     position: &GeodeticPosition,
     leg: &Leg<'_>,
     waypoint_count: usize,
-    quality: NavQuality,
+    integrity: SteeringIntegrity,
 ) -> NavGuidance {
     let to = leg.to;
     let course_rad = leg.from.map_or_else(
@@ -183,7 +188,7 @@ fn leg_guidance(
         }),
         leg_index: u32::try_from(leg.index).unwrap_or(u32::MAX),
         waypoint_count: u32::try_from(waypoint_count).unwrap_or(u32::MAX),
-        quality,
+        integrity,
         holding: false,
         position: None,
         position_integrity: None,

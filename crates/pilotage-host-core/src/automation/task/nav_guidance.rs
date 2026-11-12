@@ -9,7 +9,9 @@
 //! byte-identical, and guidance that ends is cleared rather than frozen
 //! or centered.
 
-use pilotage_mission::{NavGuidance, NavQuality, PositionIntegrity, PositionKind, ToFrom};
+use pilotage_mission::{
+    NavGuidance, NavQuality, PositionIntegrity, PositionKind, SteeringIntegrity, ToFrom,
+};
 use pilotage_protocol::{SessionId, wire};
 
 /// Source identity of the mission principal's guidance group. Role
@@ -117,11 +119,7 @@ fn to_wire(guidance: &NavGuidance, stamp: wire::MeasurementStamp) -> wire::NavGu
         distance_to_waypoint_m: guidance.distance_to_waypoint_m as f32,
         leg_index: guidance.leg_index,
         waypoint_count: guidance.waypoint_count,
-        solution_quality: match guidance.quality {
-            NavQuality::Good => 0,
-            NavQuality::Degraded => 1,
-            NavQuality::Unusable => 2,
-        },
+        solution_quality: quality_to_wire(guidance.integrity),
         sequencing: if guidance.holding {
             SEQUENCING_HOLD
         } else {
@@ -160,6 +158,26 @@ fn integrity_to_wire(integrity: Option<PositionIntegrity>) -> u32 {
         Some(PositionIntegrity::Degraded) => 2,
         Some(PositionIntegrity::SensorExcluded) => 3,
         _ => 0,
+    }
+}
+
+/// The wire's solution quality: 0 good, 1 degraded, 2 unusable. A receiver
+/// removes the guidance display on unusable, so a solution flown by dead
+/// reckoning travels as degraded whatever its navigator graded it: the
+/// vehicle flies that guidance. A judgment this vocabulary cannot read is
+/// unusable.
+fn quality_to_wire(integrity: SteeringIntegrity) -> u32 {
+    match integrity {
+        SteeringIntegrity::WithinLimits {
+            quality: NavQuality::Good,
+            ..
+        } => 0,
+        SteeringIntegrity::WithinLimits {
+            quality: NavQuality::Degraded,
+            ..
+        }
+        | SteeringIntegrity::DeadReckoning { .. } => 1,
+        _ => 2,
     }
 }
 

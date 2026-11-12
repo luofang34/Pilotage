@@ -227,6 +227,7 @@ fn mission_arms_once_climbs_flies_the_route_and_completes() {
     assert_flight_events(&events);
     assert_eq!(engine.counters().guidance_refused, 0);
     assert_eq!(engine.counters().fusion_rejected, 0);
+    assert_eq!(engine.counters().nav_source_mismatch, 0);
 
     let height_m = -truth.ned[2];
     assert!(height_m > 10.0, "still at cruise height, got {height_m}");
@@ -337,7 +338,7 @@ fn guidance_tracks_the_active_leg_and_leaves_with_the_plan() {
     assert_eq!(sequenced.from_ident.as_deref(), Some("DEMOA"));
     assert_eq!(sequenced.to_ident, "DEMOB");
     assert_eq!(sequenced.leg_index, 1);
-    assert_eq!(sequenced.quality, NavQuality::Good);
+    assert_eq!(sequenced.integrity.quality(), Some(NavQuality::Good));
     assert!(sequenced.lateral_deviation_m.is_some_and(f64::is_finite));
     assert!(
         sequenced.vertical_deviation_m.is_some_and(f64::is_finite),

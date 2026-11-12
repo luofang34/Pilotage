@@ -75,6 +75,19 @@ pub enum SteeringIntegrity {
     },
 }
 
+impl SteeringIntegrity {
+    /// The navigator's grade of the solution flown; `None` while none is.
+    #[must_use]
+    pub const fn quality(&self) -> Option<NavQuality> {
+        match self {
+            Self::WithinLimits { quality, .. } | Self::DeadReckoning { quality, .. } => {
+                Some(*quality)
+            }
+            Self::NoSolution { .. } => None,
+        }
+    }
+}
+
 /// The position source the plan is steered on, and the engine's judgment
 /// of it.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -227,6 +240,7 @@ impl MissionEngine {
                 contributing: None,
                 integrity: SteeringIntegrity::NoSolution {
                     reason: self
+                        .nav
                         .no_solution
                         .unwrap_or(StartWithheldReason::NavigationNotStarted),
                 },

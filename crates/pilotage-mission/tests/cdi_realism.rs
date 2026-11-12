@@ -137,7 +137,7 @@ fn displace_and_recapture(side: f64) {
     );
     let tracking = rig.expect_guidance("tracking the first fixed leg");
     assert_eq!(tracking.to_ident, CORNER_IDENTS[1]);
-    assert_eq!(tracking.quality, NavQuality::Good);
+    assert_eq!(tracking.integrity.quality(), Some(NavQuality::Good));
 
     rig.disturbance_ned = right_of_course_ned(tracking.course_rad, PUSH_MPS * side);
     assert!(

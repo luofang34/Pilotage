@@ -5,7 +5,15 @@ use navigate_contract::{
 };
 use navigate_route::Leg;
 
-use super::{NavQuality, leg_guidance, profile_deviation_m};
+use super::{NavQuality, SteeringIntegrity, leg_guidance, profile_deviation_m};
+
+/// A solution within its limits at the navigator's `quality`.
+const fn within(quality: NavQuality) -> SteeringIntegrity {
+    SteeringIntegrity::WithinLimits {
+        quality,
+        horizontal_1sigma_m: 5.0,
+    }
+}
 
 /// One degree of arc on the mean-radius sphere, meters: the scale every
 /// hand-computed expectation below is derived from.
@@ -41,13 +49,13 @@ fn eastbound_leg_pins_course_deviations_and_distance() {
     // 0.01° south of the track at its midpoint, 50 m above the profile.
     let ownship = position(-0.01, 0.5, 1050.0);
 
-    let guidance = leg_guidance(&ownship, &leg, 3, NavQuality::Good);
+    let guidance = leg_guidance(&ownship, &leg, 3, within(NavQuality::Good));
 
     assert_eq!(guidance.to_ident, "EASTB");
     assert_eq!(guidance.from_ident.as_deref(), Some("EASTA"));
     assert_eq!(guidance.leg_index, 1);
     assert_eq!(guidance.waypoint_count, 3);
-    assert_eq!(guidance.quality, NavQuality::Good);
+    assert_eq!(guidance.integrity, within(NavQuality::Good));
 
     // An equatorial eastbound great circle courses due east exactly.
     let course_error = guidance.course_rad - std::f64::consts::FRAC_PI_2;
@@ -84,7 +92,12 @@ fn left_of_track_is_negative() {
         index: 1,
         path: LegPath::TrackToFix,
     };
-    let guidance = leg_guidance(&position(0.01, 0.5, 1000.0), &leg, 3, NavQuality::Degraded);
+    let guidance = leg_guidance(
+        &position(0.01, 0.5, 1000.0),
+        &leg,
+        3,
+        within(NavQuality::Degraded),
+    );
 
     let lateral = guidance
         .lateral_deviation_m
@@ -93,7 +106,7 @@ fn left_of_track_is_negative() {
         (lateral + 0.01 * METERS_PER_DEGREE).abs() < 1.0,
         "left of track must be negative, got {lateral}"
     );
-    assert_eq!(guidance.quality, NavQuality::Degraded);
+    assert_eq!(guidance.integrity, within(NavQuality::Degraded));
     assert_eq!(guidance.vertical_deviation_m, Some(0.0));
 }
 
@@ -108,7 +121,12 @@ fn direct_to_courses_at_the_waypoint_and_reports_no_cross_track() {
     };
     // Due south-west of the waypoint: the live bearing to it is the
     // course, and no track exists to deviate from.
-    let guidance = leg_guidance(&position(-0.01, 0.5, 1000.0), &leg, 3, NavQuality::Good);
+    let guidance = leg_guidance(
+        &position(-0.01, 0.5, 1000.0),
+        &leg,
+        3,
+        within(NavQuality::Good),
+    );
 
     assert_eq!(guidance.from_ident, None);
     assert_eq!(guidance.lateral_deviation_m, None);
@@ -130,7 +148,12 @@ fn an_unconstrained_waypoint_reports_no_vertical_deviation() {
         index: 1,
         path: LegPath::TrackToFix,
     };
-    let guidance = leg_guidance(&position(0.0, 0.5, 2000.0), &leg, 2, NavQuality::Good);
+    let guidance = leg_guidance(
+        &position(0.0, 0.5, 2000.0),
+        &leg,
+        2,
+        within(NavQuality::Good),
+    );
     assert_eq!(guidance.vertical_deviation_m, None);
 }
 

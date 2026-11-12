@@ -1,6 +1,9 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use pilotage_mission::{NavGuidance, NavQuality, PositionIntegrity, PositionKind, ToFrom};
+use pilotage_mission::{
+    NavGuidance, NavQuality, PositionIntegrity, PositionKind, StartWithheldReason,
+    SteeringIntegrity, ToFrom,
+};
 use pilotage_protocol::{SessionId, wire};
 
 use super::{NavGuidancePublisher, NavPublication};
@@ -15,7 +18,10 @@ fn guidance() -> NavGuidance {
         distance_to_waypoint_m: 480.0,
         leg_index: 1,
         waypoint_count: 3,
-        quality: NavQuality::Degraded,
+        integrity: SteeringIntegrity::WithinLimits {
+            quality: NavQuality::Degraded,
+            horizontal_1sigma_m: 3.0,
+        },
         to_from: Some(ToFrom::To),
         holding: false,
         position: Some(PositionKind::Satellite),
@@ -121,7 +127,9 @@ fn an_undefined_deviation_travels_as_nan_and_a_direct_to_leg_has_no_origin() {
         from_ident: None,
         lateral_deviation_m: None,
         vertical_deviation_m: None,
-        quality: NavQuality::Unusable,
+        integrity: SteeringIntegrity::NoSolution {
+            reason: StartWithheldReason::NavigationStale,
+        },
         to_from: None,
         ..guidance()
     };
@@ -206,4 +214,32 @@ fn the_position_integrity_travels_as_its_code_and_none_as_zero() {
         let state = sample(publisher.publication(Some(&guidance), 0));
         assert_eq!(state.position_integrity, code, "{position_integrity:?}");
     }
+}
+
+#[test]
+fn dead_reckoning_travels_as_degraded_so_a_receiver_keeps_the_guidance() {
+    let mut publisher = NavGuidancePublisher::for_session(SessionId::new(7));
+    let quality_of = |publisher: &mut NavGuidancePublisher, integrity| {
+        let guidance = NavGuidance {
+            integrity,
+            ..guidance()
+        };
+        sample(publisher.publication(Some(&guidance), 0)).solution_quality
+    };
+    let graded = |quality| SteeringIntegrity::WithinLimits {
+        quality,
+        horizontal_1sigma_m: 3.0,
+    };
+    assert_eq!(quality_of(&mut publisher, graded(NavQuality::Good)), 0);
+    assert_eq!(quality_of(&mut publisher, graded(NavQuality::Degraded)), 1);
+    assert_eq!(quality_of(&mut publisher, graded(NavQuality::Unusable)), 2);
+    let reckoned = SteeringIntegrity::DeadReckoning {
+        quality: NavQuality::Unusable,
+        horizontal_1sigma_m: 4_000.0,
+    };
+    assert_eq!(
+        quality_of(&mut publisher, reckoned),
+        1,
+        "the navigator grades it unusable; the vehicle flies it"
+    );
 }

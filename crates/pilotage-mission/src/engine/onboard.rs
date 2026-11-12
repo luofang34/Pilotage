@@ -49,6 +49,13 @@ pub(super) struct OnboardNavigation {
     pub(super) reported_dead_reckoning_m: Option<f64>,
 }
 
+impl OnboardNavigation {
+    /// The latest solution kept, whatever its age or fitness.
+    pub(super) const fn held(&self) -> Option<&NavigationSolution> {
+        self.latest.as_ref()
+    }
+}
+
 impl MissionEngine {
     /// Offers one solution of the onboard navigator. `now` is the time of
     /// the offer on the engine's clock domain.
