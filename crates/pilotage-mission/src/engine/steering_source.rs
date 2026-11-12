@@ -10,7 +10,9 @@ use navigate_contract::{SensorClass, SourceComposition};
 
 use crate::config::OwnshipSource;
 
-use super::{MissionEngine, NavQuality, StartWithheldReason};
+use super::{
+    MissionEngine, NavQuality, SourceIntegrity, SourceIntegrityState, StartWithheldReason,
+};
 
 #[cfg(test)]
 mod tests;
@@ -102,6 +104,9 @@ pub struct SteeringSource {
     pub contributing: Option<SourceComposition>,
     /// The engine's judgment of the position.
     pub integrity: SteeringIntegrity,
+    /// What the navigator says of a position sensor it monitors, with the
+    /// solution flown; `None` while none is flown or it says nothing.
+    pub source_integrity: Option<SourceIntegrity>,
 }
 
 /// The kind of position the plan is steered on, as an instrument
@@ -179,9 +184,32 @@ impl SteeringSource {
     /// The judgment an instrument annunciates of the position steered
     /// on; `None` while none is, and for a solution within the limits
     /// whose navigator grades it unusable, which an instrument cannot
-    /// present as fit.
+    /// present as fit. A sensor the navigator excluded is annunciated
+    /// before anything else, and one it finds disagreeing degrades a
+    /// solution however it is graded.
     #[must_use]
     pub const fn position_integrity(&self) -> Option<PositionIntegrity> {
+        let flown = match self.integrity {
+            SteeringIntegrity::NoSolution { .. }
+            | SteeringIntegrity::WithinLimits {
+                quality: NavQuality::Unusable,
+                ..
+            } => return None,
+            SteeringIntegrity::WithinLimits { .. } | SteeringIntegrity::DeadReckoning { .. } => {
+                self.source_integrity
+            }
+        };
+        match flown {
+            Some(SourceIntegrity {
+                state: SourceIntegrityState::Excluded,
+                ..
+            }) => return Some(PositionIntegrity::SensorExcluded),
+            Some(SourceIntegrity {
+                state: SourceIntegrityState::Disagreeing,
+                ..
+            }) => return Some(PositionIntegrity::Degraded),
+            _ => {}
+        }
         match self.integrity {
             SteeringIntegrity::WithinLimits {
                 quality: NavQuality::Good,
@@ -211,7 +239,19 @@ impl SteeringSource {
             source,
             contributing,
             integrity,
+            source_integrity: None,
         }
+    }
+
+    /// This steering source with the navigator's statement of a position
+    /// sensor.
+    #[must_use]
+    pub const fn with_source_integrity(
+        mut self,
+        source_integrity: Option<SourceIntegrity>,
+    ) -> Self {
+        self.source_integrity = source_integrity;
+        self
     }
 }
 
@@ -244,6 +284,7 @@ impl MissionEngine {
                         .no_solution
                         .unwrap_or(StartWithheldReason::NavigationNotStarted),
                 },
+                source_integrity: None,
             };
         };
         let quality = solution.integrity.quality.into();
@@ -266,6 +307,10 @@ impl MissionEngine {
             contributing: (source != PositionSource::SimulationTruth)
                 .then_some(solution.integrity.contributing),
             integrity,
+            // Only the onboard navigator's solution comes with one.
+            source_integrity: (source == PositionSource::OnboardNavigation)
+                .then(|| self.onboard.source_integrity())
+                .flatten(),
         }
     }
 }

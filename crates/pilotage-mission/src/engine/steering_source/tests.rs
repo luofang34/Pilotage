@@ -1,7 +1,8 @@
 use navigate_contract::{SensorClass, SourceComposition};
 
 use super::{
-    PositionIntegrity, PositionKind, PositionSource, SteeringIntegrity, SteeringSource, kind_of,
+    PositionIntegrity, PositionKind, PositionSource, SourceIntegrity, SourceIntegrityState,
+    SteeringIntegrity, SteeringSource, kind_of,
 };
 use crate::engine::{NavQuality, StartWithheldReason};
 
@@ -102,5 +103,77 @@ fn the_judgment_and_the_grade_give_the_annunciated_integrity() {
     for (integrity, expected) in cases {
         let steering = SteeringSource::new(PositionSource::OnboardNavigation, None, integrity);
         assert_eq!(steering.position_integrity(), expected, "{integrity:?}");
+    }
+}
+
+/// The navigator's statement of its satellite receiver in `state`.
+const fn gnss(state: SourceIntegrityState) -> Option<SourceIntegrity> {
+    Some(SourceIntegrity {
+        class: SensorClass::Gnss,
+        state,
+        since: None,
+    })
+}
+
+const GOOD: SteeringIntegrity = SteeringIntegrity::WithinLimits {
+    quality: NavQuality::Good,
+    horizontal_1sigma_m: 3.0,
+};
+const DEGRADED: SteeringIntegrity = SteeringIntegrity::WithinLimits {
+    quality: NavQuality::Degraded,
+    horizontal_1sigma_m: 30.0,
+};
+const UNUSABLE: SteeringIntegrity = SteeringIntegrity::WithinLimits {
+    quality: NavQuality::Unusable,
+    horizontal_1sigma_m: 30.0,
+};
+const RECKONED: SteeringIntegrity = SteeringIntegrity::DeadReckoning {
+    quality: NavQuality::Unusable,
+    horizontal_1sigma_m: 900.0,
+};
+const NONE: SteeringIntegrity = SteeringIntegrity::NoSolution {
+    reason: StartWithheldReason::NavigationStale,
+};
+
+/// Every judgment with every statement of the navigator, and what an
+/// instrument annunciates.
+#[rustfmt::skip]
+const ANNUNCIATED: [(SteeringIntegrity, Option<SourceIntegrityState>, Option<PositionIntegrity>); 20] = {
+    use PositionIntegrity::{Degraded, Normal, SensorExcluded};
+    use SourceIntegrityState::{Consistent, Disagreeing, Excluded};
+    [
+        (GOOD, None, Some(Normal)),
+        (GOOD, Some(Consistent), Some(Normal)),
+        (GOOD, Some(Disagreeing), Some(Degraded)),
+        (GOOD, Some(Excluded), Some(SensorExcluded)),
+        (DEGRADED, None, Some(Degraded)),
+        (DEGRADED, Some(Consistent), Some(Degraded)),
+        (DEGRADED, Some(Disagreeing), Some(Degraded)),
+        (DEGRADED, Some(Excluded), Some(SensorExcluded)),
+        (RECKONED, None, Some(Degraded)),
+        (RECKONED, Some(Consistent), Some(Degraded)),
+        (RECKONED, Some(Disagreeing), Some(Degraded)),
+        (RECKONED, Some(Excluded), Some(SensorExcluded)),
+        (UNUSABLE, None, None),
+        (UNUSABLE, Some(Consistent), None),
+        (UNUSABLE, Some(Disagreeing), None),
+        (UNUSABLE, Some(Excluded), None),
+        (NONE, None, None),
+        (NONE, Some(Consistent), None),
+        (NONE, Some(Disagreeing), None),
+        (NONE, Some(Excluded), None),
+    ]
+};
+
+#[test]
+fn a_sensor_the_navigator_excludes_or_doubts_is_annunciated() {
+    for (integrity, state, expected) in ANNUNCIATED {
+        let steering = SteeringSource::new(PositionSource::OnboardNavigation, None, integrity)
+            .with_source_integrity(state.and_then(gnss));
+        assert_eq!(
+            steering.position_integrity(),
+            expected,
+            "{integrity:?} with {state:?}"
+        );
     }
 }

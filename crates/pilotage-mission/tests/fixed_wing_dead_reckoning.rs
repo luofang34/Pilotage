@@ -20,6 +20,7 @@ use pilotage_mission::{
     NavQuality, OwnshipSource, PlannedWaypoint, PositionKind, PositionSource, StartWithheldReason,
     SteeringIntegrity, VehicleStatus, WaypointPlan,
 };
+use pilotage_mission::{OnboardSolution, PositionIntegrity, SourceIntegrity, SourceIntegrityState};
 use pilotage_protocol::{ControlAction, VehicleClass};
 
 #[path = "fixed_wing_denied/aircraft.rs"]
@@ -425,4 +426,74 @@ fn a_climb_captures_on_the_flight_controllers_altitude_when_its_datum_is_known()
         None,
         "without the datum the height alone says nothing"
     );
+}
+
+#[test]
+fn a_gnss_exclusion_the_navigator_reports_reaches_the_display_and_the_guidance() {
+    let (mut engine, _) = MissionEngine::from_waypoints(
+        &plan(ALTITUDE_M),
+        config(OwnshipSource::onboard_navigation(), 0.0),
+    )
+    .expect("builds");
+    fly(&mut engine, 400, &low_navigator(0.0), false);
+    assert_eq!(engine.navigation_display().steering.source_integrity, None);
+
+    let aircraft = Aircraft {
+        ned: [0.0, 0.0, 0.0],
+        heading_rad: 0.0,
+        bank_rad: 0.0,
+        indicated_mps: CRUISE_IAS_MPS,
+        wind: [0.0, 0.0],
+        heading_bias_rad: 0.0,
+    };
+    let mut now = MonotonicNanos::from_nanos(1_000_000_000 + 400 * STEP_NANOS);
+    let mut offer = |engine: &mut MissionEngine, sequence: u32, state| {
+        now = MonotonicNanos::from_nanos(now.as_nanos() + STEP_NANOS);
+        let since = MonotonicNanos::from_nanos(21_000_000_000);
+        let statement = SourceIntegrity {
+            class: SensorClass::Gnss,
+            state,
+            since: Some(since),
+        };
+        let solution = solve(&aircraft, now, sequence, low_navigator(0.0)(0.0));
+        engine.on_onboard_solution(
+            OnboardSolution::with_source_integrity(solution, Some(statement)),
+            now,
+        );
+        engine.tick(now);
+        (statement, now)
+    };
+
+    let (doubted, _) = offer(&mut engine, 1_000, SourceIntegrityState::Disagreeing);
+    let steering = engine.navigation_display().steering;
+    assert_eq!(steering.source_integrity, Some(doubted));
+    assert_eq!(
+        steering.position_integrity(),
+        Some(PositionIntegrity::Degraded)
+    );
+
+    let (excluded, at) = offer(&mut engine, 1_001, SourceIntegrityState::Excluded);
+    let steering = engine.navigation_display().steering;
+    assert_eq!(
+        steering.source_integrity,
+        Some(excluded),
+        "the display names the sensor, its state, and since when"
+    );
+    assert_eq!(
+        engine
+            .nav_guidance()
+            .and_then(|guidance| guidance.position_integrity),
+        Some(PositionIntegrity::SensorExcluded),
+        "and the guidance on the wire carries it"
+    );
+
+    // A solution with no statement ends the report with it.
+    let later = MonotonicNanos::from_nanos(at.as_nanos() + STEP_NANOS);
+    engine.on_onboard_solution(
+        &solve(&aircraft, later, 1_002, low_navigator(0.0)(0.0)),
+        later,
+    );
+    engine.tick(later);
+    assert_eq!(engine.navigation_display().steering.source_integrity, None);
+    assert_eq!(engine.counters().nav_source_mismatch, 0);
 }

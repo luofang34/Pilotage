@@ -13,6 +13,7 @@ mod navigation_display;
 mod onboard;
 mod output;
 mod ownship;
+mod source_integrity;
 mod steering;
 mod steering_source;
 mod tick;
@@ -44,6 +45,7 @@ pub use navigation_display::{
     DisplayFix, DisplayWaypoint, LegDisplay, NavigationDisplay, ToFrom, WaypointProgress,
 };
 pub use output::{MissionAction, MissionCounters, MissionEvent, MissionOutput, MissionState};
+pub use source_integrity::{OnboardSolution, SourceIntegrity, SourceIntegrityState};
 pub use steering_source::{
     FlightPhase, PositionIntegrity, PositionKind, PositionSource, SteeringIntegrity, SteeringSource,
 };
