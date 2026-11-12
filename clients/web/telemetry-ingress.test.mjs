@@ -862,6 +862,8 @@ function guidance(sequence, overrides = {}, stampOverrides = {}) {
     legIndex: 2,
     waypointCount: 5,
     solutionQuality: 0,
+    sequencing: 0,
+    toFrom: 1,
     ...overrides,
     stamp: {
       sourceId: 0x0a1en,
@@ -979,11 +981,13 @@ function testNavGuidanceRejectsUninterpretableSamples() {
     { legIndex: -1 },
     { waypointCount: 1.5 },
     { toIdent: 42 },
+    { sequencing: -1 },
+    { toFrom: 1.5 },
   ]) {
     const view = tracker.observe(guidance(9, { toIdent: "BAD", ...overrides }), 10);
     assert.equal(view.navGuidance.toIdent, "WP01", `must reject ${JSON.stringify(overrides)}`);
   }
-  assert.equal(tracker.diagnostics().malformedGuidance, 5);
+  assert.equal(tracker.diagnostics().malformedGuidance, 7);
 
   // NaN deviations are the schema's "not tracking" encoding, not a fault:
   // they are accepted so the display profile can remove that deviation.
