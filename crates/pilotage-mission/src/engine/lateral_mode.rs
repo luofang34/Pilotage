@@ -11,14 +11,24 @@
 //! A vehicle that cannot stop never flies a straight line without end on
 //! a lost position: its heading hold is bounded by a timer, and when the
 //! timer runs out it flies a racetrack by time.
+//!
+//! The machine does not select the intent yet. Each tick steps it on the
+//! plan's demand, and the engine's own selection records the mode it
+//! flew; a tick on which the two differ is counted. The timer is not run
+//! until the machine selects the intent.
+
+use navigate_contract::{GeodeticPosition, MonotonicNanos, NavigationSolution};
+use pilotage_protocol::ControlIntent;
+
+use super::tick::overflown;
+use super::{MissionEngine, MissionEvent, MissionState};
 
 #[cfg(test)]
 mod tests;
 
 /// The lateral mode.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum LateralMode {
+pub(super) enum LateralMode {
     /// Nothing is flown.
     #[default]
     Off,
@@ -86,6 +96,13 @@ pub(super) enum LateralEvent {
     /// The demand needs a position and there is none.
     Lost(LossResponse),
     /// The bound of the heading hold ran out.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the engine runs no timer while it only observes the machine"
+        )
+    )]
     TimerExpired,
 }
 
@@ -98,6 +115,9 @@ pub(super) enum LateralEffect {
     HeadingHoldBegan,
     /// The timed racetrack began.
     TimedHoldBegan,
+    /// A position came back during the heading hold or the timed
+    /// racetrack: the timer is cleared and the mode now flown is resumed.
+    Resumed,
 }
 
 /// The mode after `event` in `mode`, and what to act on.
@@ -125,7 +145,135 @@ pub(super) const fn next(mode: LateralMode, event: LateralEvent) -> (LateralMode
         (HeadingHold, HeadingHold) | (TimedHold, TimedHold) => LateralEffect::None,
         (_, HeadingHold) => LateralEffect::HeadingHoldBegan,
         (_, TimedHold) => LateralEffect::TimedHoldBegan,
+        (HeadingHold | TimedHold, Standby | PositionHold | DirectTo | Track | Pattern)
+            if matches!(event, LateralEvent::Demand(_)) =>
+        {
+            LateralEffect::Resumed
+        }
         _ => LateralEffect::None,
     };
     (to, effect)
+}
+
+/// The machine's mode beside the mode the engine flew.
+#[derive(Debug, Default)]
+pub(super) struct Lateral {
+    /// The machine's mode after the latest tick.
+    pub(super) mode: LateralMode,
+    /// The mode the engine's own selection flew on the latest tick.
+    pub(super) flown: LateralMode,
+}
+
+impl MissionEngine {
+    /// The intent of a tick in `state`. Steps the lateral machine on what
+    /// the plan demands, lets the engine select its intent, and counts a
+    /// tick on which the mode selected is not the machine's
+    /// ([`super::MissionCounters::lateral_mode_mismatch`]).
+    pub(super) fn intent_for_state(
+        &mut self,
+        state: MissionState,
+        solution: Option<&NavigationSolution>,
+        now: MonotonicNanos,
+        events: &mut Vec<MissionEvent>,
+    ) -> Option<ControlIntent> {
+        let event = self.lateral_event(state, solution, now);
+        let (mode, _) = next(self.modes.lateral.mode, event);
+        self.modes.lateral = Lateral {
+            mode,
+            flown: LateralMode::Off,
+        };
+        let intent = self.select_intent(state, solution, now, events);
+        if self.modes.lateral.flown != mode {
+            self.counters.lateral_mode_mismatch =
+                self.counters.lateral_mode_mismatch.wrapping_add(1);
+        }
+        intent
+    }
+
+    /// Records the lateral mode the engine's selection flies this tick.
+    pub(super) const fn fly_lateral(&mut self, mode: LateralMode) {
+        self.modes.lateral.flown = mode;
+    }
+
+    /// What this tick asks of the lateral mode. The mission's phase is
+    /// read here once, to hand the machine its demand.
+    fn lateral_event(
+        &self,
+        state: MissionState,
+        solution: Option<&NavigationSolution>,
+        now: MonotonicNanos,
+    ) -> LateralEvent {
+        let by_heading = self.steers_by_heading();
+        let can_stop = self.config.can_stop();
+        match state {
+            MissionState::Arming if self.arm_request_sent() => {
+                LateralEvent::Demand(Demand::Standby)
+            }
+            // Launched with no solution fit to fly.
+            MissionState::AwaitSolution
+                if by_heading && solution.is_none() && self.launched(now) =>
+            {
+                LateralEvent::Lost(LossResponse::HoldHeading)
+            }
+            MissionState::Climb | MissionState::Enroute | MissionState::Complete => {
+                let Some(solution) = solution else {
+                    return LateralEvent::Lost(self.loss_response(state, now));
+                };
+                let demand = match state {
+                    MissionState::Climb if can_stop => Some(Demand::Position),
+                    MissionState::Climb if by_heading && !self.flies_route() => None,
+                    // The tick that completes the plan stops a vehicle that
+                    // can stop; one that cannot flies its pattern from then on.
+                    MissionState::Complete if can_stop => Some(Demand::Position),
+                    MissionState::Complete => Some(Demand::Pattern),
+                    _ => self.route_demand(&solution.position),
+                };
+                demand.map_or(LateralEvent::Disengaged, LateralEvent::Demand)
+            }
+            MissionState::AwaitSolution
+            | MissionState::Arming
+            | MissionState::Held
+            | MissionState::Failed => LateralEvent::Disengaged,
+        }
+    }
+
+    /// How this vehicle answers a demand it has no position to fly on.
+    fn loss_response(&self, state: MissionState, now: MonotonicNanos) -> LossResponse {
+        if self.steers_by_heading() {
+            LossResponse::HoldHeading
+        } else if state == MissionState::Complete {
+            LossResponse::Coast
+        } else if self.fc_position_valid(now) {
+            LossResponse::HoldPosition
+        } else {
+            LossResponse::Silent
+        }
+    }
+
+    /// What the plan demands of a vehicle at `position`: nothing while
+    /// its path is not flown; after its last waypoint, the stop of a
+    /// vehicle that can stop and the holding pattern of one that cannot;
+    /// direct to the last waypoint a stopping vehicle flies on to, to a
+    /// first fix with no leg behind it, and back to a fix flown past; and
+    /// otherwise the active leg's track.
+    fn route_demand(&self, position: &GeodeticPosition) -> Option<Demand> {
+        if !self.flies_route() {
+            return None;
+        }
+        if self.plan_complete {
+            return Some(if self.config.can_stop() {
+                Demand::Position
+            } else {
+                Demand::Pattern
+            });
+        }
+        if self.route.approaching() {
+            return Some(Demand::DirectTo);
+        }
+        let leg = self.route.active_leg()?;
+        Some(match leg.from {
+            Some(from) if !overflown(position, &from.position, &leg.to.position) => Demand::Track,
+            _ => Demand::DirectTo,
+        })
+    }
 }

@@ -1,6 +1,7 @@
 //! The state of the engine's mode machines, kept together so each machine
 //! owns its own state and none reads another's.
 
+use super::lateral_mode::Lateral;
 use super::nav_source::NavMode;
 use super::vertical_mode::VerticalStatus;
 
@@ -9,6 +10,8 @@ use super::vertical_mode::VerticalStatus;
 pub(super) struct Modes {
     /// The navigation source and its integrity.
     pub(super) nav: NavMode,
+    /// The lateral mode.
+    pub(super) lateral: Lateral,
     /// The vertical mode.
     pub(super) vertical: VerticalStatus,
 }

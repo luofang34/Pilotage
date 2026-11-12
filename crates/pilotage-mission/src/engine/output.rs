@@ -241,4 +241,8 @@ pub struct MissionCounters {
     /// own threshold, disagreed on whether the climb's target is
     /// captured. Any count is a defect.
     pub vertical_mode_mismatch: u64,
+    /// Ticks on which the lateral mode machine and the engine's own
+    /// selection of the intent disagreed on the mode flown. Any count is
+    /// a defect.
+    pub lateral_mode_mismatch: u64,
 }

@@ -21,7 +21,7 @@ use crate::config::OwnshipSource;
 
 mod heading_bias;
 
-use super::{MissionEngine, MissionEvent, MissionState, StartWithheldReason};
+use super::{LateralMode, MissionEngine, MissionEvent, MissionState, StartWithheldReason};
 use pilotage_mission_core::FlightAction as CoreFlightAction;
 
 /// How long the wind estimate takes to follow a change, seconds: long
@@ -129,6 +129,7 @@ impl MissionEngine {
         fallback_altitude_m: f64,
         events: &mut Vec<MissionEvent>,
     ) -> Option<ControlIntent> {
+        self.fly_lateral(LateralMode::HeadingHold);
         self.announce_hold(events);
         self.repeat_heading(fallback_altitude_m)
     }
@@ -185,6 +186,7 @@ impl MissionEngine {
             MissionState::Enroute => self.follow_plan_intent(solution, now, events),
             MissionState::Complete => self.end_of_plan_intent(solution, now, events),
             MissionState::Arming if self.arm_request_sent() => {
+                self.fly_lateral(LateralMode::Standby);
                 let altitude_m = if self.config.cruise_height_m > 0.0 {
                     cruise_altitude_m
                 } else {
@@ -226,6 +228,7 @@ impl MissionEngine {
         if !self.fc_position_valid(now) {
             return None;
         }
+        self.fly_lateral(LateralMode::PositionHold);
         self.announce_hold(events);
         self.last_yaw_rad?;
         Some(super::tick::outputs::zero_velocity_intent())

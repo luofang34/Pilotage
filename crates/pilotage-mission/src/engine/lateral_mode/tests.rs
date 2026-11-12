@@ -29,7 +29,7 @@ const EVENTS: [LateralEvent; 11] = [
 /// Every (mode, event) pair with its stated outcome.
 #[rustfmt::skip]
 const TABLE: [(LateralMode, LateralEvent, LateralMode, LateralEffect); 99] = {
-    use LateralEffect::{HeadingHoldBegan as HeadingBegan, None as Nothing, TimedHoldBegan as TimedBegan};
+    use LateralEffect::{HeadingHoldBegan as HeadingBegan, None as Nothing, Resumed, TimedHoldBegan as TimedBegan};
     use LateralEvent::{Demand as D, Disengaged, Lost as L, TimerExpired as Expired};
     use LateralMode::{Coast, DirectTo, HeadingHold, Off, Pattern, PositionHold, Standby, TimedHold, Track};
     use LossResponse as R;
@@ -107,11 +107,11 @@ const TABLE: [(LateralMode, LateralEvent, LateralMode, LateralEffect); 99] = {
         (Pattern, Expired, Pattern, Nothing),
 
         (HeadingHold, Disengaged, Off, Nothing),
-        (HeadingHold, D(Demand::Standby), Standby, Nothing),
-        (HeadingHold, D(Demand::Position), PositionHold, Nothing),
-        (HeadingHold, D(Demand::DirectTo), DirectTo, Nothing),
-        (HeadingHold, D(Demand::Track), Track, Nothing),
-        (HeadingHold, D(Demand::Pattern), Pattern, Nothing),
+        (HeadingHold, D(Demand::Standby), Standby, Resumed),
+        (HeadingHold, D(Demand::Position), PositionHold, Resumed),
+        (HeadingHold, D(Demand::DirectTo), DirectTo, Resumed),
+        (HeadingHold, D(Demand::Track), Track, Resumed),
+        (HeadingHold, D(Demand::Pattern), Pattern, Resumed),
         (HeadingHold, L(R::HoldPosition), PositionHold, Nothing),
         (HeadingHold, L(R::Silent), Off, Nothing),
         (HeadingHold, L(R::HoldHeading), HeadingHold, Nothing),
@@ -119,11 +119,11 @@ const TABLE: [(LateralMode, LateralEvent, LateralMode, LateralEffect); 99] = {
         (HeadingHold, Expired, TimedHold, TimedBegan),
 
         (TimedHold, Disengaged, Off, Nothing),
-        (TimedHold, D(Demand::Standby), Standby, Nothing),
-        (TimedHold, D(Demand::Position), PositionHold, Nothing),
-        (TimedHold, D(Demand::DirectTo), DirectTo, Nothing),
-        (TimedHold, D(Demand::Track), Track, Nothing),
-        (TimedHold, D(Demand::Pattern), Pattern, Nothing),
+        (TimedHold, D(Demand::Standby), Standby, Resumed),
+        (TimedHold, D(Demand::Position), PositionHold, Resumed),
+        (TimedHold, D(Demand::DirectTo), DirectTo, Resumed),
+        (TimedHold, D(Demand::Track), Track, Resumed),
+        (TimedHold, D(Demand::Pattern), Pattern, Resumed),
         (TimedHold, L(R::HoldPosition), PositionHold, Nothing),
         (TimedHold, L(R::Silent), Off, Nothing),
         (TimedHold, L(R::HoldHeading), TimedHold, Nothing),
@@ -185,5 +185,27 @@ fn the_heading_hold_announces_its_start_once() {
     assert_eq!(
         next(mode, lost),
         (LateralMode::HeadingHold, LateralEffect::None)
+    );
+}
+
+#[test]
+fn a_position_that_returns_resumes_the_mode_demanded_and_says_so() {
+    for held in [LateralMode::HeadingHold, LateralMode::TimedHold] {
+        for (demand, mode) in [
+            (Demand::Track, LateralMode::Track),
+            (Demand::DirectTo, LateralMode::DirectTo),
+            (Demand::Pattern, LateralMode::Pattern),
+        ] {
+            assert_eq!(
+                next(held, LateralEvent::Demand(demand)),
+                (mode, LateralEffect::Resumed),
+                "{held:?} resumes {demand:?}"
+            );
+        }
+    }
+    // A demand that follows a demand resumes nothing.
+    assert_eq!(
+        next(LateralMode::DirectTo, LateralEvent::Demand(Demand::Track)).1,
+        LateralEffect::None
     );
 }
