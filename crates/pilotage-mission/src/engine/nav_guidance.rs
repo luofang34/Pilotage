@@ -15,7 +15,7 @@ use navigate_geodesy::{cross_track_m, distance_m};
 use crate::body::GEODESY;
 use navigate_route::Leg;
 
-use super::{MissionEngine, MissionState, PositionKind, ToFrom};
+use super::{MissionEngine, MissionState, PositionIntegrity, PositionKind, ToFrom};
 
 #[cfg(test)]
 mod tests;
@@ -86,6 +86,9 @@ pub struct NavGuidance {
     /// The kind of position this geometry rests on; `None` when the
     /// engine cannot name one, which removes the display.
     pub position: Option<PositionKind>,
+    /// The engine's judgment of that position; `None` when it has none an
+    /// instrument can present, which removes the display.
+    pub position_integrity: Option<PositionIntegrity>,
 }
 
 impl MissionEngine {
@@ -119,6 +122,7 @@ impl MissionEngine {
                     to_from: Some(leg.to_from),
                     holding: true,
                     position: self.steering_source().position_kind(),
+                    position_integrity: self.steering_source().position_integrity(),
                 })
             }
             MissionState::AwaitSolution
@@ -133,7 +137,9 @@ impl MissionEngine {
                     self.route.waypoints().len(),
                     solution.integrity.quality.into(),
                 );
-                guidance.position = self.steering_source().position_kind();
+                let steering = self.steering_source();
+                guidance.position = steering.position_kind();
+                guidance.position_integrity = steering.position_integrity();
                 Some(guidance)
             }
         }
@@ -180,6 +186,7 @@ fn leg_guidance(
         quality,
         holding: false,
         position: None,
+        position_integrity: None,
     }
 }
 

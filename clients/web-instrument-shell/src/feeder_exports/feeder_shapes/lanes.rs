@@ -115,6 +115,7 @@ pub(in super::super) struct JsGuidanceSample {
     sequencing: u32,
     to_from: u32,
     position_source: u32,
+    position_integrity: u32,
 }
 
 /// The phase scale of every guidance sample. The wire's guidance carries
@@ -155,13 +156,14 @@ fn position_source_of(code: u32) -> PositionSource {
     }
 }
 
-/// The position integrity of a solution the wire grades 0 good or 1
-/// degraded. An unusable or unread grade is unknown, which removes the
-/// display.
-fn position_integrity_of(solution_quality: u32) -> PositionIntegrity {
-    match solution_quality {
-        0 => PositionIntegrity::Normal,
-        1 => PositionIntegrity::Degraded,
+/// The position integrity the wire codes as 1 normal, 2 degraded, and 3
+/// a position sensor excluded. Zero states none and any other value is
+/// unread: both are unknown, which removes the display.
+fn position_integrity_of(code: u32) -> PositionIntegrity {
+    match code {
+        1 => PositionIntegrity::Normal,
+        2 => PositionIntegrity::Degraded,
+        3 => PositionIntegrity::SensorExcluded,
         _ => PositionIntegrity::Unknown,
     }
 }
@@ -200,7 +202,7 @@ impl JsGuidanceSample {
                 waypoint_count: self.waypoint_count,
                 solution_quality: self.solution_quality,
                 position_source: position_source_of(self.position_source),
-                position_integrity: position_integrity_of(self.solution_quality),
+                position_integrity: position_integrity_of(self.position_integrity),
             },
         )
     }
@@ -221,6 +223,7 @@ struct JsGuidanceOut {
     sequencing: u8,
     to_from: u8,
     position_source: u8,
+    position_integrity: u8,
 }
 
 /// The guidance snapshot the script consumes.
@@ -258,6 +261,12 @@ impl From<NavSnapshot> for JsNavSnapshot {
                     PositionSource::None | PositionSource::Unknown => 0,
                     stated => stated.to_u8(),
                 },
+                position_integrity: match guidance.position_integrity {
+                    PositionIntegrity::Normal => 1,
+                    PositionIntegrity::Degraded => 2,
+                    PositionIntegrity::SensorExcluded => 3,
+                    PositionIntegrity::Unknown => 0,
+                },
             },
             age_ms: snapshot.age_ms,
         }
@@ -291,6 +300,7 @@ struct JsGuidanceIn {
     sequencing: u32,
     to_from: u32,
     position_source: u32,
+    position_integrity: u32,
 }
 
 impl JsNavSnapshotIn {
@@ -310,7 +320,7 @@ impl JsNavSnapshotIn {
                 waypoint_count: self.nav_guidance.waypoint_count,
                 solution_quality: self.nav_guidance.solution_quality,
                 position_source: position_source_of(self.nav_guidance.position_source),
-                position_integrity: position_integrity_of(self.nav_guidance.solution_quality),
+                position_integrity: position_integrity_of(self.nav_guidance.position_integrity),
             },
             age_ms: self.age_ms,
         }

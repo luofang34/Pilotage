@@ -511,6 +511,11 @@ message NavGuidanceState {
   // or an estimate whose aids are not stated. 0 states none: a display
   // that names its position source removes the guidance.
   uint32 position_source = 13;
+  // The source's judgment of that position: 1 normal, 2 degraded (flown
+  // with caution, dead reckoning included), 3 flown without a position
+  // sensor the navigator excluded. 0 states none: a display that
+  // annunciates position integrity removes the guidance.
+  uint32 position_integrity = 14;
 }
 
 message PayloadAxisObservation {

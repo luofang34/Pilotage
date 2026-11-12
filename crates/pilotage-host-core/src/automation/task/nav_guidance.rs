@@ -9,7 +9,7 @@
 //! byte-identical, and guidance that ends is cleared rather than frozen
 //! or centered.
 
-use pilotage_mission::{NavGuidance, NavQuality, PositionKind, ToFrom};
+use pilotage_mission::{NavGuidance, NavQuality, PositionIntegrity, PositionKind, ToFrom};
 use pilotage_protocol::{SessionId, wire};
 
 /// Source identity of the mission principal's guidance group. Role
@@ -133,6 +133,7 @@ fn to_wire(guidance: &NavGuidance, stamp: wire::MeasurementStamp) -> wire::NavGu
             Some(ToFrom::From) => 2,
         },
         position_source: position_to_wire(guidance.position),
+        position_integrity: integrity_to_wire(guidance.position_integrity),
     }
 }
 
@@ -146,6 +147,18 @@ fn position_to_wire(position: Option<PositionKind>) -> u32 {
         Some(PositionKind::Inertial) => 3,
         Some(PositionKind::DeadReckoning) => 4,
         Some(PositionKind::Blended) => 5,
+        _ => 0,
+    }
+}
+
+/// The wire's position integrity: 1 normal, 2 degraded, 3 a position
+/// sensor excluded, and 0 for none stated, which a receiver cannot
+/// display. A judgment this vocabulary cannot read is not stated.
+fn integrity_to_wire(integrity: Option<PositionIntegrity>) -> u32 {
+    match integrity {
+        Some(PositionIntegrity::Normal) => 1,
+        Some(PositionIntegrity::Degraded) => 2,
+        Some(PositionIntegrity::SensorExcluded) => 3,
         _ => 0,
     }
 }

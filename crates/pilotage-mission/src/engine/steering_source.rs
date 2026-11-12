@@ -111,6 +111,19 @@ pub enum PositionKind {
     Blended,
 }
 
+/// The engine's judgment of the position steered on, as an instrument
+/// annunciates it beside the position's kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum PositionIntegrity {
+    /// Within the limits, and graded good by its navigator.
+    Normal,
+    /// Flown with caution: graded degraded, or flown by dead reckoning.
+    Degraded,
+    /// Flown without a position sensor its navigator excluded.
+    SensorExcluded,
+}
+
 /// The position aids of `contributing`, as the kinds an instrument names.
 fn kind_of(contributing: SourceComposition) -> PositionKind {
     let satellite = contributing.contains(SensorClass::Gnss);
@@ -147,6 +160,30 @@ impl SteeringSource {
             SteeringIntegrity::WithinLimits { .. } => {
                 Some(self.contributing.map_or(PositionKind::Blended, kind_of))
             }
+        }
+    }
+
+    /// The judgment an instrument annunciates of the position steered
+    /// on; `None` while none is, and for a solution within the limits
+    /// whose navigator grades it unusable, which an instrument cannot
+    /// present as fit.
+    #[must_use]
+    pub const fn position_integrity(&self) -> Option<PositionIntegrity> {
+        match self.integrity {
+            SteeringIntegrity::WithinLimits {
+                quality: NavQuality::Good,
+                ..
+            } => Some(PositionIntegrity::Normal),
+            SteeringIntegrity::WithinLimits {
+                quality: NavQuality::Degraded,
+                ..
+            }
+            | SteeringIntegrity::DeadReckoning { .. } => Some(PositionIntegrity::Degraded),
+            SteeringIntegrity::WithinLimits {
+                quality: NavQuality::Unusable,
+                ..
+            }
+            | SteeringIntegrity::NoSolution { .. } => None,
         }
     }
 

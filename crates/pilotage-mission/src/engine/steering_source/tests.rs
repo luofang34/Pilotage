@@ -1,6 +1,8 @@
 use navigate_contract::{SensorClass, SourceComposition};
 
-use super::{PositionKind, PositionSource, SteeringIntegrity, SteeringSource, kind_of};
+use super::{
+    PositionIntegrity, PositionKind, PositionSource, SteeringIntegrity, SteeringSource, kind_of,
+};
 use crate::engine::{NavQuality, StartWithheldReason};
 
 fn of(classes: &[SensorClass]) -> SourceComposition {
@@ -59,4 +61,46 @@ fn the_judgment_outranks_the_aids() {
         Some(PositionKind::Blended),
         "a solution that names no sensor, as a simulator's truth"
     );
+}
+
+#[test]
+fn the_judgment_and_the_grade_give_the_annunciated_integrity() {
+    let within = |quality| SteeringIntegrity::WithinLimits {
+        quality,
+        horizontal_1sigma_m: 3.0,
+    };
+    let reckoned = |quality| SteeringIntegrity::DeadReckoning {
+        quality,
+        horizontal_1sigma_m: 900.0,
+    };
+    let cases = [
+        (within(NavQuality::Good), Some(PositionIntegrity::Normal)),
+        (
+            within(NavQuality::Degraded),
+            Some(PositionIntegrity::Degraded),
+        ),
+        (within(NavQuality::Unusable), None),
+        (
+            reckoned(NavQuality::Good),
+            Some(PositionIntegrity::Degraded),
+        ),
+        (
+            reckoned(NavQuality::Degraded),
+            Some(PositionIntegrity::Degraded),
+        ),
+        (
+            reckoned(NavQuality::Unusable),
+            Some(PositionIntegrity::Degraded),
+        ),
+        (
+            SteeringIntegrity::NoSolution {
+                reason: StartWithheldReason::NavigationStale,
+            },
+            None,
+        ),
+    ];
+    for (integrity, expected) in cases {
+        let steering = SteeringSource::new(PositionSource::OnboardNavigation, None, integrity);
+        assert_eq!(steering.position_integrity(), expected, "{integrity:?}");
+    }
 }

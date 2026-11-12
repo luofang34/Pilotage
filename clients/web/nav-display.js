@@ -30,10 +30,11 @@ export function navDisplayState(snapshot) {
   if (bindings === null) return null;
   if (!snapshot || !snapshot.navGuidance || !Number.isFinite(snapshot.ageMs)) return null;
   const g = snapshot.navGuidance;
-  // A quality, sequencing, TO/FROM or position source outside the
+  // A quality, sequencing, TO/FROM, position source or integrity outside the
   // schema's non-negative integer coding removes the display before any
   // coercion could make it look presentable.
-  for (const code of [g.solutionQuality, g.sequencing, g.toFrom, g.positionSource]) {
+  const codes = [g.solutionQuality, g.sequencing, g.toFrom, g.positionSource, g.positionIntegrity];
+  for (const code of codes) {
     if (!Number.isInteger(code) || code < 0) return null;
   }
   const marshalled = {
@@ -50,6 +51,7 @@ export function navDisplayState(snapshot) {
       sequencing: g.sequencing >>> 0,
       toFrom: g.toFrom >>> 0,
       positionSource: g.positionSource >>> 0,
+      positionIntegrity: g.positionIntegrity >>> 0,
     },
     ageMs: snapshot.ageMs,
   };

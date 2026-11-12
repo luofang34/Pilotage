@@ -25,6 +25,7 @@ fn tracked_leg() -> JsNavSnapshotIn {
             sequencing: 0,
             to_from: 1,
             position_source: 1,
+            position_integrity: 1,
         },
         age_ms: 120.0,
     }
@@ -72,16 +73,16 @@ fn frame_is_valid(guidance: JsNavSnapshotIn, sequencing: NavSequencing, fromto: 
     );
 }
 
-/// The position source and integrity that reach the frame for a wire
-/// `position_source` code and solution quality, or `None` when the lane
-/// gives no nav group.
+/// The position source and integrity that reach the frame for the wire's
+/// `position_source` and `position_integrity` codes, or `None` when the
+/// lane gives no nav group.
 fn position_on_the_frame(
     position_source: u32,
-    solution_quality: u32,
+    position_integrity: u32,
 ) -> Option<(PositionSource, PositionIntegrity)> {
     let mut guidance = tracked_leg();
     guidance.nav_guidance.position_source = position_source;
-    guidance.nav_guidance.solution_quality = solution_quality;
+    guidance.nav_guidance.position_integrity = position_integrity;
     let nav = nav_display_state(Some(&guidance.into_snapshot()))?;
     let state = AircraftState {
         nav,
@@ -97,25 +98,27 @@ fn position_on_the_frame(
 
 #[test]
 fn the_lane_names_the_position_it_rests_on() {
-    use PositionIntegrity::{Degraded, Normal};
+    use PositionIntegrity::{Degraded, Normal, SensorExcluded};
     let cases = [
-        (1, 0, Some((PositionSource::Gps, Normal))),
-        (2, 0, Some((PositionSource::Visual, Normal))),
-        (3, 1, Some((PositionSource::Inertial, Degraded))),
-        (4, 1, Some((PositionSource::DeadReckoning, Degraded))),
-        (4, 0, Some((PositionSource::DeadReckoning, Normal))),
-        (5, 0, Some((PositionSource::Blended, Normal))),
-        // No position stated, an unread code, or an unusable solution:
-        // the guidance is removed, never drawn on an unnamed position.
-        (0, 0, None),
-        (6, 0, None),
-        (1, 2, None),
+        (1, 1, Some((PositionSource::Gps, Normal))),
+        (2, 1, Some((PositionSource::Visual, Normal))),
+        (3, 2, Some((PositionSource::Inertial, Degraded))),
+        (3, 3, Some((PositionSource::Inertial, SensorExcluded))),
+        (2, 3, Some((PositionSource::Visual, SensorExcluded))),
+        (4, 2, Some((PositionSource::DeadReckoning, Degraded))),
+        (5, 1, Some((PositionSource::Blended, Normal))),
+        // No position or no integrity stated, or an unread code: the
+        // guidance is removed, never drawn on an unnamed position.
+        (0, 1, None),
+        (6, 1, None),
+        (1, 0, None),
+        (1, 4, None),
     ];
-    for (position_source, solution_quality, expected) in cases {
+    for (position_source, position_integrity, expected) in cases {
         assert_eq!(
-            position_on_the_frame(position_source, solution_quality),
+            position_on_the_frame(position_source, position_integrity),
             expected,
-            "position {position_source}, quality {solution_quality}"
+            "position {position_source}, integrity {position_integrity}"
         );
     }
 }

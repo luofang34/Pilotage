@@ -30,6 +30,7 @@ function snapshot(overrides = {}, ageMs = 40) {
       sequencing: 0,
       toFrom: 1,
       positionSource: 1,
+      positionIntegrity: 1,
       ...overrides,
     },
     ageMs,
@@ -173,9 +174,12 @@ function testTheLaneNamesThePositionItRestsOn() {
   for (const [positionSource, label] of [[2, "visual"], [3, "inertial"], [5, "blended"]]) {
     assert.equal(navDisplayState(snapshot({ positionSource })).positionSource, positionSource, label);
   }
-  const reckoned = navDisplayState(snapshot({ positionSource: 4, solutionQuality: 1 }));
+  const reckoned = navDisplayState(snapshot({ positionSource: 4, positionIntegrity: 2 }));
   assert.equal(reckoned.positionSource, 4, "dead reckoning is named");
-  assert.equal(reckoned.positionIntegrity, 1, "and its solution is degraded");
+  assert.equal(reckoned.positionIntegrity, 1, "and its integrity is degraded");
+  const excluded = navDisplayState(snapshot({ positionSource: 3, positionIntegrity: 3 }));
+  assert.equal(excluded.positionIntegrity, 2, "an excluded sensor is annunciated");
+  assert.equal(navDisplayState(snapshot({ positionIntegrity: 0 })), null, "no integrity stated");
   // No position stated, or a code the lane cannot read, removes the display.
   assert.equal(navDisplayState(snapshot({ positionSource: 0 })), null);
   assert.equal(navDisplayState(snapshot({ positionSource: 9 })), null);

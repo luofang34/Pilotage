@@ -200,6 +200,7 @@ pub(super) struct NavGuidance {
     sequencing: u32,
     to_from: u32,
     position_source: u32,
+    position_integrity: u32,
     stamp: Stamp,
 }
 
@@ -287,6 +288,7 @@ pub(super) fn nav_guidance_message(state: wire::NavGuidanceState) -> Option<NavG
         sequencing: state.sequencing,
         to_from: state.to_from,
         position_source: state.position_source,
+        position_integrity: state.position_integrity,
         stamp: stamp_message(stamp),
     })
 }

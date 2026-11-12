@@ -617,10 +617,11 @@ check(
     f32Field(out, 5, lateral); // lateral_deviation_m
     f32Field(out, 6, vertical); // vertical_deviation_m
     f32Field(out, 7, 3704.0); // distance_to_waypoint_m
-    // A hold states sequencing 1 (HOLD), TO/FROM 2 (FROM) and a visual
-    // position (2); a plan leg leaves all three at the schema's zero, which
-    // the decoder reads as the sequencing default, OFF, and no position.
-    const held = hold ? [[11, 1], [12, 2], [13, 2]] : [];
+    // A hold states sequencing 1 (HOLD), TO/FROM 2 (FROM), a visual
+    // position (2) and an excluded sensor (3); a plan leg leaves all four at
+    // the schema's zero, which the decoder reads as the sequencing default,
+    // OFF, and no position or integrity.
+    const held = hold ? [[11, 1], [12, 2], [13, 2], [14, 3]] : [];
     for (const [field, value] of [[8, 2], [9, 5], [10, 1], ...held]) {
       varint(out, (field << 3) | 0);
       varint(out, value);
@@ -652,6 +653,8 @@ check(
     holding?.sequencing === 1 && holding?.toFrom === 2);
   check("the position source decodes as stated, and as zero when unstated",
     holding?.positionSource === 2 && nav?.positionSource === 0);
+  check("the position integrity decodes as stated, and as zero when unstated",
+    holding?.positionIntegrity === 3 && nav?.positionIntegrity === 0);
   check("guidance stamp carries the navigation-solution role",
     nav?.stamp?.role === 6 && nav?.stamp?.clock === 3);
 

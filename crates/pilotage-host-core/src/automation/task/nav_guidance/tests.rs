@@ -1,6 +1,6 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use pilotage_mission::{NavGuidance, NavQuality, PositionKind, ToFrom};
+use pilotage_mission::{NavGuidance, NavQuality, PositionIntegrity, PositionKind, ToFrom};
 use pilotage_protocol::{SessionId, wire};
 
 use super::{NavGuidancePublisher, NavPublication};
@@ -19,6 +19,7 @@ fn guidance() -> NavGuidance {
         to_from: Some(ToFrom::To),
         holding: false,
         position: Some(PositionKind::Satellite),
+        position_integrity: Some(PositionIntegrity::Normal),
     }
 }
 
@@ -185,5 +186,24 @@ fn the_position_kind_travels_as_its_code_and_none_as_zero() {
         };
         let state = sample(publisher.publication(Some(&guidance), 0));
         assert_eq!(state.position_source, code, "{position:?}");
+    }
+}
+
+#[test]
+fn the_position_integrity_travels_as_its_code_and_none_as_zero() {
+    let mut publisher = NavGuidancePublisher::for_session(SessionId::new(7));
+    let cases = [
+        (Some(PositionIntegrity::Normal), 1),
+        (Some(PositionIntegrity::Degraded), 2),
+        (Some(PositionIntegrity::SensorExcluded), 3),
+        (None, 0),
+    ];
+    for (position_integrity, code) in cases {
+        let guidance = NavGuidance {
+            position_integrity,
+            ..guidance()
+        };
+        let state = sample(publisher.publication(Some(&guidance), 0));
+        assert_eq!(state.position_integrity, code, "{position_integrity:?}");
     }
 }
