@@ -61,6 +61,18 @@ const GATE_SHARE_OF_RADIUS: f64 = 0.5;
 /// something holds against guidance, has no speed toward the track.
 const CLOSING_SHARE: f64 = 0.5;
 
+/// The cross-track error, as a share of the turn radius, from which the
+/// approach to the track is a capture: the trim integrates nothing until
+/// [`QUIET_TIME_CONSTANTS`] of guidance's own time constant after the
+/// error last stood there. Guidance takes such an error out on a tail that
+/// closes ever more slowly, and a trim that integrated the tail would
+/// carry the aircraft across the track.
+const CAPTURE_SHARE_OF_RADIUS: f64 = 0.25;
+
+/// How many of guidance's time constants, the turn radius over the speed,
+/// the trim waits after a capture.
+const QUIET_TIME_CONSTANTS: f64 = 3.0;
+
 /// A step longer than this, seconds, is a gap in the solutions, not a time
 /// to integrate over.
 const MAX_STEP_S: f64 = 1.0;
@@ -91,6 +103,8 @@ pub(super) struct TrackTrim {
     offset_rad: f64,
     /// The track flown, since when, and when the trim last stepped.
     track: Option<(TrackKey, MonotonicNanos, MonotonicNanos)>,
+    /// When the aircraft was last capturing a track from afar.
+    captured_at: Option<MonotonicNanos>,
 }
 
 impl MissionEngine {
@@ -126,8 +140,16 @@ impl MissionEngine {
         let across_mps = -velocity.north_mps * sin + velocity.east_mps * cos;
         // Right of the track, closing means moving left.
         let closing_mps = -across_mps * cross_m.signum();
-        let asked_mps = self.guidance.cross_track_gain_per_s * cross_m.abs();
+        let gain_per_s = self.guidance.cross_track_gain_per_s;
+        let asked_mps = gain_per_s * cross_m.abs();
+        if cross_m.abs() > CAPTURE_SHARE_OF_RADIUS * self.guided_radius_m() {
+            self.track_trim.captured_at = Some(now);
+        }
+        let quiet = self.track_trim.captured_at.is_none_or(|at| {
+            gain_per_s > 0.0 && seconds_between(at, now) >= QUIET_TIME_CONSTANTS / gain_per_s
+        });
         let established = cross_m.is_finite()
+            && quiet
             && cross_m.abs() <= self.trim_gate_m()
             && closing_mps <= CLOSING_SHARE * asked_mps;
         let gain = self.trim_gain_per_m_s();
@@ -154,16 +176,17 @@ impl MissionEngine {
     /// The cross-track error beyond which the trim does not integrate,
     /// metres.
     fn trim_gate_m(&self) -> f64 {
+        GATE_SHARE_OF_RADIUS * self.guided_radius_m()
+    }
+
+    /// The turn radius guidance's cross-track gain is sized for, metres.
+    fn guided_radius_m(&self) -> f64 {
         let gain = self.guidance.cross_track_gain_per_s;
         let speed = crate::true_airspeed_for(
             self.commanded_cruise_mps(),
             self.config.anchor.altitude_m + self.config.cruise_height_m,
         );
-        if gain > 0.0 {
-            GATE_SHARE_OF_RADIUS * speed / gain
-        } else {
-            0.0
-        }
+        if gain > 0.0 { speed / gain } else { 0.0 }
     }
 }
 

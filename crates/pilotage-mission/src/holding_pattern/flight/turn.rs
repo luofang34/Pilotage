@@ -68,8 +68,14 @@ impl Turn {
         done
     }
 
-    /// The guided point of the turn for a vehicle at `position`.
-    pub(super) fn lead(&self, position: [f64; 2]) -> [f64; 2] {
+    /// How far `position` is outside the turn's circle, metres.
+    pub(super) fn radial_error_m(&self, position: [f64; 2]) -> f64 {
+        (position[0] - self.centre[0]).hypot(position[1] - self.centre[1]) - self.radius_m
+    }
+
+    /// The guided point of the turn for a vehicle at `position`, on a
+    /// circle `inward_m` inside the turn's own.
+    pub(super) fn lead(&self, position: [f64; 2], inward_m: f64) -> [f64; 2] {
         let lead = if self.clockwise {
             TURN_LEAD_RAD
         } else {
@@ -78,7 +84,7 @@ impl Turn {
         offset(
             self.centre,
             self.bearing(position) + lead,
-            self.radius_m / TURN_LEAD_RAD.cos(),
+            (self.radius_m - inward_m) / TURN_LEAD_RAD.cos(),
         )
     }
 }
