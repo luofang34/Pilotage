@@ -14,28 +14,14 @@
 //! is new, so a navigator that stops solving goes stale even when its
 //! host keeps offering the last solution.
 
-use navigate_contract::{
-    AttitudeQuaternion, DurationNanos, MonotonicNanos, NavigationSolution, SolutionQuality,
-};
+use navigate_contract::{AttitudeQuaternion, MonotonicNanos, NavigationSolution};
 
-use crate::config::{BeyondLimits, OwnshipSource};
+use crate::config::OwnshipSource;
 
-use super::{MissionEngine, OnboardSolution, SourceIntegrity, StartWithheldReason};
+use super::{MissionEngine, OnboardSolution, SourceIntegrity};
 
 /// How far a quaternion norm may be from one and still give a heading.
 const UNIT_NORM_TOLERANCE: f64 = 1e-3;
-
-/// The bounds a held solution must meet to be flown.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct OnboardLimits {
-    /// Age past which the held solution yields no solution.
-    pub(super) max_age: DurationNanos,
-    /// 1-sigma horizontal uncertainty above which the held solution is
-    /// beyond its limits, meters.
-    pub(super) max_horizontal_1sigma_m: f64,
-    /// What a fresh solution beyond its limits does.
-    pub(super) beyond: BeyondLimits,
-}
 
 /// The latest solution the navigator published, on the mission clock.
 #[derive(Debug, Default)]
@@ -132,99 +118,6 @@ impl MissionEngine {
         }
         Some(held)
     }
-
-    /// The held solution for `now`, or `None` when none is held, the held
-    /// one is older than `limits` allow, or it is beyond its limits (graded
-    /// unusable, or with a horizontal uncertainty above the limit) and not
-    /// flown by dead reckoning.
-    pub(super) fn onboard_solution(
-        &mut self,
-        now: MonotonicNanos,
-        limits: OnboardLimits,
-    ) -> Option<NavigationSolution> {
-        self.onboard.dead_reckoned = None;
-        let held = self.onboard.latest?;
-        let fresh = now
-            .elapsed_since(held.stamp.solved_at)
-            .is_some_and(|age| age.as_nanos() <= limits.max_age.as_nanos());
-        if !fresh {
-            self.counters.onboard_stale = self.counters.onboard_stale.wrapping_add(1);
-            return None;
-        }
-        if within_limits(&held, limits) {
-            return Some(held);
-        }
-        if self.dead_reckons(&held, limits) {
-            self.counters.onboard_dead_reckoned =
-                self.counters.onboard_dead_reckoned.wrapping_add(1);
-            self.onboard.dead_reckoned = Some(held);
-            return Some(held);
-        }
-        self.counters.onboard_unfit = self.counters.onboard_unfit.wrapping_add(1);
-        None
-    }
-
-    /// Whether `held`, beyond its limits, is flown by dead reckoning: the
-    /// policy says so, the vehicle is in flight, and the uncertainty is a
-    /// number under the ceiling. Before flight the start waits for a
-    /// solution within the limits; a solution of unknown uncertainty is
-    /// never flown.
-    fn dead_reckons(&self, held: &NavigationSolution, limits: OnboardLimits) -> bool {
-        let BeyondLimits::DeadReckon { ceiling_1sigma_m } = limits.beyond else {
-            return false;
-        };
-        let sigma = held.integrity.horizontal_1sigma_m;
-        let in_flight = matches!(
-            self.state(),
-            super::MissionState::Climb
-                | super::MissionState::Enroute
-                | super::MissionState::Complete
-        );
-        in_flight && sigma.is_finite() && ceiling_1sigma_m.is_none_or(|ceiling| sigma <= ceiling)
-    }
-}
-
-impl MissionEngine {
-    /// Why the onboard navigator gives no solution to fly at `now`: none
-    /// published yet, the held one too old, graded unusable, or with a
-    /// horizontal uncertainty above the limit. `None` when the held
-    /// solution is flown, within its limits or by dead reckoning. Reads the same judgments as
-    /// [`Self::onboard_solution`] and counts nothing.
-    pub(super) fn onboard_absence(
-        &self,
-        now: MonotonicNanos,
-        limits: OnboardLimits,
-    ) -> Option<StartWithheldReason> {
-        let Some(held) = self.onboard.latest else {
-            return Some(StartWithheldReason::NavigationNotStarted);
-        };
-        let fresh = now
-            .elapsed_since(held.stamp.solved_at)
-            .is_some_and(|age| age.as_nanos() <= limits.max_age.as_nanos());
-        if !fresh {
-            return Some(StartWithheldReason::NavigationStale);
-        }
-        if within_limits(&held, limits) || self.dead_reckons(&held, limits) {
-            return None;
-        }
-        if held.integrity.quality == SolutionQuality::Unusable {
-            return Some(StartWithheldReason::NavigationUnusable);
-        }
-        let sigma = held.integrity.horizontal_1sigma_m;
-        (sigma > limits.max_horizontal_1sigma_m).then_some(
-            StartWithheldReason::NavigationTooUncertain {
-                horizontal_1sigma_m: sigma,
-                limit_m: limits.max_horizontal_1sigma_m,
-            },
-        )
-    }
-}
-
-/// Whether `held` is within `limits`: not graded unusable, and with a
-/// horizontal uncertainty no larger than the limit.
-fn within_limits(held: &NavigationSolution, limits: OnboardLimits) -> bool {
-    held.integrity.quality != SolutionQuality::Unusable
-        && held.integrity.horizontal_1sigma_m <= limits.max_horizontal_1sigma_m
 }
 
 /// Whether every velocity component is a finite number.

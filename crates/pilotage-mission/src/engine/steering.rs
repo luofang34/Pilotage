@@ -120,17 +120,16 @@ impl MissionEngine {
     }
 
     /// The hold of the heading and altitude last commanded while no
-    /// solution is fit to fly, at `now`, announced once for each reason.
+    /// solution is fit to fly, announced once for each reason.
     /// Before any command the present heading and the last known altitude
     /// are held; with no heading known nothing can be held, and the event
     /// still says why.
     pub(super) fn hold_heading(
         &mut self,
-        now: MonotonicNanos,
         fallback_altitude_m: f64,
         events: &mut Vec<MissionEvent>,
     ) -> Option<ControlIntent> {
-        self.announce_hold(now, events);
+        self.announce_hold(events);
         self.repeat_heading(fallback_altitude_m)
     }
 
@@ -158,13 +157,13 @@ impl MissionEngine {
             {
                 return Some(intent);
             }
-            return self.hold_heading(now, cruise_altitude_m, events);
+            return self.hold_heading(cruise_altitude_m, events);
         }
         // Launched with no solution fit to fly: climb on the present
         // heading to the cruise altitude rather than leave the flight
         // controller without a command.
         if state == MissionState::AwaitSolution && solution.is_none() && self.launched(now) {
-            return self.hold_heading(now, cruise_altitude_m, events);
+            return self.hold_heading(cruise_altitude_m, events);
         }
         match state {
             MissionState::Climb => {
@@ -200,10 +199,10 @@ impl MissionEngine {
         }
     }
 
-    /// Announces the hold of a vehicle with no solution fit to fly at
-    /// `now`, once for each reason in a row.
-    pub(super) fn announce_hold(&mut self, now: MonotonicNanos, events: &mut Vec<MissionEvent>) {
-        let reason = self.solution_absence(now);
+    /// Announces the hold of a vehicle with no solution fit to fly, once
+    /// for each reason in a row.
+    pub(super) fn announce_hold(&mut self, events: &mut Vec<MissionEvent>) {
+        let reason = self.solution_absence();
         let changed = self
             .steering
             .holding
@@ -227,7 +226,7 @@ impl MissionEngine {
         if !self.fc_position_valid(now) {
             return None;
         }
-        self.announce_hold(now, events);
+        self.announce_hold(events);
         self.last_yaw_rad?;
         Some(super::tick::outputs::zero_velocity_intent())
     }

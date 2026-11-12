@@ -236,8 +236,4 @@ pub struct MissionCounters {
     /// Ticks under the onboard-navigation source on which the held
     /// solution was beyond its limits and flown by dead reckoning.
     pub onboard_dead_reckoned: u64,
-    /// Ticks on which the navigation source machine and the source's own
-    /// judgment disagreed on whether a solution is steered on, or on
-    /// whether it is by dead reckoning. Any count is a defect.
-    pub nav_source_mismatch: u64,
 }

@@ -232,7 +232,7 @@ impl MissionEngine {
         now: MonotonicNanos,
     ) -> Option<StartWithheldReason> {
         if solution.is_none() {
-            return Some(self.solution_absence(now));
+            return Some(self.solution_absence());
         }
         (self.config.arm_when_vehicle_ready && !self.vehicle_ready(now))
             .then_some(StartWithheldReason::VehicleNotReady)

@@ -11,9 +11,7 @@ use navigate_geodesy::NedOffset;
 use crate::config::OwnshipSource;
 use crate::ownship::{OwnshipAltitude, OwnshipSample, TruthRole};
 
-use super::estimate::EstimateBudget;
-use super::onboard::OnboardLimits;
-use super::{MissionEngine, StartWithheldReason};
+use super::MissionEngine;
 
 /// The single synthesized-GNSS source identity the engine stamps its
 /// observations with.
@@ -74,46 +72,6 @@ impl MissionEngine {
         [offset.north_m, offset.east_m, offset.down_m]
     }
 
-    /// The solution the configured source gives for `now`: the filter's
-    /// solution under simulation truth, the latest fresh vehicle estimate,
-    /// or the latest fit solution of the onboard navigator. A source that
-    /// holds a value it cannot fly counts why.
-    pub(super) fn source_solution(&mut self, now: MonotonicNanos) -> Option<NavigationSolution> {
-        match self.config.ownship_source {
-            OwnshipSource::SimulationTruth => self.filter.tick(now),
-            OwnshipSource::VehicleEstimate {
-                sigma_m,
-                velocity_sigma_mps,
-                max_age,
-            } => {
-                let budget = EstimateBudget {
-                    sigma_m,
-                    velocity_sigma_mps,
-                    max_age,
-                };
-                let solution = self
-                    .estimate
-                    .solution(now, &self.plane, self.config.clock, budget);
-                if solution.is_none() && self.estimate.has_sample() {
-                    self.counters.estimate_stale = self.counters.estimate_stale.wrapping_add(1);
-                }
-                solution
-            }
-            OwnshipSource::OnboardNavigation {
-                max_age,
-                max_horizontal_1sigma_m,
-                beyond_limits,
-            } => {
-                let limits = OnboardLimits {
-                    max_age,
-                    max_horizontal_1sigma_m,
-                    beyond: beyond_limits,
-                };
-                self.onboard_solution(now, limits)
-            }
-        }
-    }
-
     /// Synthesizes a GNSS-class fix from a simulation-truth sample and
     /// offers it to the fusion filter.
     fn fuse_truth(&mut self, sample: &OwnshipSample, now: MonotonicNanos) {
@@ -140,39 +98,6 @@ impl MissionEngine {
         );
         if !self.filter.ingest(&observation, now).is_accepted() {
             self.counters.fusion_rejected = self.counters.fusion_rejected.wrapping_add(1);
-        }
-    }
-}
-
-impl MissionEngine {
-    /// Why the configured source gives no solution at `now`: for the
-    /// onboard navigator, its own reason; for the other sources, no sample
-    /// yet or none recent enough to fly.
-    pub(super) fn solution_absence(&self, now: MonotonicNanos) -> StartWithheldReason {
-        match self.config.ownship_source {
-            OwnshipSource::OnboardNavigation {
-                max_age,
-                max_horizontal_1sigma_m,
-                beyond_limits,
-            } => self
-                .onboard_absence(
-                    now,
-                    OnboardLimits {
-                        max_age,
-                        max_horizontal_1sigma_m,
-                        beyond: beyond_limits,
-                    },
-                )
-                .unwrap_or(StartWithheldReason::NavigationStale),
-            OwnshipSource::VehicleEstimate { .. } if !self.estimate.has_sample() => {
-                StartWithheldReason::NavigationNotStarted
-            }
-            OwnshipSource::SimulationTruth if !self.truth_sampled => {
-                StartWithheldReason::NavigationNotStarted
-            }
-            OwnshipSource::VehicleEstimate { .. } | OwnshipSource::SimulationTruth => {
-                StartWithheldReason::NavigationStale
-            }
         }
     }
 }

@@ -183,7 +183,6 @@ fn the_estimate_flies_the_route_to_completion_as_a_degraded_solution() {
     assert_eq!(engine.counters().rejected_role, 0);
     assert_eq!(engine.counters().fusion_rejected, 0);
     assert_eq!(engine.counters().estimate_stale, 0);
-    assert_eq!(engine.counters().nav_source_mismatch, 0);
     let height_m = -estimate.ned[2];
     assert!(height_m > 10.0, "still at cruise height, got {height_m}");
 }
@@ -238,7 +237,6 @@ fn a_stale_estimate_publishes_no_solution_and_commands_nothing() {
     assert!(output.intent.is_none(), "a stale sample commands nothing");
     assert_eq!(output.state, MissionState::Enroute);
     assert_eq!(engine.counters().estimate_stale, stale_before + 1);
-    assert_eq!(engine.counters().nav_source_mismatch, 0);
     assert!(
         engine.nav_guidance().is_none(),
         "no solution, no guidance display"

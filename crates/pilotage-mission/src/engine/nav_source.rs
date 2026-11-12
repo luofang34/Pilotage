@@ -8,14 +8,15 @@
 //! phase: flight is handed in as a fact, so no behaviour here is implied
 //! by another machine's state.
 //!
-//! The engine runs the machine beside the source's own judgment each tick
-//! and counts every tick on which the two disagree
-//! ([`super::MissionCounters::nav_source_mismatch`]).
+//! Each tick steps the machine once ([`MissionEngine::judge_source`]),
+//! and its state alone decides whether the held solution is steered on,
+//! whether by dead reckoning, and why not when it is not.
 
-use navigate_contract::{MonotonicNanos, SolutionQuality};
+use navigate_contract::{DurationNanos, MonotonicNanos, NavigationSolution, SolutionQuality};
 
 use crate::config::{BeyondLimits, OwnshipSource};
 
+use super::estimate::EstimateBudget;
 use super::{MissionEngine, MissionState, StartWithheldReason};
 
 #[cfg(test)]
@@ -164,8 +165,7 @@ pub(super) const fn next(state: NavState, event: NavEvent) -> (NavState, NavEffe
     (to, effect)
 }
 
-/// The machine's state beside what the display reads of a tick with no
-/// solution.
+/// The machine's state, and why its latest tick gave no solution.
 #[derive(Debug, Default)]
 pub(super) struct NavMode {
     /// The machine's state after the latest tick that read the source.
@@ -175,23 +175,54 @@ pub(super) struct NavMode {
     pub(super) no_solution: Option<StartWithheldReason>,
 }
 
+/// What the configured source holds at one tick.
+struct Reading {
+    /// The event the guards chose.
+    event: NavEvent,
+    /// The solution steered on when the machine says one is.
+    held: Option<NavigationSolution>,
+    /// The horizontal limit the held solution was judged against, metres.
+    limit_m: f64,
+}
+
 impl MissionEngine {
-    /// Steps the machine for a tick at `now` whose source judgment is
-    /// already made, and counts a disagreement with that judgment:
-    /// whether a solution is steered on, and whether by dead reckoning.
-    pub(super) fn step_nav_source(&mut self, now: MonotonicNanos) {
-        let event = self.nav_event(now);
-        let (state, _) = next(self.nav.state, event);
+    /// The solution steered on at `now`, or `None`: reads the configured
+    /// source once, steps the machine, and takes the held solution only
+    /// in a state that steers. Counts why a held value is not flown, and
+    /// keeps the reason for the display and the hold.
+    pub(super) fn judge_source(&mut self, now: MonotonicNanos) -> Option<NavigationSolution> {
+        let reading = self.read_source(now);
+        let (state, _) = next(self.nav.state, reading.event);
         self.nav.state = state;
-        let steers = self.last_solution.is_some();
-        let dead_reckons = self.onboard.dead_reckoned.is_some();
-        if state.steers() != steers || (state == NavState::DeadReckoning) != dead_reckons {
-            self.counters.nav_source_mismatch = self.counters.nav_source_mismatch.wrapping_add(1);
-        }
+        let solution = reading.held.filter(|_| state.steers());
+        self.onboard.dead_reckoned = solution.filter(|_| state == NavState::DeadReckoning);
+        self.nav.no_solution = match state {
+            NavState::Fit | NavState::DeadReckoning => None,
+            NavState::NotStarted => Some(StartWithheldReason::NavigationNotStarted),
+            NavState::Lost(Loss::Stale) => Some(StartWithheldReason::NavigationStale),
+            NavState::Lost(Loss::Unusable) => Some(StartWithheldReason::NavigationUnusable),
+            NavState::Lost(Loss::TooUncertain) => {
+                Some(StartWithheldReason::NavigationTooUncertain {
+                    horizontal_1sigma_m: reading
+                        .held
+                        .map_or(f64::NAN, |held| held.integrity.horizontal_1sigma_m),
+                    limit_m: reading.limit_m,
+                })
+            }
+        };
+        solution
     }
 
-    /// The event of a tick at `now` for the configured source.
-    fn nav_event(&self, now: MonotonicNanos) -> NavEvent {
+    /// Why the latest tick gave no solution to steer on.
+    pub(super) fn solution_absence(&self) -> StartWithheldReason {
+        self.nav
+            .no_solution
+            .unwrap_or(StartWithheldReason::NavigationNotStarted)
+    }
+
+    /// What the configured source holds at `now`, with the refusal
+    /// counted under the source's own counter.
+    fn read_source(&mut self, now: MonotonicNanos) -> Reading {
         // Flight is the mission's fact, handed to the machine as a guard.
         let in_flight = matches!(
             self.state(),
@@ -203,41 +234,100 @@ impl MissionEngine {
                 max_horizontal_1sigma_m,
                 beyond_limits,
             } => {
-                let held = self.onboard.held().map(|held| Held {
-                    fresh: now
-                        .elapsed_since(held.stamp.solved_at)
-                        .is_some_and(|age| age.as_nanos() <= max_age.as_nanos()),
-                    graded_unusable: held.integrity.quality == SolutionQuality::Unusable,
-                    horizontal_1sigma_m: held.integrity.horizontal_1sigma_m,
-                });
                 let limits = Limits {
                     max_horizontal_1sigma_m,
                     beyond: beyond_limits,
                 };
-                classify(held, limits, in_flight)
+                self.read_onboard(now, max_age, limits, in_flight)
             }
             OwnshipSource::VehicleEstimate {
-                sigma_m, max_age, ..
+                sigma_m,
+                velocity_sigma_mps,
+                max_age,
             } => {
-                let held = self.estimate.acquired_at().map(|acquired_at| Held {
-                    fresh: now
-                        .elapsed_since(acquired_at)
-                        .is_some_and(|age| age.as_nanos() <= max_age.as_nanos()),
+                let facts = self.estimate.acquired_at().map(|acquired_at| Held {
+                    fresh: is_fresh(now, acquired_at, max_age),
                     graded_unusable: false,
                     horizontal_1sigma_m: sigma_m,
                 });
-                classify(held, UNLIMITED, in_flight)
+                let event = classify(facts, UNLIMITED, in_flight);
+                if event == NavEvent::Aged {
+                    self.counters.estimate_stale = self.counters.estimate_stale.wrapping_add(1);
+                }
+                let budget = EstimateBudget {
+                    sigma_m,
+                    velocity_sigma_mps,
+                    max_age,
+                };
+                Reading {
+                    event,
+                    held: self
+                        .estimate
+                        .solution(now, &self.plane, self.config.clock, budget),
+                    limit_m: UNLIMITED.max_horizontal_1sigma_m,
+                }
             }
             // The fusion filter judges its own solution: it publishes one
             // or it does not, and a filter that was given samples and
             // publishes nothing has aged out.
-            OwnshipSource::SimulationTruth => match self.last_solution {
-                Some(_) => NavEvent::WithinLimits,
-                None if self.truth_sampled => NavEvent::Aged,
-                None => NavEvent::NothingHeld,
-            },
+            OwnshipSource::SimulationTruth => {
+                let held = self.filter.tick(now);
+                let event = match held {
+                    Some(_) => NavEvent::WithinLimits,
+                    None if self.truth_sampled => NavEvent::Aged,
+                    None => NavEvent::NothingHeld,
+                };
+                Reading {
+                    event,
+                    held,
+                    limit_m: UNLIMITED.max_horizontal_1sigma_m,
+                }
+            }
         }
     }
+}
+
+impl MissionEngine {
+    /// What the onboard navigator's latest solution is at `now` against
+    /// `limits`, with the refusal counted.
+    fn read_onboard(
+        &mut self,
+        now: MonotonicNanos,
+        max_age: DurationNanos,
+        limits: Limits,
+        in_flight: bool,
+    ) -> Reading {
+        let held = self.onboard.held().copied();
+        let facts = held.map(|held| Held {
+            fresh: is_fresh(now, held.stamp.solved_at, max_age),
+            graded_unusable: held.integrity.quality == SolutionQuality::Unusable,
+            horizontal_1sigma_m: held.integrity.horizontal_1sigma_m,
+        });
+        let event = classify(facts, limits, in_flight);
+        let counter = match event {
+            NavEvent::Aged => Some(&mut self.counters.onboard_stale),
+            NavEvent::DeadReckoned => Some(&mut self.counters.onboard_dead_reckoned),
+            NavEvent::GradedUnusable | NavEvent::TooUncertain => {
+                Some(&mut self.counters.onboard_unfit)
+            }
+            NavEvent::NothingHeld | NavEvent::WithinLimits => None,
+        };
+        if let Some(counter) = counter {
+            *counter = counter.wrapping_add(1);
+        }
+        Reading {
+            event,
+            held,
+            limit_m: limits.max_horizontal_1sigma_m,
+        }
+    }
+}
+
+/// Whether a value acquired at `at` is no older than `max_age` at `now`.
+/// A value stamped after `now` has no age and is not fresh.
+fn is_fresh(now: MonotonicNanos, at: MonotonicNanos, max_age: DurationNanos) -> bool {
+    now.elapsed_since(at)
+        .is_some_and(|age| age.as_nanos() <= max_age.as_nanos())
 }
 
 /// The limits of a source that states no uncertainty of its own to judge.
