@@ -241,13 +241,19 @@ attr outcome pass
 node RESULT-LINK-AUTHZ verification-result
 title browser authorization-regime suite — recorded pass
 attr command node clients/web/telemetry-ingress.test.mjs
-attr config-digest e60465b2eefdd453cfb7963a99bfcb71ce43cbaf
+attr config-digest 7d139bea8952e1bec0f0fe7c61c8de811fb1c9b1
 attr tool-version node v26.12.1
-attr source-digest git-blob:00c934fe00638ffca3fbd2c36cddecf86edbc5d4
+attr source-digest git-blob:7e7899d40ead9d88a9321d872c60fdb3300ae671
 attr artifact docs/link/evidence-artifacts/link05/authz-regime.run.txt
-attr output-digest sha256:f5d329300d12605c24a48d974a26e562b33da0a3611fc916b5d7adea28dc0a20
-attr run-id local:e60465b2eefdd453cfb7963a99bfcb71ce43cbaf
+attr output-digest sha256:3bc697f0dea7c4cbefbe8819192bda4469ddd34f4e55137566afc4232dce6fcf
+attr run-id local:7d139bea8952e1bec0f0fe7c61c8de811fb1c9b1
 attr outcome pass
+
+node CFG-LINK-AUTHZ-PHASE configuration-item
+title committed baseline for browser authorization result after nav-guidance flight-phase and RNP wire fields
+attr scm git
+attr commit 7d139bea8952e1bec0f0fe7c61c8de811fb1c9b1
+attr tree 41ba1085fa50549b8b81f3832f5312149b399e32
 
 node CFG-LINK-HOST-CORE configuration-item
 title committed baseline for the adapter, host wire-mapping, and browser authorization results with the engine actor in the host core
@@ -407,7 +413,7 @@ edge RESULT-LINK-CAPTURE-SINK justified-by TOOL-LINK-CARGO
 
 edge RESULT-LINK-AUTHZ result-of CASE-LINK-AUTHZ
 edge RESULT-LINK-AUTHZ covers LINK-AUTHZ-005
-edge RESULT-LINK-AUTHZ justified-by CFG-LINK-HOST-CORE
+edge RESULT-LINK-AUTHZ justified-by CFG-LINK-AUTHZ-PHASE
 edge RESULT-LINK-AUTHZ justified-by TOOL-LINK-NODE
 
 # --- Review coverage ---
