@@ -114,7 +114,7 @@ fn assert_record(record: &SurveyPlanRecord) {
         record
             .mission_identity
             .revision_id
-            .starts_with("operational-survey-v1:")
+            .starts_with("operational-survey-v2:")
     );
     assert_eq!(
         record

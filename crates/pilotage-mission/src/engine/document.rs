@@ -2,10 +2,9 @@
 
 use navigate_contract::{AltitudeConstraint, FlightPlan, PlanRole, TurnType, Waypoint};
 use pilotage_mission_core::{
-    Comparison, Digest, ExecutionPolicy, ExecutionTarget, FlightAction, FlightPlanReference,
-    MissionAction, MissionCapability, MissionCondition, MissionDocument, MissionPhase,
-    NavigationCondition, NavigationDataIdentity, PhaseClock, PhaseDeadline, VehicleCondition,
-    VehicleLifecycleState,
+    Digest, ExecutionPolicy, ExecutionTarget, FlightAction, FlightPlanReference, MissionAction,
+    MissionCapability, MissionCondition, MissionDocument, MissionPhase, NavigationCondition,
+    NavigationDataIdentity, PhaseClock, PhaseDeadline, VehicleCondition, VehicleLifecycleState,
 };
 use sha2::{Digest as _, Sha256};
 
@@ -47,13 +46,13 @@ pub(super) fn climb_capture_margin_m(config: &MissionConfig) -> f64 {
 
 const PLAN_DIGEST_DOMAIN: &[u8] = b"pilotage.flight-plan.v1\0";
 /// Revision prefix of a mission built from a navdata route.
-pub(super) const ROUTE_REVISION_PREFIX: &str = "operational-route-v1";
+pub(super) const ROUTE_REVISION_PREFIX: &str = "operational-route-v2";
 /// Revision prefix of a mission built from an area survey request.
-pub(super) const SURVEY_REVISION_PREFIX: &str = "operational-survey-v1";
+pub(super) const SURVEY_REVISION_PREFIX: &str = "operational-survey-v2";
 /// Revision prefix of a mission that flies home.
-pub(super) const HOME_REVISION_PREFIX: &str = "operational-home-v1";
+pub(super) const HOME_REVISION_PREFIX: &str = "operational-home-v2";
 /// Revision prefix of a mission built from a waypoint list.
-pub(super) const WAYPOINTS_REVISION_PREFIX: &str = "operational-waypoints-v1";
+pub(super) const WAYPOINTS_REVISION_PREFIX: &str = "operational-waypoints-v2";
 
 /// One task of a plan flown in segments: its phase identifier and the waypoints, by
 /// index, it flies toward.
@@ -237,11 +236,10 @@ fn climb_phase(config: &MissionConfig, first: bool) -> MissionPhase {
         entry_conditions: vec![entry],
         action: MissionAction::Flight(FlightAction::Climb { target_altitude_m }),
         cleanup_actions: Vec::new(),
+        // The engine's vertical mode judges the capture, with its margin
+        // and its altitude source; the document only waits for it.
         completion_conditions: vec![MissionCondition::Navigation(
-            NavigationCondition::Altitude {
-                comparison: Comparison::GreaterOrEqual,
-                value_m: target_altitude_m - climb_capture_margin_m(config),
-            },
+            NavigationCondition::AltitudeCaptured { expected: true },
         )],
         abort_conditions: Vec::new(),
         depends_on: Vec::new(),

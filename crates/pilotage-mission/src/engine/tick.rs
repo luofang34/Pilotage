@@ -65,7 +65,6 @@ impl MissionEngine {
         };
         let mut action = self.apply_core_output(&core_output, &mut events);
         let mut state = self.state();
-        self.compare_vertical(before, state);
         self.step_vertical(state, solution.as_ref(), now);
         if state == MissionState::Climb && self.vertical_mode() == VerticalMode::Hold {
             let Some(extra_action) = self.continue_core(now, solution.as_ref(), &mut events) else {
@@ -194,7 +193,8 @@ impl MissionEngine {
                 guidance_valid: Some(solution.is_some()),
                 plan_complete: Some(self.plan_complete),
                 waypoints_captured: u32::try_from(self.waypoints_captured()).ok(),
-                altitude_m: self.observed_altitude_m(solution, now),
+                altitude_m: solution.map(|solution| solution.position.altitude_m),
+                altitude_captured: Some(self.vertical_mode() == VerticalMode::Hold),
             },
             vehicle: VehicleObservation {
                 lifecycle: self.vehicle_lifecycle(now),

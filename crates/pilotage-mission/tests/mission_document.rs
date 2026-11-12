@@ -109,7 +109,7 @@ fn navigation_solution_altitude_and_plan_completion_are_document_conditions() {
     assert!(matches!(
         phases[1].completion_conditions.as_slice(),
         [MissionCondition::Navigation(
-            NavigationCondition::Altitude { value_m: 514.0, .. }
+            NavigationCondition::AltitudeCaptured { expected: true }
         )]
     ));
     assert!(matches!(
@@ -214,6 +214,8 @@ fn observation(guidance_valid: bool, altitude_m: f64, plan_complete: bool) -> Mi
             plan_complete: Some(plan_complete),
             waypoints_captured: None,
             altitude_m: Some(altitude_m),
+            // As the executor judges it: within a metre of the 515 m target.
+            altitude_captured: Some(altitude_m >= 514.0),
         },
         vehicle: VehicleObservation::default(),
         signals: Vec::new(),

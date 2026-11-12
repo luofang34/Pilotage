@@ -63,6 +63,13 @@ pub enum NavigationCondition {
         /// The waypoint index.
         index: u32,
     },
+    /// The executor's vertical target has the specified capture state. The
+    /// executor judges the capture, with its own margin and altitude
+    /// source; the document states only that it is waited for.
+    AltitudeCaptured {
+        /// The required capture state.
+        expected: bool,
+    },
     /// The observed altitude satisfies a comparison.
     Altitude {
         /// The comparison operation.

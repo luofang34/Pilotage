@@ -14,13 +14,9 @@
 //! vehicle that sags out of the margin is still holding that altitude,
 //! not climbing to it again.
 //!
-//! The mode drives what the engine itself decides: the climb's vertical
-//! command and the mode a display reads. The mission core still ends its
-//! climb phase by the altitude threshold in the mission document, with
-//! the same margin and altitude. The engine counts every tick on which
-//! the machine and the core disagree
-//! ([`super::MissionCounters::vertical_mode_mismatch`]), so the two
-//! judges cannot drift apart unseen.
+//! The mode is the one judge of a capture: it sets the climb's vertical
+//! command and the mode a display reads, and the mission core ends its
+//! climb phase when the engine reports the target captured.
 
 use navigate_contract::{MonotonicNanos, NavigationSolution};
 use pilotage_mission_core::FlightAction as CoreFlightAction;
@@ -168,35 +164,23 @@ impl MissionEngine {
         let event = match target_m {
             None => VerticalEvent::Disengaged,
             Some(target_m) => {
+                let fresh = self.modes.vertical.target_m != Some(target_m);
+                // A target just set, or one not yet held, is climbed to.
+                let climbing = fresh || self.modes.vertical.mode != VerticalMode::Hold;
                 let relation = relate(
-                    self.observed_altitude_m(solution, now),
+                    self.target_altitude_source_m(solution, now, climbing),
                     target_m,
                     climb_capture_margin_m(&self.config),
                 );
-                if self.modes.vertical.target_m == Some(target_m) {
-                    VerticalEvent::Sample(relation)
-                } else {
+                if fresh {
                     VerticalEvent::TargetSet(relation)
+                } else {
+                    VerticalEvent::Sample(relation)
                 }
             }
         };
         let (mode, _) = next(self.modes.vertical.mode, event);
         self.modes.vertical = VerticalStatus { mode, target_m };
-    }
-
-    /// Counts a disagreement between the machine and the mission core on
-    /// a tick that began in the climb: the machine holds the climb's
-    /// target exactly when the core has left the climb for the route.
-    pub(super) fn compare_vertical(&mut self, before: MissionState, after: MissionState) {
-        let left_climb = match (before, after) {
-            (MissionState::Climb, MissionState::Climb) => false,
-            (MissionState::Climb, MissionState::Enroute) => true,
-            _ => return,
-        };
-        if (self.modes.vertical.mode == VerticalMode::Hold) != left_climb {
-            self.counters.vertical_mode_mismatch =
-                self.counters.vertical_mode_mismatch.wrapping_add(1);
-        }
     }
 
     /// The altitude the mission flies to in `state`, metres above the

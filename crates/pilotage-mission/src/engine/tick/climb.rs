@@ -8,7 +8,7 @@ use pilotage_protocol::{ControlIntent, ReferenceFrame, VelocityIntent};
 use crate::body_frame::clamp_symmetric;
 
 use super::super::document::climb_capture_margin_m;
-use super::super::{MissionEngine, MissionState, VerticalMode};
+use super::super::{MissionEngine, VerticalMode};
 use super::outputs;
 
 impl MissionEngine {
@@ -68,22 +68,23 @@ impl MissionEngine {
         Some(outputs::zero_velocity_intent())
     }
 
-    /// The altitude the mission core judges the phases by at `now`: the
-    /// solution's, except in the climb of a vehicle that holds its
-    /// altitude itself. That vehicle's flight controller climbs to the
-    /// commanded altitude on its own air data, so the climb is judged by
-    /// its altitude (its height on the origin datum the commands are
-    /// turned by) while a fresh one is known, and otherwise by the
+    /// The altitude a vertical target is judged against at `now`: the
+    /// solution's, except while a vehicle that holds its altitude itself
+    /// is `climbing` to a target. That vehicle's flight controller climbs
+    /// to the commanded altitude on its own air data, so its climb is
+    /// judged by its altitude (its height on the origin datum the commands
+    /// are turned by) while a fresh one is known, and otherwise by the
     /// solution's, credited with twice its vertical uncertainty past the
     /// capture window so a navigator's honest vertical error cannot keep
-    /// the mission in the climb.
-    pub(in crate::engine) fn observed_altitude_m(
+    /// the target from being captured.
+    pub(in crate::engine) fn target_altitude_source_m(
         &self,
         solution: Option<&NavigationSolution>,
         now: MonotonicNanos,
+        climbing: bool,
     ) -> Option<f64> {
         let solution_altitude_m = solution.map(|value| value.position.altitude_m);
-        if self.config.can_stop() || self.state() != MissionState::Climb {
+        if self.config.can_stop() || !climbing {
             return solution_altitude_m;
         }
         if let (Some(origin_m), Some(height_m)) =

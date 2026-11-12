@@ -2,6 +2,7 @@
 
 mod cleanup;
 mod clocks;
+mod conditions;
 mod determinism;
 mod flight_vectors;
 mod support;
