@@ -37,8 +37,33 @@ pub enum OwnshipSource {
         /// Age past which the latest solution yields no solution.
         max_age: DurationNanos,
         /// 1-sigma horizontal uncertainty above which the latest solution
-        /// is not flown, meters.
+        /// is beyond its limits, meters.
         max_horizontal_1sigma_m: f64,
+        /// What a fresh solution beyond its limits (graded unusable, or
+        /// with a horizontal uncertainty above the limit) does.
+        beyond_limits: BeyondLimits,
+    },
+}
+
+/// What the engine does with a fresh onboard solution beyond its limits:
+/// graded unusable, or with a horizontal uncertainty above the limit.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BeyondLimits {
+    /// The solution is not flown: the vehicle holds, and the start waits.
+    Hold,
+    /// In flight the solution is still flown: the plan goes on by dead
+    /// reckoning, waypoints sequence on the solution's own position, and
+    /// the engine reports the dead reckoning with its uncertainty. A
+    /// navigator with no position aid (an inertial and barometric one
+    /// without satellites) grows its uncertainty for the whole flight,
+    /// and holding would end the flight where the uncertainty crossed a
+    /// line. The start still waits for a solution within the limits, and
+    /// a solution that is stale, absent, or of an unknown uncertainty is
+    /// never flown.
+    DeadReckon {
+        /// The 1-sigma horizontal uncertainty past which the vehicle holds
+        /// all the same, meters; `None` for no ceiling.
+        ceiling_1sigma_m: Option<f64>,
     },
 }
 
@@ -64,6 +89,22 @@ impl OwnshipSource {
         Self::OnboardNavigation {
             max_age: DurationNanos::from_millis(1_000),
             max_horizontal_1sigma_m: 50.0,
+            beyond_limits: BeyondLimits::Hold,
+        }
+    }
+
+    /// The onboard-navigation source for flight without satellite
+    /// navigation: the limits of [`Self::onboard_navigation`], past which
+    /// the plan goes on by dead reckoning with no ceiling
+    /// ([`BeyondLimits::DeadReckon`]).
+    #[must_use]
+    pub const fn onboard_navigation_gnss_denied() -> Self {
+        Self::OnboardNavigation {
+            max_age: DurationNanos::from_millis(1_000),
+            max_horizontal_1sigma_m: 50.0,
+            beyond_limits: BeyondLimits::DeadReckon {
+                ceiling_1sigma_m: None,
+            },
         }
     }
 }
@@ -205,6 +246,12 @@ pub struct MissionConfig {
     /// [`crate::MissionEngine::declared_start`] hands it on to the
     /// navigator as stated. Default none.
     pub declared_start: Option<crate::DeclaredStart>,
+    /// The height above the WGS84 ellipsoid of the flight controller's
+    /// local origin, metres: the datum its reported heights stand on and
+    /// that turns the altitudes the engine commands into its frame. With
+    /// it, a vehicle that holds its altitude itself captures the climb on
+    /// the altitude its flight controller flies. Default none.
+    pub fc_origin_height_m: Option<f64>,
 }
 
 impl MissionConfig {
@@ -271,6 +318,7 @@ impl MissionConfig {
             arm_when_vehicle_ready: false,
             launch_detection: None,
             declared_start: None,
+            fc_origin_height_m: None,
         }
     }
 }

@@ -388,6 +388,20 @@ impl MissionTask {
                 MissionEvent::MissionComplete => info!("mission complete"),
                 // The engine absorbs the bias in every heading it commands,
                 // so this is the one place a bad heading reference shows.
+                MissionEvent::DeadReckoning {
+                    horizontal_1sigma_m,
+                    vertical_1sigma_m,
+                } => {
+                    warn!(
+                        horizontal_1sigma_m,
+                        vertical_1sigma_m,
+                        "the plan goes on by dead reckoning: the navigator's solution is \
+                         beyond its limits"
+                    );
+                }
+                MissionEvent::NavigationRecovered {
+                    horizontal_1sigma_m,
+                } => info!(horizontal_1sigma_m, "navigation within its limits again"),
                 MissionEvent::HeadingBiasEstimated { bias_rad } => {
                     warn!(
                         bias_deg = bias_rad.to_degrees(),

@@ -2,6 +2,7 @@
 //! actions out. All time is caller-supplied; nothing here reads a clock
 //! or performs I/O.
 
+mod dead_reckoning;
 mod document;
 mod holding_pattern;
 mod home;
@@ -34,6 +35,7 @@ use pilotage_mission_core::{
     MissionTerminal as CoreMissionTerminal, NavigationDataIdentity, PhaseStage, ReceiptResult,
 };
 
+pub use dead_reckoning::DeadReckoning;
 pub use nav_guidance::{NavGuidance, NavQuality};
 pub use navigation_display::{
     DisplayFix, DisplayWaypoint, LegDisplay, NavigationDisplay, ToFrom, WaypointProgress,
@@ -443,6 +445,15 @@ fn build_waypoints(
 /// crosses the track and swings past it.
 fn guidance_config(config: &MissionConfig) -> VelocityGuidanceConfig {
     let mut guidance = VelocityGuidanceConfig::default();
+    // A dead-reckoned solution may be graded unusable; the engine has
+    // already decided to fly it, so guidance takes it as given.
+    if let crate::OwnshipSource::OnboardNavigation {
+        beyond_limits: crate::BeyondLimits::DeadReckon { .. },
+        ..
+    } = config.ownship_source
+    {
+        guidance.admission.minimum_quality = navigate_contract::SolutionQuality::Unusable;
+    }
     guidance.cruise_mps = config.cruise_mps;
     guidance.max_horizontal_mps = config.limits.max_horizontal_mps;
     guidance.max_vertical_mps = config.limits.max_vertical_mps;

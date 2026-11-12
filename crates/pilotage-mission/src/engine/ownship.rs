@@ -102,10 +102,12 @@ impl MissionEngine {
             OwnshipSource::OnboardNavigation {
                 max_age,
                 max_horizontal_1sigma_m,
+                beyond_limits,
             } => {
                 let limits = OnboardLimits {
                     max_age,
                     max_horizontal_1sigma_m,
+                    beyond: beyond_limits,
                 };
                 self.onboard_solution(now, limits)
             }
@@ -151,12 +153,14 @@ impl MissionEngine {
             OwnshipSource::OnboardNavigation {
                 max_age,
                 max_horizontal_1sigma_m,
+                beyond_limits,
             } => self
                 .onboard_absence(
                     now,
                     OnboardLimits {
                         max_age,
                         max_horizontal_1sigma_m,
+                        beyond: beyond_limits,
                     },
                 )
                 .unwrap_or(StartWithheldReason::NavigationStale),
