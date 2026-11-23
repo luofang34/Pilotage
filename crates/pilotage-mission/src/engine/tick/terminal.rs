@@ -20,6 +20,11 @@ impl MissionEngine {
         let mut events = core::mem::take(&mut self.hold_events);
         let solution = self.publish_solution(now, Some(&mut events));
         let state = MissionState::AfterPlan;
+        if self.selected().altitude_m.is_some() {
+            // The plan's target stands after the plan and needs no step. A
+            // selected altitude is a new target to capture.
+            self.step_vertical(self.lifecycle().vertical_stage(), solution.as_ref(), now);
+        }
         let intent = self.intent_for_tick(
             self.lifecycle().lateral_stage(),
             solution.as_ref(),

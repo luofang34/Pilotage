@@ -301,7 +301,7 @@ impl MissionEngine {
         let Some(solution) = solution else {
             return false;
         };
-        if !self.flies_route() {
+        if !self.flies_route() || self.heading_selected() {
             return false;
         }
         self.advance_plan(solution, events);
@@ -406,6 +406,7 @@ impl MissionEngine {
         now: MonotonicNanos,
         events: &mut Vec<MissionEvent>,
     ) -> Option<ControlIntent> {
+        let to = &self.at_selected_altitude(to);
         let guided = guide_velocity(
             solution,
             reference,

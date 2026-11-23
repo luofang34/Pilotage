@@ -207,6 +207,12 @@ pub enum MissionEvent {
         /// The mode resumed.
         mode: LateralMode,
     },
+    /// The operator's selection changed, and these targets apply from
+    /// this tick. A selection with no target flies the plan.
+    TargetsSelected {
+        /// The selection in effect.
+        targets: super::SelectedTargets,
+    },
 }
 
 /// What one call to [`crate::MissionEngine::tick`] produced.

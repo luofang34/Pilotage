@@ -22,7 +22,9 @@ pub use config::HostCoreConfig;
 pub use core::HostCore;
 pub use error::HostCoreError;
 pub use output::{HostEvent, HostStatus, NextWake};
-pub use pilotage_mission::{OnboardSolution, SourceIntegrity, SourceIntegrityState};
+pub use pilotage_mission::{
+    OnboardSolution, SelectError, SelectedTargets, SourceIntegrity, SourceIntegrityState,
+};
 
 use pilotage_protocol::VehicleId;
 
