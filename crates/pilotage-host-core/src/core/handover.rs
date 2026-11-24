@@ -24,6 +24,7 @@ const SUCCESSOR_CLIENT: ClientKey = ClientKey::new(u64::MAX - 3);
 const TAKEOVER_TIMEOUT_NS: u64 = 2_000_000_000;
 
 /// A principal over a plan loaded while another one flies.
+#[derive(Clone)]
 pub(super) struct Incoming {
     pub(super) task: Box<MissionTask>,
     /// When it was loaded, nanoseconds since the core's origin.

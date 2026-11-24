@@ -39,6 +39,7 @@ pub(super) enum NavPublication {
 }
 
 /// Stamps the mission executor's guidance for one session.
+#[derive(Clone)]
 pub(super) struct NavGuidancePublisher {
     sequence: u32,
     incarnation: [u8; 16],

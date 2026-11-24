@@ -54,7 +54,7 @@ pub struct ParamReport {
 }
 
 /// FC-owned reports from the selected source.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct FcReports {
     /// Latest landed detector report from the selected flight controller.
     pub landed_state: Option<super::LandedStateReport>,

@@ -26,6 +26,13 @@ pub enum HostCoreError {
         #[source]
         source: Box<pilotage_mission::MissionBuildError>,
     },
+    /// A copy of the core is not possible: the adapter refused its copy.
+    #[error("a copy of the host core is not possible: {source}")]
+    NotCopyable {
+        /// The adapter's refusal.
+        #[source]
+        source: Box<pilotage_adapter_aviate::AviateAdapterError>,
+    },
     /// The call needs a loaded mission, and none is loaded.
     #[error("{operation} needs a loaded mission, and none is loaded")]
     NoMission {

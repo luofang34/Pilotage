@@ -50,7 +50,7 @@ pub use updates::{
 /// Latest state received from the FC, with receive stamps so staleness
 /// can propagate to consumers (ADR-0018: loss of data marks groups
 /// stale rather than freezing them).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LinkState {
     /// Configured MAVLink vehicle system id.
     pub system_id: u8,

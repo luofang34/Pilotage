@@ -9,7 +9,7 @@ use super::selected::SelectedTargets;
 use super::vertical_mode::VerticalStatus;
 
 /// The state of each mode machine after the latest tick.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(super) struct Modes {
     /// The navigation source and its integrity.
     pub(super) nav: NavMode,

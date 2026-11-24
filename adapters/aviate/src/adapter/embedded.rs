@@ -21,6 +21,7 @@ use crate::clock::AdapterClock;
 use crate::error::AviateAdapterError;
 use crate::uplink::FlightUplink;
 
+mod copy;
 #[cfg(test)]
 mod tests;
 

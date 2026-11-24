@@ -9,7 +9,7 @@ use pilotage_session::ClientKey;
 use crate::connection::ToConnection;
 
 /// The queue of each connected in-core client.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct ClientRegistry {
     clients: BTreeMap<ClientKey, VecDeque<ToConnection>>,
     /// The messages still owed to clients the engine removed, such as the

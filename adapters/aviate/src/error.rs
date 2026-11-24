@@ -50,6 +50,13 @@ pub enum AviateAdapterError {
         #[source]
         source: std::io::Error,
     },
+    /// A copy of the adapter is not possible: the adapter owns a part
+    /// that only one adapter can own. Only an embedded adapter has a copy.
+    #[error("a copy of the Aviate adapter is not possible: it owns {part}")]
+    NotCopyable {
+        /// The part that only one adapter can own.
+        part: &'static str,
+    },
     /// The MAVLink receive link could not start.
     #[error(transparent)]
     Link(#[from] pilotage_mavlink::LinkError),

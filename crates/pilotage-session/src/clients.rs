@@ -48,7 +48,7 @@ pub(crate) struct ClientState {
 /// grant/commit/override that installs a principal records the scope for it,
 /// and any effect that empties or reassigns a scope removes it from the prior
 /// holder. This keeps the disconnect path precise even after handovers.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct ClientRegistry {
     clients: BTreeMap<ClientKey, ClientState>,
     held: BTreeMap<PrincipalId, BTreeSet<ScopePair>>,

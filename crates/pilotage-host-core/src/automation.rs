@@ -112,6 +112,7 @@ pub struct AutomationStatus {
 }
 
 /// Where the plan comes from.
+#[derive(Clone)]
 pub enum PlanSource {
     /// A route that expands against a navigation-data snapshot, with the
     /// snapshot's provenance (ADR-0030).
@@ -131,6 +132,7 @@ pub enum PlanSource {
 
 /// A validated mission: the plan source and the config the flight engine
 /// is built from once capabilities are known.
+#[derive(Clone)]
 pub struct MissionPlan {
     source: PlanSource,
     config: MissionConfig,

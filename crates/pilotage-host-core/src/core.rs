@@ -2,6 +2,7 @@
 
 mod handover;
 mod selected;
+mod snapshot;
 
 use std::time::Duration;
 

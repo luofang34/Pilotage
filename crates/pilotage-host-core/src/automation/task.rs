@@ -68,6 +68,7 @@ const NO_DEVICE_DIGEST: [u8; 32] = [0; 32];
 pub const TICK_INTERVAL: Duration = Duration::from_millis(50);
 
 /// The in-process mission principal's state.
+#[derive(Clone)]
 pub struct MissionTask {
     /// The commands for the engine since the core last took them.
     outbox: Vec<ToEngine>,

@@ -27,6 +27,17 @@ impl AdapterClock {
         }
     }
 
+    /// This clock when the host sets its time. `None` for the process
+    /// clock, which a copy of the adapter cannot stop.
+    #[must_use]
+    pub(crate) fn host_set(self) -> Option<Self> {
+        match self {
+            #[cfg(feature = "net")]
+            Self::System => None,
+            Self::Manual(_) => Some(self),
+        }
+    }
+
     /// Sets a manual clock to `now`; a system clock does not change.
     pub fn set(&mut self, now: Instant) {
         match self {

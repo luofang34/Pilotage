@@ -47,7 +47,7 @@ pub(crate) struct ExpiredHolder {
 /// marks it active on grant/handover/override, refreshes it on accepted
 /// axis-bearing frames, and clears it when the holder is released. No entry
 /// means no holder to watch.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct HolderLiveness {
     entries: Vec<HeldSlot>,
 }
