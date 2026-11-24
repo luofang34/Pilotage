@@ -1,6 +1,7 @@
 //! The selected targets against the engine in flight: what each target
 //! does to the intents and the modes, and what the engine refuses.
 
+mod abeam;
 mod rig;
 
 use core::f64::consts::{FRAC_PI_2, PI, TAU};
@@ -10,7 +11,7 @@ use pilotage_protocol::{ControlIntent, HeadingAltitudeIntent, VehicleClass};
 
 use super::{SelectError, SelectedTargets};
 use crate::{LateralMode, MissionEngine, MissionEvent, MissionOutput, MissionState, VerticalMode};
-use rig::{ALTITUDE_M, CEILING_MPS, CRUISE_MPS, Feed, PLAN, Rig};
+use rig::{ALTITUDE_M, CEILING_MPS, CRUISE_MPS, Feed, Rig};
 
 fn heading(heading_true_rad: f64) -> SelectedTargets {
     SelectedTargets {
@@ -57,13 +58,6 @@ fn turn(from: f64, to: f64) -> f64 {
     (to - from).sin().atan2((to - from).cos())
 }
 
-fn legs_advanced(rig: &Rig) -> usize {
-    rig.events
-        .iter()
-        .filter(|event| matches!(event, MissionEvent::LegAdvanced { .. }))
-        .count()
-}
-
 /// Flies until the vertical mode holds `selected_m`, and then until the
 /// aircraft is at it: the capture window is wider than the altitude
 /// error the demands then remove.
@@ -78,12 +72,10 @@ fn until_altitude_held(rig: &mut Rig, selected_m: f64) {
 }
 
 #[test]
-fn a_selected_heading_is_flown_and_the_plan_does_not_sequence() {
+fn a_selected_heading_is_flown_in_place_of_the_plans_path() {
     for feed in [Feed::Truth, Feed::Navigator] {
         let mut rig = Rig::new(feed);
         rig.fly_to_route();
-        // Slightly right of the first leg: the aircraft goes abeam the
-        // first waypoint, which sequences a plan that is flown.
         let selected = 0.05;
         rig.engine.select(heading(selected)).expect("selects");
         let output = rig.step();
@@ -93,14 +85,7 @@ fn a_selected_heading_is_flown_and_the_plan_does_not_sequence() {
         // the ellipsoid there.
         assert!((f64::from(demand.altitude_m) - ALTITUDE_M).abs() < 1.0);
         assert_eq!(rig.engine.lateral_status().mode, LateralMode::HeadingSelect);
-        let past_first = PLAN[0][0] + 500.0;
-        rig.step_until(4_000, |rig, _| rig.ned[0] > past_first);
-        assert!(rig.ned[0] > past_first, "the aircraft passed the waypoint");
-        assert_eq!(legs_advanced(&rig), 0, "{:?}", rig.events);
-        assert_eq!(rig.engine.plan_progress(), (0, false));
-        let display = rig.engine.navigation_display();
-        assert_eq!(display.active_waypoint, Some(0));
-        assert_eq!(display.selected, heading(selected));
+        assert_eq!(rig.engine.navigation_display().selected, heading(selected));
     }
 }
 
@@ -109,7 +94,7 @@ fn a_cleared_heading_returns_to_the_plan() {
     let mut rig = Rig::new(Feed::Truth);
     rig.fly_to_route();
     rig.engine.select(heading(0.05)).expect("selects");
-    rig.step_until(4_000, |rig, _| rig.ned[0] > PLAN[0][0] + 500.0);
+    rig.step_until(400, |_, _| false);
     rig.engine
         .select(SelectedTargets::default())
         .expect("clears");
@@ -120,10 +105,6 @@ fn a_cleared_heading_returns_to_the_plan() {
         output.intent
     );
     assert_ne!(rig.engine.lateral_status().mode, LateralMode::HeadingSelect);
-    // The first waypoint is still the active one: the plan sequences
-    // from it.
-    rig.step_until(8_000, |rig, _| legs_advanced(rig) > 0);
-    assert!(legs_advanced(&rig) > 0, "the plan sequences again");
 }
 
 #[test]

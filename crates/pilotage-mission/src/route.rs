@@ -11,7 +11,7 @@
 
 use navigate_contract::{FlightPlan, GeodeticPosition, Ident, LegPath, PlanRole, Waypoint};
 use navigate_route::{
-    ExecutionConfig, ExecutionState, HoldStatus, Leg, PlanExecution, SequenceEvent,
+    ExecutionConfig, ExecutionState, HoldStatus, Leg, PlanExecution, SequenceEvent, SequenceReason,
 };
 
 use crate::body;
@@ -158,6 +158,15 @@ impl MissionRoute {
     /// Returns the index of the leg made active and the cross-track
     /// distance from the first leg, metres, positive right of it.
     pub(crate) fn pass_start(&mut self, position: &GeodeticPosition) -> Option<(usize, f64)> {
+        let (state, cross_track_m) = self.start_passed(position)?;
+        self.state = state;
+        Some((state.active_index(), cross_track_m))
+    }
+
+    /// The progress after the first waypoint is passed as
+    /// [`Self::pass_start`] passes it, and the cross-track distance from
+    /// the first leg, metres; `None` when it is not passed.
+    fn start_passed(&self, position: &GeodeticPosition) -> Option<(ExecutionState, f64)> {
         if !self.pass_first_behind || self.state.active_index() != 0 || self.state.is_complete() {
             return None;
         }
@@ -181,10 +190,70 @@ impl MissionRoute {
             body::GEODESY,
         )
         .ok()?;
-        self.state = PlanExecution::resume(self.plan(), self.config, 1, false)
+        let state = PlanExecution::resume(self.plan(), self.config, 1, false)
             .ok()?
             .state();
-        Some((1, cross_track_m))
+        Some((state, cross_track_m))
+    }
+
+    /// Sequences the active waypoint of a vehicle that does not fly the
+    /// route's path, once the vehicle is abeam of the waypoint and at most
+    /// `bound_m` beside the active leg. Abeam is the sequencer's own test
+    /// for a waypoint passed beside. The capture radius and the turn
+    /// ahead of a fly-by waypoint do not sequence here: they are for a
+    /// vehicle on the path.
+    ///
+    /// The last waypoint is never sequenced, so the plan does not complete
+    /// and the waypoint stays the one to fly to. A hold is never
+    /// sequenced and its progress does not change: a hold is an
+    /// instruction that the operator flies or deletes.
+    ///
+    /// Returns the index of the leg made active and the cross-track
+    /// distance, metres, positive right of the leg.
+    pub(crate) fn pass_abeam(
+        &mut self,
+        position: &GeodeticPosition,
+        bound_m: f64,
+    ) -> Option<(usize, f64)> {
+        if self.state.is_complete() {
+            return None;
+        }
+        let index = self.state.active_index();
+        let active = self.waypoints.get(index)?;
+        let last = index.checked_add(1)? >= self.waypoints.len();
+        if last || active.path.and_then(|path| path.hold()).is_some() {
+            return None;
+        }
+        let (state, cross_track_m) = self
+            .start_passed(position)
+            .or_else(|| self.leg_passed(position))?;
+        // A comparison with a bound that is not a number is false.
+        if cross_track_m.abs() <= bound_m {
+            self.state = state;
+            Some((state.active_index(), cross_track_m))
+        } else {
+            None
+        }
+    }
+
+    /// The progress after the sequencer passes the active waypoint beside
+    /// it at `position`, and the cross-track distance it reports, metres;
+    /// `None` when the sequencer does not pass it. The sequencer has no
+    /// call for this test alone, so it runs on a copy of the progress with
+    /// the smallest capture radius the sequencer accepts and no speed,
+    /// which leaves the test for a waypoint passed beside as the only one
+    /// that can sequence.
+    fn leg_passed(&self, position: &GeodeticPosition) -> Option<(ExecutionState, f64)> {
+        let mut config = self.config;
+        config.capture_radius_m = f64::MIN_POSITIVE;
+        let mut probe = PlanExecution::resume_state(self.plan(), config, self.state).ok()?;
+        match probe.advance(position, 0.0) {
+            SequenceEvent::LegAdvanced {
+                reason: SequenceReason::Passed { cross_track_m },
+                ..
+            } => Some((probe.state(), cross_track_m)),
+            _ => None,
+        }
     }
 
     /// Whether the last waypoint sequenced and the vehicle still flies on

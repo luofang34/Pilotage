@@ -23,6 +23,7 @@ use super::{
     MissionAction, MissionEngine, MissionEvent, MissionOutput, MissionState, VerticalMode,
 };
 
+mod abeam;
 mod climb;
 mod directives;
 pub(super) mod outputs;
@@ -301,10 +302,10 @@ impl MissionEngine {
         let Some(solution) = solution else {
             return false;
         };
-        if !self.flies_route() || self.heading_selected() {
+        if !self.flies_route() {
             return false;
         }
-        self.advance_plan(solution, events);
+        self.sequence_plan(solution, events);
         true
     }
 

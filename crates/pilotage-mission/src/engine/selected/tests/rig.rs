@@ -59,20 +59,19 @@ pub fn config(feed: Feed) -> MissionConfig {
     config
 }
 
-pub fn plan() -> WaypointPlan {
+/// The waypoint at `north` and `east` of the anchor, metres.
+pub fn waypoint([north, east]: [f64; 2]) -> PlannedWaypoint {
     let plane = crate::body::tangent_plane(anchor()).expect("the anchor is plausible");
-    let waypoints = PLAN
-        .iter()
-        .map(|[north, east]| {
-            let position = plane.from_ned(&NedOffset::new(*north, *east, 0.0));
-            PlannedWaypoint::new(
-                position.latitude_rad.to_degrees(),
-                position.longitude_rad.to_degrees(),
-                ALTITUDE_M,
-            )
-        })
-        .collect();
-    WaypointPlan::new(waypoints)
+    let position = plane.from_ned(&NedOffset::new(north, east, 0.0));
+    PlannedWaypoint::new(
+        position.latitude_rad.to_degrees(),
+        position.longitude_rad.to_degrees(),
+        ALTITUDE_M,
+    )
+}
+
+pub fn plan() -> WaypointPlan {
+    WaypointPlan::new(PLAN.into_iter().map(waypoint).collect())
 }
 
 /// The engine with the aircraft it flies.
@@ -95,11 +94,17 @@ pub struct Rig {
 impl Rig {
     /// A rig 1000 m south of the first waypoint, northbound at cruise.
     pub fn new(feed: Feed) -> Self {
-        let (engine, _) = MissionEngine::from_waypoints(&plan(), config(feed)).expect("builds");
+        Self::with(feed, config(feed), &plan(), 0.0)
+    }
+
+    /// A rig that flies `plan` under `config`, northbound at cruise from
+    /// 1000 m north of the anchor and `east_m` east of it.
+    pub fn with(feed: Feed, config: MissionConfig, plan: &WaypointPlan, east_m: f64) -> Self {
+        let (engine, _) = MissionEngine::from_waypoints(plan, config).expect("builds");
         Self {
             engine,
             feed,
-            ned: [1_000.0, 0.0, 0.0],
+            ned: [1_000.0, east_m, 0.0],
             heading_rad: 0.0,
             airspeed_mps: CRUISE_MPS,
             climb_mps: 0.0,

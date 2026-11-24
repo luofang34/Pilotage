@@ -8,6 +8,16 @@
 //! on its route, and after its plan. They do not apply before the arm or
 //! while a human holds the motion scope.
 //!
+//! Under a selected heading the vehicle does not fly the plan's path. The
+//! plan keeps up with the vehicle: the active waypoint sequences when the
+//! vehicle goes abeam of it at most
+//! [`crate::MissionConfig::selected_heading_sequence_bound_m`] beside the
+//! active leg. The capture radius and the turn ahead of a waypoint do not
+//! sequence then. The last waypoint and a hold do not sequence, so the
+//! plan does not complete and a hold stays for the operator to fly. When
+//! the operator clears the heading, the plan is flown to the waypoint
+//! that is active then.
+//!
 //! The selection is plain data. The engine reads it on each tick, so a
 //! change applies from the next tick.
 
@@ -156,8 +166,8 @@ impl MissionEngine {
     }
 
     /// Whether a selected heading replaces the plan's lateral path. The
-    /// plan does not sequence while it does: the vehicle does not fly the
-    /// plan's legs, so a leg it flies past is not a leg it flew.
+    /// plan then sequences only when the vehicle goes abeam of the active
+    /// waypoint near the route, and it does not complete.
     pub(super) const fn heading_selected(&self) -> bool {
         self.modes.selected.heading_true_rad.is_some()
     }
