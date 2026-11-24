@@ -1,8 +1,9 @@
 //! The lateral mode machine: what the vehicle flies over the ground.
 //!
 //! One pure function, [`next`], turns a mode and one event into the next
-//! mode and what to act on. The events come from outside: the plan and
-//! the mission say what is demanded ([`Demand`]), the navigation source
+//! mode and what to act on. The events come from outside: the plan, the
+//! mission, and the operator's selected heading say what is demanded
+//! ([`Demand`]), the navigation source
 //! says when there is no position to fly it on, and the vehicle's
 //! capability says how that loss is answered ([`LossResponse`]). The
 //! machine receives [`LateralStage`] facts rather than reading another
@@ -51,6 +52,9 @@ pub enum LateralMode {
     /// A racetrack orbit flown by heading/bank and time, with no position
     /// to fly on.
     TimedHold,
+    /// The true heading an operator selected, in place of the plan's
+    /// lateral path.
+    HeadingSelect,
 }
 
 /// What the plan and the mission ask of the lateral mode.
@@ -66,6 +70,8 @@ pub(super) enum Demand {
     Track,
     /// Fly a holding pattern on position.
     Pattern,
+    /// Fly the heading an operator selected.
+    Heading,
 }
 
 /// How a vehicle answers a demand it has no position to fly on.
@@ -113,7 +119,7 @@ pub(super) enum LateralEffect {
 /// The mode after `event` in `mode`, and what to act on.
 pub(super) const fn next(mode: LateralMode, event: LateralEvent) -> (LateralMode, LateralEffect) {
     use LateralMode::{
-        DirectTo, HeadingHold, Off, Pattern, PositionHold, Standby, TimedHold, Track,
+        DirectTo, HeadingHold, HeadingSelect, Off, Pattern, PositionHold, Standby, TimedHold, Track,
     };
     let to = match (mode, event) {
         (_, LateralEvent::Disengaged | LateralEvent::Lost(LossResponse::Silent)) => Off,
@@ -122,6 +128,7 @@ pub(super) const fn next(mode: LateralMode, event: LateralEvent) -> (LateralMode
         (_, LateralEvent::Demand(Demand::DirectTo)) => DirectTo,
         (_, LateralEvent::Demand(Demand::Track)) => Track,
         (_, LateralEvent::Demand(Demand::Pattern)) => Pattern,
+        (_, LateralEvent::Demand(Demand::Heading)) => HeadingSelect,
         (_, LateralEvent::Lost(LossResponse::HoldPosition)) => PositionHold,
         // A pattern that loses its position goes on by time at once: it
         // already circles a fix.
@@ -134,11 +141,10 @@ pub(super) const fn next(mode: LateralMode, event: LateralEvent) -> (LateralMode
         (HeadingHold, HeadingHold) | (TimedHold, TimedHold) => LateralEffect::None,
         (_, HeadingHold) => LateralEffect::HeadingHoldBegan,
         (_, TimedHold) => LateralEffect::TimedHoldBegan,
-        (HeadingHold | TimedHold, Standby | PositionHold | DirectTo | Track | Pattern)
-            if matches!(event, LateralEvent::Demand(_)) =>
-        {
-            LateralEffect::Resumed
-        }
+        (
+            HeadingHold | TimedHold,
+            Standby | PositionHold | DirectTo | Track | Pattern | HeadingSelect,
+        ) if matches!(event, LateralEvent::Demand(_)) => LateralEffect::Resumed,
         _ => LateralEffect::None,
     };
     (to, effect)
@@ -245,6 +251,13 @@ impl MissionEngine {
                     LateralStage::Complete => Some(Demand::Position),
                     LateralStage::AfterPlan => Some(Demand::Pattern),
                     _ => self.route_demand(&solution.position),
+                };
+                // A selected heading replaces what the plan demands of a
+                // vehicle in flight. It does not engage a mode that the
+                // plan leaves off.
+                let demand = match demand {
+                    Some(_) if self.heading_selected() => Some(Demand::Heading),
+                    other => other,
                 };
                 demand.map_or(LateralEvent::Disengaged, LateralEvent::Demand)
             }

@@ -228,6 +228,14 @@ pub struct MissionConfig {
     /// wind; the report says its position rests on an old one.
     /// Default 600 s.
     pub timed_hold_wind_stale_age: DurationNanos,
+    /// The greatest distance beside its active leg at which a vehicle on a
+    /// selected heading sequences the active waypoint as it goes abeam of
+    /// it, metres; see [`crate::SelectedTargets`]. A vehicle farther than
+    /// this beside its route does not fly that route: the active waypoint
+    /// stays, and the operator goes direct to a waypoint to join the
+    /// route again. A bound that is not a number sequences nothing.
+    /// Default 9260 m (5 NM).
+    pub selected_heading_sequence_bound_m: f64,
     /// The bank angle the mission plans its turns at, degrees. With the
     /// speed over the ground it sizes the turn ahead of a fly-by waypoint.
     /// It also limits the bank of the holding pattern after the plan.
@@ -330,6 +338,7 @@ impl MissionConfig {
             terminal_holding_pattern: TerminalHoldingPattern::default(),
             heading_hold_bound: DurationNanos::from_millis(60_000),
             timed_hold_wind_stale_age: DurationNanos::from_millis(600_000),
+            selected_heading_sequence_bound_m: 9_260.0,
             route_bank_deg: crate::DEFAULT_ROUTE_BANK_DEG,
             arm_when_vehicle_ready: false,
             launch_detection: None,

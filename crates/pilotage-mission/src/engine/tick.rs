@@ -23,6 +23,7 @@ use super::{
     MissionAction, MissionEngine, MissionEvent, MissionOutput, MissionState, VerticalMode,
 };
 
+mod abeam;
 mod climb;
 mod directives;
 pub(super) mod outputs;
@@ -304,7 +305,7 @@ impl MissionEngine {
         if !self.flies_route() {
             return false;
         }
-        self.advance_plan(solution, events);
+        self.sequence_plan(solution, events);
         true
     }
 
@@ -406,6 +407,7 @@ impl MissionEngine {
         now: MonotonicNanos,
         events: &mut Vec<MissionEvent>,
     ) -> Option<ControlIntent> {
+        let to = &self.at_selected_altitude(to);
         let guided = guide_velocity(
             solution,
             reference,
