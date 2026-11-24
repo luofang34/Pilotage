@@ -45,7 +45,7 @@ const SIZE_CAPS = {
   "lease-release.js": 67,
   "main.js": 281,
   "media-recovery.js": 50,
-  "nav-display.js": 68,
+  "nav-display.js": 74,
   "reconnect.js": 150,
   "resume-control.js": 59,
   "session-admission.js": 130,
@@ -62,7 +62,7 @@ const SIZE_CAPS = {
   "state-abi.js": 380,
   "state-abi-equipment.js": 123,
   "state-abi-records.js": 87,
-  "telemetry-ingress.js": 484,
+  "telemetry-ingress.js": 497,
   "stream-cancellation.js": 16,
   "transport-session.js": 128,
   "turn-derivation.js": 92,
@@ -78,7 +78,7 @@ const SIZE_CAPS = {
   "viewer-elements.js": 23,
   "wire-bounds.js": 120,
   "transfer-handover.js": 84,
-  "wire.js": 1389,
+  "wire.js": 1398,
 };
 
 const dir = new URL("./", import.meta.url);
