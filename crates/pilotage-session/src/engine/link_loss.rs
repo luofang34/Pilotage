@@ -50,7 +50,7 @@ enum ScopeLinkLoss {
 /// Per-vehicle configured policy plus the link-loss lifecycle of every scope
 /// whose holder was lost. Both vectors are bounded by the capability
 /// declaration and sized at construction.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct LinkLossState {
     /// The policy configured and validated for each vehicle.
     selected: Vec<(VehicleId, LinkLossPolicy)>,

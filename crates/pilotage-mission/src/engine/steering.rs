@@ -41,7 +41,7 @@ const WIND_STEADY_RATE_RPS: f64 = 0.02;
 const WIND_SETTLE_S: f64 = 5.0;
 
 /// The steering state of a fixed wing on the onboard navigator.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(super) struct Steering {
     /// The heading and altitude last commanded, radians and metres.
     last: Option<(f64, f64)>,

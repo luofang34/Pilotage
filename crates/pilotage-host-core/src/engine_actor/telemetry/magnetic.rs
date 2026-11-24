@@ -15,7 +15,7 @@ use pilotage_world::{MagneticEpoch, WMM2025};
 use tracing::{info, warn};
 
 /// Turns the magnetic headings of the vehicles that declare them true.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(in crate::engine_actor) struct MagneticCorrection {
     /// The one date the field is evaluated at for the whole run.
     epoch: MagneticEpoch,

@@ -32,7 +32,7 @@ pub(super) struct DirectDemand {
     pub(super) constrained: bool,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct NormalShapers {
     roll: AxisDemandShaper,
     pitch: AxisDemandShaper,
@@ -60,14 +60,14 @@ impl NormalShapers {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct DirectShapers {
     roll: JerkLimitedAxis,
     pitch: JerkLimitedAxis,
     thrust: JerkLimitedAxis,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct LegacyHorizontalShapers {
     north: JerkLimitedAxis,
     east: JerkLimitedAxis,
@@ -95,7 +95,7 @@ impl DirectShapers {
 }
 
 /// The profile and temporal state for one uplink.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(super) struct UplinkFeel {
     profile: ValidatedFlightFeelProfile,
     normal: NormalShapers,

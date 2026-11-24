@@ -24,7 +24,7 @@ use super::{MissionEngine, OnboardSolution, SourceIntegrity};
 const UNIT_NORM_TOLERANCE: f64 = 1e-3;
 
 /// The latest solution the navigator published, on the mission clock.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(super) struct OnboardNavigation {
     latest: Option<NavigationSolution>,
     /// What the navigator said of a position sensor with the latest

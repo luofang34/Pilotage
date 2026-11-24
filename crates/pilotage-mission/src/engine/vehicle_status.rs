@@ -105,7 +105,7 @@ pub enum StartWithheldReason {
 }
 
 /// The latest vehicle status and the arm request held for it.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(super) struct VehicleReadiness {
     latest: Option<VehicleStatus>,
     held_arm: Option<MissionAction>,

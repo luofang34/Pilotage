@@ -28,7 +28,7 @@ pub(super) struct EstimateBudget {
 }
 
 /// The latest admitted estimate sample.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(super) struct VehicleEstimate {
     latest: Option<OwnshipSample>,
 }

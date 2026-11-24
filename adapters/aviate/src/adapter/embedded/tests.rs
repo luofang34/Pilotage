@@ -4,11 +4,14 @@ use pilotage_adapter_api::{LinkLossPolicy, SourceIncarnation, VehicleAdapter};
 use pilotage_control_feel::{FlightFeelProfile, ValidatedFlightFeelProfile};
 use pilotage_mavlink::codec::{encode_autopilot_heartbeat, parse_datagram};
 use pilotage_mavlink::link::LinkConfig;
+#[cfg(feature = "net")]
+use pilotage_mavlink::link::LinkState;
 use pilotage_protocol::{ScopeId, VehicleId};
 use web_time::Instant;
 
 use super::EmbeddedIncarnations;
 use crate::adapter::{AviateAdapter, FLIGHT_SCOPE};
+use crate::error::AviateAdapterError;
 
 fn embedded(start: Instant) -> AviateAdapter {
     let feel = ValidatedFlightFeelProfile::new(FlightFeelProfile::legacy_compatibility()).unwrap();
@@ -84,5 +87,82 @@ fn the_embedded_path_takes_every_time_from_the_host() {
     assert_eq!(
         adapter.arm.map(|report| report.acquired_at),
         Some(start + Duration::from_secs(3))
+    );
+}
+
+#[test]
+fn a_copy_does_not_get_what_the_original_gets_later() {
+    let start = Instant::now();
+    let mut adapter = embedded(start);
+    adapter.set_now(start + Duration::from_secs(1));
+    adapter.on_downlink(&encode_autopilot_heartbeat(0, false, 0, 1, 1));
+    let mut copy = adapter.try_clone().unwrap();
+    adapter.set_now(start + Duration::from_secs(2));
+    adapter.on_downlink(&encode_autopilot_heartbeat(1, false, 0, 1, 1));
+    assert!(adapter.on_uplink_reply(&encode_autopilot_heartbeat(2, true, 0, 1, 1)));
+    adapter.sample_telemetry();
+    copy.sample_telemetry();
+    let heartbeat = |adapter: &AviateAdapter| {
+        let state = adapter.estimate.as_ref().unwrap().state.lock().unwrap();
+        state.last_heartbeat
+    };
+    assert_eq!(heartbeat(&adapter), Some(start + Duration::from_secs(2)));
+    assert_eq!(heartbeat(&copy), Some(start + Duration::from_secs(1)));
+    assert!(adapter.arm.is_some());
+    assert!(copy.arm.is_none(), "the reply went to the original only");
+}
+
+#[test]
+fn a_copy_sends_the_frames_the_original_sends() {
+    let start = Instant::now();
+    let mut adapter = embedded(start);
+    let mut copy = adapter.try_clone().unwrap();
+    for adapter in [&mut adapter, &mut copy] {
+        adapter
+            .set_link_loss_policy(
+                VehicleId::new(1),
+                &ScopeId::new(FLIGHT_SCOPE),
+                Some(LinkLossPolicy::Neutralize),
+            )
+            .unwrap();
+    }
+    let frames = adapter.drain_uplink();
+    assert_eq!(frames.len(), 1);
+    assert_eq!(frames, copy.drain_uplink());
+}
+
+#[test]
+fn a_cache_with_a_second_owner_has_no_copy() {
+    let adapter = embedded(Instant::now());
+    let second_owner = adapter.estimate.as_ref().unwrap().state.clone();
+    let refusal = adapter.try_clone().unwrap_err();
+    assert!(
+        matches!(refusal, AviateAdapterError::NotCopyable { part } if part.contains("second owner")),
+        "{refusal}"
+    );
+    drop(second_owner);
+    assert!(adapter.try_clone().is_ok());
+}
+
+#[cfg(feature = "net")]
+#[test]
+fn an_adapter_on_the_process_clock_has_no_copy() {
+    let state = std::sync::Arc::new(std::sync::Mutex::new(LinkState::default()));
+    let adapter = AviateAdapter::from_state(VehicleId::new(1), state);
+    let refusal = adapter.try_clone().unwrap_err();
+    assert!(
+        matches!(refusal, AviateAdapterError::NotCopyable { part } if part.contains("process clock")),
+        "{refusal}"
+    );
+}
+
+#[cfg(feature = "net")]
+#[test]
+fn an_uplink_with_a_socket_has_no_copy() {
+    let uplink = crate::uplink::FlightUplink::new().unwrap();
+    let refusal = uplink.try_clone().unwrap_err();
+    assert!(
+        matches!(refusal, AviateAdapterError::NotCopyable { part } if part.contains("socket")),
+        "{refusal}"
     );
 }

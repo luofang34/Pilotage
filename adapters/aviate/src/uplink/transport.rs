@@ -81,6 +81,19 @@ impl UplinkTransport {
         }
     }
 
+    /// A second in-memory transport with the same queues. `None` for a
+    /// socket transport: two uplinks cannot own one socket.
+    pub(super) fn memory_copy(&self) -> Option<Self> {
+        match self {
+            #[cfg(feature = "net")]
+            Self::Udp(_) => None,
+            Self::Memory { sent, replies } => Some(Self::Memory {
+                sent: sent.clone(),
+                replies: replies.clone(),
+            }),
+        }
+    }
+
     /// The local socket address, for a socket transport.
     pub(super) fn local_addr(&self) -> std::io::Result<SocketAddr> {
         match self {

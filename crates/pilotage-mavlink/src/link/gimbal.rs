@@ -41,7 +41,7 @@ impl Default for GimbalManagerReport {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct DeviceReport {
     clock: BootClock,
     sequence: u32,
@@ -49,7 +49,7 @@ struct DeviceReport {
 }
 
 /// Payload reports belonging to the selected MAVLink vehicle system.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct GimbalReports {
     /// Managers keyed by sender component and declared device ID.
     pub managers: BTreeMap<(u8, u8), GimbalManagerReport>,

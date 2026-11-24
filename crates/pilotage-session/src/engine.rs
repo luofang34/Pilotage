@@ -42,7 +42,7 @@ use link_loss::LinkLossState;
 /// Physical control must echo a host-issued window. The host checks its own
 /// monotonic time at admission. Relative-delay checks provide a separate
 /// congestion signal; they do not prove source acquisition age.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SessionEngine {
     authority: AuthorityEngine,
     /// Group pairs that are COMMAND-ONLY: every member advertises no

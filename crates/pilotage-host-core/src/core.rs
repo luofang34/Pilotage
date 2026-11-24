@@ -1,6 +1,7 @@
 //! The core and its calls.
 
 mod handover;
+mod snapshot;
 
 use std::time::Duration;
 

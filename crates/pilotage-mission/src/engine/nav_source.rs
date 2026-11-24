@@ -167,7 +167,7 @@ pub(super) const fn next(state: NavState, event: NavEvent) -> (NavState, NavEffe
 
 /// The machine's state, its dead-reckoning and hold annunciations, and why
 /// its latest tick gave no solution.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(super) struct NavMode {
     /// The machine's state after the latest tick that read the source.
     pub(super) state: NavState,

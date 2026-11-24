@@ -7,7 +7,7 @@ use pilotage_session::{ClientKey, DomainEnvelope};
 use pilotage_timing::MonoTimestamp;
 
 /// One command an in-core client submits to the engine.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ToEngine {
     /// A client connected; its messages queue under `client`.
     ClientConnected {

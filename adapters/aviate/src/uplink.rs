@@ -30,6 +30,7 @@ use pilotage_control_feel::ValidatedFlightFeelProfile;
 use pilotage_control_feel::{FeelDigest, FlightFeelProfile};
 use pilotage_flight_uplink::{ActivationStep, StickFrame, UplinkPolicy};
 
+mod copy;
 mod direct;
 mod fc_replies;
 mod fixed_wing;

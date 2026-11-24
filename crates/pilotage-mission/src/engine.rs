@@ -84,7 +84,7 @@ use onboard::OnboardNavigation;
 /// session wire, and supplies each `now` on the configured clock domain.
 /// The shared core owns phase transitions. This handler owns Navigate
 /// observations, guidance, and directive interpretation.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MissionEngine {
     config: MissionConfig,
     plane: LocalTangentPlane,

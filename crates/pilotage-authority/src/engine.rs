@@ -31,7 +31,7 @@ type ScopeKey = (VehicleId, ScopeId);
 /// [`AuthorityEngine::handle`]. Poll [`AuthorityEngine::next_deadline`] for the
 /// earliest pending offer expiry and call [`AuthorityEngine::expire_due`] when
 /// that deadline is reached.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct AuthorityEngine {
     scopes: BTreeMap<ScopeKey, ScopeState>,
 }

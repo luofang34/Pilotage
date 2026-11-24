@@ -156,7 +156,7 @@ pub struct LateralStatus {
 }
 
 /// The machine's mode with what its holds keep between ticks.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(super) struct Lateral {
     /// The mode after the latest tick.
     pub(super) mode: LateralMode,

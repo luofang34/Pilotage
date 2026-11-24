@@ -44,7 +44,7 @@ pub struct HeadingState {
 /// The flight uplink policy. Every time argument is a monotonic time
 /// since an origin that the caller chooses once; the MAVLink boot time of
 /// each frame is that time in milliseconds.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UplinkPolicy {
     seq: u8,
     heading: HeadingState,

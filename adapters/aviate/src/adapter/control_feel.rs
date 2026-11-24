@@ -73,7 +73,7 @@ impl ControlFeelEntry {
 }
 
 /// Active, pending, and rollback control-feel artifacts.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(super) struct ControlFeelProfiles {
     active: ControlFeelEntry,
     active_neutral: NeutralBoundary,

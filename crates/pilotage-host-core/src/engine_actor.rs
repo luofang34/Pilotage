@@ -98,6 +98,43 @@ impl<A: VehicleAdapter> EngineActor<A> {
         }
     }
 
+    /// A second actor in the same state, around the adapter that
+    /// `copy_adapter` makes from this actor's adapter. The two actors share
+    /// nothing.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error of `copy_adapter`.
+    pub fn try_clone_with<E>(
+        &self,
+        copy_adapter: impl FnOnce(&A) -> Result<A, E>,
+    ) -> Result<Self, E> {
+        // Every field is named, so a new field does not compile until this
+        // function copies it.
+        let Self {
+            engine,
+            adapter,
+            clients,
+            action_dedup,
+            adapter_rejection_dedup,
+            link_loss_enact_failures,
+            nav_guidance,
+            magnetic,
+            now,
+        } = self;
+        Ok(Self {
+            engine: engine.clone(),
+            adapter: copy_adapter(adapter)?,
+            clients: clients.clone(),
+            action_dedup: action_dedup.clone(),
+            adapter_rejection_dedup: adapter_rejection_dedup.clone(),
+            link_loss_enact_failures: *link_loss_enact_failures,
+            nav_guidance: nav_guidance.clone(),
+            magnetic: magnetic.clone(),
+            now: *now,
+        })
+    }
+
     /// Sets the time of the current call.
     pub fn set_now(&mut self, now: Duration) {
         self.now = now;

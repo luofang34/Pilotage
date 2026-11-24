@@ -45,7 +45,7 @@ impl ActionFingerprint {
 /// re-execute a very stale retransmission.
 const RESULTS_PER_CLIENT: usize = 64;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct ClientActions {
     results: HashMap<u32, (ActionFingerprint, ControlActionResult)>,
     /// Insertion order for bounded eviction.
@@ -66,7 +66,7 @@ fn advances(latest: u32, id: u32) -> bool {
 }
 
 /// Deduplication state across all connected clients.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(super) struct ActionDedup {
     per_client: HashMap<ClientKey, ClientActions>,
 }

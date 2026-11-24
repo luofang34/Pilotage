@@ -9,7 +9,7 @@ type RejectionKey = (ClientKey, VehicleId, ScopeId);
 type RejectionState = (Generation, FrameRejectionReason);
 
 /// One reliable notice per adapter rejection transition and authority epoch.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(super) struct RejectionDedup {
     active: BTreeMap<RejectionKey, RejectionState>,
 }
