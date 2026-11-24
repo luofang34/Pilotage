@@ -1,9 +1,11 @@
 //! The state of the engine's mode machines, kept together so each machine
-//! owns its own state and none reads another's.
+//! owns its own state and none reads another's, with the operator's
+//! selection that the machines read.
 
 use super::lateral_mode::Lateral;
 use super::lifecycle::Lifecycle;
 use super::nav_source::NavMode;
+use super::selected::SelectedTargets;
 use super::vertical_mode::VerticalStatus;
 
 /// The state of each mode machine after the latest tick.
@@ -17,4 +19,7 @@ pub(super) struct Modes {
     pub(super) lateral: Lateral,
     /// The vertical mode.
     pub(super) vertical: VerticalStatus,
+    /// The targets an operator selected, which each machine reads in
+    /// place of the plan's.
+    pub(super) selected: SelectedTargets,
 }

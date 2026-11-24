@@ -198,8 +198,21 @@ impl MissionEngine {
     }
 
     /// The altitude the mission flies to in `stage`, metres above the
-    /// ellipsoid.
+    /// ellipsoid: in flight, the altitude an operator selected, or else
+    /// the plan's.
     fn vertical_target_m(&self, stage: VerticalStage) -> Option<f64> {
+        let selected_m = match stage {
+            VerticalStage::Climb | VerticalStage::Route | VerticalStage::PostPlan => {
+                self.modes.selected.altitude_m
+            }
+            VerticalStage::Disengaged | VerticalStage::Arming => None,
+        };
+        selected_m.or_else(|| self.plan_vertical_target_m(stage))
+    }
+
+    /// The altitude the plan flies to in `stage`, metres above the
+    /// ellipsoid.
+    fn plan_vertical_target_m(&self, stage: VerticalStage) -> Option<f64> {
         match stage {
             VerticalStage::Arming
                 if self.arm_request_sent() && self.config.cruise_height_m > 0.0 =>

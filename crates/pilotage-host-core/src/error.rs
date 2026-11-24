@@ -33,6 +33,19 @@ pub enum HostCoreError {
         #[source]
         source: Box<pilotage_adapter_aviate::AviateAdapterError>,
     },
+    /// The call needs a loaded mission, and none is loaded.
+    #[error("{operation} needs a loaded mission, and none is loaded")]
+    NoMission {
+        /// The call that needs a mission.
+        operation: &'static str,
+    },
+    /// The mission does not fly the selected targets.
+    #[error("the mission refused the selected targets: {source}")]
+    Select {
+        /// The engine's refusal.
+        #[source]
+        source: pilotage_mission::SelectError,
+    },
     /// The adapter did not build.
     #[error("the Aviate adapter did not build: {source}")]
     Adapter {

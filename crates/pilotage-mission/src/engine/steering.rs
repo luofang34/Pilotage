@@ -96,6 +96,34 @@ impl MissionEngine {
         Some(self.heading_altitude(heading, altitude_m))
     }
 
+    /// The heading and altitude demand for a true `heading` that an
+    /// operator selected, at `altitude_m` above the ellipsoid. A fixed wing
+    /// on the onboard navigator turns the command against the heading bias
+    /// of its flight controller. Its wind and bias estimates stay current
+    /// for the return to the plan, and the bias estimate sees each command:
+    /// the first command of the plan after a long selection must not look
+    /// steady against an old one.
+    pub(super) fn steer_selected(
+        &mut self,
+        solution: Option<&NavigationSolution>,
+        heading: f64,
+        altitude_m: f64,
+        now: MonotonicNanos,
+        events: &mut Vec<MissionEvent>,
+    ) -> ControlIntent {
+        if !self.steers_by_heading() {
+            return self.heading_altitude(heading, altitude_m);
+        }
+        if let Some(solution) = solution {
+            self.update_wind(solution, now);
+        }
+        self.update_heading_bias(now);
+        self.report_heading_bias(events);
+        let commanded = self.unbiased_heading(heading);
+        self.record_heading_command(commanded, now);
+        self.heading_altitude(commanded, altitude_m)
+    }
+
     /// Records the last guided heading and target altitude on a fixed wing
     /// steered by velocity so a subsequent position loss holds that heading
     /// for 60 s and then enters a timed racetrack orbit around it.
@@ -303,8 +331,11 @@ impl MissionEngine {
     }
 
     /// The intent for `heading` and `altitude_m` at the cruise airspeed,
-    /// recorded as the last command.
+    /// recorded as the last command. An altitude that an operator selected
+    /// replaces `altitude_m` in flight: each heading and altitude demand
+    /// passes here, so each one commands the selected altitude.
     pub(super) fn heading_altitude(&mut self, heading: f64, altitude_m: f64) -> ControlIntent {
+        let altitude_m = self.flown_selection().altitude_m.unwrap_or(altitude_m);
         let heading = heading.sin().atan2(heading.cos());
         self.steering.last = Some((heading, altitude_m));
         ControlIntent::HeadingAltitude(HeadingAltitudeIntent {

@@ -58,6 +58,10 @@ pub struct NavigationDisplay {
     /// a racetrack flown by time, and a racetrack resting on an old wind,
     /// from what the engine says.
     pub lateral: LateralStatus,
+    /// The targets the operator selected, so a display shows the selected
+    /// heading, altitude, and airspeed. A target that is not selected is
+    /// absent.
+    pub selected: super::SelectedTargets,
 }
 
 /// One waypoint of the plan.
@@ -160,6 +164,7 @@ impl MissionEngine {
             steering: self.steering_source(),
             vertical: self.vertical_status(),
             lateral: self.lateral_status(),
+            selected: self.selected(),
         }
     }
 

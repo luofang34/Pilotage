@@ -1,6 +1,7 @@
 //! The core and its calls.
 
 mod handover;
+mod selected;
 mod snapshot;
 
 use std::time::Duration;
@@ -8,7 +9,7 @@ use std::time::Duration;
 use navigate_contract::{GeodeticPosition, MonotonicNanos};
 use pilotage_adapter_aviate::AviateAdapter;
 use pilotage_mission::{
-    MissionEngine, MissionEvent, OnboardSolution, WaypointPlan, WaypointPlanRecord,
+    MissionEngine, MissionEvent, OnboardSolution, SelectedTargets, WaypointPlan, WaypointPlanRecord,
 };
 use pilotage_session::{SessionConfig, SessionEngine};
 use pilotage_timing::StalenessPolicy;
@@ -42,6 +43,9 @@ pub struct HostCore {
     /// A principal over a plan loaded while `principal` flew, until it
     /// takes the motion scope over or gives up.
     incoming: Option<handover::Incoming>,
+    /// The targets the operator selected. The core keeps them, not a
+    /// principal, so they stay in effect when a new plan takes over.
+    selected: SelectedTargets,
     next_engine_tick: u64,
     next_mission_tick: u64,
     status: HostStatus,
@@ -106,6 +110,7 @@ impl HostCore {
             actor,
             principal: None,
             incoming: None,
+            selected: SelectedTargets::default(),
             next_engine_tick: 0,
             next_mission_tick: 0,
             status: HostStatus::default(),
@@ -180,6 +185,7 @@ impl HostCore {
                 self.next_engine_tick = self.next_engine_tick.saturating_add(nanos(TICK_INTERVAL));
             } else {
                 self.set_times(self.next_mission_tick);
+                self.apply_selection();
                 if let Some(principal) = self.principal.as_mut() {
                     principal.on_tick();
                 }

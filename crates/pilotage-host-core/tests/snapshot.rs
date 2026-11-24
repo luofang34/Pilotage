@@ -323,6 +323,31 @@ fn a_copy_made_while_a_new_plan_takes_over_continues_as_the_original() {
 
 /// Fails to compile, with the name of the type, when a part of the core
 /// stops being `Clone`.
+#[test]
+fn a_copy_flies_the_selection_of_the_original() {
+    let inputs = inputs();
+    let mut original = Run::new();
+    original.advance(&inputs, SNAPSHOT_AT_NS);
+    let selection = pilotage_mission::SelectedTargets {
+        heading_true_rad: Some(1.0),
+        ..pilotage_mission::SelectedTargets::default()
+    };
+    original.core.select_targets(selection).unwrap();
+    let mut copy = original.snapshot();
+    assert_eq!(copy.core.selected_targets(), selection);
+    original.trace = Trace::default();
+    original.advance(&inputs, END_NS);
+    copy.advance(&inputs, END_NS);
+    assert_eq!(original.trace, copy.trace);
+
+    // A selection made after the snapshot is not in the snapshot.
+    let mut later = Run::new();
+    later.advance(&inputs, SNAPSHOT_AT_NS);
+    let before = later.snapshot();
+    later.core.select_targets(selection).unwrap();
+    assert!(before.core.selected_targets().is_empty());
+}
+
 fn assert_clone<T: Clone>() {}
 
 #[test]

@@ -17,6 +17,7 @@ mod navigation_display;
 mod onboard;
 mod output;
 mod ownship;
+mod selected;
 mod source_integrity;
 mod steering;
 mod steering_source;
@@ -56,6 +57,7 @@ pub use navigation_display::{
     DisplayFix, DisplayWaypoint, LegDisplay, NavigationDisplay, ToFrom, WaypointProgress,
 };
 pub use output::{MissionAction, MissionCounters, MissionEvent, MissionOutput, MissionState};
+pub use selected::{SelectError, SelectedTargets};
 pub use source_integrity::{OnboardSolution, SourceIntegrity, SourceIntegrityState};
 pub use steering_source::{
     FlightPhase, PositionIntegrity, PositionKind, PositionSource, SteeringIntegrity, SteeringSource,
@@ -122,7 +124,8 @@ pub struct MissionEngine {
     /// Time spent held before the current hold; the sequencing clock
     /// excludes it.
     held_total_ns: u64,
-    /// Hold and resume transitions the next tick announces.
+    /// What the next tick announces from between the ticks: a hold, a
+    /// resume, and a change of the operator's selection.
     hold_events: Vec<MissionEvent>,
     /// The vehicle's latest status and the arm request held for it.
     vehicle: vehicle_status::VehicleReadiness,
@@ -459,20 +462,29 @@ fn guidance_config(config: &MissionConfig) -> VelocityGuidanceConfig {
     {
         guidance.admission.minimum_quality = navigate_contract::SolutionQuality::Unusable;
     }
-    guidance.cruise_mps = config.cruise_mps;
     guidance.max_horizontal_mps = config.limits.max_horizontal_mps;
     guidance.max_vertical_mps = config.limits.max_vertical_mps;
     if !config.can_stop() {
         guidance.arrival_slowdown_radius_m = 0.0;
-        let cruise_altitude_m = config.anchor.altitude_m + config.cruise_height_m;
-        let speed_mps = crate::true_airspeed_for(
-            config.cruise_mps.min(config.limits.max_horizontal_mps),
-            cruise_altitude_m,
-        );
-        let radius_m = crate::turn_radius_for(speed_mps, config.route_bank_deg, 0.0);
-        if radius_m > 0.0 {
-            guidance.cross_track_gain_per_s = speed_mps / radius_m;
-        }
     }
+    shape_cruise(&mut guidance, config, config.cruise_mps);
     guidance
+}
+
+/// Sets the cruise speed of `guidance` to `cruise_mps`, with the
+/// cross-track gain of a fixed wing at that speed.
+fn shape_cruise(guidance: &mut VelocityGuidanceConfig, config: &MissionConfig, cruise_mps: f64) {
+    guidance.cruise_mps = cruise_mps;
+    if config.can_stop() {
+        return;
+    }
+    let cruise_altitude_m = config.anchor.altitude_m + config.cruise_height_m;
+    let speed_mps = crate::true_airspeed_for(
+        cruise_mps.min(config.limits.max_horizontal_mps),
+        cruise_altitude_m,
+    );
+    let radius_m = crate::turn_radius_for(speed_mps, config.route_bank_deg, 0.0);
+    if radius_m > 0.0 {
+        guidance.cross_track_gain_per_s = speed_mps / radius_m;
+    }
 }

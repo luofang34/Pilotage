@@ -10,11 +10,14 @@ use super::wind_turn;
 
 impl MissionEngine {
     /// The cruise speed guidance commands, within the horizontal ceiling,
-    /// and within the holding speed limit in a holding pattern.
+    /// and within the holding speed limit in a holding pattern. An airspeed
+    /// that an operator selected replaces the configured cruise speed in
+    /// flight, within the same limits.
     pub(in crate::engine) fn commanded_cruise_mps(&self) -> f64 {
         let cruise_mps = self
-            .config
-            .cruise_mps
+            .flown_selection()
+            .airspeed_mps
+            .unwrap_or(self.config.cruise_mps)
             .min(self.config.limits.max_horizontal_mps);
         self.holding_speed_limit_mps()
             .map_or(cruise_mps, |limit_mps| cruise_mps.min(limit_mps))

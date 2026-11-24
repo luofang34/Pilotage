@@ -34,6 +34,7 @@ impl MissionEngine {
             LateralMode::DirectTo | LateralMode::Track | LateralMode::Pattern => {
                 self.route_intent(stage, solution, now, events)
             }
+            LateralMode::HeadingSelect => self.selected_heading_intent(solution, now, events),
             LateralMode::HeadingHold => self.hold_heading(cruise_altitude_m, events),
             // The pattern flown goes on by time; with none, a racetrack
             // begins where the vehicle is; with no heading to begin one
